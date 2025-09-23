@@ -233,9 +233,10 @@ JitCode* BaselineCacheIRCompiler::compile() {
 
   // Count stub entries: We count entries rather than successes as it much
   // easier to ensure ICStubReg is valid at entry than at exit.
-  Address enteredCount(ICStubReg, ICCacheIRStub::offsetOfEnteredCount());
+  Address enteredCount(ICStubReg, ICCacheIRStub::offsetOfEnteredCount()); 
   masm.add32(Imm32(1), enteredCount);
-
+  // Register enteredCountVal = masm.loadPtr(enteredCount, allocator.useRegister);
+  masm.printf("Incrementing entered count!");
   perfSpewer_.startRecording();
 
   CacheIRReader reader(writer_);

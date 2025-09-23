@@ -1,0 +1,680 @@
+
+[
+  {
+    "channel": "BaselineICStats",
+    "location": {
+      "filename": "../mozconfigs/progs/ic-poly.js",
+      "line": 1,
+      "column": 1
+    },
+    "reason": "Dumping IC Stats at JitScript destruction.",
+    "entries": [
+      {
+        "op": "Lt",
+        "pc": 42,
+        "line": 2,
+        "column": 17,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "JumpIfFalse",
+        "pc": 43,
+        "line": 2,
+        "column": 17,
+        "counts": [
+          88
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "NewObject",
+        "pc": 59,
+        "line": 3,
+        "column": 13,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "InitProp",
+        "pc": 65,
+        "line": 3,
+        "column": 14,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "InitProp",
+        "pc": 79,
+        "line": 3,
+        "column": 19,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "InitProp",
+        "pc": 89,
+        "line": 3,
+        "column": 27,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "Mod",
+        "pc": 105,
+        "line": 5,
+        "column": 11,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 127,
+        "line": 6,
+        "column": 13,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 136,
+        "line": 6,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 141,
+        "line": 6,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 147,
+        "line": 6,
+        "column": 26,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 156,
+        "line": 6,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 161,
+        "line": 6,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 177,
+        "line": 7,
+        "column": 13,
+        "counts": [
+          11
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 186,
+        "line": 7,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 191,
+        "line": 7,
+        "column": 13,
+        "counts": [
+          694
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 197,
+        "line": 7,
+        "column": 26,
+        "counts": [
+          11
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 206,
+        "line": 7,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 211,
+        "line": 7,
+        "column": 26,
+        "counts": [
+          694
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 227,
+        "line": 8,
+        "column": 13,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 236,
+        "line": 8,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 241,
+        "line": 8,
+        "column": 13,
+        "counts": [
+          694
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 247,
+        "line": 8,
+        "column": 26,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 256,
+        "line": 8,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 261,
+        "line": 8,
+        "column": 26,
+        "counts": [
+          694
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 277,
+        "line": 9,
+        "column": 13,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 286,
+        "line": 9,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 291,
+        "line": 9,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 297,
+        "line": 9,
+        "column": 26,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 306,
+        "line": 9,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 311,
+        "line": 9,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 327,
+        "line": 10,
+        "column": 13,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 336,
+        "line": 10,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 341,
+        "line": 10,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 347,
+        "line": 10,
+        "column": 26,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 356,
+        "line": 10,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 361,
+        "line": 10,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 377,
+        "line": 11,
+        "column": 13,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 386,
+        "line": 11,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 391,
+        "line": 11,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 397,
+        "line": 11,
+        "column": 26,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 406,
+        "line": 11,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 411,
+        "line": 11,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 427,
+        "line": 12,
+        "column": 13,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 436,
+        "line": 12,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 441,
+        "line": 12,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 447,
+        "line": 12,
+        "column": 26,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 456,
+        "line": 12,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 461,
+        "line": 12,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 477,
+        "line": 13,
+        "column": 13,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 486,
+        "line": 13,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 491,
+        "line": 13,
+        "column": 13,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "BindUnqualifiedGName",
+        "pc": 497,
+        "line": 13,
+        "column": 26,
+        "counts": [
+          10
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 506,
+        "line": 13,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetGName",
+        "pc": 511,
+        "line": 13,
+        "column": 26,
+        "counts": [
+          695
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetGName",
+        "pc": 531,
+        "line": 15,
+        "column": 3,
+        "counts": [
+          5566,
+          0
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetGName",
+        "pc": 536,
+        "line": 15,
+        "column": 17,
+        "counts": [
+          5566,
+          0
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "Add",
+        "pc": 541,
+        "line": 15,
+        "column": 17,
+        "counts": [
+          5561,
+          4866,
+          4171,
+          2781,
+          2781
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "SetProp",
+        "pc": 542,
+        "line": 15,
+        "column": 17,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetGName",
+        "pc": 548,
+        "line": 16,
+        "column": 3,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetProp",
+        "pc": 554,
+        "line": 16,
+        "column": 3,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "CallIgnoresRv",
+        "pc": 564,
+        "line": 16,
+        "column": 8,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "ToNumeric",
+        "pc": 573,
+        "line": 2,
+        "column": 29,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "Inc",
+        "pc": 574,
+        "line": 2,
+        "column": 29,
+        "counts": [
+          5567
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "GetGName",
+        "pc": 591,
+        "line": 18,
+        "column": 1,
+        "counts": [
+          0
+        ],
+        "fallback_count": 0
+      },
+      {
+        "op": "CallIgnoresRv",
+        "pc": 602,
+        "line": 18,
+        "column": 6,
+        "counts": [
+          0
+        ],
+        "fallback_count": 0
+      }
+    ]
+  }
+]

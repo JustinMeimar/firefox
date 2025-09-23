@@ -14,6 +14,8 @@
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BytecodeAnalysis.h"
+#include "jit/CacheIRCompiler.h"
+#include "jit/CacheIRSpewer.h"
 #include "jit/IonScript.h"
 #include "jit/JitFrames.h"
 #include "jit/JitSpewer.h"
@@ -59,7 +61,7 @@ ICScript::~ICScript() {
   // The contents of the AllocSite LifoAlloc are removed and freed separately
   // after the next minor GC. See prepareForDestruction.
   MOZ_ASSERT(allocSitesSpace_.isEmpty());
-  MOZ_ASSERT(!envAllocSite_);
+  MOZ_ASSERT(!envAllocSite_); 
 }
 
 #ifdef DEBUG
@@ -393,10 +395,11 @@ void ICScript::prepareForDestruction(Zone* zone) {
   rt->gc.queueAllLifoBlocksForFreeAfterMinorGC(&allocSitesSpace_);
 
   // Trigger write barriers.
-  PreWriteBarrier(zone, this);
+  PreWriteBarrier(zone, this); 
 }
 
 void JitScript::prepareForDestruction(Zone* zone) {
+  // JitSpewBaselineICStats(owningScript(), "Dumping IC Stats at JitScript destruction."); 
   forEachICScript(
       [&](ICScript* script) { script->prepareForDestruction(zone); });
 

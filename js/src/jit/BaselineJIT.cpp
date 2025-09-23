@@ -25,6 +25,7 @@
 #include "jit/Ion.h"
 #include "jit/IonOptimizationLevels.h"
 #include "jit/JitCommon.h"
+#include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/MacroAssembler.h"
@@ -1246,8 +1247,7 @@ void BaselineInterpreter::toggleCodeCoverageInstrumentation(bool enable) {
 
 void jit::FinishDiscardBaselineScript(JS::GCContext* gcx, JSScript* script) {
   MOZ_ASSERT(script->hasBaselineScript());
-  MOZ_ASSERT(!script->jitScript()->icScript()->active());
-
+  MOZ_ASSERT(!script->jitScript()->icScript()->active()); 
   BaselineScript* baseline =
       script->jitScript()->clearBaselineScript(gcx, script);
   BaselineScript::Destroy(gcx, baseline);
