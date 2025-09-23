@@ -1,0 +1,55 @@
+
+BUILD_DIR := justfile_directory() + "/obj-debug-x86_64-pc-linux-gnu" 
+JS_SRC := justfile_directory() + "/js/src"
+CC_DB_JSON := "compile_commands.json"
+PROFILE_DIR := "profiling"
+FLAME_DIR := "/home/justin/install/FlameGraph"
+
+BASELINE_FLAGS := "--no-ion --blinterp --baseline-eager --ion-extra-checks"
+PBL_JITLESS_FLAGS := "--no-jit-backend --aot-ics --portable-baseline --portable-baseline-eager"
+ENFORCE_AOT_PBL_JITLESS_FLAGS := "--no-jit-backend --enforce-aot-ics --portable-baseline --portable-baseline-eager"
+JIT_SPEW_CHANNELS := "bl-ic"
+
+build-engine CONFIG:
+    #!/usr/bin/env bash
+    set -e
+    export MOZCONFIG="{{CONFIG}}"
+    export JS_SHELL="{{BUILD_DIR}}/dist/bin/js"
+    ./mach configure 
+    ./mach build-backend
+    ./mach build
+    just symlinks 
+
+symlinks:
+    ln -sf "{{BUILD_DIR}}/{{CC_DB_JSON}}" "{{JS_SRC}}/{{CC_DB_JSON}}"
+    ln -sf "{{BUILD_DIR}}/dist/bin/js" "./jsshell"
+
+debug FILE:
+    gdb --args ./jsshell {{ PBL_JITLESS_FLAGS }} -f {{ FILE }}
+
+setup-profiling:
+    @mkdir -p "{{PROFILE_DIR}}"
+
+run-with-spew FILE:
+    #!/usr/bin/bash
+    export JITFLAGS=logs
+    export IONFLAGS=bl-ic
+    export CACHEIR_LOGS=/tmp/cacheir_logs/
+    export CACHEIR_LOG_FLUSH=1000 
+    ./jsshell {{ BASELINE_FLAGS }} -f {{ FILE }}
+
+profile-flame FILE MODE: setup-profiling
+    #!/usr/bin/env bash
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    case "{{MODE}}" in
+        baseline) flags="{{BASELINE_FLAGS}}" ;;
+        no-jit) flags="{{PBL_JITLESS_FLAGS}}" ;;
+        enforce-aot) flags="{{ENFORCE_AOT_PBL_JITLESS_FLAGS}}" ;;
+        *) flags="" ;;
+    esac
+    echo "Using flags: ${flags}"
+    perf record -g "{{BUILD_DIR}}/dist/bin/js" ${flags} -f "{{FILE}}"
+    perf script | "{{FLAME_DIR}}"/stackcollapse-perf.pl \
+                | "{{FLAME_DIR}}/"flamegraph.pl \
+                > "{{PROFILE_DIR}}/${timestamp}-flamegraph.svg"
+    echo "Flame graph saved: {{PROFILE_DIR}}/${timestamp}-flamegraph.svg"
