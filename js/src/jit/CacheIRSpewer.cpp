@@ -520,8 +520,9 @@ static const char* ArrayBufferViewKindName(ArrayBufferViewKind kind) {
       return "FixedLength";
     case ArrayBufferViewKind::Resizable:
       return "Resizable";
+    default:
+      MOZ_CRASH("Unknown ArrayBufferViewKind");
   }
-  MOZ_CRASH("Unknown ArrayBufferViewKind");
 }
 
 // Text spewer for CacheIR ops that produces output that can be included

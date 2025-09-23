@@ -114,13 +114,13 @@ JS_AOT_IC_DATA(IC_LASTUSED)
         IC##idx,                                                        \
         sizeof(IC##idx)},
 
-static const CacheIRAOTStub stubs[] = {JS_AOT_IC_DATA(IC_TOP)};
+static const ::js::jit::CacheIRAOTStub stubs[] = {JS_AOT_IC_DATA(IC_TOP)};
 
-mozilla::Span<const CacheIRAOTStub> js::jit::GetAOTStubs() {
+mozilla::Span<const ::js::jit::CacheIRAOTStub> js::jit::GetAOTStubs() {
   return mozilla::Span(stubs, sizeof(stubs) / sizeof(stubs[0]));
 }
 
-CacheIRWriter::CacheIRWriter(JSContext* cx, const CacheIRAOTStub& stub)
+js::jit::CacheIRWriter::CacheIRWriter(JSContext* cx, const CacheIRAOTStub& stub)
     : CustomAutoRooter(cx),
 #  ifdef DEBUG
       cx_(cx),
