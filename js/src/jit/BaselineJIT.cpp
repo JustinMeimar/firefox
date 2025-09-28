@@ -25,6 +25,7 @@
 #include "jit/Ion.h"
 #include "jit/IonOptimizationLevels.h"
 #include "jit/JitCommon.h"
+#include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/MacroAssembler.h"
@@ -1244,6 +1245,30 @@ void BaselineInterpreter::toggleCodeCoverageInstrumentation(bool enable) {
 void jit::FinishDiscardBaselineScript(JS::GCContext* gcx, JSScript* script) {
   MOZ_ASSERT(script->hasBaselineScript());
   MOZ_ASSERT(!script->jitScript()->icScript()->active());
+  
+  if(JitOptions.baselineInterpreter) { 
+    ICScript *icScript = script->jitScript()->icScript();
+    for (uint32_t i = 0; i < icScript->numICEntries(); i++) {
+        jit::ICEntry& entry = icScript->icEntry(i);
+        jit::ICStub* stub = entry.firstStub();
+        jit::ICStub* fallbackStub = stub;
+        while (!fallbackStub->isFallback()) {
+          fallbackStub = fallbackStub->toCacheIRStub()->next();
+        }
+        uint32_t pcOffset = fallbackStub->toFallbackStub()->pcOffset();
+        JitSpew(JitSpew_BaselineScripts,
+            "; %s (pcOffset %05u)", CodeName(JSOp(*script->offsetToPC(pcOffset))), pcOffset
+        );
+        uint32_t stubNum = 1;
+        while (!stub->isFallback()) {
+          JitSpew(JitSpew_BaselineScripts, ";   Stub #%d (entry count: %d)", stubNum, stub->enteredCount());
+          jit::ICCacheIRStub* cacheIRStub = stub->toCacheIRStub(); 
+          stub = cacheIRStub->next();
+          stubNum++;
+        }
+        JitSpew(JitSpew_BaselineScripts, ";   Fallback (entry count: %d)", stub->enteredCount());
+    }
+  }
 
   BaselineScript* baseline =
       script->jitScript()->clearBaselineScript(gcx, script);
