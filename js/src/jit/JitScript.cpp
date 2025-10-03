@@ -60,6 +60,19 @@ ICScript::~ICScript() {
   // after the next minor GC. See prepareForDestruction.
   MOZ_ASSERT(allocSitesSpace_.isEmpty());
   MOZ_ASSERT(!envAllocSite_);
+  JitSpew(js::jit::JitSpew_BaselineIC, "Profling Script Before Destruction.");
+  for (uint32_t i = 0; i < this->numICEntries(); i++) {
+      jit::ICEntry& entry = this->icEntry(i);
+      jit::ICStub* stub = entry.firstStub(); 
+      uint32_t stubNum = 1;
+      while (!stub->isFallback()) {
+        JitSpew(JitSpew_BaselineScripts, ";   Stub #%d (entry count: %d)", stubNum, stub->enteredCount());
+        jit::ICCacheIRStub* cacheIRStub = stub->toCacheIRStub(); 
+        stub = cacheIRStub->next();
+        stubNum++;
+      }
+      JitSpew(JitSpew_BaselineScripts, ";   Fallback (entry count: %d)", stub->enteredCount());
+  }
 }
 
 #ifdef DEBUG
