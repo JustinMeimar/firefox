@@ -14,6 +14,8 @@
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BytecodeAnalysis.h"
+#include "jit/CacheIRCompiler.h"
+#include "jit/CacheIRSpewer.h"
 #include "jit/IonScript.h"
 #include "jit/JitFrames.h"
 #include "jit/JitSpewer.h"
@@ -59,20 +61,7 @@ ICScript::~ICScript() {
   // The contents of the AllocSite LifoAlloc are removed and freed separately
   // after the next minor GC. See prepareForDestruction.
   MOZ_ASSERT(allocSitesSpace_.isEmpty());
-  MOZ_ASSERT(!envAllocSite_);
-  JitSpew(js::jit::JitSpew_BaselineIC, "Profling Script Before Destruction.");
-  for (uint32_t i = 0; i < this->numICEntries(); i++) {
-      jit::ICEntry& entry = this->icEntry(i);
-      jit::ICStub* stub = entry.firstStub(); 
-      uint32_t stubNum = 1;
-      while (!stub->isFallback()) {
-        JitSpew(JitSpew_BaselineScripts, ";   Stub #%d (entry count: %d)", stubNum, stub->enteredCount());
-        jit::ICCacheIRStub* cacheIRStub = stub->toCacheIRStub(); 
-        stub = cacheIRStub->next();
-        stubNum++;
-      }
-      JitSpew(JitSpew_BaselineScripts, ";   Fallback (entry count: %d)", stub->enteredCount());
-  }
+  MOZ_ASSERT(!envAllocSite_); 
 }
 
 #ifdef DEBUG
@@ -398,9 +387,30 @@ void ICScript::prepareForDestruction(Zone* zone) {
 
   // Trigger write barriers.
   PreWriteBarrier(zone, this);
+  
+  // Spew state of stubs before destruction.
+  JitSpew(JitSpew_BaselineScripts, "Profling Script Before Destruction.");
+  for (uint32_t entryNum = 0; entryNum < this->numICEntries(); entryNum++) {
+    const jit::ICEntry& entry = this->icEntry(entryNum);
+    const jit::ICStub* stub = entry.firstStub(); 
+    uint32_t stubNum = 1;
+    while (!stub->isFallback()) {
+      const jit::ICCacheIRStub* cacheIRStub = stub->toCacheIRStub();
+      const CacheIRStubInfo* stubInfo = cacheIRStub->stubInfo();
+      const char *stubKind = CacheKindNames[static_cast<uint32_t>(stubInfo->kind())]; 
+      JitSpew(JitSpew_BaselineScripts, "ICEntry:%d Stub:%d Count:%d OpKind:%s",
+          entryNum, stubNum, stub->enteredCount(), stubKind);
+      Fprinter out(stdout);
+      SpewCacheIROps(out, "-", stubInfo); 
+      stub = cacheIRStub->next();
+      stubNum++;
+    }
+    JitSpew(JitSpew_BaselineScripts, "ICEntry:%d Stub(Fallback):%d Count:%d", entryNum, stubNum, stub->enteredCount());
+  }
 }
 
 void JitScript::prepareForDestruction(Zone* zone) {
+  // zone->traceWeakJitScripts
   forEachICScript(
       [&](ICScript* script) { script->prepareForDestruction(zone); });
 
