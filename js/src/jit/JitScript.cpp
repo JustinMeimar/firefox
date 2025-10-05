@@ -386,31 +386,11 @@ void ICScript::prepareForDestruction(Zone* zone) {
   rt->gc.queueAllLifoBlocksForFreeAfterMinorGC(&allocSitesSpace_);
 
   // Trigger write barriers.
-  PreWriteBarrier(zone, this);
-  
-  // Spew state of stubs before destruction.
-  JitSpew(JitSpew_BaselineScripts, "Profling Script Before Destruction.");
-  for (uint32_t entryNum = 0; entryNum < this->numICEntries(); entryNum++) {
-    const jit::ICEntry& entry = this->icEntry(entryNum);
-    const jit::ICStub* stub = entry.firstStub(); 
-    uint32_t stubNum = 1;
-    while (!stub->isFallback()) {
-      const jit::ICCacheIRStub* cacheIRStub = stub->toCacheIRStub();
-      const CacheIRStubInfo* stubInfo = cacheIRStub->stubInfo();
-      const char *stubKind = CacheKindNames[static_cast<uint32_t>(stubInfo->kind())]; 
-      JitSpew(JitSpew_BaselineScripts, "ICEntry:%d Stub:%d Count:%d OpKind:%s",
-          entryNum, stubNum, stub->enteredCount(), stubKind);
-      Fprinter out(stdout);
-      SpewCacheIROps(out, "-", stubInfo); 
-      stub = cacheIRStub->next();
-      stubNum++;
-    }
-    JitSpew(JitSpew_BaselineScripts, "ICEntry:%d Stub(Fallback):%d Count:%d", entryNum, stubNum, stub->enteredCount());
-  }
+  PreWriteBarrier(zone, this); 
 }
 
 void JitScript::prepareForDestruction(Zone* zone) {
-  // zone->traceWeakJitScripts
+  JitSpewBaselineICStats(owningScript(), "Dumping IC Stats at JitScript destruction."); 
   forEachICScript(
       [&](ICScript* script) { script->prepareForDestruction(zone); });
 
