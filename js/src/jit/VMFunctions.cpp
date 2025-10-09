@@ -3321,5 +3321,18 @@ void Printf1(const char* output, uintptr_t value) {
   fprintf(stderr, "%s", line.get());
 }
 
+#define INSTRUMENT_STUBS
+#ifdef INSTRUMENT_STUBS
+void LogStubExecutionInfo(uint32_t hash, uint32_t count, uint8_t* stubCode) {
+  char filename[64];
+  snprintf(filename, sizeof(filename), "/tmp/stub_%08x.txt", hash);  
+  FILE* f = fopen(filename, "w");
+  if (f) {
+    fprintf(f, "%u\n", count);
+    fclose(f);
+  }
+}
+#endif
+
 }  // namespace jit
 }  // namespace js

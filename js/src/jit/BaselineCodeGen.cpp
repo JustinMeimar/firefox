@@ -771,7 +771,6 @@ bool BaselineInterpreterCodeGen::emitNextIC() {
   saveInterpreterPCReg();
   masm.loadPtr(frame.addressOfInterpreterICEntry(), ICStubReg);
   masm.loadPtr(Address(ICStubReg, ICEntry::offsetOfFirstStub()), ICStubReg);
-  masm.printf("Calling inline cache\n", ICStubReg);
   masm.call(Address(ICStubReg, ICStub::offsetOfStubCode()));
   uint32_t returnOffset = masm.currentOffset();
   restoreInterpreterPCReg();

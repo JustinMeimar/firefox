@@ -108,12 +108,17 @@ bool StructuredSpewer::enabled(JSScript* script) {
   return false;
 }
 
+#define ALWAYS_SPEW 1
 bool StructuredSpewer::enabled(JSContext* cx, const JSScript* script,
                                SpewChannel channel) const {
+#if !ALWAYS_SPEW 
   if (script && !script->spewEnabled()) {
     return false;
   }
   return cx->spewer().enabled(channel);
+#else
+  return channel == SpewChannel::BaselineICStats;
+#endif
 }
 
 // Attempt to setup a common header for objects based on script/channel.
@@ -230,6 +235,7 @@ void StructuredSpewer::parseSpewFlags(const char* flags) {
 AutoStructuredSpewer::AutoStructuredSpewer(JSContext* cx, SpewChannel channel,
                                            JSScript* script)
     : printer_(mozilla::Nothing()) {
+ 
   if (!cx->spewer().enabled(cx, script, channel)) {
     return;
   }

@@ -399,7 +399,7 @@ void ICScript::prepareForDestruction(Zone* zone) {
 }
 
 void JitScript::prepareForDestruction(Zone* zone) {
-  // JitSpewBaselineICStats(owningScript(), "Dumping IC Stats at JitScript destruction."); 
+  JitSpewBaselineICStats(owningScript(), "Dumping IC Stats at JitScript destruction."); 
   forEachICScript(
       [&](ICScript* script) { script->prepareForDestruction(zone); });
 
@@ -407,6 +407,7 @@ void JitScript::prepareForDestruction(Zone* zone) {
   owningScript_ = nullptr;
   baselineScript_.set(zone, nullptr);
   ionScript_.set(zone, nullptr);
+  exit(255); 
 }
 
 struct FallbackStubs {
@@ -700,9 +701,12 @@ static bool HasEnteredCounters(ICEntry& entry) {
 void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
   MOZ_ASSERT(script->hasJitScript());
   JSContext* cx = TlsContext.get();
+  setenv("SPEW_UPLOAD", "/home/justin/dev/spidermonkey/firefox/profiling/structured-spews", 1);
+  setenv("SPEW","BaselineICStats", 1);
+  setenv("MOZ_UPLOAD_DIR", "/home/justin/dev/spidermonkey/firefox/profiling/structured-spews", 1);
   AutoStructuredSpewer spew(cx, SpewChannel::BaselineICStats, script);
   if (!spew) {
-    return;
+    MOZ_CRASH("Expected Structured Spew to be enabled.");
   }
 
   JitScript* jitScript = script->jitScript();
@@ -720,23 +724,29 @@ void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
 
     JS::LimitedColumnNumberOneOrigin column;
     unsigned int line = PCToLineNumber(script, pc, &column);
-
     spew->beginObject();
     spew->property("op", CodeName(JSOp(*pc)));
     spew->property("pc", pcOffset);
     spew->property("line", line);
     spew->property("column", column.oneOriginValue());
-
-    spew->beginListProperty("counts");
+    spew->beginListProperty("stubs");
     ICStub* stub = entry.firstStub();
     while (stub && !stub->isFallback()) {
       uint32_t count = stub->enteredCount();
-      spew->value(count);
+      auto cacheIRStubInfo = stub->toCacheIRStub()->stubInfo();
+      uint32_t hash = mozilla::HashBytes(cacheIRStubInfo->code(),
+                                         cacheIRStubInfo->codeLength());
+      spew->beginObject();
+      spew->property("hash", std::to_string(hash).c_str());
+      spew->property("count", count);
+      spew->property("ir", "CacheIROp1 ()");
+
+      spew->endObject();
       stub = stub->toCacheIRStub()->next();
     }
-    spew->endList();
+    spew->endList();  // Changed from endObject to endList
     spew->property("fallback_count", fallback->enteredCount());
-    spew->endObject();
+    spew->endObject(); 
   }
   spew->endList();
 }

@@ -20,6 +20,7 @@
 #include "jit/Linker.h"
 #include "jit/MoveEmitter.h"
 #include "jit/RegExpStubConstants.h"
+#include "jit/Registers.h"
 #include "jit/SharedICHelpers.h"
 #include "jit/VMFunctions.h"
 #include "js/experimental/JitInfo.h"  // JSJitInfo
@@ -42,6 +43,8 @@ using namespace js::jit;
 using mozilla::Maybe;
 
 using JS::ExpandoAndGeneration;
+
+// #define INSTRUMENT_STUBS
 
 namespace js {
 namespace jit {
@@ -235,8 +238,15 @@ JitCode* BaselineCacheIRCompiler::compile() {
   // easier to ensure ICStubReg is valid at entry than at exit.
   Address enteredCount(ICStubReg, ICCacheIRStub::offsetOfEnteredCount()); 
   masm.add32(Imm32(1), enteredCount);
-  // Register enteredCountVal = masm.loadPtr(enteredCount, allocator.useRegister);
-  masm.printf("Incrementing entered count!");
+
+#ifdef INSTRUMENT_STUBS
+  Register countReg = allocator.allocateRegister(masm);
+  masm.load32(enteredCount, countReg); 
+  masm.printf("Incrementing count to: %d\n", countReg); 
+  // masm.callLogStubExecutionInfo(countReg, countReg);
+  Address stubCode(ICStubReg, ICCacheIRStub::offsetOfStubCode());
+#endif
+
   perfSpewer_.startRecording();
 
   CacheIRReader reader(writer_);
