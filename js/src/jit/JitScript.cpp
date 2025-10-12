@@ -16,6 +16,7 @@
 #include "jit/BytecodeAnalysis.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRSpewer.h"
+#include "jit/Disassemble.h"
 #include "jit/IonScript.h"
 #include "jit/JitFrames.h"
 #include "jit/JitSpewer.h"
@@ -61,7 +62,7 @@ ICScript::~ICScript() {
   // The contents of the AllocSite LifoAlloc are removed and freed separately
   // after the next minor GC. See prepareForDestruction.
   MOZ_ASSERT(allocSitesSpace_.isEmpty());
-  MOZ_ASSERT(!envAllocSite_); 
+  MOZ_ASSERT(!envAllocSite_);
 }
 
 #ifdef DEBUG
@@ -395,11 +396,12 @@ void ICScript::prepareForDestruction(Zone* zone) {
   rt->gc.queueAllLifoBlocksForFreeAfterMinorGC(&allocSitesSpace_);
 
   // Trigger write barriers.
-  PreWriteBarrier(zone, this); 
+  PreWriteBarrier(zone, this);
 }
 
 void JitScript::prepareForDestruction(Zone* zone) {
-  JitSpewBaselineICStats(owningScript(), "Dumping IC Stats at JitScript destruction."); 
+  JitSpewBaselineICStats(owningScript(),
+                         "Dumping IC Stats at JitScript destruction.");
   forEachICScript(
       [&](ICScript* script) { script->prepareForDestruction(zone); });
 
@@ -407,7 +409,6 @@ void JitScript::prepareForDestruction(Zone* zone) {
   owningScript_ = nullptr;
   baselineScript_.set(zone, nullptr);
   ionScript_.set(zone, nullptr);
-  exit(255); 
 }
 
 struct FallbackStubs {
@@ -698,12 +699,60 @@ static bool HasEnteredCounters(ICEntry& entry) {
   return false;
 }
 
+namespace {
+  static std::string* g_disasmOutput = nullptr;  
+  void disasmCallback(const char* text) {
+    if (g_disasmOutput) {
+      *g_disasmOutput += text;
+    }
+  }
+   void spewDisassembly(AutoStructuredSpewer& spew, uint8_t* code, size_t length) {
+    std::string disasmOutput;
+    g_disasmOutput = &disasmOutput;
+    jit::Disassemble(code, length, disasmCallback);
+    g_disasmOutput = nullptr;
+    spew->beginListProperty("dis");
+    size_t pos = 0;
+    while (pos < disasmOutput.length()) {
+      size_t addressEnd = disasmOutput.find("  ", pos);
+      if (addressEnd == std::string::npos) break;
+      
+      size_t bytesEnd = disasmOutput.find("  ", addressEnd + 2);
+      if (bytesEnd == std::string::npos) break;
+      size_t instrStart = bytesEnd + 2;
+      while (instrStart < disasmOutput.length() && disasmOutput[instrStart] == ' ') {
+        instrStart++;
+      }
+      size_t instrEnd = instrStart;
+      while (instrEnd < disasmOutput.length() && 
+             disasmOutput[instrEnd] != '\n' && 
+             !(disasmOutput[instrEnd] >= '0' && disasmOutput[instrEnd] <= '9' &&
+               instrEnd + 8 < disasmOutput.length() &&
+               disasmOutput[instrEnd + 8] == ' ')) {
+        instrEnd++;
+      }
+      if (instrStart < instrEnd) {
+        std::string instruction = disasmOutput.substr(instrStart, instrEnd - instrStart);
+        spew->value("%s", instruction.c_str());
+      }
+      pos = instrEnd;
+      while (pos < disasmOutput.length() && disasmOutput[pos] != '0') {
+        pos++;
+      }
+    }
+    spew->endList();
+  } 
+}
+
+#define SPEW_DISASM 1
 void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
   MOZ_ASSERT(script->hasJitScript());
   JSContext* cx = TlsContext.get();
-  setenv("SPEW_UPLOAD", "/home/justin/dev/spidermonkey/firefox/profiling/structured-spews", 1);
-  setenv("SPEW","BaselineICStats", 1);
-  setenv("MOZ_UPLOAD_DIR", "/home/justin/dev/spidermonkey/firefox/profiling/structured-spews", 1);
+  setenv("SPEW_UPLOAD",
+         "/home/justin/dev/spidermonkey/firefox/profiling/structured-spews", 1);
+  setenv("SPEW", "BaselineICStats", 1);
+  setenv("MOZ_UPLOAD_DIR",
+         "/home/justin/dev/spidermonkey/firefox/profiling/structured-spews", 1);
   AutoStructuredSpewer spew(cx, SpewChannel::BaselineICStats, script);
   if (!spew) {
     MOZ_CRASH("Expected Structured Spew to be enabled.");
@@ -733,20 +782,41 @@ void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
     ICStub* stub = entry.firstStub();
     while (stub && !stub->isFallback()) {
       uint32_t count = stub->enteredCount();
-      auto cacheIRStubInfo = stub->toCacheIRStub()->stubInfo();
-      uint32_t hash = mozilla::HashBytes(cacheIRStubInfo->code(),
-                                         cacheIRStubInfo->codeLength());
+      auto info = stub->toCacheIRStub()->stubInfo();
+      uint32_t hash = mozilla::HashBytes(info->code(), info->codeLength());
       spew->beginObject();
       spew->property("hash", std::to_string(hash).c_str());
-      spew->property("count", count);
-      spew->property("ir", "CacheIROp1 ()");
+      spew->property("call-count", count);
+
+      // Cache IR
+      spew->beginListProperty("ir");
+      CacheIRReader reader(info);
+      while (reader.more()) {
+        CacheOp op = reader.readOp();
+        const char* name = CacheIRCodeName(op);
+        CacheIROpInfo opInfo = CacheIROpInfos[size_t(op)];
+        reader.skip(opInfo.argLength);
+        spew->value("%s", name);
+      }
+      spew->endList();  // ir
+
+#if SPEW_DISASM
+      // Disassembly
+      std::string disasmOutput;
+      g_disasmOutput = &disasmOutput;
+      uint8_t* jitStart = stub->jitCode()->raw();
+      uint8_t* jitEnd = stub->jitCode()->rawEnd();
+      jit::Disassemble(jitStart, jitEnd - jitStart, disasmCallback);
+      g_disasmOutput = nullptr;
+      spewDisassembly(spew, jitStart, jitEnd-jitStart);      
+#endif
 
       spew->endObject();
       stub = stub->toCacheIRStub()->next();
     }
-    spew->endList();  // Changed from endObject to endList
+    spew->endList();  // stubs
     spew->property("fallback_count", fallback->enteredCount());
-    spew->endObject(); 
+    spew->endObject();
   }
   spew->endList();
 }
