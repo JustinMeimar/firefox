@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+
 #include "jit/JitScript-inl.h"
 
 #include "mozilla/BinarySearch.h"
@@ -15,19 +16,21 @@
 #include "jit/BaselineJIT.h"
 #include "jit/BytecodeAnalysis.h"
 #include "jit/CacheIRCompiler.h"
-#include "jit/CacheIRSpewer.h"
-#include "jit/Disassemble.h"
+#include "jit/CacheIRReader.h"
 #include "jit/IonScript.h"
 #include "jit/JitFrames.h"
 #include "jit/JitSpewer.h"
 #include "jit/ScriptFromCalleeToken.h"
 #include "jit/TrialInlining.h"
 #include "js/ColumnNumber.h"  // JS::LimitedColumnNumberOneOrigin
+#include "js/Printer.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/Compartment.h"
 #include "vm/FrameIter.h"  // js::OnlyJSJitFrameIter
 #include "vm/JitActivation.h"
+#include "vm/JSONPrinter.h"
 #include "vm/JSScript.h"
+#include "vm/Logging.h"
 
 #include "gc/GCContext-inl.h"
 #include "jit/JSJitFrameIter-inl.h"
@@ -162,12 +165,16 @@ void JSScript::releaseJitScript(JS::GCContext* gcx) {
   MOZ_ASSERT(hasJitScript());
   MOZ_ASSERT(!hasBaselineScript());
   MOZ_ASSERT(!hasIonScript());
-
+  
+  JS_LOG(ICStats, Debug, "Releasing JIT Script");
+  JitSpewBaselineICStats(this, "");
+  
   gcx->removeCellMemory(this, jitScript()->allocBytes(), MemoryUse::JitScript);
 
   JitScript::Destroy(zone(), jitScript());
   warmUpData_.clearJitScript();
   updateJitCodeRaw(gcx->runtime());
+  
 }
 
 void JSScript::releaseJitScriptOnFinalize(JS::GCContext* gcx) {
@@ -747,78 +754,63 @@ namespace {
 #define SPEW_DISASM 1
 void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
   MOZ_ASSERT(script->hasJitScript());
-  JSContext* cx = TlsContext.get();
-  setenv("SPEW_UPLOAD",
-         "/home/justin/dev/spidermonkey/firefox/profiling/structured-spews", 1);
-  setenv("SPEW", "BaselineICStats", 1);
-  setenv("MOZ_UPLOAD_DIR",
-         "/home/justin/dev/spidermonkey/firefox/profiling/structured-spews", 1);
-  AutoStructuredSpewer spew(cx, SpewChannel::BaselineICStats, script);
-  if (!spew) {
-    MOZ_CRASH("Expected Structured Spew to be enabled.");
-  }
-
   JitScript* jitScript = script->jitScript();
-  spew->property("reason", dumpReason);
-  spew->beginListProperty("entries");
+  
+  // Setup JSON printer.
+  auto out = Fprinter(); 
+  if (!out.init(getenv("IC_STAT_LOG"))) {
+    JS_LOG(ICStats, Debug, "Failed to open file printer...");
+    return;
+  }
+  auto json = JSONPrinter(out);
+  
+  json.beginListProperty("entries");
   for (size_t i = 0; i < jitScript->numICEntries(); i++) {
     ICEntry& entry = jitScript->icEntry(i);
     ICFallbackStub* fallback = jitScript->fallbackStub(i);
     if (!HasEnteredCounters(entry)) {
       continue;
     }
-
     uint32_t pcOffset = fallback->pcOffset();
     jsbytecode* pc = script->offsetToPC(pcOffset);
-
     JS::LimitedColumnNumberOneOrigin column;
     unsigned int line = PCToLineNumber(script, pc, &column);
-    spew->beginObject();
-    spew->property("op", CodeName(JSOp(*pc)));
-    spew->property("pc", pcOffset);
-    spew->property("line", line);
-    spew->property("column", column.oneOriginValue());
-    spew->beginListProperty("stubs");
+    
+    json.beginObject();
+    json.property("op", CodeName(JSOp(*pc)));
+    json.property("pc", pcOffset);
+    json.property("line", line);
+    json.property("column", column.oneOriginValue());
+    json.beginListProperty("stubs");
+    
     ICStub* stub = entry.firstStub();
     while (stub && !stub->isFallback()) {
       uint32_t count = stub->enteredCount();
-      auto info = stub->toCacheIRStub()->stubInfo();
+      const CacheIRStubInfo* info = stub->toCacheIRStub()->stubInfo();
       uint32_t hash = mozilla::HashBytes(info->code(), info->codeLength());
-      spew->beginObject();
-      spew->property("hash", std::to_string(hash).c_str());
-      spew->property("call-count", count);
-
-      // Cache IR
-      spew->beginListProperty("ir");
+      json.beginObject();
+      json.property("hash", std::to_string(hash).c_str());
+      json.property("call-count", count);
+      json.beginListProperty("ir");
       CacheIRReader reader(info);
       while (reader.more()) {
         CacheOp op = reader.readOp();
         const char* name = CacheIRCodeName(op);
         CacheIROpInfo opInfo = CacheIROpInfos[size_t(op)];
         reader.skip(opInfo.argLength);
-        spew->value("%s", name);
+        json.value("%s", name);
       }
-      spew->endList();  // ir
-
-#if SPEW_DISASM
-      // Disassembly
-      std::string disasmOutput;
-      g_disasmOutput = &disasmOutput;
-      uint8_t* jitStart = stub->jitCode()->raw();
-      uint8_t* jitEnd = stub->jitCode()->rawEnd();
-      jit::Disassemble(jitStart, jitEnd - jitStart, disasmCallback);
-      g_disasmOutput = nullptr;
-      spewDisassembly(spew, jitStart, jitEnd-jitStart);      
-#endif
-
-      spew->endObject();
+      json.endList();  // ir
+      json.endObject();
       stub = stub->toCacheIRStub()->next();
     }
-    spew->endList();  // stubs
-    spew->property("fallback_count", fallback->enteredCount());
-    spew->endObject();
+    json.endList();  // stubs
+    json.endObject();
+    out.flush();
   }
-  spew->endList();
+  json.endList();
+  out.finish();
+  JS_LOG(ICStats, Debug, "Expect JSON log file...");
 }
 #endif
 

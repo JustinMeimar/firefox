@@ -88,6 +88,8 @@ namespace jit {
   _(BaselineOp)                            \
   /* Inline caches. */                     \
   _(BaselineIC)                            \
+  /* Inline cache statistics. */           \
+  _(ICStats)                               \
   /* Inline cache fallbacks. */            \
   _(BaselineICFallback)                    \
   /* OSR from Baseline => Ion. */          \
