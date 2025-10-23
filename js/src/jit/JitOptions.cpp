@@ -134,7 +134,7 @@ DefaultJitOptions::DefaultJitOptions() {
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   // Whether the Portable Baseline Interpreter is enabled.
-  SET_DEFAULT(portableBaselineInterpreter, false);
+  SET_DEFAULT(portableBaselineInterpreter, true);
 #endif
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP_FORCE
