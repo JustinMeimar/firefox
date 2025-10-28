@@ -230,8 +230,14 @@ static void InitializeJS() {
   // Update static engine preferences, such as AVX, before
   // `JS_InitWithFailureDiagnostic` is called.
   JS::SetAVXEnabled(mozilla::StaticPrefs::javascript_options_wasm_simd_avx());
-#endif
-
+#endif 
+  if (XRE_IsParentProcess()) {
+    setenv("JS_IS_PARENT_PROCESS", "1", 1);
+    unsetenv("JS_IS_CONTENT_PROCESS");
+  } else if (XRE_IsContentProcess()) {
+    setenv("JS_IS_CONTENT_PROCESS", "1", 1);
+    unsetenv("JS_IS_PARENT_PROCESS");
+  }
   if (XRE_IsParentProcess() &&
       mozilla::StaticPrefs::javascript_options_main_process_disable_jit()) {
     JS::DisableJitBackend();

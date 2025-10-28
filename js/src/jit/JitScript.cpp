@@ -10,6 +10,7 @@
 #include "mozilla/BinarySearch.h"
 #include "mozilla/CheckedInt.h"
 
+#include <cstddef>
 #include <utility>
 
 #include "jit/BaselineIC.h"
@@ -707,65 +708,32 @@ static bool HasEnteredCounters(ICEntry& entry) {
   return false;
 }
 
-namespace {
-  static std::string* g_disasmOutput = nullptr;  
-  void disasmCallback(const char* text) {
-    if (g_disasmOutput) {
-      *g_disasmOutput += text;
-    }
+static void SetStubLogFile(char *logFile, size_t maxNameLength, const JSScript* script) {
+
+  const char* isParent = getenv("JS_IS_PARENT_PROCESS");
+  const char* isContent = getenv("JS_IS_CONTENT_PROCESS");
+  const char *logDir = getenv("IC_STAT_LOG_DIR");
+  
+  if (!logDir) {
+    MOZ_CRASH("Must supply the IC_STAT_LOG_DIR environment variable.");
   }
-   void spewDisassembly(AutoStructuredSpewer& spew, uint8_t* code, size_t length) {
-    std::string disasmOutput;
-    g_disasmOutput = &disasmOutput;
-    jit::Disassemble(code, length, disasmCallback);
-    g_disasmOutput = nullptr;
-    spew->beginListProperty("dis");
-    size_t pos = 0;
-    while (pos < disasmOutput.length()) {
-      size_t addressEnd = disasmOutput.find("  ", pos);
-      if (addressEnd == std::string::npos) break;
-      
-      size_t bytesEnd = disasmOutput.find("  ", addressEnd + 2);
-      if (bytesEnd == std::string::npos) break;
-      size_t instrStart = bytesEnd + 2;
-      while (instrStart < disasmOutput.length() && disasmOutput[instrStart] == ' ') {
-        instrStart++;
-      }
-      size_t instrEnd = instrStart;
-      while (instrEnd < disasmOutput.length() && 
-             disasmOutput[instrEnd] != '\n' && 
-             !(disasmOutput[instrEnd] >= '0' && disasmOutput[instrEnd] <= '9' &&
-               instrEnd + 8 < disasmOutput.length() &&
-               disasmOutput[instrEnd + 8] == ' ')) {
-        instrEnd++;
-      }
-      if (instrStart < instrEnd) {
-        std::string instruction = disasmOutput.substr(instrStart, instrEnd - instrStart);
-        spew->value("%s", instruction.c_str());
-      }
-      pos = instrEnd;
-      while (pos < disasmOutput.length() && disasmOutput[pos] != '0') {
-        pos++;
-      }
-    }
-    spew->endList();
-  } 
+  if (!isParent && !isContent) {
+    MOZ_CRASH("Tried to log a stub from process of indeterminate source.");
+  }
+  
+  const char* processPrefix = isParent ? "parent_process" : "content_process";
+  static std::atomic<uint32_t> fileCounter{0};
+  uint32_t fileId = fileCounter.fetch_add(1, std::memory_order_relaxed);  
+  snprintf(logFile, maxNameLength, "%s/ic_stats_%s_%u_%p.json",
+           logDir, processPrefix, fileId, (void*)script);
 }
 
-#define SPEW_DISASM 1
 void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
   MOZ_ASSERT(script->hasJitScript());
-  JitScript* jitScript = script->jitScript(); 
-  const char *logDir = getenv("IC_STAT_LOG_DIR");
-  if (logDir == NULL) {
-    fprintf(stderr, "[IC_LOG] Environment variable IC_STAT_LOG_DIR is unset.\n");
-    return;
-  }
-
-  static std::atomic<uint32_t> fileCounter{0};
-  uint32_t fileId = fileCounter.fetch_add(1, std::memory_order_relaxed);
+  JitScript* jitScript = script->jitScript();
   char logFile[512];
-  snprintf(logFile, sizeof(logFile), "%s/ic_stats_%u_%p.json", logDir, fileId, (void*)script); 
+  SetStubLogFile(logFile, 512, script);
+ 
   auto out = Fprinter();
   if (!out.init(logFile)) {
     fprintf(stderr, "[IC_LOG] Failed to open file printer at path: %s\n", logFile);
