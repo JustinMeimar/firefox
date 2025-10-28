@@ -81,6 +81,7 @@ JitScript::~JitScript() = default;
 #endif
 
 bool JSScript::createJitScript(JSContext* cx) {
+  JS_LOG(ICStats, Info, "Creating JIT Script");
   MOZ_ASSERT(!hasJitScript());
   cx->check(this);
 
@@ -166,7 +167,7 @@ void JSScript::releaseJitScript(JS::GCContext* gcx) {
   MOZ_ASSERT(!hasBaselineScript());
   MOZ_ASSERT(!hasIonScript());
   
-  JS_LOG(ICStats, Debug, "Releasing JIT Script");
+  JS_LOG(ICStats, Info, "Releasing JIT Script");
   JitSpewBaselineICStats(this, "");
   
   gcx->removeCellMemory(this, jitScript()->allocBytes(), MemoryUse::JitScript);
@@ -754,16 +755,24 @@ namespace {
 #define SPEW_DISASM 1
 void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
   MOZ_ASSERT(script->hasJitScript());
-  JitScript* jitScript = script->jitScript();
-  
-  // Setup JSON printer.
-  auto out = Fprinter(); 
-  if (!out.init(getenv("IC_STAT_LOG"))) {
-    JS_LOG(ICStats, Debug, "Failed to open file printer...");
+  JitScript* jitScript = script->jitScript(); 
+  const char *logDir = getenv("IC_STAT_LOG_DIR");
+  if (logDir == NULL) {
+    fprintf(stderr, "[IC_LOG] Environment variable IC_STAT_LOG_DIR is unset.\n");
     return;
   }
-  auto json = JSONPrinter(out);
+
+  static std::atomic<uint32_t> fileCounter{0};
+  uint32_t fileId = fileCounter.fetch_add(1, std::memory_order_relaxed);
+  char logFile[512];
+  snprintf(logFile, sizeof(logFile), "%s/ic_stats_%u_%p.json", logDir, fileId, (void*)script); 
+  auto out = Fprinter();
+  if (!out.init(logFile)) {
+    fprintf(stderr, "[IC_LOG] Failed to open file printer at path: %s\n", logFile);
+    return;
+  } 
   
+  auto json = JSONPrinter(out); 
   json.beginListProperty("entries");
   for (size_t i = 0; i < jitScript->numICEntries(); i++) {
     ICEntry& entry = jitScript->icEntry(i);
@@ -785,32 +794,59 @@ void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
     
     ICStub* stub = entry.firstStub();
     while (stub && !stub->isFallback()) {
+      if (!stub->hasJitCode()) {
+        stub = stub->toCacheIRStub()->next();
+        continue;
+      }
+      
       uint32_t count = stub->enteredCount();
-      const CacheIRStubInfo* info = stub->toCacheIRStub()->stubInfo();
-      uint32_t hash = mozilla::HashBytes(info->code(), info->codeLength());
       json.beginObject();
-      json.property("hash", std::to_string(hash).c_str());
       json.property("call-count", count);
-      json.beginListProperty("ir");
-      CacheIRReader reader(info);
-      while (reader.more()) {
+      
+      const CacheIRStubInfo* stubInfo = stub->toCacheIRStub()->stubInfo();
+      if (!stubInfo || stubInfo->codeLength() == 0
+                    || stubInfo->codeLength() > 10000) {
+        json.property("hash", 0);
+        json.beginListProperty("ir");
+        json.endList();
+        json.endObject();
+        stub = stub->toCacheIRStub()->next();
+        continue;
+      }
+      
+      uint32_t codeLength = stubInfo->codeLength();  
+      CacheIRStubKey::Lookup lookup(stubInfo->kind(), stubInfo->engine(),
+                                    stubInfo->code(), codeLength);
+      mozilla::HashNumber hash = CacheIRStubKey::hash(lookup);
+      json.property("hash", hash);
+      json.beginListProperty("ir"); 
+      CacheIRReader reader(stubInfo);
+      uint32_t opsRead = 0;
+      const uint32_t maxOps = codeLength / 2; // each op is 2 bytes
+      while (reader.more() && opsRead < maxOps) {
         CacheOp op = reader.readOp();
         const char* name = CacheIRCodeName(op);
         CacheIROpInfo opInfo = CacheIROpInfos[size_t(op)];
-        reader.skip(opInfo.argLength);
+        if (opInfo.argLength > 0) {
+          const uint8_t* currentPos = reader.currentPosition();
+          const uint8_t* bufferEnd = stubInfo->code() + codeLength;
+          if (currentPos + opInfo.argLength > bufferEnd) {
+            break;
+          }
+          reader.skip(opInfo.argLength);
+        } 
         json.value("%s", name);
+        opsRead++;
       }
-      json.endList();  // ir
+      json.endList(); 
       json.endObject();
       stub = stub->toCacheIRStub()->next();
     }
     json.endList();  // stubs
     json.endObject();
-    out.flush();
   }
   json.endList();
   out.finish();
-  JS_LOG(ICStats, Debug, "Expect JSON log file...");
 }
 #endif
 

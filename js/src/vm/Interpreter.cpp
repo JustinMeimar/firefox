@@ -398,6 +398,7 @@ static void AssertExceptionResult(JSContext* cx) {
 #  pragma optimize("g", off)
 #endif
 bool js::RunScript(JSContext* cx, RunState& state) {
+  JS_LOG(ICStats, Info, "Running a script.");
   AutoCheckRecursionLimit recursion(cx);
   if (!recursion.check(cx)) {
     return false;
@@ -855,7 +856,7 @@ bool js::Execute(JSContext* cx, HandleScript script, HandleObject envChain,
   /* The env chain is something we control, so we know it can't
      have any outer objects on it. */
   MOZ_ASSERT(!IsWindowProxy(envChain));
-
+  JS_LOG(ICStats, Info, "Executing the interpreter.");
   if (script->isModule()) {
     MOZ_RELEASE_ASSERT(
         envChain == script->module()->environment(),
