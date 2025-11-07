@@ -169,7 +169,9 @@ void JSScript::releaseJitScript(JS::GCContext* gcx) {
   MOZ_ASSERT(!hasIonScript());
   
   JS_LOG(ICStats, Info, "Releasing JIT Script");
+#if PROFILE_IC_STUBS
   JitSpewBaselineICStats(this, "");
+#endif
   
   gcx->removeCellMemory(this, jitScript()->allocBytes(), MemoryUse::JitScript);
 
@@ -699,7 +701,7 @@ void JitScript::setIonScriptImpl(JS::GCContext* gcx, JSScript* script,
   script->updateJitCodeRaw(gcx->runtime());
 }
 
-#ifdef JS_STRUCTURED_SPEW
+#if PROFILE_IC_STUBS
 static bool HasEnteredCounters(ICEntry& entry) {
   ICStub* stub = entry.firstStub();
   if (stub && !stub->isFallback()) {
@@ -707,7 +709,9 @@ static bool HasEnteredCounters(ICEntry& entry) {
   }
   return false;
 }
+#endif
 
+#if PROFILE_IC_STUBS
 static void SetStubLogFile(char *logFile, size_t maxNameLength, const JSScript* script) {
 
   const char* isParent = getenv("JS_IS_PARENT_PROCESS");
@@ -727,7 +731,9 @@ static void SetStubLogFile(char *logFile, size_t maxNameLength, const JSScript* 
   snprintf(logFile, maxNameLength, "%s/ic_stats_%s_%u_%p.json",
            logDir, processPrefix, fileId, (void*)script);
 }
+#endif
 
+#if PROFILE_IC_STUBS
 void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
   MOZ_ASSERT(script->hasJitScript());
   JitScript* jitScript = script->jitScript();
