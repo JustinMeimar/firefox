@@ -733,8 +733,8 @@ static void SetStubLogFile(char *logFile, size_t maxNameLength, const JSScript* 
 }
 #endif
 
-#if PROFILE_IC_STUBS
 void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
+#if PROFILE_IC_STUBS
   MOZ_ASSERT(script->hasJitScript());
   JitScript* jitScript = script->jitScript();
   char logFile[512];
@@ -821,8 +821,8 @@ void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
   }
   json.endList();
   out.finish();
-}
 #endif
+}
 
 using StubHashMap = HashMap<ICCacheIRStub*, ICCacheIRStub*,
                             DefaultHasher<ICCacheIRStub*>, SystemAllocPolicy>;
