@@ -701,6 +701,7 @@ void JitScript::setIonScriptImpl(JS::GCContext* gcx, JSScript* script,
   script->updateJitCodeRaw(gcx->runtime());
 }
 
+#define PROFILE_IC_STUBS 1
 #if PROFILE_IC_STUBS
 static bool HasEnteredCounters(ICEntry& entry) {
   ICStub* stub = entry.firstStub();
@@ -747,6 +748,7 @@ void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
   } 
   
   auto json = JSONPrinter(out); 
+  json.beginObject();
   json.beginListProperty("entries");
   for (size_t i = 0; i < jitScript->numICEntries(); i++) {
     ICEntry& entry = jitScript->icEntry(i);
@@ -820,6 +822,7 @@ void jit::JitSpewBaselineICStats(JSScript* script, const char* dumpReason) {
     json.endObject();
   }
   json.endList();
+  json.endObject();
   out.finish();
 #endif
 }
