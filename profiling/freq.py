@@ -1,6 +1,6 @@
 #-------=====================================================----------#
 #                   
-#                       Stub Frequency Script.
+#                  Stub Frequency Analysis Script.
 #   
 #       Stubs are generated from running the browser in debug with
 #                  the following environment variables.
@@ -46,7 +46,6 @@ def fold_duplicate_stubs(stubs):
         else:
             dedup_stubs[stub_hash] = stub
     return list(dedup_stubs.values())
-
 
 def update_normalized_count(stubs):
     total_count = sum([stub["call-count"] for stub in stubs])

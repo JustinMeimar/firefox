@@ -5,6 +5,7 @@ def plot_content_parent_distribution(content_stubs, parent_stubs, png_name):
     """
     Plot call count distributions for content vs parent processes.
     """
+    from freq import compute_distribution
     content_sorted = compute_distribution(content_stubs)
     parent_sorted = compute_distribution(parent_stubs)
     
