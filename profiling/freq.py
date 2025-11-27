@@ -1,95 +1,124 @@
-#-------=====================================================----------#
-#                   
-#                  Stub Frequency Analysis Script.
-#   
-#       Stubs are generated from running the browser in debug with
-#                  the following environment variables.
-#
-#            - MOZ_DISABLE_CONTENT_SANDBOX=1
-#            - IC_STAT_LOG_DIR=<path-to-stubs>
-#           
-#-------=====================================================----------#
-
-from typing import List
+from typing import List, Dict
 from pathlib import Path
 from argparse import ArgumentParser
-import matplotlib.pyplot as plt
+from dataclasses import dataclass
 import json
 from plot import *
 
-def load_stub_logs(stub_dir: List[Path]): 
-    content_stubs = []
-    parent_stubs = []
-    for dir in stub_dirs: 
-        for path in dir.iterdir():
-            with path.open('r') as stub_log_f:
-                data = json.load(stub_log_f)
-                for entry in data["entries"]: 
-                    for stub in entry["stubs"]:
-                        stub["maybe-op"] = entry["op"]
-                        if "content" in path.name:
-                            content_stubs.append(stub)
-                        elif "parent" in path.name:
-                            parent_stubs.append(stub) 
-    return content_stubs, parent_stubs 
+@dataclass
+class Stub:
+    call_count: int
+    hash: int 
+    ir: List[str]
+    op: str = None
+    call_ratio: float = None
 
-def fold_duplicate_stubs(stubs):
-    """
-    An identical stub may appear in different JitScripts. Here we sum their
-    call-counts to give the total call-count for each.
-    """
-    dedup_stubs = {}
+def load_stubs_from_dir(dir: Path) -> List[Stub]:
+    stubs = []
+    stub_map = {}
+    for path in dir.iterdir():
+        if not path.is_file():
+            continue
+        with path.open('r') as f:
+            data = json.load(f)
+            for entry in data["entries"]: 
+                for stub_data in entry["stubs"]:
+                    if stub_data["call-count"] <= 0:
+                        continue
+                    hash_val = stub_data["hash"]
+                    if hash_val in stub_map:
+                        stub_map[hash_val].call_count += stub_data["call-count"]
+                    else:
+                        stub_map[hash_val] = Stub(
+                            call_count=stub_data["call-count"],
+                            hash=hash_val,
+                            ir=stub_data["ir"],
+                            op=entry["op"]
+                        )
+    return list(stub_map.values())
+
+def fold_duplicate_stubs(stubs: List[Stub]) -> List[Stub]:
+    dedup = {}
     for stub in stubs:
-        stub_hash = stub["hash"]
-        if stub_hash in dedup_stubs:
-            dedup_stubs[stub_hash]["call-count"] += stub["call-count"]  
+        if stub.hash in dedup:
+            dedup[stub.hash].call_count += stub.call_count  
         else:
-            dedup_stubs[stub_hash] = stub
-    return list(dedup_stubs.values())
+            dedup[stub.hash] = stub
+    return list(dedup.values())
 
-def update_normalized_count(stubs):
-    total_count = sum([stub["call-count"] for stub in stubs])
+def update_normalized_count(stubs: List[Stub]) -> List[Stub]:
+    total = sum(s.call_count for s in stubs)
     for stub in stubs:
-        stub["call-ratio"] = round(stub["call-count"] / total_count, 3)
+        stub.call_ratio = round(stub.call_count / total, 3) if total else 0
     return stubs
 
-def compute_distribution(stubs):
-    stubs = fold_duplicate_stubs(stubs)
-    stubs = update_normalized_count(stubs)
-    stubs.sort(key=lambda stub: stub["call-count"], reverse=True) 
-    print(stubs[0:5]) 
+def compute_distribution(stubs: List[Stub]) -> List[Stub]:
+    # stubs = fold_duplicate_stubs(stubs)
+    stubs.sort(key=lambda s: s.call_count, reverse=True) 
     return stubs
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("stub_dirs", nargs="+")
+    parser.add_argument("--speedometer", required=True, help="path to speedometer stub directory")
+    parser.add_argument("--jetstream", required=True, help="path to jetstream stub directory")
+    parser.add_argument("--parent", required=True, help="path to parent stub directory")
+    parser.add_argument("--combined-name", default="combined")
     args = parser.parse_args()
-    if not args.stub_dirs:
-        print("must supply stub_dirs to analyze")
-        exit(1)
     
-    def verify_dir_or_exit(dir) -> Path:
-        d = Path(dir)
+    datasets: Dict[str, List[Stub]] = {}
+    for name, path in [
+        ("Speedometer3", args.speedometer),
+        ("JetStream2", args.jetstream),
+        ("Parent Process", args.parent)]:
+        d = Path(path)
         if not d.is_dir():
-            print(f"Supplied directory: {dir} is invalid.")
+            print(f"Invalid directory: {path}")
             exit(1)
-        return d
+        datasets[name] = compute_distribution(load_stubs_from_dir(d))
+    combined = compute_distribution([s for stubs in datasets.values() for s in stubs])
+   
+    print("Plotting Parent Content Graph")
+    plot_multi_distribution(datasets, combined, "parent_content_plot.png") 
     
-    stub_dirs = list(map(verify_dir_or_exit, args.stub_dirs))
-    content_combine, parent_combine = load_stub_logs(stub_dirs)
-     
-    print("computing parent process stub distribution...") 
-    parent_stubs = compute_distribution(parent_combine)
-    
-    print("computing content process stub distribution...") 
-    content_stubs = compute_distribution(content_combine)
-    
-    hash_suffix = str(abs(hash(''.join(args.stub_dirs))))[0:8]
+    print("Plotting Speed Op Dist")
+    plot_op_distributions_multiline(
+            stubs=datasets["Speedometer3"],
+            output="speedometer_op_dist.png",
+            title="Stub Call Distribution - Speedometer 3 (Top 10 Ops)",
+            top_k=10)
 
-    # Uncomment to plot
+    print("Plotting JetStream2 Op Dist")
+    plot_op_distributions_multiline(
+            stubs=datasets["JetStream2"],
+            output="jetstream_op_dist.png",
+            title="Stub Call Distribution - JetStream 2 (Top 10 Ops)",
+            top_k=10)
     
-    # plot_stub_proportions_pie(parent_stubs, f"stub_pie_parent_{hash_suffix}", 20)
-    # plot_stub_proportions_pie(content_stubs, f"stub_pie_content_{hash_suffix}", 20)
-    # plot_stub_distribution(parent_stubs, "parent", f"stub_dist_parent_{hash_suffix}")
-    # plot_stub_distribution(content_stubs, "content", f"stub_dist_content_{hash_suffix}")
+    print("Plotting Parent Process Op Dist")
+    plot_op_distributions_multiline(
+            stubs=datasets["Parent Process"],
+            output="parent_op_dist.png",
+            title="Stub Call Distribution - Parent Process (Top 10 Ops)",
+            top_k=10)
+
+    print("Generating Speedometer3 table")
+    generate_op_distribution_table(
+        stubs=datasets["Speedometer3"],
+        output="speedometer_op_table.png",
+        title="Speedometer 3 - Top 10 Op Distribution Summary",
+        top_k=10)
+
+    print("Generating JetStream2 table")
+    generate_op_distribution_table(
+        stubs=datasets["JetStream2"],
+        output="jetstream_op_table.png",
+        title="JetStream 2 - Top 10 Op Distribution Summary",
+        top_k=10)
+
+    print("Generating Parent Process table")
+    generate_op_distribution_table(
+        stubs=datasets["Parent Process"],
+        output="parent_op_table.png",
+        title="Parent Process - Top 10 Op Distribution Summary",
+        top_k=10)
 
