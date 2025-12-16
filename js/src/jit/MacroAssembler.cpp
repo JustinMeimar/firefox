@@ -276,8 +276,7 @@ void MacroAssembler::checkAllocatorState(Register temp, gc::AllocKind allocKind,
   // If the zone has a realm with an object allocation metadata hook, emit a
   // guard for this. Note that IC stubs and some other trampolines can be shared
   // across realms, so we don't bake in a realm pointer.
-  if (gc::IsObjectAllocKind(allocKind) &&
-      realm()->zone()->hasRealmWithAllocMetadataBuilder()) {
+  if (gc::IsObjectAllocKind(allocKind) && zone()->hasRealmWithAllocMetadataBuilder()) {
     loadJSContext(temp);
     loadPtr(Address(temp, JSContext::offsetOfRealm()), temp);
     branchPtr(Assembler::NotEqual,
@@ -330,7 +329,6 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
-  CompileZone* zone = realm()->zone();
   size_t thingSize = gc::Arena::thingSize(allocKind);
   size_t totalSize = thingSize;
   if (nDynamicSlots) {
@@ -339,7 +337,7 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
   MOZ_ASSERT(totalSize < INT32_MAX);
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
-  bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::Object,
+  bumpPointerAllocate(result, temp, fail, zone(), JS::TraceKind::Object,
                       totalSize, allocSite);
 
   if (nDynamicSlots) {
@@ -359,7 +357,7 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 // Inlined version of FreeSpan::allocate. This does not fill in slots_.
 void MacroAssembler::freeListAllocate(Register result, Register temp,
                                       gc::AllocKind allocKind, Label* fail) {
-  CompileZone* zone = realm()->zone();
+  CompileZone* czone = zone();
   int thingSize = int(gc::Arena::thingSize(allocKind));
 
   Label fallback;
@@ -367,7 +365,7 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
 
   // Load the first and last offsets of |zone|'s free list for |allocKind|.
   // If there is no room remaining in the span, fall back to get the next one.
-  gc::FreeSpan** ptrFreeList = zone->addressOfFreeList(allocKind);
+  gc::FreeSpan** ptrFreeList = czone->addressOfFreeList(allocKind);
   loadPtr(AbsoluteAddress(ptrFreeList), temp);
   load16ZeroExtend(Address(temp, js::gc::FreeSpan::offsetOfFirst()), result);
   load16ZeroExtend(Address(temp, js::gc::FreeSpan::offsetOfLast()), temp);
@@ -397,7 +395,7 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   bind(&success);
 
   if (runtime()->geckoProfiler().enabled()) {
-    uint32_t* countAddress = zone->addressOfTenuredAllocCount();
+    uint32_t* countAddress = czone->addressOfTenuredAllocCount();
     movePtr(ImmPtr(countAddress), temp);
     add32(Imm32(1), Address(temp, 0));
   }
@@ -611,10 +609,8 @@ void MacroAssembler::nurseryAllocateString(Register result, Register temp,
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
-
-  CompileZone* zone = realm()->zone();
   size_t thingSize = gc::Arena::thingSize(allocKind);
-  bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::String,
+  bumpPointerAllocate(result, temp, fail, zone(), JS::TraceKind::String,
                       thingSize);
 }
 
@@ -625,11 +621,9 @@ void MacroAssembler::nurseryAllocateBigInt(Register result, Register temp,
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
-
-  CompileZone* zone = realm()->zone();
   size_t thingSize = gc::Arena::thingSize(gc::AllocKind::BIGINT);
 
-  bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::BigInt,
+  bumpPointerAllocate(result, temp, fail, zone(), JS::TraceKind::BigInt,
                       thingSize);
 }
 
@@ -779,20 +773,20 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
                                      Register scratch2,
                                      const LiveRegisterSet& liveRegs) {
   Label done, abiCall;
-  CompileZone* zone = realm()->zone();
+  CompileZone* czone = zone();
 
-  loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCount()),
+  loadPtr(AbsoluteAddress(czone->zone()->addressOfPreservedWrappersCount()),
           scratchSuccess);
   branchPtr(Assembler::Equal,
-            AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCapacity()),
+            AbsoluteAddress(czone->zone()->addressOfPreservedWrappersCapacity()),
             scratchSuccess, &abiCall);
-  loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappers()),
+  loadPtr(AbsoluteAddress(czone->zone()->addressOfPreservedWrappers()),
           scratch2);
 
   storePtr(wrapper, BaseIndex(scratch2, scratchSuccess, ScalePointer));
   addPtr(Imm32(1), scratchSuccess);
   storePtr(scratchSuccess,
-           AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCount()));
+           AbsoluteAddress(czone->zone()->addressOfPreservedWrappersCount()));
   move32(Imm32(1), scratchSuccess);
 
   jump(&done);
@@ -4536,9 +4530,9 @@ void MacroAssembler::alignJitStackBasedOnNArgs(uint32_t argc,
 
 MacroAssembler::MacroAssembler(TempAllocator& alloc,
                                CompileRuntime* maybeRuntime,
-                               CompileRealm* maybeRealm)
+                               CompileZone* maybeZone)
     : maybeRuntime_(maybeRuntime),
-      maybeRealm_(maybeRealm),
+      maybeZone_(maybeZone),
       framePushed_(0),
       abiArgs_(/* This will be overwritten for every ABI call, the initial value
                   doesn't matter */
@@ -4553,11 +4547,11 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
 
 StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc)
     : MacroAssembler(alloc, CompileRuntime::get(cx->runtime()),
-                     CompileRealm::get(cx->realm())) {}
+                     CompileZone::get(cx->zone())) {}
 
 OffThreadMacroAssembler::OffThreadMacroAssembler(TempAllocator& alloc,
                                                  CompileRealm* realm)
-    : MacroAssembler(alloc, realm->runtime(), realm) {
+    : MacroAssembler(alloc, realm->runtime(), realm->zone()) {
   MOZ_ASSERT(CurrentThreadIsOffThreadCompiling());
 }
 
@@ -9560,7 +9554,7 @@ void MacroAssembler::iteratorClose(Register obj, Register temp1, Register temp2,
 
   // Clear objectBeingIterated.
   Address iterObjAddr(temp1, NativeIterator::offsetOfObjectBeingIterated());
-  guardedCallPreBarrierAnyZone(iterObjAddr, MIRType::Object, temp2);
+  guardedCallPreBarrier(iterObjAddr, MIRType::Object);
   storePtr(ImmPtr(nullptr), iterObjAddr);
 
   // Reset property cursor.

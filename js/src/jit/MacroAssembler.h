@@ -357,11 +357,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // compilations.
   CompileRuntime* maybeRuntime_ = nullptr;
 
-  // Information about the current Realm. This is nullptr for Wasm compilations
-  // and when compiling runtime-wide jitcode that will live in the Atom zone:
-  // for example, trampolines, the baseline interpreter, and (if
-  // self_hosted_cache is enabled) self-hosted baseline code.
-  CompileRealm* maybeRealm_ = nullptr;
+  // Information about the current Zone. This is nullptr only for Wasm compilations.
+  CompileZone* maybeZone_ = nullptr;
 
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
@@ -370,7 +367,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Constructor is protected. Use one of the derived classes!
   explicit MacroAssembler(TempAllocator& alloc,
                           CompileRuntime* maybeRuntime = nullptr,
-                          CompileRealm* maybeRealm = nullptr);
+                          CompileZone* maybeZone = nullptr);
 
  public:
   MoveResolver& moveResolver() {
@@ -384,11 +381,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   size_t instructionsSize() const { return size(); }
 
-  CompileRealm* realm() const {
-    MOZ_ASSERT(maybeRealm());
-    return maybeRealm();
+  CompileZone* zone() const {
+    MOZ_ASSERT(maybeZone());
+    return maybeZone();
   }
-  CompileRealm* maybeRealm() const { return maybeRealm_; }
+  CompileZone* maybeZone() const { return maybeZone_; }
   CompileRuntime* runtime() const {
     MOZ_ASSERT(maybeRuntime_);
     return maybeRuntime_;
@@ -1900,9 +1897,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                            const void* handlerp, Label* label);
 
   inline void branchTestNeedsIncrementalBarrier(Condition cond, Label* label);
-  inline void branchTestNeedsIncrementalBarrierAnyZone(Condition cond,
-                                                       Label* label,
-                                                       Register scratch);
 
   // Perform a type-test on a tag of a Value (32bits boxing), or the tagged
   // value (64bits boxing).
@@ -5207,18 +5201,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
     branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
-    unguardedCallPreBarrier(address, type);
-    bind(&done);
-  }
-
-  // Like guardedCallPreBarrier, but unlike guardedCallPreBarrier this can be
-  // called from runtime-wide trampolines because it loads cx->zone (instead of
-  // baking in the current Zone) if JitContext::realm is nullptr.
-  template <typename T>
-  void guardedCallPreBarrierAnyZone(const T& address, MIRType type,
-                                    Register scratch) {
-    Label done;
-    branchTestNeedsIncrementalBarrierAnyZone(Assembler::Zero, &done, scratch);
     unguardedCallPreBarrier(address, type);
     bind(&done);
   }

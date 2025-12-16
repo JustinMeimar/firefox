@@ -4009,11 +4009,10 @@ bool BaselineCompilerCodeGen::emit_SetAliasedVar() {
   regs.take(R0);
   regs.take(R2);
   Register temp = regs.takeAny();
-  Register temp2 = regs.takeAny();
 
   getEnvironmentCoordinateObject(objReg);
   Address address = getEnvironmentCoordinateAddressFromObject(objReg, temp);
-  emitGuardedCallPreBarrierAnyZone(address, MIRType::Value, temp2);
+  EmitPreBarrier(masm, address, MIRType::Value);
   masm.storeValue(R0, address);
   frame.push(R0);
 
@@ -4043,7 +4042,6 @@ bool BaselineInterpreterCodeGen::emit_SetAliasedVar() {
   Register env = regs.takeAny();
   Register scratch1 = regs.takeAny();
   Register scratch2 = regs.takeAny();
-  Register scratch3 = regs.takeAny();
 
   // Load the right environment object.
   masm.loadPtr(frame.addressOfEnvironmentChain(), env);
@@ -4083,7 +4081,7 @@ bool BaselineInterpreterCodeGen::emit_SetAliasedVar() {
 
   // Pre-barrier and store.
   Address slotAddr(scratch2, 0);
-  emitGuardedCallPreBarrierAnyZone(slotAddr, MIRType::Value, scratch3);
+  EmitPreBarrier(masm, slotAddr, MIRType::Value);
   masm.storeValue(R2, slotAddr);
 
   // Post barrier.
@@ -4421,13 +4419,13 @@ bool BaselineCompilerCodeGen::emitFormalArgAccess(JSOp op) {
     masm.loadValue(argAddr, R0);
     frame.push(R0);
   } else {
-    Register temp = R1.scratchReg();
-    emitGuardedCallPreBarrierAnyZone(argAddr, MIRType::Value, temp);
+    EmitPreBarrier(masm, argAddr, MIRType::Value);
     masm.loadValue(frame.addressOfStackValue(-1), R0);
     masm.storeValue(R0, argAddr);
 
     MOZ_ASSERT(frame.numUnsyncedSlots() == 0);
 
+    Register temp = R1.scratchReg();
     // Reload the arguments object.
     Register reg = R2.scratchReg();
     masm.loadPtr(frame.addressOfArgsObj(), reg);
@@ -4477,8 +4475,7 @@ bool BaselineInterpreterCodeGen::emitFormalArgAccess(JSOp op) {
       masm.loadValue(argAddr, R0);
       frame.push(R0);
     } else {
-      emitGuardedCallPreBarrierAnyZone(argAddr, MIRType::Value,
-                                       R0.scratchReg());
+      EmitPreBarrier(masm, argAddr, MIRType::Value);
       masm.loadValue(frame.addressOfStackValue(-1), R0);
       masm.storeValue(R0, argAddr);
 
@@ -5284,7 +5281,7 @@ bool BaselineCodeGen<Handler>::emit_TakeDisposeCapability() {
   masm.loadPtr(frame.addressOfEnvironmentChain(), R0.scratchReg());
   Address capAddr(R0.scratchReg(),
                   DisposableEnvironmentObject::offsetOfDisposeCapability());
-  emitGuardedCallPreBarrierAnyZone(capAddr, MIRType::Value, R2.scratchReg());
+  EmitPreBarrier(masm, capAddr, MIRType::Value);
   masm.loadValue(capAddr, R1);
   masm.storeValue(UndefinedValue(), capAddr);
 
@@ -6144,7 +6141,7 @@ bool BaselineCodeGen<Handler>::emitSuspend(JSOp op) {
     Address envChainSlot(
         genObj, AbstractGeneratorObject::offsetOfEnvironmentChainSlot());
     masm.loadPtr(frame.addressOfEnvironmentChain(), envObj);
-    emitGuardedCallPreBarrierAnyZone(envChainSlot, MIRType::Value, temp);
+    EmitPreBarrier(masm, envChainSlot, MIRType::Value);
     masm.storeValue(JSVAL_TYPE_OBJECT, envObj, envChainSlot);
 
     Label skipBarrier;
@@ -6499,8 +6496,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     masm.bind(&loop);
     {
       masm.pushValue(Address(scratch2, 0));
-      emitGuardedCallPreBarrierAnyZone(Address(scratch2, 0), MIRType::Value,
-                                       scratch1);
+      EmitPreBarrier(masm, Address(scratch2, 0), MIRType::Value);
       masm.addPtr(Imm32(sizeof(Value)), scratch2);
       masm.branchSub32(Assembler::NonZero, Imm32(1), initLength, &loop);
     }
@@ -6731,11 +6727,11 @@ bool BaselineCodeGen<Handler>::emit_InitHomeObject() {
   masm.assertFunctionIsExtended(func);
 
   // Set HOMEOBJECT_SLOT
-  Register temp = R1.scratchReg();
   Address addr(func, FunctionExtended::offsetOfMethodHomeObjectSlot());
-  emitGuardedCallPreBarrierAnyZone(addr, MIRType::Value, temp);
+  EmitPreBarrier(masm, addr, MIRType::Value);
   masm.storeValue(R0, addr);
 
+  Register temp = R1.scratchReg();
   Label skipBarrier;
   masm.branchPtrInNurseryChunk(Assembler::Equal, func, temp, &skipBarrier);
   masm.branchValueIsNurseryCell(Assembler::NotEqual, R0, temp, &skipBarrier);
