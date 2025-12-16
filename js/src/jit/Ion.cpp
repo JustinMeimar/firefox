@@ -210,6 +210,9 @@ bool JitRuntime::initialize(JSContext* cx) {
     aotIndirectionTable_.set(AOTSlot::VMWrapperBase,
                              uintptr_t(aotVMWrapperSlots_.begin()));
   }
+#ifdef ENABLE_JS_AOT_ICS
+  js::jit::FillAOTICs(cx, cx->zone()->getJitZone(cx));
+#endif
 
   if (!generateBaselineICFallbackCode(cx)) {
     return false;
@@ -233,7 +236,7 @@ bool JitRuntime::initialize(JSContext* cx) {
       return false;
     }
   }
- 
+
   if (!GenerateBaselineInterpreter(cx, baselineInterpreter_)) {
     return false;
   }
