@@ -195,7 +195,7 @@ void BaselineCacheIRCompiler::callVM(MacroAssembler& masm) {
   callVMInternal(masm, id);
 }
 
-JitCode* BaselineCacheIRCompiler::compile() {
+JitCode* BaselineCacheIRCompiler::compile(bool isAOTFill) {
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compile");
 
 #ifndef JS_USE_LINK_REGISTER
@@ -204,6 +204,13 @@ JitCode* BaselineCacheIRCompiler::compile() {
 #ifdef JS_CODEGEN_ARM
   AutoNonDefaultSecondScratchRegister andssr(masm, BaselineSecondScratchReg);
 #endif
+#ifdef ENABLE_JS_AOT_ICS
+  if (isAOTFill) {
+    AutoScratchRegister scratchAOT(allocator, masm);
+    masm.maybeAOTScratch.emplace(scratchAOT.get());
+  }
+#endif
+
   if (JitOptions.enableICFramePointers) {
     /* [SMDOC] Baseline IC Frame Pointers
      *
@@ -2502,7 +2509,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
       return false;
     }
 
-    code = comp.compile();
+    code = comp.compile(true);
     if (!code) {
       return false;
     }

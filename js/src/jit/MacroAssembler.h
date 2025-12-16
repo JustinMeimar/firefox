@@ -373,6 +373,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
                           CompileRealm* maybeRealm = nullptr);
 
  public:
+#ifdef ENABLE_JS_AOT_ICS
+  // Tracking a scratch register to be used during AOT filling of stubs.
+  mozilla::Maybe<Register> maybeAOTScratch;
+#endif
+
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
     // shared between visitors in the CodeGenerator. This assertion
@@ -5206,7 +5211,16 @@ class MacroAssembler : public MacroAssemblerSpecific {
   template <typename T>
   void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
+#ifdef ENABLE_JS_AOT_ICS
+    if (maybeAOTScratch.isSome()) {
+        // The realm isn't available when doing AOT fill. So we need to use the AnyZone version.
+        branchTestNeedsIncrementalBarrierAnyZone(Assembler::Zero, &done, maybeAOTScratch.value());
+    } else {
+        branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
+    }
+#else
     branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
+#endif
     unguardedCallPreBarrier(address, type);
     bind(&done);
   }
