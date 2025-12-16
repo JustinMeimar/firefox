@@ -164,9 +164,6 @@ class JitZone {
  public:
   explicit JitZone(JSContext* cx, bool zoneHasNurseryStrings) {
     setStringsCanBeInNursery(zoneHasNurseryStrings);
-#ifdef ENABLE_JS_AOT_ICS
-    js::jit::FillAOTICs(cx, this);
-#endif
   }
   ~JitZone() {
     MOZ_ASSERT(jitScripts_.isEmpty());
