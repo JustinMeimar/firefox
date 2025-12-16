@@ -2490,7 +2490,13 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   if (!code && !IsPortableBaselineInterpreterEnabled()) {
     // We have to generate stub code.
     TempAllocator temp(&cx->tempLifoAlloc());
-    JitContext jctx(cx);
+    // We may or may not need to construct a JitContext during this scope.
+    Maybe<JitContext> maybeJitCtx;
+    if (!isAOTFill) {
+      // Only need to construct a JitContext for non-AOT fills.
+      // For AOT fill, there's already a JitContext in the thread.
+      maybeJitCtx.emplace(cx);
+    }
     BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset);
     if (!comp.init(kind)) {
       return false;
@@ -2715,12 +2721,12 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 
 #ifdef ENABLE_JS_AOT_ICS
 
-#  ifndef ENABLE_PORTABLE_BASELINE_INTERP
+// #  ifndef ENABLE_PORTABLE_BASELINE_INTERP
 // The AOT loading of ICs doesn't work (yet) in modes with a native
 // JIT enabled because compilation tries to access state that doesn't
 // exist yet (trampolines?) when we create the JitZone.
 // #    error AOT ICs are only supported (for now) in PBL builds.
-#  endif
+// #  endif
 
 void js::jit::FillAOTICs(JSContext* cx, JitZone* zone) {
   if (JitOptions.enableAOTICs) {
