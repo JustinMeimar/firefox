@@ -201,6 +201,9 @@ bool JitRuntime::initialize(JSContext* cx) {
   if (!populateAOTTrampolineSlots(cx)) {
     return false;
   }
+#ifdef ENABLE_JS_AOT_ICS
+  js::jit::FillAOTICs(cx, cx->zone()->getJitZone(cx));
+#endif
 
   if (!generateBaselineICFallbackCode(cx)) {
     return false;
@@ -224,7 +227,7 @@ bool JitRuntime::initialize(JSContext* cx) {
       return false;
     }
   }
- 
+
   if (!GenerateBaselineInterpreter(cx, baselineInterpreter_)) {
     return false;
   }
