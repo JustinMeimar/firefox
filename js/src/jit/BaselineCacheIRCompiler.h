@@ -159,7 +159,7 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
   template <typename Fn, Fn fn>
   void callVM(MacroAssembler& masm);
 
-  JitCode* compile();
+  JitCode* compile(bool isAOTFill = false);
 
   bool makesGCCalls() const;
   bool localTracingSlots() const { return localTracingSlots_; }
