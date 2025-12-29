@@ -129,6 +129,11 @@ struct DefaultJitOptions {
 #ifdef ENABLE_JS_AOT_ICS
   bool enableAOTICs;
   bool enableAOTICEnforce;
+
+  // MARK: options for a AOT IC pipeline.
+  // bool generateAOTICs;  // build 0, generate corpus (required only once)
+  // bool compileAOTICs;   // build 1, compile the corpus with MASM
+  // bool patchAOTICs;     // build 2, patch pre-compiled IC stubs
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

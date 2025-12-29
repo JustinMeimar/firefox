@@ -127,7 +127,6 @@ bool JitRuntime::initialize(JSContext* cx) {
   if (!generateBaselineICFallbackCode(cx)) {
     return false;
   }
-
   jitcodeGlobalTable_ = cx->new_<JitcodeGlobalTable>();
   if (!jitcodeGlobalTable_) {
     return false;

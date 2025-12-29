@@ -2435,10 +2435,12 @@ static bool AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
 
 #ifdef ENABLE_JS_AOT_ICS
 void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
-  // Generate a random filename (unlikely to conflict with others).
+  // Generate a deterministic filename based on IC content hash.
+  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
+                                writer.codeStart(), writer.codeLength());
+  HashNumber hash = CacheIRStubKey::hash(lookup);
   char filename[64];
-  snprintf(filename, sizeof(filename), "IC-%" PRIu64,
-           mozilla::RandomUint64OrDie());
+  snprintf(filename, sizeof(filename), "IC-%" PRIu64, uint64_t(hash));
   FILE* f = fopen(filename, "w");
   MOZ_RELEASE_ASSERT(f);
 

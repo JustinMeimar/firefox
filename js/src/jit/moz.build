@@ -255,6 +255,14 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
         "wasm32/Trampoline-wasm32.cpp",
     ]
 
+# Generate Baseline interpreter at build time.
+# GeneratedFile(
+#     "BootstrappedBaselineInterp.h",
+#     "BootstrappedBaselineInterp.so",
+#     script="../devtools/bootstrap/boostrap_baseline_interp.py",
+#     inputs=[],
+# )
+
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(
     "ABIFunctionTypeGenerated.h",
