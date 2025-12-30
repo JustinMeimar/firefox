@@ -2491,8 +2491,16 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 
   if (!code && !IsPortableBaselineInterpreterEnabled()) {
     // We have to generate stub code.
-    TempAllocator temp(&cx->tempLifoAlloc());
-    JitContext jctx(cx);
+    TempAllocator temp(&cx->tempLifoAlloc()); 
+    // Only create a JitContext if one doesn't already exist.
+    // JitContexts cannot be nested, so we must check first.
+    // This allows LookupOrCompileStub to be called both from contexts
+    // that already have a JitContext (like JitRuntime::initialize) and
+    // from contexts that don't (like standalone IC compilation).
+    mozilla::Maybe<JitContext> maybeJctx;
+    if (!MaybeGetJitContext()) {
+      maybeJctx.emplace(cx);
+    }
     BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset);
     if (!comp.init(kind)) {
       return false;
@@ -2502,6 +2510,15 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     if (!code) {
       return false;
     }
+    
+    // Write compiled code to a file for consumption in the next build.
+    HashNumber hash = CacheIRStubKey::hash(lookup); 
+    char filename[64];
+    snprintf(filename, sizeof(filename), "IC-compiled-%" PRIu64, uint64_t(hash));
+    FILE* f = fopen(filename, "w");
+    fwrite(code->raw(), 1, code->rawEnd() - code->raw(), f);
+    fflush(f);
+    fclose(f);
 
     comp.perfSpewer().saveProfile(code, name);
 
@@ -2721,7 +2738,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 // The AOT loading of ICs doesn't work (yet) in modes with a native
 // JIT enabled because compilation tries to access state that doesn't
 // exist yet (trampolines?) when we create the JitZone.
-#    error AOT ICs are only supported (for now) in PBL builds.
+//#    error AOT ICs are only supported (for now) in PBL builds.
 #  endif
 
 void js::jit::FillAOTICs(JSContext* cx, JitZone* zone) {

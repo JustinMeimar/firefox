@@ -50,6 +50,7 @@ static JitContext* CurrentJitContext() {
 }
 
 void jit::SetJitContext(JitContext* ctx) {
+  // NOTE: this assert is important.
   MOZ_ASSERT(!TlsJitContext.get());
   TlsJitContext.set(ctx);
 }

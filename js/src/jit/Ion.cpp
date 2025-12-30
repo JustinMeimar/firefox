@@ -150,6 +150,13 @@ bool JitRuntime::initialize(JSContext* cx) {
     return false;
   }
 
+  // Compile AOT ICs in the atoms zone. The generated code will work across
+  // all realms/zones by using runtime zone loading instead of baked addresses.
+  MOZ_ASSERT(cx->zone());
+  MOZ_ASSERT(cx->zone()->getJitZone(cx));
+
+  (void)FillAOTICs(cx, cx->zone()->getJitZone(cx));;
+
   // Initialize the jitCodeRaw of the Runtime's canonical SelfHostedLazyScript
   // to point to the interpreter trampoline.
   cx->runtime()->selfHostedLazyScript.ref().jitCodeRaw_ =

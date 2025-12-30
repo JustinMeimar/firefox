@@ -53,7 +53,17 @@ inline void EmitBaselineLeaveStubFrame(MacroAssembler& masm) {
 template <typename AddrType>
 inline void EmitPreBarrier(MacroAssembler& masm, const AddrType& addr,
                            MIRType type) {
-  masm.guardedCallPreBarrier(addr, type);
+  // For AOT ICs (maybeRealm() == nullptr), we need to use the AnyZone variant
+  // which loads the zone at runtime instead of baking in the address.
+  if (!masm.maybeRealm()) {
+    // We need a scratch register for the runtime zone loading.
+    // Use rax since it's caller-saved and not used for the address.
+    masm.push(rax);
+    masm.guardedCallPreBarrierAnyZone(addr, type, rax);
+    masm.pop(rax);
+  } else {
+    masm.guardedCallPreBarrier(addr, type);
+  }
 }
 
 inline void EmitStubGuardFailure(MacroAssembler& masm) {

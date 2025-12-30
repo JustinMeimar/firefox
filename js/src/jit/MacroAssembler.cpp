@@ -276,13 +276,18 @@ void MacroAssembler::checkAllocatorState(Register temp, gc::AllocKind allocKind,
   // If the zone has a realm with an object allocation metadata hook, emit a
   // guard for this. Note that IC stubs and some other trampolines can be shared
   // across realms, so we don't bake in a realm pointer.
-  if (gc::IsObjectAllocKind(allocKind) &&
-      realm()->zone()->hasRealmWithAllocMetadataBuilder()) {
-    loadJSContext(temp);
-    loadPtr(Address(temp, JSContext::offsetOfRealm()), temp);
-    branchPtr(Assembler::NotEqual,
-              Address(temp, Realm::offsetOfAllocationMetadataBuilder()),
-              ImmWord(0), fail);
+  // For AOT IC compilation (maybeRealm() == nullptr), we conservatively emit
+  // the guard since we don't know at compile time which zone will be used.
+  if (gc::IsObjectAllocKind(allocKind)) {
+    bool emitGuard = !maybeRealm() ||
+                     maybeRealm()->zone()->hasRealmWithAllocMetadataBuilder();
+    if (emitGuard) {
+      loadJSContext(temp);
+      loadPtr(Address(temp, JSContext::offsetOfRealm()), temp);
+      branchPtr(Assembler::NotEqual,
+                Address(temp, Realm::offsetOfAllocationMetadataBuilder()),
+                ImmWord(0), fail);
+    }
   }
 }
 
@@ -309,6 +314,13 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
   // JSCLASS_SKIP_NURSERY_FINALIZE class flag set. It's hard to assert that here
   // though so disallow all foreground finalized objects for now.
   MOZ_ASSERT(!IsForegroundFinalized(allocKind));
+
+  // AOT ICs are realm-agnostic and can't bake in zone addresses.
+  // Fall back to slow path allocation.
+  if (!maybeRealm()) {
+    jump(fail);
+    return;
+  }
 
   // We still need to allocate in the nursery, per the comment in
   // shouldNurseryAllocate; however, we need to insert into the
@@ -359,6 +371,13 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 // Inlined version of FreeSpan::allocate. This does not fill in slots_.
 void MacroAssembler::freeListAllocate(Register result, Register temp,
                                       gc::AllocKind allocKind, Label* fail) {
+  // AOT ICs are realm-agnostic and can't bake in zone addresses.
+  // Fall back to slow path allocation.
+  if (!maybeRealm()) {
+    jump(fail);
+    return;
+  }
+
   CompileZone* zone = realm()->zone();
   int thingSize = int(gc::Arena::thingSize(allocKind));
 
@@ -609,6 +628,13 @@ void MacroAssembler::nurseryAllocateString(Register result, Register temp,
                                            Label* fail) {
   MOZ_ASSERT(IsNurseryAllocable(allocKind));
 
+  // AOT ICs are realm-agnostic and can't bake in zone addresses.
+  // Fall back to slow path allocation.
+  if (!maybeRealm()) {
+    jump(fail);
+    return;
+  }
+
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
 
@@ -622,6 +648,13 @@ void MacroAssembler::nurseryAllocateString(Register result, Register temp,
 void MacroAssembler::nurseryAllocateBigInt(Register result, Register temp,
                                            Label* fail) {
   MOZ_ASSERT(IsNurseryAllocable(gc::AllocKind::BIGINT));
+
+  // AOT ICs are realm-agnostic and can't bake in zone addresses.
+  // Fall back to slow path allocation.
+  if (!maybeRealm()) {
+    jump(fail);
+    return;
+  }
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
@@ -778,6 +811,11 @@ void MacroAssembler::newGCBigInt(Register result, Register temp,
 void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
                                      Register scratch2,
                                      const LiveRegisterSet& liveRegs) {
+  // AOT ICs are realm-agnostic and can't bake in zone addresses.
+  // This function is unlikely to be called during AOT IC compilation,
+  // but assert that we have a realm just in case.
+  MOZ_ASSERT(maybeRealm(), "preserveWrapper needs realm-specific code");
+
   Label done, abiCall;
   CompileZone* zone = realm()->zone();
 

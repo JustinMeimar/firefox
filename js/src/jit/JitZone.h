@@ -165,7 +165,9 @@ class JitZone {
   explicit JitZone(JSContext* cx, bool zoneHasNurseryStrings) {
     setStringsCanBeInNursery(zoneHasNurseryStrings);
 #ifdef ENABLE_JS_AOT_ICS
-    js::jit::FillAOTICs(cx, this);
+    // NOTE: disable filling AOT stubs for now, since the JitContext is
+    // uninitialized (?) We get  
+    // js::jit::FillAOTICs(cx, this);
 #endif
   }
   ~JitZone() {
