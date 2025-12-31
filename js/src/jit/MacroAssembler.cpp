@@ -315,13 +315,6 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
   // though so disallow all foreground finalized objects for now.
   MOZ_ASSERT(!IsForegroundFinalized(allocKind));
 
-  // AOT ICs are realm-agnostic and can't bake in zone addresses.
-  // Fall back to slow path allocation.
-  if (!maybeRealm()) {
-    jump(fail);
-    return;
-  }
-
   // We still need to allocate in the nursery, per the comment in
   // shouldNurseryAllocate; however, we need to insert into the
   // mallocedBuffers set, so bail to do the nursery allocation in the
@@ -342,7 +335,9 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
-  CompileZone* zone = realm()->zone();
+  // For AOT ICs (maybeRealm() == nullptr), zone will be null and we'll use
+  // runtime loading in bumpPointerAllocate.
+  CompileZone* zone = maybeRealm() ? realm()->zone() : nullptr;
   size_t thingSize = gc::Arena::thingSize(allocKind);
   size_t totalSize = thingSize;
   if (nDynamicSlots) {
@@ -372,7 +367,10 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 void MacroAssembler::freeListAllocate(Register result, Register temp,
                                       gc::AllocKind allocKind, Label* fail) {
   // AOT ICs are realm-agnostic and can't bake in zone addresses.
-  // Fall back to slow path allocation.
+  // Tenured allocation requires zone-specific free lists, which is complex to
+  // load at runtime. Fall back to slow path for now.
+  // TODO: Implement runtime loading for tenured allocations if profiling shows
+  // it's needed.
   if (!maybeRealm()) {
     jump(fail);
     return;
@@ -628,17 +626,11 @@ void MacroAssembler::nurseryAllocateString(Register result, Register temp,
                                            Label* fail) {
   MOZ_ASSERT(IsNurseryAllocable(allocKind));
 
-  // AOT ICs are realm-agnostic and can't bake in zone addresses.
-  // Fall back to slow path allocation.
-  if (!maybeRealm()) {
-    jump(fail);
-    return;
-  }
-
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
-
-  CompileZone* zone = realm()->zone();
+  // For AOT ICs (maybeRealm() == nullptr), zone will be null and we'll use
+  // runtime loading in bumpPointerAllocate.
+  CompileZone* zone = maybeRealm() ? realm()->zone() : nullptr;
   size_t thingSize = gc::Arena::thingSize(allocKind);
   bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::String,
                       thingSize);
@@ -649,17 +641,11 @@ void MacroAssembler::nurseryAllocateBigInt(Register result, Register temp,
                                            Label* fail) {
   MOZ_ASSERT(IsNurseryAllocable(gc::AllocKind::BIGINT));
 
-  // AOT ICs are realm-agnostic and can't bake in zone addresses.
-  // Fall back to slow path allocation.
-  if (!maybeRealm()) {
-    jump(fail);
-    return;
-  }
-
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
-
-  CompileZone* zone = realm()->zone();
+  // For AOT ICs (maybeRealm() == nullptr), zone will be null and we'll use
+  // runtime loading in bumpPointerAllocate.
+  CompileZone* zone = maybeRealm() ? realm()->zone() : nullptr;
   size_t thingSize = gc::Arena::thingSize(gc::AllocKind::BIGINT);
 
   bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::BigInt,
@@ -693,14 +679,22 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
 
   // We know statically whether nursery allocation is enable for a particular
   // kind because we discard JIT code when this changes.
-  if (!IsNurseryAllocEnabled(zone, traceKind)) {
+  // For AOT ICs (zone == nullptr), we optimistically assume nursery allocation
+  // is enabled and will fail at runtime if not.
+  if (zone && !IsNurseryAllocEnabled(zone, traceKind)) {
     jump(fail);
     return;
   }
 
   // Use a relative 32 bit offset to the Nursery position_ to currentEnd_ to
   // avoid 64-bit immediate loads.
-  void* posAddr = zone->addressOfNurseryPosition();
+  void* posAddr;
+  if (zone) {
+    posAddr = zone->addressOfNurseryPosition();
+  } else {
+    // AOT IC: Load nursery position address from runtime
+    posAddr = runtime()->addressOfNurseryPosition();
+  }
   int32_t endOffset = Nursery::offsetOfCurrentEndFromPosition();
 
   movePtr(ImmPtr(posAddr), temp);
@@ -713,6 +707,13 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   if (allocSite.is<gc::CatchAllAllocSite>()) {
     // No allocation site supplied. This is the case when called from Warp, or
     // from places that don't support pretenuring.
+    if (!zone) {
+      // AOT IC: We need a zone to get the catchAllAllocSite.
+      // Fall back to slow path for now.
+      // TODO: Consider loading catchAllAllocSite from zone at runtime.
+      jump(fail);
+      return;
+    }
     gc::CatchAllAllocSite siteKind = allocSite.as<gc::CatchAllAllocSite>();
     gc::AllocSite* site = zone->catchAllAllocSite(traceKind, siteKind);
     uintptr_t headerWord = gc::NurseryCellHeader::MakeValue(site, traceKind);
@@ -739,6 +740,11 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   } else {
     // Update allocation site and store pointer in the nursery cell header. This
     // is only used from baseline.
+    if (!zone) {
+      // AOT IC: updateAllocSite needs zone. Fall back to slow path.
+      jump(fail);
+      return;
+    }
     Register site = allocSite.as<Register>();
     updateAllocSite(temp, result, zone, site);
     // See NurseryCellHeader::MakeValue.

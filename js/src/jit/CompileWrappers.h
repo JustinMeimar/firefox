@@ -88,6 +88,10 @@ class CompileRuntime {
   const void* addressOfStringToAtomCache();
   const void* addressOfLastBufferedWholeCell();
 
+  // Addresses for runtime-global GC/nursery data (used by AOT ICs)
+  void* addressOfNurseryPosition();
+  void* addressOfNurseryAllocatedSites();
+
   bool runtimeFuseIntact(RuntimeFuses::FuseIndex index);
   const void* addressOfRuntimeFuse(RuntimeFuses::FuseIndex index);
 
