@@ -825,6 +825,10 @@ struct JSRuntime {
  public:
   JS::GCContext* gcContext() { return &gc.mainThreadContext.ref(); }
 
+  static size_t offsetOfNursery() {
+    return offsetof(JSRuntime, gc) + js::gc::GCRuntime::offsetOfNursery();
+  }
+
 #if !JS_HAS_INTL_API
   /* Number localization, used by jsnum.cpp. */
   js::WriteOnceData<const char*> thousandsSeparator;

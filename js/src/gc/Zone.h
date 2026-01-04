@@ -826,6 +826,34 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
 
   bool allocNurseryGetterSetters() const { return allocNurseryGetterSetters_; }
 
+  static constexpr size_t offsetOfAllocNurseryObjects() {
+    return offsetof(Zone, allocNurseryObjects_);
+  }
+
+  static constexpr size_t offsetOfAllocNurseryStrings() {
+    return offsetof(Zone, allocNurseryStrings_);
+  }
+
+  static constexpr size_t offsetOfAllocNurseryBigInts() {
+    return offsetof(Zone, allocNurseryBigInts_);
+  }
+
+  static constexpr size_t offsetOfAllocGetterSetters() {
+    return offsetof(Zone, allocNurseryGetterSetters_);
+  }
+
+  static constexpr size_t offsetOfRuntime() {
+    return offsetof(Zone, runtime_);
+  }
+
+  static constexpr size_t offsetOfArenas() {
+    return offsetof(Zone, arenas);
+  }
+
+  static constexpr size_t offsetOfFreeList(js::gc::AllocKind thingKind) {
+    return offsetof(Zone, arenas) + decltype(arenas)::offsetOfFreeList(thingKind);
+  }
+
   js::gc::Heap minHeapToTenure(JS::TraceKind kind) const {
     switch (kind) {
       case JS::TraceKind::Object:
