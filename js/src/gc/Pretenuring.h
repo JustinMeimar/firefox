@@ -436,6 +436,10 @@ class PretenuringNursery {
 
   void* addressOfAllocatedSites() { return &allocatedSites; }
 
+  static constexpr size_t offsetOfAllocatedSites() {
+    return offsetof(PretenuringNursery, allocatedSites);
+  }
+
  private:
   void updateTotalAllocCounts(AllocSite* site);
 };

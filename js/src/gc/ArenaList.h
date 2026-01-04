@@ -238,6 +238,10 @@ class FreeLists {
   FreeSpan** addressOfFreeList(AllocKind thingKind) {
     return &freeLists_[thingKind];
   }
+
+  static constexpr size_t offsetOfFreeList(AllocKind thingKind) {
+    return offsetof(FreeLists, freeLists_) + size_t(thingKind) * sizeof(FreeSpan*);
+  }
 };
 
 class ArenaLists {
@@ -283,6 +287,12 @@ class ArenaLists {
 
   FreeSpan** addressOfFreeList(AllocKind thingKind) {
     return freeLists_.refNoCheck().addressOfFreeList(thingKind);
+  }
+
+  static size_t offsetOfFreeList(AllocKind thingKind) {
+    return offsetof(ArenaLists, freeLists_) +
+      decltype(freeLists_)::offsetOfValue() +
+      FreeLists::offsetOfFreeList(thingKind);
   }
 
   inline Arena* getFirstArena(AllocKind thingKind) const;
