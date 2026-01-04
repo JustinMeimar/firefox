@@ -152,14 +152,14 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
   friend class AutoStubFrame;
 
   BaselineCacheIRCompiler(JSContext* cx, TempAllocator& alloc,
-                          const CacheIRWriter& writer, uint32_t stubDataOffset);
+                          const CacheIRWriter& writer, uint32_t stubDataOffset, bool isAOTFill = false);
 
   [[nodiscard]] bool init(CacheKind kind);
 
   template <typename Fn, Fn fn>
   void callVM(MacroAssembler& masm);
 
-  JitCode* compile(bool isAOTFill = false);
+  JitCode* compile();
 
   bool makesGCCalls() const;
   bool localTracingSlots() const { return localTracingSlots_; }
