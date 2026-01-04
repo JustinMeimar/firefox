@@ -595,6 +595,15 @@ class MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS MOZ_GSL_OWNER Maybe
     return aDefault;
   }
 
+  template<typename R>
+  constexpr R refOr(R aDefault) const {
+    static_assert(std::is_convertible_v<T, R>, "refOr requires contained type be convertible to argument type");
+    if (isSome()) {
+      return ref();
+    }
+    return aDefault;
+  }
+
   /*
    * Returns the contents of this Maybe<T> by ref. If |isNothing()|, returns the
    * value returned from the function or functor provided.
