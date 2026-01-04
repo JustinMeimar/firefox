@@ -6,10 +6,14 @@
 
 #include "jit/BaselineCodeGen.h"
 
+#include "JitOptions.h"
 #include "mozilla/Casting.h"
 
 #include "gc/GC.h"
+#include "jit/AOTPatches.h"
+#include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineCompileQueue.h"
+#include "jit/BaselineInterpreterMetadata.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
@@ -18,11 +22,13 @@
 #include "jit/CalleeToken.h"
 #include "jit/FixedList.h"
 #include "jit/IonOptimizationLevels.h"
+#include "jit/JitCode.h"
 #include "jit/JitcodeMap.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/Linker.h"
+#include "jit/ProcessExecutableMemory.h"
 #include "jit/PerfSpewer.h"
 #include "jit/SharedICHelpers.h"
 #include "jit/TemplateObject.h"
@@ -30,6 +36,7 @@
 #include "jit/VMFunctions.h"
 #include "js/friend/ErrorMessages.h"  // JSMSG_*
 #include "js/UniquePtr.h"
+#include <fstream>
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/BuiltinObjectKind.h"
@@ -7176,12 +7183,20 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 
   tableOffset_ = masm.currentOffset();
 
+#ifdef ENABLE_JS_AOT_ICS
+  MOZ_ASSERT(opHandlerOffsets_.resizeUninitialized(JSOP_LIMIT));
+#endif 
+
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
     const Label& opLabel = opLabels[i];
     MOZ_ASSERT(opLabel.bound());
     CodeLabel cl;
     masm.writeCodePointer(&cl);
     cl.target()->bind(opLabel.offset());
+#ifdef ENABLE_JS_AOT_ICS
+    // Track offsets of opcode handlers for AOT baseline metadata.
+    opHandlerOffsets_[i] = CodeOffset(opLabel.offset());
+#endif 
     masm.addCodeLabel(cl);
   }
 
@@ -7230,6 +7245,126 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 
 bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
+
+#ifdef ENABLE_JS_AOT_ICS
+  if (JitOptions.useAOTBaseline) {
+    // Load the AOT-compiled Baseline Interpreter blob.
+    uint8_t* aotBlob = GetAOTBaselineBlob();
+    size_t blobSize = GetAOTBaselineSize();
+
+    // Get the JitZone for executable memory allocation.
+    JitZone* jitZone = cx->zone()->getJitZone(cx);
+    if (!jitZone) {
+      return false;
+    }
+
+    // Allocate executable memory for the interpreter code.
+    static const size_t ExecutableAllocatorAlignment = sizeof(void*);
+    size_t bytesNeeded = blobSize + sizeof(JitCodeHeader);
+    bytesNeeded = AlignBytes(bytesNeeded, ExecutableAllocatorAlignment);
+
+    ExecutablePool* pool;
+    uint8_t* allocation = (uint8_t*)jitZone->execAlloc()
+                            .alloc(cx, bytesNeeded, &pool, CodeKind::Other);
+    if (!allocation) {
+      return false;
+    }
+
+    // The code starts after the JitCodeHeader.
+    uint8_t* codeStart = allocation + sizeof(JitCodeHeader);
+    uint32_t headerSize = sizeof(JitCodeHeader);
+
+    // Create the JitCode object.
+    JitCode* code = JitCode::New<NoGC>(cx, codeStart, blobSize,
+                                       headerSize, pool, CodeKind::Other);
+    if (!code) {
+      return false;
+    }
+
+    // Make the code writable for copying and patching.
+    AutoWritableJitCodeFallible awjc(code);
+    if (!awjc.makeWritable()) {
+      return false;
+    }
+
+    // Copy the AOT blob to executable memory.
+    memcpy(codeStart, aotBlob, blobSize);
+
+    // Patch the opcode dispatch table with runtime addresses.
+    uint8_t** dispatchTable = reinterpret_cast<uint8_t**>(
+        codeStart + kBaselineDispatchTableOffset);
+    
+    // Each opcode handler is at: baseAddress + kBaselineOpcodeOffsets[i]
+    for (size_t i = 0; i < JSOP_LIMIT; i++) {
+      dispatchTable[i] = codeStart + kBaselineOpcodeOffsets[i];
+    }
+
+    // Apply other runtime patches
+    for (const BaselinePatchEntry& patch: kBaselinePatches) {
+      uint8_t* patchStart = codeStart + patch.offset;
+      switch (patch.type) {
+        case PatchType::WellKnownSymbols: {
+          MOZ_ASSERT(patch.count == 1);
+          uintptr_t wksAddr = (uintptr_t)(&cx->runtime()->wellKnownSymbols);
+          *reinterpret_cast<uintptr_t*>(patchStart) = wksAddr;
+          break;
+        }
+      }
+    }
+    
+    // All of the code below is duct tape to pass in the metadata collected from
+    // the initial build & run phase which generated AOTPatches.h.
+    using CodeOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
+    using ICReturnOffsetVector = BaselineInterpreter::ICReturnOffsetVector;
+    using CallVMOffsets = BaselineInterpreter::CallVMOffsets;
+    CodeOffsetVector debugInstrOffsets;
+    CodeOffsetVector debugTrapOffsets;
+    CodeOffsetVector codeCoverageOffsets;
+    ICReturnOffsetVector icReturnOffsets;
+    for (size_t i = 0; i < kDebugInstrumentationOffsetsLength; i++) {
+      if (!debugInstrOffsets.append(kDebugInstrumentationOffsets[i])) {
+        return false;
+      }
+    }
+    for (size_t i = 0; i < kDebugTrapOffsetsLength; i++) {
+      if (!debugTrapOffsets.append(kDebugTrapOffsets[i])) {
+        return false;
+      }
+    }
+    for (size_t i = 0; i < kCodeCoverageOffsetsLength; i++) {
+      if (!codeCoverageOffsets.append(kCodeCoverageOffsets[i])) {
+        return false;
+      }
+    }
+    for (size_t i = 0; i < kICReturnOffsetsLength; i++) {
+      const auto& ic = kICReturnOffsets[i];
+      if (!icReturnOffsets.append(BaselineInterpreter::ICReturnOffset(ic.offset, JSOp(ic.opcode)))) {
+        return false;
+      }
+    }
+
+    interpreter.init(
+        code,
+        kBaselineEntryPoints.interpretOp,
+        kBaselineEntryPoints.interpretOpNoDebugTrap,
+        kBaselineEntryPoints.bailoutPrologue,
+        kBaselineEntryPoints.profilerEnterToggle,
+        kBaselineEntryPoints.profilerExitToggle,
+        kBaselineEntryPoints.debugTrapHandler,
+        std::move(debugInstrOffsets),
+        std::move(debugTrapOffsets),
+        std::move(codeCoverageOffsets),
+        std::move(icReturnOffsets),
+        CallVMOffsets{kCallVMOffsets.debugPrologueOffset,
+                      kCallVMOffsets.debugEpilogueOffset,
+                      kCallVMOffsets.debugAfterYieldOffset});
+  
+    // Todo: still need to handle registration in the JitCode table etc as done
+    // in the generated case. Need to make much less ugly.
+    return true;
+  }
+#endif
+
   AutoCreatedBy acb(masm, "BaselineInterpreterGenerator::generate");
 
   if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
@@ -7265,16 +7400,76 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
   {
     AutoCreatedBy acb(masm, "everything_else");
     Linker linker(masm);
+
     if (masm.oom()) {
       ReportOutOfMemory(cx);
       return false;
     }
-
+   
     JitCode* code = linker.newCode(cx, CodeKind::Other);
     if (!code) {
       return false;
     }
 
+#ifdef ENABLE_JS_AOT_ICS
+
+    if (JitOptions.dumpBaselineInterpreter) {
+      // Dump the baseline interpreter code for analysis.
+      std::ofstream bl_interp_out("./baseline_interpreter.bin");
+      uint8_t* start = code->raw();
+      uint8_t* end = code->rawEnd();
+      std::size_t code_size = end - start;
+      bl_interp_out.write(reinterpret_cast<const char*>(start), code_size);
+      bl_interp_out.close();
+
+      // Build and serialize baseline interpreter metadata.
+      BaselineInterpreterMetadata metadata;
+      metadata.setDispatchTableOffset(tableOffset_);
+
+      BaselineInterpreterMetadata::EntryPoints entryPoints;
+      entryPoints.interpretOp = interpretOpOffset_;
+      entryPoints.interpretOpNoDebugTrap = interpretOpNoDebugTrapOffset_;
+      entryPoints.bailoutPrologue = bailoutPrologueOffset_.offset();
+      entryPoints.profilerEnterToggle = profilerEnterFrameToggleOffset_.offset();
+      entryPoints.profilerExitToggle = profilerExitFrameToggleOffset_.offset();
+      entryPoints.debugTrapHandler = debugTrapHandlerOffset_;
+      metadata.setEntryPoints(entryPoints);
+
+      for (size_t i = 0; i < JSOP_LIMIT; i++) {
+        metadata.addOpcodeHandler(i, opHandlerOffsets_[i].offset());
+      }
+
+      // Debug instrumentation offsets
+      for (uint32_t offset : handler.debugInstrumentationOffsets()) {
+        metadata.addDebugInstrumentationOffset(offset);
+      }
+
+      // Debug trap offsets
+      for (uint32_t offset : debugTrapOffsets_) {
+        metadata.addDebugTrapOffset(offset);
+      }
+
+      // Code coverage offsets
+      for (uint32_t offset : handler.codeCoverageOffsets()) {
+        metadata.addCodeCoverageOffset(offset);
+      }
+
+      // IC return offsets
+      for (const auto& icOffset : handler.icReturnOffsets()) {
+        metadata.addICReturnOffset(icOffset.offset, uint32_t(icOffset.op));
+      }
+
+      // CallVM offsets
+      BaselineInterpreterMetadata::CallVMOffsets vmOffsets;
+      vmOffsets.debugPrologue = handler.callVMOffsets().debugPrologueOffset;
+      vmOffsets.debugEpilogue = handler.callVMOffsets().debugEpilogueOffset;
+      vmOffsets.debugAfterYield = handler.callVMOffsets().debugAfterYieldOffset;
+      metadata.setCallVMOffsets(vmOffsets);
+
+      metadata.writeToFile("./BaselineInterpreter.yaml");
+    }
+#endif
+    
     // Register BaselineInterpreter code with the profiler's JitCode table.
     {
       auto entry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
@@ -7305,7 +7500,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 
 #ifdef MOZ_VTUNE
     vtune::MarkStub(code, "BaselineInterpreter");
-#endif
+#endif  
 
     interpreter.init(
         code, interpretOpOffset_, interpretOpNoDebugTrapOffset_,

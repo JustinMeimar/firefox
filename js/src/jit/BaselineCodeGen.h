@@ -571,6 +571,8 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
 
   // Offsets of move instructions for tableswitch base address.
   Vector<CodeOffset, 0, SystemAllocPolicy> tableLabels_;
+    
+  Vector<CodeOffset, 0, SystemAllocPolicy> opHandlerOffsets_;
 
   // Offset of the first tableswitch entry.
   uint32_t tableOffset_ = 0;

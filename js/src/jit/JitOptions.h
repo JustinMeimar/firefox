@@ -73,6 +73,8 @@ struct DefaultJitOptions {
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   bool portableBaselineInterpreter;
 #endif
+  bool dumpBaselineInterpreter;
+  bool useAOTBaseline;
   bool baselineInterpreter;
   bool baselineJit;
   bool baselineBatching;

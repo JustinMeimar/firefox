@@ -154,8 +154,9 @@ bool JitRuntime::initialize(JSContext* cx) {
   // all realms/zones by using runtime zone loading instead of baked addresses.
   MOZ_ASSERT(cx->zone());
   MOZ_ASSERT(cx->zone()->getJitZone(cx));
-
-  (void)FillAOTICs(cx, cx->zone()->getJitZone(cx));;
+  
+  // Note: for now, don't load or write out any IC stubs.
+  // (void)FillAOTICs(cx, cx->zone()->getJitZone(cx));;
 
   // Initialize the jitCodeRaw of the Runtime's canonical SelfHostedLazyScript
   // to point to the interpreter trampoline.

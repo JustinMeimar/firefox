@@ -2483,10 +2483,11 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
 
 #ifdef ENABLE_JS_AOT_ICS
-  if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
-      !jitZone->isIncompleteAOTICs()) {
-    DumpNonAOTICStubAndQuit(kind, writer);
-  }
+  // NOTE: We can turn this on during a bechmark to dump a corpus.
+  // if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
+  //     !jitZone->isIncompleteAOTICs()) {
+  //   DumpNonAOTICStubAndQuit(kind, writer);
+  // }
 #endif
 
   if (!code && !IsPortableBaselineInterpreterEnabled()) {
@@ -2511,14 +2512,16 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
       return false;
     }
     
-    // Write compiled code to a file for consumption in the next build.
-    HashNumber hash = CacheIRStubKey::hash(lookup); 
-    char filename[64];
-    snprintf(filename, sizeof(filename), "IC-compiled-%" PRIu64, uint64_t(hash));
-    FILE* f = fopen(filename, "w");
-    fwrite(code->raw(), 1, code->rawEnd() - code->raw(), f);
-    fflush(f);
-    fclose(f);
+    // NOTE: We can write AOT compiled stubs like so:
+    
+    // // Write compiled code to a file for consumption in the next build.
+    // HashNumber hash = CacheIRStubKey::hash(lookup); 
+    // char filename[64];
+    // snprintf(filename, sizeof(filename), "IC-compiled-%" PRIu64, uint64_t(hash));
+    // FILE* f = fopen(filename, "w");
+    // fwrite(code->raw(), 1, code->rawEnd() - code->raw(), f);
+    // fflush(f);
+    // fclose(f);
 
     comp.perfSpewer().saveProfile(code, name);
 
