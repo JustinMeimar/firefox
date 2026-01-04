@@ -7207,6 +7207,10 @@ bool CacheIRCompiler::emitStoreDenseElement(ObjOperandId objId,
   ConstantOrRegister val = allocator.useConstantOrRegister(masm, rhsId);
 
   AutoScratchRegister scratch(allocator, masm);
+  Maybe<AutoScratchRegister> maybeZoneScratch;
+  if (isAOTFill_) {
+    maybeZoneScratch.emplace(allocator, masm);
+  }
 
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
@@ -7233,7 +7237,7 @@ bool CacheIRCompiler::emitStoreDenseElement(ObjOperandId objId,
   }
 
   // Perform the store.
-  EmitPreBarrier(masm, element, MIRType::Value);
+  EmitPreBarrier(masm, element, MIRType::Value, maybeZoneScratch.refOr(InvalidReg));
   EmitStoreDenseElement(masm, val, element);
 
   emitPostBarrierElement(obj, val, scratch, index);
@@ -7278,6 +7282,10 @@ bool CacheIRCompiler::emitStoreDenseElementHole(ObjOperandId objId,
   ConstantOrRegister val = allocator.useConstantOrRegister(masm, rhsId);
 
   AutoScratchRegister scratch(allocator, masm);
+  Maybe<AutoScratchRegister> maybeZoneScratch;
+  if (isAOTFill_) {
+    maybeZoneScratch.emplace(allocator, masm);
+  }
 
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
@@ -7320,7 +7328,7 @@ bool CacheIRCompiler::emitStoreDenseElementHole(ObjOperandId objId,
     masm.spectreBoundsCheck32(index, initLength, spectreTemp, failure->label());
   }
 
-  EmitPreBarrier(masm, element, MIRType::Value);
+  EmitPreBarrier(masm, element, MIRType::Value, maybeZoneScratch.refOr(InvalidReg));
 
   masm.bind(&storeSkipPreBarrier);
   EmitStoreDenseElement(masm, val, element);
@@ -8252,11 +8260,16 @@ bool CacheIRCompiler::emitStoreFixedSlotUndefinedResult(ObjOperandId objId,
   Register obj = allocator.useRegister(masm, objId);
   ValueOperand val = allocator.useValueRegister(masm, rhsId);
 
+  Maybe<AutoScratchRegister> maybeZoneScratch;
+  if (isAOTFill_) {
+    maybeZoneScratch.emplace(allocator, masm);
+  }
+
   StubFieldOffset offset(offsetOffset, StubField::Type::RawInt32);
   emitLoadStubField(offset, scratch);
 
   BaseIndex slot(obj, scratch, TimesOne);
-  EmitPreBarrier(masm, slot, MIRType::Value);
+  EmitPreBarrier(masm, slot, MIRType::Value, maybeZoneScratch.refOr(InvalidReg));
   masm.storeValue(val, slot);
   emitPostBarrierSlot(obj, val, scratch);
 
