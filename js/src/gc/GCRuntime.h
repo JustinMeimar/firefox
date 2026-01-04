@@ -1479,6 +1479,12 @@ class GCRuntime {
 
   friend class MarkingValidator;
   friend class AutoEnterIteration;
+
+public:
+  static size_t offsetOfNursery() {
+    return offsetof(GCRuntime, nursery_) +
+      decltype(GCRuntime::nursery_)::offsetOfValue();
+  }
 };
 
 #ifndef JS_GC_ZEAL
