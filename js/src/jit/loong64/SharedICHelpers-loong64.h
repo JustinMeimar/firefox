@@ -68,10 +68,10 @@ inline void EmitBaselineLeaveStubFrame(MacroAssembler& masm) {
 
 template <typename AddrType>
 inline void EmitPreBarrier(MacroAssembler& masm, const AddrType& addr,
-                           MIRType type) {
+                           MIRType type, Register scratch = InvalidReg) {
   // On LoongArch, $ra is clobbered by guardedCallPreBarrier. Save it first.
   masm.push(ra);
-  masm.guardedCallPreBarrier(addr, type);
+  masm.guardedCallPreBarrier(addr, type, scratch);
   masm.pop(ra);
 }
 

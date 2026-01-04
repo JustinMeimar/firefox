@@ -371,6 +371,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
 
+  // Whether or not the IC being compiled is an AOT IC, and thus will be shared across runtimes.
+  bool isAOTFill_ = false;
+
  protected:
   // Constructor is protected. Use one of the derived classes!
   explicit MacroAssembler(TempAllocator& alloc,
@@ -1957,6 +1960,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void branchTestNeedsIncrementalBarrierAnyZone(Condition cond,
                                                        Label* label,
                                                        Register scratch);
+#ifdef ENABLE_JS_AOT_ICS
+  // Version of `branchTestNeedsIncrementalBarrier` that loads the zone at runtime.
+  // See 'Runtime agnostic code generation'.
+  inline void branchTestNeedsIncrementalBarrierRuntime(Condition cond, Label* label, Register scratch);
+#endif
 
   // Perform a type-test on a tag of a Value (32bits boxing), or the tagged
   // value (64bits boxing).
@@ -5264,7 +5272,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  public:
   template <typename T>
-  void guardedCallPreBarrier(const T& address, MIRType type) {
+  void guardedCallPreBarrier(const T& address, MIRType type, Register scratch = InvalidReg) {
     Label done;
 #ifdef ENABLE_AOT_BASELINE
     if (isAOT()) {
@@ -5636,6 +5644,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            const AllocSiteInput& allocSite = AllocSiteInput());
   void updateAllocSite(Register temp, Register result, CompileZone* zone,
                        Register site);
+#ifdef ENABLE_JS_AOT_ICS
+  // Checks whether or not nursery allocation is enabled (runtime agnostic) and fail if not.
+  // See 'Runtime agnostic code generation'.
+  void failIfNurseryAllocDisabledRuntime(Register zone, JS::TraceKind kind, Label* fail);
+  // Version of `bumpPointerAllocate` that loads the zone at runtime.
+  // See 'Runtime agnostic code generation'.
+  void bumpPointerAllocateRuntime(Register result, Register temp, Label* fail,
+                                  JS::TraceKind traceKind, uint32_t size,
+                           const AllocSiteInput& allocSite = AllocSiteInput());
+  // Version of `updateAllocSite` that loads the zone at runtime.
+  // See 'Runtime agnostic code generation'.
+  void updateAllocSiteRuntime(Register temp, Register result, Register site);
+#endif
 
   void freeListAllocate(Register result, Register temp, gc::AllocKind allocKind,
                         Label* fail);
@@ -5940,6 +5961,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void reserveStack(uint32_t amount);
 #else  // !JS_CODEGEN_ARM64
   void reserveStack(uint32_t amount);
+#endif
+
+ private:
+#ifdef ENABLE_JS_AOT_ICS
+  // Load the zone at runtime. See 'Runtime agnostic code generation'.
+  void loadZone(Register zone);
 #endif
 
  public:
