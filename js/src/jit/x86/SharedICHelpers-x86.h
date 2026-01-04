@@ -52,8 +52,8 @@ inline void EmitBaselineLeaveStubFrame(MacroAssembler& masm) {
 
 template <typename AddrType>
 inline void EmitPreBarrier(MacroAssembler& masm, const AddrType& addr,
-                           MIRType type) {
-  masm.guardedCallPreBarrier(addr, type);
+                           MIRType type, Register scratch = InvalidReg) {
+  masm.guardedCallPreBarrier(addr, type, scratch);
 }
 
 inline void EmitStubGuardFailure(MacroAssembler& masm) {
