@@ -303,6 +303,25 @@ struct BranchWasmRefIsSubtypeRegisters {
   bool needScratch2;
 };
 
+//
+// Runtime agnostic code generation
+// ----------------------------
+// In order to support a pre-generated baseline interpreter and ahead-of-time
+// (AOT) compiled IC stubs, the MacroAssembler must be runtime agnostic when
+// generating code for the AOT IC stubs. That is, it may not bake in any
+// addresses/ptrs that rely on the runtime, since the runtime would not be
+// available at the time of compilation.
+//
+// The existing _anyZone methods will not suffice either as they load the zone
+// via the runtime.
+//
+// Instead, the address of the runtime is stored in an ICStub field. Later on,
+// this field can be loaded via an ICStubReg offset, which can then be used to
+// load the zone. Once the zone is available, other required properties may be
+// accessed using an offset from the zone itself. The _Runtime version of existing
+// methods work this way.
+
+
 // [SMDOC] Code generation invariants (incomplete)
 //
 // ## 64-bit GPRs carrying 32-bit values
@@ -353,31 +372,30 @@ struct BranchWasmRefIsSubtypeRegisters {
 // lifoAlloc use if one will be destroyed before the other.
 class MacroAssembler : public MacroAssemblerSpecific {
  private:
-  // Information about the current JSRuntime. This is nullptr only for Wasm
-  // compilations.
+  // Information about the current JSRuntime. This is nullptr for Wasm
+  // compilations as well as AOT IC compilation.
   CompileRuntime* maybeRuntime_ = nullptr;
 
   // Information about the current Realm. This is nullptr for Wasm compilations
   // and when compiling runtime-wide jitcode that will live in the Atom zone:
   // for example, trampolines, the baseline interpreter, and (if
   // self_hosted_cache is enabled) self-hosted baseline code.
+  // Furthermore, this is also nullptr for AOT IC compilations.
   CompileRealm* maybeRealm_ = nullptr;
 
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
 
+  // Whether or not the IC being compiled is an AOT IC, and thus will be shared across runtimes.
+  bool isAOTFill_ = false;
+
  protected:
   // Constructor is protected. Use one of the derived classes!
   explicit MacroAssembler(TempAllocator& alloc,
                           CompileRuntime* maybeRuntime = nullptr,
-                          CompileRealm* maybeRealm = nullptr);
-
+                          CompileRealm* maybeRealm = nullptr,
+                          bool isAOTFill = false);
  public:
-#ifdef ENABLE_JS_AOT_ICS
-  // Tracking a scratch register to be used during AOT filling of stubs.
-  mozilla::Maybe<Register> maybeAOTScratch;
-#endif
-
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
     // shared between visitors in the CodeGenerator. This assertion
@@ -1908,6 +1926,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void branchTestNeedsIncrementalBarrierAnyZone(Condition cond,
                                                        Label* label,
                                                        Register scratch);
+#ifdef ENABLE_JS_AOT_ICS
+  // Version of `branchTestNeedsIncrementalBarrier` that loads the zone at runtime.
+  // See 'Runtime agnostic code generation'.
+  inline void branchTestNeedsIncrementalBarrierRuntime(Condition cond, Label* label, Register scratch);
+#endif
 
   // Perform a type-test on a tag of a Value (32bits boxing), or the tagged
   // value (64bits boxing).
@@ -5209,17 +5232,16 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  public:
   template <typename T>
-  void guardedCallPreBarrier(const T& address, MIRType type) {
+  void guardedCallPreBarrier(const T& address, MIRType type, Register scratch = InvalidReg) {
     Label done;
-#ifdef ENABLE_JS_AOT_ICS
-    if (maybeAOTScratch.isSome()) {
-        // The realm isn't available when doing AOT fill. So we need to use the AnyZone version.
-        branchTestNeedsIncrementalBarrierAnyZone(Assembler::Zero, &done, maybeAOTScratch.value());
-    } else {
+    if (!isAOTFill_) {
         branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
     }
-#else
-    branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
+#ifdef ENABLE_JS_AOT_ICS
+    else {
+        MOZ_ASSERT(scratch != InvalidReg);
+        branchTestNeedsIncrementalBarrierRuntime(Assembler::Zero, &done, scratch);
+    }
 #endif
     unguardedCallPreBarrier(address, type);
     bind(&done);
@@ -5580,6 +5602,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            const AllocSiteInput& allocSite = AllocSiteInput());
   void updateAllocSite(Register temp, Register result, CompileZone* zone,
                        Register site);
+#ifdef ENABLE_JS_AOT_ICS
+  // Checks whether or not nursery allocation is enabled (runtime agnostic) and fail if not.
+  // See 'Runtime agnostic code generation'.
+  void failIfNurseryAllocDisabledRuntime(Register zone, JS::TraceKind kind, Label* fail);
+  // Version of `bumpPointerAllocate` that loads the zone at runtime.
+  // See 'Runtime agnostic code generation'.
+  void bumpPointerAllocateRuntime(Register result, Register temp, Label* fail,
+                                  JS::TraceKind traceKind, uint32_t size,
+                           const AllocSiteInput& allocSite = AllocSiteInput());
+  // Version of `updateAllocSite` that loads the zone at runtime.
+  // See 'Runtime agnostic code generation'.
+  void updateAllocSiteRuntime(Register temp, Register result, Register site);
+#endif
 
   void freeListAllocate(Register result, Register temp, gc::AllocKind allocKind,
                         Label* fail);
@@ -5886,6 +5921,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void reserveStack(uint32_t amount);
 #endif
 
+ private:
+#ifdef ENABLE_JS_AOT_ICS
+  // Load the zone at runtime. See 'Runtime agnostic code generation'.
+  void loadZone(Register zone);
+#endif
+
  public:
   void enableProfilingInstrumentation() {
     emitProfilingInstrumentation_ = true;
@@ -6062,7 +6103,7 @@ class MOZ_RAII StackMacroAssembler : public MacroAssembler {
   JS::AutoCheckCannotGC nogc;
 
  public:
-  StackMacroAssembler(JSContext* cx, TempAllocator& alloc);
+  StackMacroAssembler(JSContext* cx, TempAllocator& alloc, bool isAOTFill = false);
 };
 
 // WasmMacroAssembler does not contain GC pointers, so it doesn't need the no-GC
