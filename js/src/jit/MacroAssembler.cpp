@@ -809,8 +809,8 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
 
   // Update allocation site and store pointer in the nursery cell header. This
   // is only used from baseline.
-  // AOT ICs may not be called from Warp (or other places with pretenuring support).
-  MOZ_ASSERT(allocSite.is<gc::CatchAllAllocSite>());
+  // AOT ICs may not be called from Warp (or other places without pretenuring support).
+  MOZ_ASSERT(!allocSite.is<gc::CatchAllAllocSite>());
   Register site = allocSite.as<Register>();
   updateAllocSiteRuntime(temp, result, site);
   // See NurseryCellHeader::MakeValue.
