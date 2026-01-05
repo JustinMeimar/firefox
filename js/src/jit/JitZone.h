@@ -152,6 +152,9 @@ class JitZone {
   // Whether AOT IC loading failed due to OOM; if so, disable
   // enforcing-AOT checks.
   bool incompleteAOTICs_ = false;
+  // Whether AOT IC filling has been performed in this zone.
+  // "Perform" does not necessarily mean success. See isIncompleteAOTICs.
+  bool filledAOTICs_ = false;
 
   gc::Heap initialStringHeap = gc::Heap::Tenured;
 
@@ -290,6 +293,11 @@ class JitZone {
 
   void setIncompleteAOTICs() { incompleteAOTICs_ = true; }
   bool isIncompleteAOTICs() const { return incompleteAOTICs_; }
+
+  void setFilledAOTICs() { filledAOTICs_ = true; }
+  // Whether AOT IC filling has been performed.
+  // Note: Perform does not guarantee success. See: isIncompleteAOTICs.
+  bool hasFilledAOTICs() const { return filledAOTICs_; }
 
   void traceWeak(JSTracer* trc, JS::Realm* realm);
 

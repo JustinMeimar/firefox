@@ -648,6 +648,13 @@ static MethodStatus CanEnterBaselineInterpreter(JSContext* cx,
     return Method_Error;
   }
 
+#ifdef ENABLE_JS_AOT_ICS
+  JitZone* jitZone = cx->zone()->getJitZone(cx);
+  if (!jitZone->hasFilledAOTICs()) {
+    js::jit::FillAOTICs(cx, jitZone);
+  }
+#endif
+
   AutoKeepJitScripts keepJitScript(cx);
   if (!script->ensureHasJitScript(cx, keepJitScript)) {
     return Method_Error;
