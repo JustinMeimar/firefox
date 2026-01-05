@@ -2504,12 +2504,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     // We have to generate stub code.
     TempAllocator temp(&cx->tempLifoAlloc());
     // We may or may not need to construct a JitContext during this scope.
-    Maybe<JitContext> maybeJitCtx;
-    if (!isAOTFill) {
-      // Only need to construct a JitContext for non-AOT fills.
-      // For AOT fill, there's already a JitContext in the thread.
-      maybeJitCtx.emplace(cx);
-    }
+    JitContext jitCtx(cx);
     BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset, isAOTFill);
     if (!comp.init(kind)) {
       return false;
@@ -2758,6 +2753,10 @@ void js::jit::FillAOTICs(JSContext* cx, JitZone* zone) {
       (void)code;
     }
   }
+  // We set AOT ICs to filled even if enableAOTICs = false.
+  // This is to prevent repeatedly calling FillAOTICs, each time the JIT is
+  // entered, when enableAOTICs = false.
+  zone->setFilledAOTICs();
 }
 #endif
 
