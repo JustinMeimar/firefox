@@ -235,6 +235,15 @@ struct PatchedImmPtr {
   explicit PatchedImmPtr(const void* value) : value(const_cast<void*>(value)) {}
 };
 
+// A pointer type which forces a relocation in the object file for the symbol
+// we take the address of.
+struct RelocationPtr {
+  void* value;
+  explicit RelocationPtr(void *value) : value(value) {
+    MOZ_ASSERT(!IsCompilingWasm()); // Probably won't work for WASM since... ? 
+  }
+};
+
 class AssemblerShared;
 class ImmGCPtr;
 

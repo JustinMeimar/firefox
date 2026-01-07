@@ -17,8 +17,8 @@ namespace js {
 namespace jit {
 
 // Metadata about the Baseline Interpreter for AOT compilation.
-// This class encapsulates all the information needed to reconstruct
-// the Baseline Interpreter from an AOT-compiled blob.
+// Encapsulates information needed to reconstruct baseline from
+// an AOT-compiled blob.
 class BaselineInterpreterMetadata {
  public:
   // Offsets to key entry points in the interpreter code.
@@ -87,6 +87,11 @@ class BaselineInterpreterMetadata {
     icReturnOffsets_.push_back({offset, opcode});
   }
 
+  // Add table label offset (for patching dispatch table references).
+  void addTableLabelOffset(uint32_t offset) {
+    tableLabelOffsets_.push_back(offset);
+  }
+
   // Set CallVM offsets.
   void setCallVMOffsets(const CallVMOffsets& offsets) {
     callVMOffsets_ = offsets;
@@ -145,6 +150,14 @@ class BaselineInterpreterMetadata {
     }
     out << "]\n\n";
 
+    // Table label offsets (for dispatch table patching)
+    out << "  table_label_offsets: [";
+    for (size_t i = 0; i < tableLabelOffsets_.size(); i++) {
+      if (i > 0) out << ", ";
+      out << tableLabelOffsets_[i];
+    }
+    out << "]\n\n";
+
     // IC return offsets
     out << "  ic_return_offsets:\n";
     for (const auto& ic : icReturnOffsets_) {
@@ -174,6 +187,7 @@ class BaselineInterpreterMetadata {
   const auto& debugInstrumentationOffsets() const { return debugInstrumentationOffsets_; }
   const auto& debugTrapOffsets() const { return debugTrapOffsets_; }
   const auto& codeCoverageOffsets() const { return codeCoverageOffsets_; }
+  const auto& tableLabelOffsets() const { return tableLabelOffsets_; }
   const auto& icReturnOffsets() const { return icReturnOffsets_; }
   const CallVMOffsets& callVMOffsets() const { return callVMOffsets_; }
 
@@ -184,6 +198,7 @@ class BaselineInterpreterMetadata {
   std::vector<uint32_t> debugInstrumentationOffsets_;
   std::vector<uint32_t> debugTrapOffsets_;
   std::vector<uint32_t> codeCoverageOffsets_;
+  std::vector<uint32_t> tableLabelOffsets_;
   std::vector<ICReturnOffset> icReturnOffsets_;
   CallVMOffsets callVMOffsets_;
 };

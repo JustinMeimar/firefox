@@ -109,6 +109,17 @@ def main(c_out, yaml_path):
         c_out.write("};\n")
         c_out.write(f"constexpr size_t kCodeCoverageOffsetsLength = {len(code_cov)};\n\n")
 
+        # Always emit table label offsets (even if empty)
+        table_labels = metadata.get('table_label_offsets', [])
+        c_out.write("constexpr uint32_t kTableLabelOffsets[] = {\n")
+        if table_labels:
+            for offset in table_labels:
+                c_out.write(f"    {offset},\n")
+        else:
+            c_out.write("    0  // Dummy element for empty array\n")
+        c_out.write("};\n")
+        c_out.write(f"constexpr size_t kTableLabelOffsetsLength = {len(table_labels)};\n\n")
+
         # Always emit IC return offsets struct and array (even if empty)
         ic_returns = metadata.get('ic_return_offsets', [])
         c_out.write("struct ICReturnOffset {\n")

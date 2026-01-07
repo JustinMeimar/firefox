@@ -112,6 +112,11 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
     localTracingSlots_ = localTracingSlots;
   }
 
+  // Set instruction size for AOT-loaded code (which doesn't use copyFrom)
+  void setInstructionsSize(uint32_t size) {
+    insnSize_ = size;
+  }
+
   uint8_t localTracingSlots() { return localTracingSlots_; }
 
   // If this JitCode object has been, effectively, corrupted due to

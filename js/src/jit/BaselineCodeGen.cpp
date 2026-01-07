@@ -2796,7 +2796,8 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   Register scratch1 = R0.scratchReg();
   Register scratch2 = R1.scratchReg();
   LoadUint8Operand(masm, scratch1);
-
+  
+  // masm.movePtr(RelocationPtr(&runtime->wellKnownSymbols()), scratch2);
   masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
 
@@ -7252,6 +7253,14 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
     uint8_t* aotBlob = GetAOTBaselineBlob();
     size_t blobSize = GetAOTBaselineSize();
 
+    // DEBUG: Check blob size
+    fprintf(stderr, "DEBUG: AOT Baseline blob: start=%p, size=%zu\n",
+            (void*)aotBlob, blobSize);
+    if (blobSize == 0) {
+      fprintf(stderr, "ERROR: AOT blob size is 0! Falling back to JIT.\n");
+      // Fall through to normal code generation
+    } else {
+
     // Get the JitZone for executable memory allocation.
     JitZone* jitZone = cx->zone()->getJitZone(cx);
     if (!jitZone) {
@@ -7290,6 +7299,12 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
     // Copy the AOT blob to executable memory.
     memcpy(codeStart, aotBlob, blobSize);
 
+    // Initialize the JitCodeHeader to point back to the JitCode object.
+    JitCodeHeader::FromExecutable(codeStart)->init(code);
+
+    // Set the instruction size (normally done by copyFrom, but we don't have a MacroAssembler).
+    code->setInstructionsSize(blobSize);
+
     // Patch the opcode dispatch table with runtime addresses.
     uint8_t** dispatchTable = reinterpret_cast<uint8_t**>(
         codeStart + kBaselineDispatchTableOffset);
@@ -7305,6 +7320,9 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
       switch (patch.type) {
         case PatchType::WellKnownSymbols: {
           MOZ_ASSERT(patch.count == 1);
+          // Note: MOVABS is a variable length x86 instruciotn. How can we be
+          // certain it is correct (ignore for now since most programs won't use
+          // emit symbol, validate later)
           uintptr_t wksAddr = (uintptr_t)(&cx->runtime()->wellKnownSymbols);
           *reinterpret_cast<uintptr_t*>(patchStart) = wksAddr;
           break;
@@ -7336,12 +7354,51 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
         return false;
       }
     }
+    // Populate table labels from AOT metadata
+    for (size_t i = 0; i < kTableLabelOffsetsLength; i++) {
+      if (!tableLabels_.append(CodeOffset(kTableLabelOffsets[i]))) {
+        return false;
+      }
+    }
     for (size_t i = 0; i < kICReturnOffsetsLength; i++) {
       const auto& ic = kICReturnOffsets[i];
       if (!icReturnOffsets.append(BaselineInterpreter::ICReturnOffset(ic.offset, JSOp(ic.opcode)))) {
         return false;
       }
     }
+
+    // Register BaselineInterpreter code with the profiler's JitCode table.
+    {
+      auto entry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
+          cx, code, code->raw(), code->rawEnd());
+      if (!entry) {
+        return false;
+      }
+
+      JitcodeGlobalTable* globalTable =
+          cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+      if (!globalTable->addEntry(std::move(entry))) {
+        ReportOutOfMemory(cx);
+        return false;
+      }
+
+      code->setHasBytecodeMap();
+    }
+
+    // Patch loads now that we know the tableswitch base address.
+    // Use the AOT-provided dispatch table offset instead of tableOffset_
+    CodeLocationLabel tableLoc(code, CodeOffset(kBaselineDispatchTableOffset));
+    for (CodeOffset off : tableLabels_) {
+      MacroAssembler::patchNearAddressMove(CodeLocationLabel(code, off),
+                                           tableLoc);
+    }
+
+    perfSpewer_.endRecording();
+    perfSpewer_.saveProfile(code);
+
+#ifdef MOZ_VTUNE
+    vtune::MarkStub(code, "BaselineInterpreter");
+#endif
 
     interpreter.init(
         code,
@@ -7357,12 +7414,18 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
         std::move(icReturnOffsets),
         CallVMOffsets{kCallVMOffsets.debugPrologueOffset,
                       kCallVMOffsets.debugEpilogueOffset,
-                      kCallVMOffsets.debugAfterYieldOffset});
-  
-    // Todo: still need to handle registration in the JitCode table etc as done
-    // in the generated case. Need to make much less ugly.
+                      kCallVMOffsets.debugAfterYieldOffset}); 
+
+    if (cx->runtime()->geckoProfiler().enabled()) {
+      interpreter.toggleProfilerInstrumentation(true);
+    }
+
+    if (coverage::IsLCovEnabled()) {
+      interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
+    }
     return true;
-  }
+    } // end else (blobSize != 0)
+  } // end if (JitOptions.useAOTBaseline)
 #endif
 
   AutoCreatedBy acb(masm, "BaselineInterpreterGenerator::generate");
@@ -7452,6 +7515,11 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
       // Code coverage offsets
       for (uint32_t offset : handler.codeCoverageOffsets()) {
         metadata.addCodeCoverageOffset(offset);
+      }
+
+      // Table label offsets (for dispatch table patching)
+      for (const CodeOffset& offset : tableLabels_) {
+        metadata.addTableLabelOffset(offset.offset());
       }
 
       // IC return offsets
