@@ -7,6 +7,7 @@
 #ifndef jit_BaselineCodeGen_h
 #define jit_BaselineCodeGen_h
 
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineFrameInfo.h"
 #include "jit/BytecodeAnalysis.h"
 #include "jit/CompileWrappers.h"
@@ -566,6 +567,7 @@ class BaselineInterpreterHandler {
 using BaselineInterpreterCodeGen = BaselineCodeGen<BaselineInterpreterHandler>;
 
 class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
+  friend class BaselineInterpreter;;
   // Offsets of patchable call instructions for debugger breakpoints/stepping.
   Vector<uint32_t, 0, SystemAllocPolicy> debugTrapOffsets_;
 
@@ -586,6 +588,30 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   // Offset of the jump (tail call) to the debug trap handler trampoline code.
   // When the debugger is enabled, NOPs are patched to calls to this location.
   uint32_t debugTrapHandlerOffset_ = 0;
+
+#ifdef ENABLE_JS_AOT_ICS
+  // Accumulator for AOT manifest data during generation.
+  struct BaselineAOTAccumulator {
+    uint32_t metadata[uint32_t(BaselineMetadataID::Count)] = {0};
+
+    Vector<uint32_t, 0, SystemAllocPolicy> debugInstr;
+    Vector<uint32_t, 0, SystemAllocPolicy> debugTraps;
+    Vector<uint32_t, 0, SystemAllocPolicy> codeCoverage;
+    Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy> icReturns;
+    Vector<PatchEntry, 0, SystemAllocPolicy> patches;
+
+    void set(BaselineMetadataID id, uint32_t val) {
+      metadata[uint32_t(id)] = val;
+    }
+
+    [[nodiscard]] bool addPatch(uint32_t offset, PatchType type, uint32_t aux = 0) {
+      PatchEntry entry{offset, type, aux};
+      return patches.append(entry);
+    }
+  } aotAccumulator_;
+
+  [[nodiscard]] bool serializeAOTManifest(JitCode* code);
+#endif
 
   BaselineInterpreterPerfSpewer perfSpewer_;
 

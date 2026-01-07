@@ -12,11 +12,13 @@
 #include "mozilla/ScopeExit.h"
 
 #include <algorithm>
+#include <fstream>
 
 #include "debugger/DebugAPI.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #include "jit/AutoWritableJitCode.h"
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineCodeGen.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineDebugModeOSR.h"
@@ -1311,6 +1313,205 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
   callVMOffsets_ = callVMOffsets;
 }
 
+#ifdef ENABLE_JS_AOT_ICS
+bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size, JitCode* code) {
+  // 1. Validate minimum size
+  if (size < sizeof(BaselineAOTFooter)) {
+    fprintf(stderr, "ERROR: AOT blob too small (%zu bytes)\n", size);
+    return false;
+  }
+
+  // 2. Find and validate footer
+  auto* footer = reinterpret_cast<BaselineAOTFooter*>(
+    blob + size - sizeof(BaselineAOTFooter));
+
+  if (footer->magic != 0x424C494E) {
+    fprintf(stderr, "ERROR: Invalid AOT magic number: 0x%08x (expected 0x424C494E)\n",
+            footer->magic);
+    return false;
+  }
+
+  if (footer->version != 1) {
+    fprintf(stderr, "ERROR: Unsupported AOT version: %u (expected 1)\n",
+            footer->version);
+    return false;
+  }
+
+  // 3. Validate manifest offset
+  if (footer->manifestOffset >= size - sizeof(BaselineAOTFooter)) {
+    fprintf(stderr, "ERROR: Invalid manifest offset: %u (blob size: %zu)\n",
+            footer->manifestOffset, size);
+    return false;
+  }
+
+  // 4. Jump to manifest
+  auto* manifest = reinterpret_cast<BaselineManifest*>(blob + footer->manifestOffset);
+
+  auto getMeta = [&](BaselineMetadataID id) -> uint32_t {
+    return manifest->metadata[uint32_t(id)];
+  };
+
+  // 5. Assign scalar members
+  code_ = code;
+  interpretOpOffset_ = getMeta(BaselineMetadataID::InterpretOp);
+  interpretOpNoDebugTrapOffset_ = getMeta(BaselineMetadataID::InterpretOpNoDebugTrap);
+  bailoutPrologueOffset_ = getMeta(BaselineMetadataID::BailoutPrologue);
+  profilerEnterToggleOffset_ = getMeta(BaselineMetadataID::ProfilerEnterToggle);
+  profilerExitToggleOffset_ = getMeta(BaselineMetadataID::ProfilerExitToggle);
+  debugTrapHandlerOffset_ = getMeta(BaselineMetadataID::DebugTrapHandler);
+
+  callVMOffsets_.debugPrologueOffset = getMeta(BaselineMetadataID::CallVMDebugPrologue);
+  callVMOffsets_.debugEpilogueOffset = getMeta(BaselineMetadataID::CallVMDebugEpilogue);
+  callVMOffsets_.debugAfterYieldOffset = getMeta(BaselineMetadataID::CallVMDebugAfterYield);
+
+  fprintf(stderr, "INFO: Loaded scalar offsets from AOT manifest\n");
+  fprintf(stderr, "  interpretOp: %u\n", interpretOpOffset_);
+  fprintf(stderr, "  bailoutPrologue: %u\n", bailoutPrologueOffset_);
+
+  // 6. Reconstruct vectors from payloads
+  uint8_t* payloadPtr = reinterpret_cast<uint8_t*>(manifest) +
+                        sizeof(manifest->metadata);
+
+  // Helper to load a vector
+  auto loadVec = [&](auto& destVec, BaselineMetadataID countId) -> bool {
+    uint32_t count = getMeta(countId);
+    if (count == 0) {
+      return true;  // Empty vector is valid
+    }
+
+    using T = typename std::remove_reference_t<decltype(destVec)>::ElementType;
+
+    // Bounds check
+    size_t bytesNeeded = count * sizeof(T);
+    size_t payloadOffset = payloadPtr - blob;
+    if (payloadOffset + bytesNeeded > size - sizeof(BaselineAOTFooter)) {
+      fprintf(stderr, "ERROR: Vector payload exceeds blob bounds\n");
+      return false;
+    }
+
+    T* src = reinterpret_cast<T*>(payloadPtr);
+    if (!destVec.append(src, count)) {
+      fprintf(stderr, "ERROR: Failed to allocate vector (count: %u)\n", count);
+      return false;
+    }
+
+    payloadPtr += bytesNeeded;
+    return true;
+  };
+
+  // Load each vector in order
+  if (!loadVec(debugInstrumentationOffsets_, BaselineMetadataID::DebugInstrumentationCount)) {
+    fprintf(stderr, "ERROR: Failed to load debug instrumentation offsets\n");
+    return false;
+  }
+
+  if (!loadVec(debugTrapOffsets_, BaselineMetadataID::DebugTrapCount)) {
+    fprintf(stderr, "ERROR: Failed to load debug trap offsets\n");
+    return false;
+  }
+
+  if (!loadVec(codeCoverageOffsets_, BaselineMetadataID::CodeCoverageCount)) {
+    fprintf(stderr, "ERROR: Failed to load code coverage offsets\n");
+    return false;
+  }
+
+  if (!loadVec(icReturnOffsets_, BaselineMetadataID::ICReturnCount)) {
+    fprintf(stderr, "ERROR: Failed to load IC return offsets\n");
+    return false;
+  }
+
+  if (!loadVec(patchEntries_, BaselineMetadataID::PatchCount)) {
+    fprintf(stderr, "ERROR: Failed to load patch entries\n");
+    return false;
+  }
+
+  fprintf(stderr, "INFO: AOT manifest loaded successfully\n");
+  fprintf(stderr, "  Debug instrumentation: %zu entries\n", debugInstrumentationOffsets_.length());
+  fprintf(stderr, "  Debug traps: %zu entries\n", debugTrapOffsets_.length());
+  fprintf(stderr, "  Code coverage: %zu entries\n", codeCoverageOffsets_.length());
+  fprintf(stderr, "  IC returns: %zu entries\n", icReturnOffsets_.length());
+  fprintf(stderr, "  Patches: %zu entries\n", patchEntries_.length());
+
+  // 7. Apply patches using MacroAssembler::patchNearAddressMove
+  fprintf(stderr, "INFO: Applying %zu patches...\n", patchEntries_.length());
+
+  uint8_t* codeBase = code_->raw();
+  uint32_t tableOffset = getMeta(BaselineMetadataID::DispatchTableOffset);
+
+  fprintf(stderr, "INFO: Patching - codeBase=%p, tableOffset=%u, table=%p\n",
+          codeBase, tableOffset, codeBase + tableOffset);
+
+  int patchNum = 0;
+  for (const auto& patch : patchEntries_) {
+    uintptr_t runtimeVal = 0;
+
+    switch (patch.type) {
+      case PatchType::DispatchTable: {
+        // Return address of dispatch table in the loaded code
+        runtimeVal = reinterpret_cast<uintptr_t>(codeBase + tableOffset);
+        break;
+      }
+
+      case PatchType::WellKnownSymbols: {
+        runtimeVal = reinterpret_cast<uintptr_t>(
+            &*cx->runtime()->wellKnownSymbols);
+        break;
+      }
+
+      case PatchType::DebugTrapHandler: {
+        JitCode* handler = cx->runtime()->jitRuntime()->debugTrapHandler(
+            DebugTrapHandlerKind::Interpreter);
+        runtimeVal = reinterpret_cast<uintptr_t>(handler->raw());
+        break;
+      }
+
+      case PatchType::VMWrapper: {
+        // patch.aux contains VMFunctionId
+        TrampolinePtr code = cx->runtime()->jitRuntime()->getVMWrapper(
+            VMFunctionId(patch.aux));
+        runtimeVal = reinterpret_cast<uintptr_t>(code.value);
+        break;
+      }
+
+      default:
+        MOZ_CRASH("Unknown patch type");
+    }
+
+    // Patch RIP-relative LEA instruction displacement
+    // The offset points to the END of the LEA instruction
+    // LEA format: REX 8D ModRM disp32, so displacement is at offset-4
+    uint8_t* patchAddr = codeBase + patch.offset;
+
+    if (patch.type == PatchType::DispatchTable) {
+      // For dispatch table, compute RIP-relative displacement
+      // RIP points to the instruction AFTER the LEA when it executes
+      uint8_t* ripAfterLea = patchAddr;  // offset points to end of LEA = where RIP will be
+      uint8_t* target = codeBase + tableOffset;
+      ptrdiff_t displacement = target - ripAfterLea;
+
+      MOZ_ASSERT(displacement >= INT32_MIN && displacement <= INT32_MAX);
+      mozilla::LittleEndian::writeInt32(patchAddr - sizeof(int32_t), int32_t(displacement));
+    } else {
+      // For absolute addresses, we'd need different handling
+      // For now, only DispatchTable patches are supported
+      MOZ_CRASH("Non-DispatchTable patches not yet implemented");
+    }
+
+    // Verbose debug for first 2 patches only
+    if (patchNum < 2) {
+      fprintf(stderr, "  Patch #%d: offset=%u, type=%u, target=%p\n",
+              patchNum, patch.offset, static_cast<uint32_t>(patch.type),
+              reinterpret_cast<void*>(runtimeVal));
+    }
+    patchNum++;
+  }
+
+  fprintf(stderr, "SUCCESS: All %zu patches applied\n", patchEntries_.length());
+
+  return true;
+}
+#endif
+
 uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
   for (const ICReturnOffset& entry : icReturnOffsets_) {
     if (entry.op == op) {
@@ -1326,7 +1527,33 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     TempAllocator temp(&cx->tempLifoAlloc());
     StackMacroAssembler masm(cx, temp);
     BaselineInterpreterGenerator generator(cx, temp, masm);
-    return generator.generate(cx, interpreter);
+  
+#ifdef ENABLE_JS_AOT_ICS
+    if (generator.generate(cx, interpreter)) {
+      // Dump AOT loaded interpreter to file for analysis.
+     
+      std::ofstream aotBaseline("./aot_basline_interp.bin",
+                            std::ios::binary | std::ios::trunc);
+      if (!aotBaseline) {
+        fprintf(stderr, "ERROR: Failed to open baseline_interpreter.bin for writing\n");
+        return false;
+      }
+      
+      // Dump the AOT-loaded baseline interpreter code for comparison
+      uint8_t* codeStart = interpreter.codeRaw();
+      size_t codeSize = interpreter.codeSize();
+
+      aotBaseline.write(reinterpret_cast<const char*>(codeStart), codeSize);
+      if (!aotBaseline) {
+        fprintf(stderr, "ERROR: Failed to write machine code (%zu bytes)\n", codeSize);
+        return false;
+      }
+
+      fprintf(stderr, "SUCCESS: Dumped %zu bytes of AOT baseline interpreter to ./aot_basline_interp.bin\n", codeSize);
+    }
+#else
+    return generator.generate(cx, interpreter)
+#endif
   }
 
   return true;
