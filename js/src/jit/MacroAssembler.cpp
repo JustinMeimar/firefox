@@ -795,16 +795,18 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
 
   // Load the nursery position via the zone's runtime.
   Address runtimeAddr(temp, Zone::offsetOfRuntime());
-  loadPtr(runtimeAddr, temp);
-  Address posAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition());
+  Address positionAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition());
   // Use a relative 32 bit offset to the Nursery position_ to currentEnd_ to
   // avoid 64-bit immediate loads.
   int32_t endOffset = Nursery::offsetOfCurrentEndFromPosition();
+  Address positionEndAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition() + endOffset);
 
-  loadPtr(posAddr, result);
+  // Load the runtime ptr stored in the zone.
+  loadPtr(runtimeAddr, temp);
+  loadPtr(positionAddr, result);
   addPtr(Imm32(totalSize), result);
-  branchPtr(Assembler::Below, Address(temp, endOffset), result, fail);
-  storePtr(result, Address(temp, 0));
+  branchPtr(Assembler::Below, positionEndAddr, result, fail);
+  storePtr(result, positionAddr);
   subPtr(Imm32(size), result);
 
   // Update allocation site and store pointer in the nursery cell header. This
