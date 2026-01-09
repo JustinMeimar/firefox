@@ -403,6 +403,11 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     return currentInstruction > operandLastUsed_[operandId];
   }
   uint32_t operandLastUsed(uint32_t operandId) const {
+    if (operandId >= operandLastUsed_.length()) {
+      // No "last usage" information was recorded for this operand, likely
+      // because it was never used.
+      return UINT32_MAX;
+    }
     return operandLastUsed_[operandId];
   }
 
