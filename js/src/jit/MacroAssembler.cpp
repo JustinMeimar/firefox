@@ -381,26 +381,29 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   // Load the first and last offsets of |zone|'s free list for |allocKind|.
   // If there is no room remaining in the span, fall back to get the next one.
 
-  mozilla::Variant<Address, AbsoluteAddress> freeListAddr =
-    [this, zone](Register temp, bool isAOTFill, gc::AllocKind allocKind) -> mozilla::Variant<Address, AbsoluteAddress> {
+  auto loadFreeList =
+    [this, zone, allocKind](Register target) {
+      if (!isAOTFill_) {
+        gc::FreeSpan** ptrFreeList = zone->addressOfFreeList(allocKind);
+        loadPtr(AbsoluteAddress(ptrFreeList), target);
+      }
 #ifdef ENABLE_JS_AOT_ICS
-      if (isAOTFill) {
-        loadZone(temp);
-        return mozilla::AsVariant(Address(temp, Zone::offsetOfFreeList(allocKind)));
+      else {
+        loadZone(target);
+        Address freeListAddr(target, Zone::offsetOfFreeList(allocKind));
+        loadPtr(freeListAddr, target);
       }
 #endif
-      gc::FreeSpan** ptrFreeList = zone->addressOfFreeList(allocKind);
-      return mozilla::AsVariant(AbsoluteAddress(ptrFreeList));
-  }(temp, isAOTFill_, allocKind);
+  };
 
-  freeListAddr.match([this, temp](auto& addr) { loadPtr(addr, temp); });
+  loadFreeList(temp);
   load16ZeroExtend(Address(temp, js::gc::FreeSpan::offsetOfFirst()), result);
   load16ZeroExtend(Address(temp, js::gc::FreeSpan::offsetOfLast()), temp);
   branch32(Assembler::AboveOrEqual, result, temp, &fallback);
 
   // Bump the offset for the next allocation.
   add32(Imm32(thingSize), result);
-  freeListAddr.match([this, temp](auto& addr) { loadPtr(addr, temp); });
+  loadFreeList(temp);
   store16(result, Address(temp, js::gc::FreeSpan::offsetOfFirst()));
   sub32(Imm32(thingSize), result);
   addPtr(temp, result);  // Turn the offset into a pointer.
@@ -411,7 +414,7 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   // interpreter will call the GC allocator to set up a new arena to allocate
   // from, after which we can resume allocating in the jit.
   branchTest32(Assembler::Zero, result, result, fail);
-  freeListAddr.match([this, temp](auto& addr) { loadPtr(addr, temp); });
+  loadFreeList(temp);
   addPtr(temp, result);  // Turn the offset into a pointer.
   Push(result);
   // Update the free list to point to the next span (which may be empty).
@@ -793,16 +796,16 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   // We'll have to perform the nursery allocation check at runtime for AOT code.
   failIfNurseryAllocDisabledRuntime(temp, traceKind, fail);
 
-  // Load the nursery position via the zone's runtime.
   Address runtimeAddr(temp, Zone::offsetOfRuntime());
+  // Load the runtime ptr stored in the zone.
+  loadPtr(runtimeAddr, temp);
+  // Load the nursery position via the zone's runtime.
   Address positionAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition());
   // Use a relative 32 bit offset to the Nursery position_ to currentEnd_ to
   // avoid 64-bit immediate loads.
   int32_t endOffset = Nursery::offsetOfCurrentEndFromPosition();
   Address positionEndAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition() + endOffset);
 
-  // Load the runtime ptr stored in the zone.
-  loadPtr(runtimeAddr, temp);
   loadPtr(positionAddr, result);
   addPtr(Imm32(totalSize), result);
   branchPtr(Assembler::Below, positionEndAddr, result, fail);
@@ -814,6 +817,7 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   // AOT ICs may not be called from Warp (or other places without pretenuring support).
   MOZ_ASSERT(!allocSite.is<gc::CatchAllAllocSite>());
   Register site = allocSite.as<Register>();
+  // N.B: temp contains the ptr to the JS runtime at this point.
   updateAllocSiteRuntime(temp, result, site);
   // See NurseryCellHeader::MakeValue.
   orPtr(Imm32(int32_t(traceKind)), site);
@@ -858,6 +862,10 @@ void MacroAssembler::updateAllocSiteRuntime(Register temp, Register result, Regi
 
   loadPtr(allocSitesAddr, temp);
   storePtr(temp, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
+  // Load the zone dynamically (again since temp was overwritten above).
+  loadZone(temp);
+  // Load the runtime.
+  loadPtr(runtimeAddr, temp);
   storePtr(site, allocSitesAddr);
 
   bind(&done);
