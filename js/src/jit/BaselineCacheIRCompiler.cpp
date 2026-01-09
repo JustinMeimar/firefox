@@ -94,14 +94,15 @@ BaseValueIndex CacheRegisterAllocator::addressOf(MacroAssembler& masm,
 BaselineCacheIRCompiler::BaselineCacheIRCompiler(JSContext* cx,
                                                  TempAllocator& alloc,
                                                  const CacheIRWriter& writer,
-                                                 uint32_t stubDataOffset, bool isAOTFill)
+                                                 uint32_t stubDataOffset,
+                                                 bool isAOTFill)
     : CacheIRCompiler(cx, alloc, writer, stubDataOffset, Mode::Baseline,
                       StubFieldPolicy::Address, isAOTFill),
       makesGCCalls_(false) {
 #ifndef ENABLE_JS_AOT_ICS
     MOZ_ASSERT(!isAOTFill);
 #endif
-      }
+}
 
 // AutoStubFrame methods
 AutoStubFrame::AutoStubFrame(BaselineCacheIRCompiler& compiler)
@@ -241,6 +242,16 @@ JitCode* BaselineCacheIRCompiler::compile() {
   masm.add32(Imm32(1), enteredCount);
 
   perfSpewer_.startRecording();
+
+#ifdef ENABLE_JS_AOT_ICS
+  if (isAOTFill_) {
+    // Load the zone into the dedicated zone register in case of AOT IC
+    // compilation.
+    // The dedicated register should have been set up in
+    // BaselineCacheIRCompiler::init.
+    masm.loadZone();
+  }
+#endif
 
   CacheIRReader reader(writer_);
   do {
@@ -897,12 +908,8 @@ bool BaselineCacheIRCompiler::emitStoreSlotShared(bool isFixed,
 
   AutoScratchRegister scratch1(allocator, masm);
   Maybe<AutoScratchRegister> scratch2;
-  Maybe<AutoScratchRegister> maybeZoneScratch;
   if (!isFixed) {
     scratch2.emplace(allocator, masm);
-  }
-  if (isAOTFill_) {
-    maybeZoneScratch.emplace(allocator, masm);
   }
 
   Address offsetAddr = stubAddress(offsetOffset);
@@ -917,7 +924,7 @@ bool BaselineCacheIRCompiler::emitStoreSlotShared(bool isFixed,
     return BaseIndex(scratch2.ref(), scratch1, TimesOne);
   };
   BaseIndex slot(buildSlot());
-  EmitPreBarrier(masm, slot, MIRType::Value, maybeZoneScratch.refOr(InvalidReg));
+  EmitPreBarrier(masm, slot, MIRType::Value);
   masm.storeValue(val, slot);
 
   emitPostBarrierSlot(obj, val, scratch1);
@@ -947,10 +954,6 @@ bool BaselineCacheIRCompiler::emitAddAndStoreSlotShared(
 
   AutoScratchRegister scratch1(allocator, masm);
   AutoScratchRegister scratch2(allocator, masm);
-  Maybe<AutoScratchRegister> maybeZoneScratch;
-  if (isAOTFill_) {
-    maybeZoneScratch.emplace(allocator, masm);
-  }
 
   Address newShapeAddr = stubAddress(newShapeOffset);
   Address offsetAddr = stubAddress(offsetOffset);
@@ -1000,8 +1003,8 @@ bool BaselineCacheIRCompiler::emitAddAndStoreSlotShared(
   // Update the object's shape.
   masm.loadPtr(newShapeAddr, scratch1);
   masm.storeObjShape(scratch1, obj,
-                     [&maybeZoneScratch](MacroAssembler& masm, const Address& addr) {
-                       EmitPreBarrier(masm, addr, MIRType::Shape, maybeZoneScratch.refOr(InvalidReg));
+                     [](MacroAssembler& masm, const Address& addr) {
+                       EmitPreBarrier(masm, addr, MIRType::Shape);
                      });
 
   // Perform the store. No pre-barrier required since this is a new
@@ -2032,6 +2035,12 @@ bool BaselineCacheIRCompiler::init(CacheKind kind) {
   if (JitOptions.enableICFramePointers) {
     baselineFrameReg_ = available.takeAny();
   }
+
+#ifdef ENABLE_JS_AOT_ICS
+  if (isAOTFill_) {
+    masm.setZoneReg(available.takeAny());
+  }
+#endif
 
   allocator.initAvailableRegs(available);
   return true;

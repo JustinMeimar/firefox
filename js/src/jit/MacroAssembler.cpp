@@ -383,9 +383,6 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   // Load the free list into the given register.
   // For AOT IC compilation, loading the free list requires loading the zone
   // first.
-  // TODO (chase): It's likely more performant to require a separate register
-  // for zone, so it does not have to loaded each time. However, this requires
-  // propagating the zoneScratch register argument in many places.
   auto loadFreeList =
     [this, allocKind](Register target) {
       if (!isAOTFill_) {
@@ -395,8 +392,7 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
       }
 #ifdef ENABLE_JS_AOT_ICS
       else {
-        loadZone(target);
-        Address freeListAddr(target, Zone::offsetOfFreeList(allocKind));
+        Address freeListAddr(zoneReg(), Zone::offsetOfFreeList(allocKind));
         loadPtr(freeListAddr, target);
       }
 #endif
@@ -711,8 +707,9 @@ static inline constexpr int32_t offsetOfNurseryFlag(JS::TraceKind kind) {
   }
 }
 
-void MacroAssembler::failIfNurseryAllocDisabledRuntime(Register zone, JS::TraceKind kind, Label* fail) {
-  Address allocNurseryFlag(zone, offsetOfNurseryFlag(kind));
+void MacroAssembler::failIfNurseryAllocDisabledRuntime(JS::TraceKind kind,
+                                                       Label* fail) {
+  Address allocNurseryFlag(zoneReg(), offsetOfNurseryFlag(kind));
   branch8(Assembler::Equal, allocNurseryFlag, Imm32(0), fail);
 }
 #endif
@@ -796,13 +793,10 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   MOZ_ASSERT(totalSize < INT32_MAX, "Nursery allocation too large");
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
-  // Load the zone dynamically.
-  loadZone(temp);
-
   // We'll have to perform the nursery allocation check at runtime for AOT code.
-  failIfNurseryAllocDisabledRuntime(temp, traceKind, fail);
+  failIfNurseryAllocDisabledRuntime(traceKind, fail);
 
-  Address runtimeAddr(temp, Zone::offsetOfRuntime());
+  Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
   // Load the runtime ptr stored in the zone.
   loadPtr(runtimeAddr, temp);
   // Load the nursery position via the zone's runtime.
@@ -823,8 +817,7 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   // AOT ICs may not be called from Warp (or other places without pretenuring support).
   MOZ_ASSERT(!allocSite.is<gc::CatchAllAllocSite>());
   Register site = allocSite.as<Register>();
-  // N.B: temp contains the ptr to the JS runtime at this point.
-  updateAllocSiteRuntime(temp, result, site);
+  updateAllocSiteRuntime(temp, site);
   // See NurseryCellHeader::MakeValue.
   orPtr(Imm32(int32_t(traceKind)), site);
   storePtr(site, Address(result, -js::Nursery::nurseryCellHeaderSize()));
@@ -850,7 +843,7 @@ void MacroAssembler::updateAllocSite(Register temp, Register result,
 }
 
 #ifdef ENABLE_JS_AOT_ICS
-void MacroAssembler::updateAllocSiteRuntime(Register temp, Register result, Register site) {
+void MacroAssembler::updateAllocSiteRuntime(Register temp, Register site) {
   Label done;
 
   add32(Imm32(1), Address(site, gc::AllocSite::offsetOfNurseryAllocCount()));
@@ -859,18 +852,14 @@ void MacroAssembler::updateAllocSiteRuntime(Register temp, Register result, Regi
            Address(site, gc::AllocSite::offsetOfNurseryAllocCount()),
            Imm32(js::gc::NormalSiteAttentionThreshold), &done);
 
-  // Load the zone dynamically.
-  loadZone(temp);
   // Load the nursery alloc sites via the zone's runtime.
-  Address runtimeAddr(temp, Zone::offsetOfRuntime());
+  Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
   loadPtr(runtimeAddr, temp);
   Address allocSitesAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfNurseryAllocatedSites());
 
   loadPtr(allocSitesAddr, temp);
   storePtr(temp, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
-  // Load the zone dynamically (again since temp was overwritten above).
-  loadZone(temp);
-  // Load the runtime.
+  // Load the runtime again (since temp was used for allocSites).
   loadPtr(runtimeAddr, temp);
   storePtr(site, allocSitesAddr);
 
@@ -4203,10 +4192,18 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 }
 
 #ifdef ENABLE_JS_AOT_ICS
-void MacroAssembler::loadZone(Register zone) {
+void MacroAssembler::loadZone() {
+  // This function is only valid in the context of AOT IC compilation.
+  MOZ_ASSERT(isAOTFill_);
+  // A valid register for the zone is required for AOT IC compilation.
+  MOZ_ASSERT(zoneReg_ != InvalidReg);
+  // The zone only needs to be loaded once per stub.
+  MOZ_ASSERT(!isZoneLoaded());
   // Load the Zone via the ICStub field.
   Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
-  loadPtr(zonePtr, zone);
+  loadPtr(zonePtr, zoneReg_);
+  // Note that the zone loading code has been emitted by now.
+  setZoneLoaded();
 }
 #endif
 

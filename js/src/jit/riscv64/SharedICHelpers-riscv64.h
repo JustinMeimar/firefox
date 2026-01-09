@@ -61,10 +61,10 @@ inline void EmitStubGuardFailure(MacroAssembler& masm) {
 }
 template <typename AddrType>
 inline void EmitPreBarrier(MacroAssembler& masm, const AddrType& addr,
-                           MIRType type, Register scratch = InvalidReg) {
+                           MIRType type) {
   // On RISC-V, $ra is clobbered by guardedCallPreBarrier. Save it first.
   masm.push(ra);
-  masm.guardedCallPreBarrier(addr, type, scratch);
+  masm.guardedCallPreBarrier(addr, type);
   masm.pop(ra);
 }
 
