@@ -1,1 +1,4 @@
 target/
+
+# Do not check in AOT ICs into source control
+ics/IC-*
