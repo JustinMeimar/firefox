@@ -584,7 +584,7 @@ class MOZ_RAII CacheIROpsAotSpewer {
   }
   void spewTypeofEqOperandImm(const char* name, TypeofEqOperand operand) {
     (void)name;
-    out_.printf(name, "TYPEOFEQOPERAND(%u)", operand.rawValue());
+    out_.printf("TYPEOFEQOPERAND(%u)", operand.rawValue());
   }
   void spewStaticStringImm(const char* name, const char* str) {
     (void)name;
