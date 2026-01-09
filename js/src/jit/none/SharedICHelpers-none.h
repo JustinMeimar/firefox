@@ -22,7 +22,7 @@ inline void EmitBaselineLeaveStubFrame(MacroAssembler&, bool v = false) {
 inline void EmitStubGuardFailure(MacroAssembler&) { MOZ_CRASH(); }
 
 template <typename T>
-inline void EmitPreBarrier(MacroAssembler&, T, MIRType, Register scratch = InvalidReg) {
+inline void EmitPreBarrier(MacroAssembler&, T, MIRType) {
   MOZ_CRASH();
 }
 

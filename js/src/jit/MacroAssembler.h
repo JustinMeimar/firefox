@@ -389,12 +389,21 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Whether or not the IC being compiled is an AOT IC, and thus will be shared across runtimes.
   bool isAOTFill_ = false;
 
+  // Register containing the dynamically loaded zone in case of AOT ICs.
+  // This should be a valid register when isAOTFill_ = true.
+  Register zoneReg_ = InvalidReg;
+
+  // Indicator to track whether or not the code for loading the zone into
+  // zoneReg_ has been emitted.
+  bool zoneLoaded_ = false;
+
  protected:
   // Constructor is protected. Use one of the derived classes!
   explicit MacroAssembler(TempAllocator& alloc,
                           CompileRuntime* maybeRuntime = nullptr,
                           CompileRealm* maybeRealm = nullptr,
                           bool isAOTFill = false);
+
  public:
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
@@ -1929,7 +1938,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #ifdef ENABLE_JS_AOT_ICS
   // Version of `branchTestNeedsIncrementalBarrier` that loads the zone at runtime.
   // See 'Runtime agnostic code generation'.
-  inline void branchTestNeedsIncrementalBarrierRuntime(Condition cond, Label* label, Register scratch);
+  inline void branchTestNeedsIncrementalBarrierRuntime(Condition cond,
+                                                       Label* label);
 #endif
 
   // Perform a type-test on a tag of a Value (32bits boxing), or the tagged
@@ -5232,15 +5242,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  public:
   template <typename T>
-  void guardedCallPreBarrier(const T& address, MIRType type, Register scratch = InvalidReg) {
+  void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
     if (!isAOTFill_) {
         branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
     }
 #ifdef ENABLE_JS_AOT_ICS
     else {
-        MOZ_ASSERT(scratch != InvalidReg);
-        branchTestNeedsIncrementalBarrierRuntime(Assembler::Zero, &done, scratch);
+      branchTestNeedsIncrementalBarrierRuntime(Assembler::Zero, &done);
     }
 #endif
     unguardedCallPreBarrier(address, type);
@@ -5605,7 +5614,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #ifdef ENABLE_JS_AOT_ICS
   // Checks whether or not nursery allocation is enabled (runtime agnostic) and fail if not.
   // See 'Runtime agnostic code generation'.
-  void failIfNurseryAllocDisabledRuntime(Register zone, JS::TraceKind kind, Label* fail);
+  void failIfNurseryAllocDisabledRuntime(JS::TraceKind kind, Label* fail);
   // Version of `bumpPointerAllocate` that loads the zone at runtime.
   // See 'Runtime agnostic code generation'.
   void bumpPointerAllocateRuntime(Register result, Register temp, Label* fail,
@@ -5613,7 +5622,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            const AllocSiteInput& allocSite = AllocSiteInput());
   // Version of `updateAllocSite` that loads the zone at runtime.
   // See 'Runtime agnostic code generation'.
-  void updateAllocSiteRuntime(Register temp, Register result, Register site);
+  void updateAllocSiteRuntime(Register temp, Register site);
 #endif
 
   void freeListAllocate(Register result, Register temp, gc::AllocKind allocKind,
@@ -5921,11 +5930,33 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void reserveStack(uint32_t amount);
 #endif
 
- private:
 #ifdef ENABLE_JS_AOT_ICS
-  // Load the zone at runtime. See 'Runtime agnostic code generation'.
-  void loadZone(Register zone);
+ public:
+  // Load the zone into zoneReg at runtime.
+  // See 'Runtime agnostic code generation'.
+  void loadZone();
 #endif
+ public:
+  void setZoneReg(Register zoneReg) {
+    MOZ_ASSERT(isAOTFill_);
+    // Must not overwrite existing register (if already set).
+    MOZ_ASSERT(zoneReg_ == InvalidReg);
+    zoneReg_ = zoneReg;
+  }
+
+ private:
+  void setZoneLoaded() {
+    MOZ_ASSERT(isAOTFill_);
+    MOZ_ASSERT(zoneReg_ != InvalidReg);
+    zoneLoaded_ = true;
+  }
+
+  bool isZoneLoaded() { return zoneLoaded_; }
+
+  Register zoneReg() {
+    MOZ_ASSERT(isZoneLoaded());
+    return zoneReg_;
+  }
 
  public:
   void enableProfilingInstrumentation() {
@@ -6103,7 +6134,8 @@ class MOZ_RAII StackMacroAssembler : public MacroAssembler {
   JS::AutoCheckCannotGC nogc;
 
  public:
-  StackMacroAssembler(JSContext* cx, TempAllocator& alloc, bool isAOTFill = false);
+  StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
+                      bool isAOTFill = false);
 };
 
 // WasmMacroAssembler does not contain GC pointers, so it doesn't need the no-GC
