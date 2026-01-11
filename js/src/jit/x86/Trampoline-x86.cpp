@@ -38,7 +38,8 @@ static const LiveRegisterSet AllRegs =
                     FloatRegisterSet(FloatRegisters::AllMask));
 
 enum EnterJitEbpArgumentOffset {
-  ARG_JITCODE = 2 * sizeof(void*),
+  ARG_JITCODE = 2 * sizeof(void*), // NOTE: this should align with the AOT
+                                   // loaded jitcode
   ARG_ARGC = 3 * sizeof(void*),
   ARG_ARGV = 4 * sizeof(void*),
   ARG_STACKFRAME = 5 * sizeof(void*),

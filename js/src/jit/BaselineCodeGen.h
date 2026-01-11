@@ -604,8 +604,8 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
       metadata[uint32_t(id)] = val;
     }
 
-    [[nodiscard]] bool addPatch(uint32_t offset, PatchType type, uint32_t aux = 0) {
-      PatchEntry entry{offset, type, aux};
+    [[nodiscard]] bool addPatch(uint32_t offset, PatchHandlerID type, uint32_t payload=0) {
+      PatchEntry entry{offset, type, payload};
       return patches.append(entry);
     }
   } aotAccumulator_;

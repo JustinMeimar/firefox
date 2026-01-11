@@ -8,6 +8,7 @@
 #define jit_BaselineAOT_h
 
 #include <cstdint>
+#include "CompileWrappers.h"
 
 namespace js::jit {
 
@@ -15,15 +16,16 @@ extern "C" {
   extern const uint8_t baseline_blob_start[];
   extern const uint8_t baseline_blob_end[];
 }
-inline uint8_t*
-GetAOTBaselineBlob() { return const_cast<uint8_t*>(baseline_blob_start); }
 
-inline std::size_t
-GetAOTBaselineSize() { return baseline_blob_end - baseline_blob_start; }
+inline uint8_t* GetAOTBaselineBlob() {
+  return const_cast<uint8_t*>(baseline_blob_start);
+}
 
-// Stable indices for metadata values in the manifest.
+inline std::size_t GetAOTBaselineSize() {
+  return baseline_blob_end - baseline_blob_start;
+}
+
 enum class BaselineMetadataID : uint32_t {
-  // Scalar offsets (entry points)
   InterpretOp = 0,
   InterpretOpNoDebugTrap,
   BailoutPrologue,
@@ -31,71 +33,104 @@ enum class BaselineMetadataID : uint32_t {
   ProfilerExitToggle,
   DebugTrapHandler,
   DispatchTableOffset,
-
-  // CallVM offsets
   CallVMDebugPrologue,
   CallVMDebugEpilogue,
   CallVMDebugAfterYield,
-
-  // Vector counts (for loader to reconstruct vectors)
+  
+  // Counts for vectors
   DebugInstrumentationCount,
   DebugTrapCount,
   CodeCoverageCount,
   ICReturnCount,
-  PatchCount,  // Number of patch entries
-
-  Count  // Total entries (now 15)
+  PatchCount,
+  OpHandlerOffsetCount,
+  Count
 };
 
-// Patch types for runtime pointer relocation
-enum class PatchType : uint32_t {
-  DispatchTable = 0,        // Load instructions that reference dispatch table base
-  WellKnownSymbols,         // Runtime well-known symbols pointer (future)
-  DebugTrapHandler,         // Debug trap handler JitCode pointer (future)
-  VMWrapper,                // VM function wrapper addresses (future)
-  // Future: TraceLoggerState, etc.
+class CompileRuntime;
+
+using PatchHandlerID = uint32_t;
+
+struct PatchContext {
+    uint8_t* codeBase;
+    const uint32_t* opHandlerOffsets;
 };
 
-// Patch entry for runtime pointer relocation (12 bytes)
-struct alignas(4) PatchEntry {
-  uint32_t offset;       // Offset in machine code to patch
-  PatchType type;        // What runtime value to patch with
-  uint32_t aux;          // Auxiliary data (e.g., VMFunction ID, opcode index)
+using PatchResolverFn = uintptr_t (*)(CompileRuntime* cx, const PatchContext& ctx, uintptr_t payload);
+
+struct alignas(8) PatchEntry {
+    uint32_t offset;
+    PatchHandlerID type;
+    uintptr_t payload;
 };
-static_assert(sizeof(PatchEntry) == 12, "PatchEntry must be 12 bytes");
+
+class PatchRegistry {
+public:
+    static void Register(PatchHandlerID id, PatchResolverFn fn);
+    static uintptr_t Resolve(PatchHandlerID id, CompileRuntime* cx, const PatchContext& ctx, uintptr_t payload);
+};
+
+struct WellKnownSymbolPatch {
+    static constexpr PatchHandlerID ID = 101;
+    static uintptr_t Resolve(CompileRuntime* runtime, const PatchContext&, uintptr_t) {
+        return uintptr_t(&runtime->wellKnownSymbols());
+    }
+};
+
+struct DispatchTablePatch {
+    static constexpr PatchHandlerID ID = 102;
+    static uintptr_t Resolve(CompileRuntime*, const PatchContext& ctx, uintptr_t payload) {
+        uint32_t offset = ctx.opHandlerOffsets[payload];
+        return uintptr_t(ctx.codeBase + offset);
+    }
+};
+
+void InitBaselinePatches();
 
 static const uint32_t AOT_BASELINE_FOOTER_MAGIC = 0x424C494E;
 struct alignas(4) BaselineAOTFooter {
   uint32_t magic = AOT_BASELINE_FOOTER_MAGIC; // 'BLIN'
-  uint32_t version = 1; // Format version
+  uint32_t version = 1;
   uint32_t manifestOffset = 0; // Absolute offset from blob start
 };
 
-// Todo: Replace staic_asserts with MOZ_ASSERTS.
-static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
-
-// Manifest header with fixed-size metadata array.
-// Variable-length payloads follow this structure in the binary.
 struct alignas(4) BaselineManifest {
   uint32_t metadata[uint32_t(BaselineMetadataID::Count)];
-
   // Followed by:
-  // - uint32_t debugInstrumentation[DebugInstrumentationCount]
-  // - uint32_t debugTraps[DebugTrapCount]
-  // - uint32_t codeCoverage[CodeCoverageCount]
-  // - ICReturnOffsetEntry icReturns[ICReturnCount]
-  // - PatchEntry patches[PatchCount]
+  // uint32_t debugInstrumentation[DebugInstrumentationCount]
+  // uint32_t debugTraps[DebugTrapCount]
+  // uint32_t codeCoverage[CodeCoverageCount]
+  // ICReturnOffsetEntry icReturns[ICReturnCount]
+  // PatchEntry patches[PatchCount]
 };
-static_assert(sizeof(BaselineManifest) == 60, "Manifest must be 60 bytes (15 fields × 4)");
 
-// IC return offset entry (8 bytes).
 struct alignas(4) ICReturnOffsetEntry {
   uint32_t offset;
-  uint32_t opcode;  // JSOp as uint32_t
+  uint32_t opcode;
 };
+
+static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
+static_assert(sizeof(BaselineManifest) == 64, "Manifest must be 64 bytes (16 fields × 4)");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
+// static_assert(sizeof(PatchEntry) == 12, "PatchEntry must be 12 bytes");
 
 }  // namespace js::jit
+
+// OLD PATCHING: (bad)
+//
+// enum class PatchType : uint32_t {
+//   DispatchTable = 0,
+//   WellKnownSymbols,
+//   DebugTrapHandler,
+//   VMWrapper,
+// };
+//
+// struct alignas(4) PatchEntry {
+//   uint32_t offset;
+//   PatchType type;
+//   uint32_t aux;
+// };
+
 
 
 #endif  // jit_BaselineAOT_h

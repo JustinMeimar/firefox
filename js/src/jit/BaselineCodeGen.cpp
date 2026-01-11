@@ -2795,9 +2795,9 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   Register scratch1 = R0.scratchReg();
   Register scratch2 = R1.scratchReg();
   LoadUint8Operand(masm, scratch1);
-  
-  // masm.movePtr(RelocationPtr(&runtime->wellKnownSymbols()), scratch2);
+
   masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
+
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
 
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
@@ -7087,9 +7087,9 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     }
 #ifdef ENABLE_JS_AOT_ICS
     // label.offset() points to the start of the LEA instruction that loads the address
-    if (!aotAccumulator_.addPatch(label.offset(), PatchType::DispatchTable)) {
-      return false;
-    }
+    // if (!aotAccumulator_.addPatch(label.offset(), PatchType::DispatchTable)) {
+    //   return false;
+    // }
 #endif
     BaseIndex pointer(scratch2, scratch1, ScalePointer);
     masm.branchToComputedAddress(pointer);
@@ -7133,9 +7133,8 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
       return false;
     }
 #ifdef ENABLE_JS_AOT_ICS
-    if (!aotAccumulator_.addPatch(label.offset(), PatchType::DispatchTable)) {
-      return false;
-    }
+    // if (!aotAccumulator_.addPatch(label.offset(), PatchType::DispatchTable)) {
+    //   return false; 
 #endif
     BaseIndex pointer(scratch2, scratch1, ScalePointer);
     masm.branchToComputedAddress(pointer);
@@ -7157,7 +7156,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
       return false;                               \
     }                                             \
     handler.resetCurrentOp();                     \
-  }
+  } 
   FOR_EACH_OPCODE(EMIT_OP)
 #undef EMIT_OP
 
@@ -7224,10 +7223,16 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     CodeLabel cl;
     masm.writeCodePointer(&cl);
     cl.target()->bind(opLabel.offset());
+
 #ifdef ENABLE_JS_AOT_ICS
-    // Track offsets of opcode handlers for AOT baseline metadata.
+    uint32_t patchOffset = cl.patchAt()->offset();
+    if (!aotAccumulator_.addPatch(patchOffset, DispatchTablePatch::ID, i)) {
+      fprintf(stderr, "Failed to register a dispatch table patch\n");
+      return false;
+    }
     opHandlerOffsets_[i] = CodeOffset(opLabel.offset());
-#endif 
+#endif
+
     masm.addCodeLabel(cl);
   }
 
@@ -7316,6 +7321,9 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
                       handler.icReturnOffsets().length());
   aotAccumulator_.set(BaselineMetadataID::PatchCount,
                       aotAccumulator_.patches.length());
+  aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount,
+                      opHandlerOffsets_.length());
+
   fprintf(stderr, "INFO: Serializing %zu patch entries\n",
           aotAccumulator_.patches.length());
 
@@ -7394,6 +7402,22 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
             aotAccumulator_.patches.length(),
             aotAccumulator_.patches.length() * sizeof(PatchEntry));
   }
+  
+
+  // OpHandler offsets
+  if (opHandlerOffsets_.length() > 0) {
+    // Write the raw uint32_t offsets of the handlers relative to blob start
+    binFile.write(reinterpret_cast<const char*>(opHandlerOffsets_.begin()),
+                  opHandlerOffsets_.length() * sizeof(uint32_t));
+
+    if (!binFile) {
+      fprintf(stderr, "ERROR: Failed to write op handler offsets\n");
+      return false;
+    }
+
+    fprintf(stderr, "INFO: Wrote %zu op handler offsets\n",
+            opHandlerOffsets_.length());
+  } 
 
   // 7. Write footer
   BaselineAOTFooter footer;

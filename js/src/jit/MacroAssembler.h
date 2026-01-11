@@ -5921,6 +5921,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   using MacroAssemblerSpecific::movePtr;
+  
+  template <typename PatchKind>
+  void movePtr(Relocatable<PatchKind> reloc, Register dest) {
+    // 1. record current offset
+    uint32_t curOffset = currentOffset();
+    (void)curOffset;
+
+    // 2. append metadata
+    // Todo:
+    
+    // 3. Emit a dummy moveptr which will get patched.
+    movePtr(ImmPtr(nullptr), dest);
+  }
 
   void movePtr(TrampolinePtr ptr, Register dest) {
     movePtr(ImmPtr(ptr.value), dest);

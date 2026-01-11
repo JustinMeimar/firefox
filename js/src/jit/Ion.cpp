@@ -17,6 +17,7 @@
 #include "jit/AlignmentMaskAnalysis.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BacktrackingAllocator.h"
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BranchHinting.h"
@@ -145,6 +146,8 @@ bool JitRuntime::initialize(JSContext* cx) {
       return false;
     }
   }
+
+  InitBaselinePatches();
 
   if (!GenerateBaselineInterpreter(cx, baselineInterpreter_)) {
     return false;

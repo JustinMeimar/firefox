@@ -17,6 +17,7 @@ UNIFIED_SOURCES += [
     "AlignmentMaskAnalysis.cpp",
     "BacktrackingAllocator.cpp",
     "Bailouts.cpp",
+    "BaselineAOT.cpp",
     "BaselineBailouts.cpp",
     "BaselineCacheIRCompiler.cpp",
     "BaselineCodeGen.cpp",

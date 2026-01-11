@@ -7,6 +7,7 @@
 #ifndef jit_shared_Assembler_shared_h
 #define jit_shared_Assembler_shared_h
 
+#include "jit/BaselineAOT.h"
 #if JS_BITS_PER_WORD == 32
 #  include "mozilla/CheckedInt.h"
 #endif
@@ -235,13 +236,14 @@ struct PatchedImmPtr {
   explicit PatchedImmPtr(const void* value) : value(const_cast<void*>(value)) {}
 };
 
-// A pointer type which forces a relocation in the object file for the symbol
-// we take the address of.
-struct RelocationPtr {
-  void* value;
-  explicit RelocationPtr(void *value) : value(value) {
-    MOZ_ASSERT(!IsCompilingWasm()); // Probably won't work for WASM since... ? 
-  }
+template<typename PatchKind>
+class Relocatable {
+  public:
+    uintptr_t payload;
+
+    explicit Relocatable(uintptr_t p) : payload(p) {}
+    PatchHandlerID getID() const { return PatchKind::ID; }
+    uintptr_t getPayload() const { return payload; }
 };
 
 class AssemblerShared;
