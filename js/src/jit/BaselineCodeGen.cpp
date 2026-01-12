@@ -2798,6 +2798,15 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
 
   masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
 
+#ifdef ENABLE_JS_AOT_ICS
+  uint32_t patchOffset = masm.currentOffset() - sizeof(void*);
+  auto* generator = static_cast<BaselineInterpreterGenerator*>(this);
+  if (!generator->aotAccumulator_.addPatch(patchOffset, WellKnownSymbolPatch::ID, 0)) {
+    fprintf(stderr, "Failed to register WellKnownSymbols patch\n");
+    return false;
+  }
+#endif
+
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
 
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
@@ -7165,26 +7174,17 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   // return here from the DebugTrapHandler.
   masm.bind(handler.interpretOpLabel());
   interpretOpOffset_ = masm.currentOffset();
-#ifdef ENABLE_JS_AOT_ICS
-  aotAccumulator_.set(BaselineMetadataID::InterpretOp, interpretOpOffset_);
-#endif
   restoreInterpreterPCReg();
   masm.jump(handler.interpretOpWithPCRegLabel());
 
   // Second external entry point: this skips the debug trap for the first op
   // and is used by OSR.
   interpretOpNoDebugTrapOffset_ = masm.currentOffset();
-#ifdef ENABLE_JS_AOT_ICS
-  aotAccumulator_.set(BaselineMetadataID::InterpretOpNoDebugTrap, interpretOpNoDebugTrapOffset_);
-#endif
   restoreInterpreterPCReg();
   masm.jump(&interpretOpAfterDebugTrap);
 
   // External entry point for Ion prologue bailouts.
   bailoutPrologueOffset_ = CodeOffset(masm.currentOffset());
-#ifdef ENABLE_JS_AOT_ICS
-  aotAccumulator_.set(BaselineMetadataID::BailoutPrologue, masm.currentOffset());
-#endif
   restoreInterpreterPCReg();
   masm.jump(&bailoutPrologue_);
 
@@ -7194,9 +7194,6 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     JitCode* handlerCode = runtime->jitRuntime()->debugTrapHandler(
         DebugTrapHandlerKind::Interpreter);
     debugTrapHandlerOffset_ = masm.currentOffset();
-#ifdef ENABLE_JS_AOT_ICS
-    aotAccumulator_.set(BaselineMetadataID::DebugTrapHandler, debugTrapHandlerOffset_);
-#endif
     masm.jump(handlerCode);
   }
 
@@ -7209,9 +7206,6 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 #endif
 
   tableOffset_ = masm.currentOffset();
-#ifdef ENABLE_JS_AOT_ICS
-  aotAccumulator_.set(BaselineMetadataID::DispatchTableOffset, tableOffset_);
-#endif
 
 #ifdef ENABLE_JS_AOT_ICS
   MOZ_ASSERT(opHandlerOffsets_.resizeUninitialized(JSOP_LIMIT));
@@ -7305,12 +7299,29 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   // 3. Record manifest offset (before writing manifest)
   size_t manifestOffset = binFile.tellp();
 
-  // 4. Finalize vector counts and capture remaining offsets in metadata
+  // 4. Populate all AOT metadata in one place
+  // Scalar offsets for entry points
+  aotAccumulator_.set(BaselineMetadataID::InterpretOp, interpretOpOffset_);
+  aotAccumulator_.set(BaselineMetadataID::InterpretOpNoDebugTrap, interpretOpNoDebugTrapOffset_);
+  aotAccumulator_.set(BaselineMetadataID::BailoutPrologue, bailoutPrologueOffset_.offset());
+  aotAccumulator_.set(BaselineMetadataID::DebugTrapHandler, debugTrapHandlerOffset_);
+  aotAccumulator_.set(BaselineMetadataID::DispatchTableOffset, tableOffset_);
+
+  // Profiler toggle offsets
   aotAccumulator_.set(BaselineMetadataID::ProfilerEnterToggle,
                       profilerEnterFrameToggleOffset_.offset());
   aotAccumulator_.set(BaselineMetadataID::ProfilerExitToggle,
                       profilerExitFrameToggleOffset_.offset());
 
+  // CallVM debug offsets
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugPrologue,
+                      handler.callVMOffsets().debugPrologueOffset);
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugEpilogue,
+                      handler.callVMOffsets().debugEpilogueOffset);
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield,
+                      handler.callVMOffsets().debugAfterYieldOffset);
+
+  // Vector counts
   aotAccumulator_.set(BaselineMetadataID::DebugInstrumentationCount,
                       handler.debugInstrumentationOffsets().length());
   aotAccumulator_.set(BaselineMetadataID::DebugTrapCount,
@@ -7326,14 +7337,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
 
   fprintf(stderr, "INFO: Serializing %zu patch entries\n",
           aotAccumulator_.patches.length());
-
-  // Also capture CallVM offsets
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugPrologue,
-                      handler.callVMOffsets().debugPrologueOffset);
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugEpilogue,
-                      handler.callVMOffsets().debugEpilogueOffset);
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield,
-                      handler.callVMOffsets().debugAfterYieldOffset);
 
   // 5. Write manifest metadata array
   binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),

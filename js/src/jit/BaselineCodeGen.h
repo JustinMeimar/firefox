@@ -568,6 +568,7 @@ using BaselineInterpreterCodeGen = BaselineCodeGen<BaselineInterpreterHandler>;
 
 class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   friend class BaselineInterpreter;;
+  friend class BaselineCodeGen<BaselineInterpreterHandler>;
   // Offsets of patchable call instructions for debugger breakpoints/stepping.
   Vector<uint32_t, 0, SystemAllocPolicy> debugTrapOffsets_;
 
@@ -590,7 +591,10 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   uint32_t debugTrapHandlerOffset_ = 0;
 
 #ifdef ENABLE_JS_AOT_ICS
-  // Accumulator for AOT manifest data during generation.
+  
+  /* 
+   *
+   * */
   struct BaselineAOTAccumulator {
     uint32_t metadata[uint32_t(BaselineMetadataID::Count)] = {0};
 

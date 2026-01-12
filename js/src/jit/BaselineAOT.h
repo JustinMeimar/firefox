@@ -25,6 +25,19 @@ inline std::size_t GetAOTBaselineSize() {
   return baseline_blob_end - baseline_blob_start;
 }
 
+/* This baseline metadata is used at load time to reconstruct the
+ * BaslineInterpreter class, which needs all the offsets as data members.
+ * I think there must be a more elegant way to encode this information,
+ * currently we lay out the counts and vectors in a sensitive order:
+ *
+ * ----------------------------------
+ *  VEC_1_COUNT, VEC_2_COUNT, ....
+ * ----------------------------------
+ *  VEC_1_1, ... VEC_1_N
+ *  VEC_2_1, ... VEC_2_M
+ *  ...
+ * ----------------------------------
+ * */
 enum class BaselineMetadataID : uint32_t {
   InterpretOp = 0,
   InterpretOpNoDebugTrap,
@@ -48,9 +61,10 @@ enum class BaselineMetadataID : uint32_t {
 };
 
 class CompileRuntime;
-
 using PatchHandlerID = uint32_t;
 
+/* 
+ * */
 struct PatchContext {
     uint8_t* codeBase;
     const uint32_t* opHandlerOffsets;
@@ -58,6 +72,13 @@ struct PatchContext {
 
 using PatchResolverFn = uintptr_t (*)(CompileRuntime* cx, const PatchContext& ctx, uintptr_t payload);
 
+/* Patch embedded into the binary. Associates an offset with a
+ * Resolve function to patch with through the PatchHandlerID,
+ * which effectively acts like a Key. A payload may also be 
+ * associated to parameterize the Resolve call, though this is
+ * still unclear, as only one Patch type uses it for the dispatch
+ * table (to parameterize which op handler to patch.)
+ * */
 struct alignas(8) PatchEntry {
     uint32_t offset;
     PatchHandlerID type;
@@ -70,6 +91,7 @@ public:
     static uintptr_t Resolve(PatchHandlerID id, CompileRuntime* cx, const PatchContext& ctx, uintptr_t payload);
 };
 
+// Patch type 1: Used in `BaselineInterpreterGenerator::emit_Symbol`
 struct WellKnownSymbolPatch {
     static constexpr PatchHandlerID ID = 101;
     static uintptr_t Resolve(CompileRuntime* runtime, const PatchContext&, uintptr_t) {
@@ -77,6 +99,7 @@ struct WellKnownSymbolPatch {
     }
 };
 
+// Patch type 2: Used in `BaselineInterpreterGenerator::emitInterpreterLoop`
 struct DispatchTablePatch {
     static constexpr PatchHandlerID ID = 102;
     static uintptr_t Resolve(CompileRuntime*, const PatchContext& ctx, uintptr_t payload) {
@@ -85,18 +108,20 @@ struct DispatchTablePatch {
     }
 };
 
+// TODO: These inits can be macro'd out once stable.
 void InitBaselinePatches();
 
 static const uint32_t AOT_BASELINE_FOOTER_MAGIC = 0x424C494E;
+
 struct alignas(4) BaselineAOTFooter {
   uint32_t magic = AOT_BASELINE_FOOTER_MAGIC; // 'BLIN'
   uint32_t version = 1;
   uint32_t manifestOffset = 0; // Absolute offset from blob start
 };
 
+/** */
 struct alignas(4) BaselineManifest {
   uint32_t metadata[uint32_t(BaselineMetadataID::Count)];
-  // Followed by:
   // uint32_t debugInstrumentation[DebugInstrumentationCount]
   // uint32_t debugTraps[DebugTrapCount]
   // uint32_t codeCoverage[CodeCoverageCount]
@@ -112,25 +137,9 @@ struct alignas(4) ICReturnOffsetEntry {
 static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) == 64, "Manifest must be 64 bytes (16 fields × 4)");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
-// static_assert(sizeof(PatchEntry) == 12, "PatchEntry must be 12 bytes");
+static_assert(sizeof(PatchEntry) == 16, "PatchEntry must be 16 bytes");
 
 }  // namespace js::jit
-
-// OLD PATCHING: (bad)
-//
-// enum class PatchType : uint32_t {
-//   DispatchTable = 0,
-//   WellKnownSymbols,
-//   DebugTrapHandler,
-//   VMWrapper,
-// };
-//
-// struct alignas(4) PatchEntry {
-//   uint32_t offset;
-//   PatchType type;
-//   uint32_t aux;
-// };
-
 
 
 #endif  // jit_BaselineAOT_h
