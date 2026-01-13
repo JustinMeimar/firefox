@@ -39,7 +39,10 @@ struct CacheIRAOTStub {
 };
 
 mozilla::Span<const CacheIRAOTStub> GetAOTStubs();
-void FillAOTICs(JSContext* cx, JitZone* zone);
+// Fill AOT compiled ICs.
+// N.B: This function is meant to be called while in the atoms zone.
+// The intention is to keep the AOT ICs within the atoms zone.
+void FillAOTICs(JSContext* cx);
 
 }  // namespace jit
 }  // namespace js

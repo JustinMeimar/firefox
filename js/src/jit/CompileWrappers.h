@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "gc/Pretenuring.h"
+#include "jit/JitZone.h"
 #include "js/TypeDecls.h"
 #include "vm/Realm.h"
 #include "vm/RealmFuses.h"
@@ -65,6 +66,10 @@ class CompileRuntime {
 #endif
 
   const JitRuntime* jitRuntime();
+
+#ifdef ENABLE_JS_AOT_ICS
+  const JitZone* atomsJitZone();
+#endif
 
   const GeckoProfilerRuntime& geckoProfiler();
 

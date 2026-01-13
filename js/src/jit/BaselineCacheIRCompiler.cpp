@@ -2500,7 +2500,21 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
 
+#ifdef ENABLE_JS_AOT_ICS
+  const JitZone* atomsJitZone =
+      CompileRuntime::get(cx->runtime())->atomsJitZone();
+  // JitZone within atoms zone should exist at this point.
+  MOZ_ASSERT(atomsJitZone);
+  // First perform a lookup within the atoms JitZone (for AOT ICs).
+  code = atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+  // Otherwise, fallback to the looking up in current JitZone
+  // i.e runtime generated ICs.
+  if (!stubInfo) {
+    code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+  }
+#else
   code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+#endif
 
 #ifdef ENABLE_JS_AOT_ICS
   if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
@@ -2738,34 +2752,25 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 
 #ifdef ENABLE_JS_AOT_ICS
 
-// #  ifndef ENABLE_PORTABLE_BASELINE_INTERP
-// The AOT loading of ICs doesn't work (yet) in modes with a native
-// JIT enabled because compilation tries to access state that doesn't
-// exist yet (trampolines?) when we create the JitZone.
-// #    error AOT ICs are only supported (for now) in PBL builds.
-// #  endif
-
-void js::jit::FillAOTICs(JSContext* cx, JitZone* zone) {
+void js::jit::FillAOTICs(JSContext* cx) {
+  MOZ_ASSERT(cx->inAtomsZone());
+  JitZone* jitZone = cx->zone()->getJitZone(cx);
   if (JitOptions.enableAOTICs) {
     for (auto& stub : GetAOTStubs()) {
       CacheIRWriter writer(cx, stub);
       if (writer.failed()) {
-        zone->setIncompleteAOTICs();
+        jitZone->setIncompleteAOTICs();
         break;
       }
       CacheIRStubInfo* stubInfo;
       JitCode* code;
       (void)LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
                                 "aot stub",
-                                /* isAOTFill = */ true, zone);
+                                /* isAOTFill = */ true, jitZone);
       (void)stubInfo;
       (void)code;
     }
   }
-  // We set AOT ICs to filled even if enableAOTICs = false.
-  // This is to prevent repeatedly calling FillAOTICs, each time the JIT is
-  // entered, when enableAOTICs = false.
-  zone->setFilledAOTICs();
 }
 #endif
 
