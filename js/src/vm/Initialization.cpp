@@ -20,6 +20,7 @@
 #include "builtin/TestingFunctions.h"
 #include "gc/Statistics.h"
 #include "jit/Assembler.h"
+#include "jit/CacheIRAOT.h"
 #include "jit/Ion.h"
 #include "jit/JitOptions.h"
 #include "jit/Simulator.h"
@@ -29,6 +30,7 @@
 #include "vm/ArrayBufferObject.h"
 #include "vm/DateTime.h"
 #include "vm/HelperThreads.h"
+#include "vm/Realm.h"
 #include "vm/Runtime.h"
 #include "vm/Time.h"
 #ifdef MOZ_VTUNE
@@ -235,6 +237,14 @@ JS_PUBLIC_API bool JS::InitSelfHostedCode(JSContext* cx, SelfHostedCache cache,
     if (!rt->createJitRuntime(cx)) {
       return false;
     }
+
+#ifdef ENABLE_JS_AOT_ICS
+    // Fill the Atom JitZone with AOT ICs
+    js::AutoAllocInAtomsZone az(cx);
+    // N.B: This relies on the baseline interpreter and other trampolines
+    // being generated already.
+    js::jit::FillAOTICs(cx);
+#endif
   }
 
   return true;

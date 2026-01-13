@@ -182,7 +182,7 @@ class JitZone {
   ICStubSpace* stubSpace() { return &stubSpace_; }
 
   JitCode* getBaselineCacheIRStubCode(const CacheIRStubKey::Lookup& key,
-                                      CacheIRStubInfo** stubInfo) {
+                                      CacheIRStubInfo** stubInfo) const {
     auto p = baselineCacheIRStubCodes_.lookup(key);
     if (p) {
       *stubInfo = p->key().stubInfo.get();
@@ -293,11 +293,6 @@ class JitZone {
 
   void setIncompleteAOTICs() { incompleteAOTICs_ = true; }
   bool isIncompleteAOTICs() const { return incompleteAOTICs_; }
-
-  void setFilledAOTICs() { filledAOTICs_ = true; }
-  // Whether AOT IC filling has been performed.
-  // Note: Perform does not guarantee success. See: isIncompleteAOTICs.
-  bool hasFilledAOTICs() const { return filledAOTICs_; }
 
   void traceWeak(JSTracer* trc, JS::Realm* realm);
 

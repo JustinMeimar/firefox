@@ -9362,13 +9362,6 @@ MethodStatus CanEnterPortableBaselineInterpreter(JSContext* cx,
     return MethodStatus::Method_Error;
   }
 
-#ifdef ENABLE_JS_AOT_ICS
-  JitZone* jitZone = cx->zone()->getJitZone(cx);
-  if (!jitZone->hasFilledAOTICs()) {
-    js::jit::FillAOTICs(cx, jitZone);
-  }
-#endif
-
   AutoKeepJitScripts keepJitScript(cx);
   if (!state.script()->ensureHasJitScript(cx, keepJitScript)) {
     return MethodStatus::Method_Error;

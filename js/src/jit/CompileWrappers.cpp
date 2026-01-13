@@ -34,6 +34,10 @@ const JitRuntime* CompileRuntime::jitRuntime() {
   return runtime()->jitRuntime();
 }
 
+const JitZone* CompileRuntime::atomsJitZone() {
+  return runtime()->atomsZone()->jitZone();
+}
+
 const GeckoProfilerRuntime& CompileRuntime::geckoProfiler() {
   return runtime()->geckoProfiler();
 }
