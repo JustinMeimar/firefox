@@ -842,6 +842,10 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
     return offsetof(Zone, allocNurseryGetterSetters_);
   }
 
+  static constexpr size_t offsetOfUnknownAllocSite(JS::TraceKind kind) {
+    return offsetof(Zone, pretenuring.unknownAllocSites[size_t(kind)]);
+  }
+
   static constexpr size_t offsetOfRuntime() {
     return offsetof(Zone, runtime_);
   }
