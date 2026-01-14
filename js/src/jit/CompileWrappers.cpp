@@ -34,9 +34,11 @@ const JitRuntime* CompileRuntime::jitRuntime() {
   return runtime()->jitRuntime();
 }
 
+#ifdef ENABLE_JS_AOT_ICS
 const JitZone* CompileRuntime::atomsJitZone() {
   return runtime()->atomsZone()->jitZone();
 }
+#endif
 
 const GeckoProfilerRuntime& CompileRuntime::geckoProfiler() {
   return runtime()->geckoProfiler();
