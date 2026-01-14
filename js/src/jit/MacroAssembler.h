@@ -5654,9 +5654,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void updateAllocSite(Register temp, Register result, CompileZone* zone,
                        Register site);
 #ifdef ENABLE_JS_AOT_ICS
-  // Checks whether or not nursery allocation is enabled (runtime agnostic) and fail if not.
-  // See 'Runtime agnostic code generation'.
-  void failIfNurseryAllocDisabledRuntime(JS::TraceKind kind, Label* fail);
   // Version of `bumpPointerAllocate` that loads the zone at runtime.
   // See 'Runtime agnostic code generation'.
   void bumpPointerAllocateRuntime(Register result, Register temp, Label* fail,
@@ -5974,17 +5971,22 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
 #ifdef ENABLE_JS_AOT_ICS
  public:
-  // Load the zone into zoneReg at runtime.
+  // Load the runtime ptr from the zone, into given register.
   // See 'Runtime agnostic code generation'.
-  void loadZone();
-#endif
- public:
+  void loadRuntime(Register reg);
   void setZoneReg(Register zoneReg) {
     MOZ_ASSERT(isAOTFill_);
     // Must not overwrite existing register (if already set).
     MOZ_ASSERT(zoneReg_ == InvalidReg);
     zoneReg_ = zoneReg;
   }
+  Register zoneReg() {
+    MOZ_ASSERT(isZoneLoaded());
+    return zoneReg_;
+  }
+  // Load the zone into zoneReg at runtime.
+  // See 'Runtime agnostic code generation'.
+  void loadZone();
 
  private:
   void setZoneLoaded() {
@@ -5994,11 +5996,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   bool isZoneLoaded() { return zoneLoaded_; }
-
-  Register zoneReg() {
-    MOZ_ASSERT(isZoneLoaded());
-    return zoneReg_;
-  }
+#endif
 
  public:
   void enableProfilingInstrumentation() {
