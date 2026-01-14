@@ -426,7 +426,7 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
 
   bind(&success);
 
-  if (runtime()->geckoProfiler().enabled()) {
+  if (!isAOTFill_ && runtime()->geckoProfiler().enabled()) {
     CompileZone* zone = realm()->zone();
     uint32_t* countAddress = zone->addressOfTenuredAllocCount();
     movePtr(ImmPtr(countAddress), temp);
@@ -707,10 +707,25 @@ static inline constexpr int32_t offsetOfNurseryFlag(JS::TraceKind kind) {
   }
 }
 
-void MacroAssembler::failIfNurseryAllocDisabledRuntime(JS::TraceKind kind,
+// Equivalent of IsNurseryAllocEnabled above, but performs the check
+// dynamically.
+// See: 'Runtime agnostic code generation'.
+static void failIfNurseryAllocDisabledRuntime(MacroAssembler* masm, JS::TraceKind kind,
                                                        Label* fail) {
-  Address allocNurseryFlag(zoneReg(), offsetOfNurseryFlag(kind));
-  branch8(Assembler::Equal, allocNurseryFlag, Imm32(0), fail);
+  Address allocNurseryFlag(masm->zoneReg(), offsetOfNurseryFlag(kind));
+  masm->branch8(Assembler::Equal, allocNurseryFlag, Imm32(0), fail);
+}
+
+// Equivalent of gc::NurseryCellHeader::MakeValue that constructs the cell
+// header dynamically.
+// See: 'Runtime agnostic code generation'.
+static void makeNurseryCellHeaderValueRuntime(
+    MacroAssembler* masm, Register headerWordResult, JS::TraceKind kind,
+    int32_t offsetOfAllocSiteFromZone) {
+  // TODO (chase): Missing assertions. See: gc::NurseryCellHeader::MakeValue
+  masm->computeEffectiveAddress(
+      Address(masm->zoneReg(), offsetOfAllocSiteFromZone), headerWordResult);
+  masm->orPtr(Imm32(int32_t(kind)), headerWordResult);
 }
 #endif
 
@@ -794,11 +809,12 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
   // We'll have to perform the nursery allocation check at runtime for AOT code.
-  failIfNurseryAllocDisabledRuntime(traceKind, fail);
+  // TODO (chase): It may be wise to perform this check at IC attachment time.
+  // This would prevent the need for this code from being emitted at all.
+  failIfNurseryAllocDisabledRuntime(this, traceKind, fail);
 
-  Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
   // Load the runtime ptr stored in the zone.
-  loadPtr(runtimeAddr, temp);
+  loadRuntime(temp);
   // Load the nursery position via the zone's runtime.
   Address positionAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition());
   // Use a relative 32 bit offset to the Nursery position_ to currentEnd_ to
@@ -812,15 +828,40 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   storePtr(result, positionAddr);
   subPtr(Imm32(size), result);
 
-  // Update allocation site and store pointer in the nursery cell header. This
-  // is only used from baseline.
-  // AOT ICs may not be called from Warp (or other places without pretenuring support).
-  MOZ_ASSERT(!allocSite.is<gc::CatchAllAllocSite>());
-  Register site = allocSite.as<Register>();
-  updateAllocSiteRuntime(temp, site);
-  // See NurseryCellHeader::MakeValue.
-  orPtr(Imm32(int32_t(traceKind)), site);
-  storePtr(site, Address(result, -js::Nursery::nurseryCellHeaderSize()));
+  if (allocSite.is<gc::CatchAllAllocSite>()) {
+    // No allocation site supplied.
+    // This is the when called from: e.g: EmitAllocateBigInt.
+    gc::CatchAllAllocSite siteKind = allocSite.as<gc::CatchAllAllocSite>();
+    // Only the Unknown CatchAllAllocSite should be used by Baseline ICs.
+    MOZ_ASSERT(siteKind == gc::CatchAllAllocSite::Unknown);
+
+    int32_t siteOffset = Zone::offsetOfUnknownAllocSite(traceKind);
+    makeNurseryCellHeaderValueRuntime(this, temp, traceKind, siteOffset);
+    // N.B: At this point, temp has been clobberred and now stores the
+    // headerWord.
+
+    storePtr(temp, Address(result, -js::Nursery::nurseryCellHeaderSize()));
+
+    if (traceKind != JS::TraceKind::Object ||
+        (!isAOTFill_ && runtime()->geckoProfiler().enabled())) {
+      // Update the catch all allocation site, which his is used to calculate
+      // nursery allocation counts so we can determine whether to disable
+      // nursery allocation of strings and bigints.
+      int32_t allocCountOffset =
+          /* siteOffset */ +gc::AllocSite::offsetOfNurseryAllocCount();
+      Address countAddress(zoneReg(), allocCountOffset);
+
+      add32(Imm32(1), Address(zoneReg(), allocCountOffset));
+    }
+  } else {
+    // Update allocation site and store pointer in the nursery cell header. This
+    // is only used from baseline.
+    Register site = allocSite.as<Register>();
+    updateAllocSiteRuntime(temp, site);
+    // See NurseryCellHeader::MakeValue.
+    orPtr(Imm32(int32_t(traceKind)), site);
+    storePtr(site, Address(result, -js::Nursery::nurseryCellHeaderSize()));
+  }
 }
 #endif
 
@@ -853,14 +894,13 @@ void MacroAssembler::updateAllocSiteRuntime(Register temp, Register site) {
            Imm32(js::gc::NormalSiteAttentionThreshold), &done);
 
   // Load the nursery alloc sites via the zone's runtime.
-  Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
-  loadPtr(runtimeAddr, temp);
+  loadRuntime(temp);
   Address allocSitesAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfNurseryAllocatedSites());
 
   loadPtr(allocSitesAddr, temp);
   storePtr(temp, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
   // Load the runtime again (since temp was used for allocSites).
-  loadPtr(runtimeAddr, temp);
+  loadRuntime(temp);
   storePtr(site, allocSitesAddr);
 
   bind(&done);
@@ -4204,6 +4244,14 @@ void MacroAssembler::loadZone() {
   loadPtr(zonePtr, zoneReg_);
   // Note that the zone loading code has been emitted by now.
   setZoneLoaded();
+}
+
+void MacroAssembler::loadRuntime(Register reg) {
+  Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
+  // Load the runtime ptr stored in the zone.
+  // N.B: temp is expected to hold the runtime ptr by the flows below.
+  // Do not clobber it!
+  loadPtr(runtimeAddr, reg);
 }
 #endif
 
