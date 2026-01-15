@@ -70,6 +70,10 @@ class BaselineCodeGen {
   bool inCall_ = false;
 #endif
 
+#ifdef ENABLE_JS_AOT_ICS
+  bool isAOTCompile_ = false;
+#endif
+
   template <typename... HandlerArgs>
   explicit BaselineCodeGen(TempAllocator& alloc, MacroAssembler& masmArg,
                            CompileRuntime* runtimeArg, HandlerArgs&&... args);

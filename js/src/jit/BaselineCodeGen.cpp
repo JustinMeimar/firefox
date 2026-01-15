@@ -103,7 +103,17 @@ BaselineCodeGen<Handler>::BaselineCodeGen(TempAllocator& alloc,
     : handler(masmArg, std::forward<HandlerArgs>(args)...),
       runtime(runtimeArg),
       masm(masmArg),
-      frame(handler.frame()) {}
+      frame(handler.frame())
+#ifdef ENABLE_JS_AOT_ICS
+      , isAOTCompile_(true)
+      {
+        // No variable avaiable here like in BaselineCacheIRCompiler:1945
+        masm.setZoneReg(R0.scratchReg());
+        masm.loadZone();  
+      }
+#else
+      {}
+#endif
 
 BaselineCompiler::BaselineCompiler(TempAllocator& alloc,
                                    CompileRuntime* runtime,

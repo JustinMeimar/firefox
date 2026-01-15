@@ -4222,6 +4222,26 @@ void MacroAssembler::loadZone() {
   setZoneLoaded();
 }
 
+void MacroAssembler::loadZoneFromBaseline() {
+  // This function is only valid in the context of AOT Baseline compilation.
+  MOZ_ASSERT(isAOTFill_);
+  // A valid register for the zone is required for AOT IC compilation.
+  MOZ_ASSERT(zoneReg_ != InvalidReg);
+  // The zone only needs to be loaded once per stub.
+  MOZ_ASSERT(!isZoneLoaded());
+  // Load the Zone via the ICStub field.
+  
+  // OLD:
+  // Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
+  
+  // Need something like:
+  // Address zonePtr(BaselineMetaDataReg, BaselineCodeGen::offsetOfZone()); 
+  
+  loadPtr(zonePtr, zoneReg_);
+  // Note that the zone loading code has been emitted by now.
+  setZoneLoaded();
+}
+
 void MacroAssembler::loadRuntime(Register reg) {
   Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
   // Load the runtime ptr stored in the zone.
@@ -4760,7 +4780,8 @@ StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
     : MacroAssembler(
           alloc,
           /* isAOTFill ? nullptr : */ CompileRuntime::get(cx->runtime()),
-          isAOTFill ? nullptr : CompileRealm::get(cx->realm()), isAOTFill) {}
+          isAOTFill ? nullptr : CompileRealm::get(cx->realm()),
+          isAOTFill) {}
 
 OffThreadMacroAssembler::OffThreadMacroAssembler(TempAllocator& alloc,
                                                  CompileRealm* realm)

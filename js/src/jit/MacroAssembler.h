@@ -5945,6 +5945,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Load the zone into zoneReg at runtime.
   // See 'Runtime agnostic code generation'.
   void loadZone();
+  void loadZoneFromBaseline();
 
  private:
   void setZoneLoaded() {

@@ -1324,7 +1324,7 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
     TempAllocator temp(&cx->tempLifoAlloc());
-    StackMacroAssembler masm(cx, temp);
+    StackMacroAssembler masm(cx, temp, /*isAOTFill=*/true);
     BaselineInterpreterGenerator generator(cx, temp, masm);
     return generator.generate(cx, interpreter);
   }
