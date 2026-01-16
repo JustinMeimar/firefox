@@ -63,6 +63,7 @@
 #  define ALLOCKIND(name) uint8_t(gc::AllocKind::name),
 #  define COMPLETIONKIND(name) uint8_t(CompletionKind::name),
 #  define REALMFUSE(i) i,
+#  define RUNTIMEFUSE(i) i,
 
 // Other macros used to serialize parts of the CacheIRWriter.
 #  define STUBFIELD(ty) AOTStubFieldData{StubField::Type::ty, 0},
