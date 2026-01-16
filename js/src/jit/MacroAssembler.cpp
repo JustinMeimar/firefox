@@ -811,8 +811,10 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   // This would prevent the need for this code from being emitted at all.
   failIfNurseryAllocDisabledRuntime(this, traceKind, fail);
 
-  // Load the runtime ptr stored in the zone.
-  loadRuntime(temp);
+  // Load the zone into zoneReg_.
+  loadBaselineZone();
+  // Copy zone to temp for accessing runtime.
+  movePtr(zoneReg(), temp);
   // Load the nursery position via the zone's runtime.
   Address positionAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition());
   // Use a relative 32 bit offset to the Nursery position_ to currentEnd_ to
@@ -892,13 +894,15 @@ void MacroAssembler::updateAllocSiteRuntime(Register temp, Register site) {
            Imm32(js::gc::NormalSiteAttentionThreshold), &done);
 
   // Load the nursery alloc sites via the zone's runtime.
-  loadRuntime(temp);
+  loadBaselineZone();
+  movePtr(zoneReg(), temp);
   Address allocSitesAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfNurseryAllocatedSites());
 
   loadPtr(allocSitesAddr, temp);
   storePtr(temp, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
   // Load the runtime again (since temp was used for allocSites).
-  loadRuntime(temp);
+  loadBaselineZone();
+  movePtr(zoneReg(), temp);
   storePtr(site, allocSitesAddr);
 
   bind(&done);
@@ -4222,23 +4226,19 @@ void MacroAssembler::loadZone() {
   setZoneLoaded();
 }
 
-void MacroAssembler::loadZoneFromBaseline() {
+void MacroAssembler::loadBaselineZone() {
   // This function is only valid in the context of AOT Baseline compilation.
   MOZ_ASSERT(isAOTFill_);
   // A valid register for the zone is required for AOT IC compilation.
   MOZ_ASSERT(zoneReg_ != InvalidReg);
   // The zone only needs to be loaded once per stub.
   MOZ_ASSERT(!isZoneLoaded());
-  // Load the Zone via the ICStub field.
-  
-  // OLD:
-  // Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
-  
-  // Need something like:
-  // Address zonePtr(BaselineMetaDataReg, BaselineCodeGen::offsetOfZone()); 
-  
-  loadPtr(zonePtr, zoneReg_);
-  // Note that the zone loading code has been emitted by now.
+
+  // Load the zone pointer from the BaselineFrame.
+  // The zone was already initialized in emitInitFrameFields().
+  Address zoneAddr(FramePointer, BaselineFrame::reverseOffsetOfZone());
+  loadPtr(zoneAddr, zoneReg_);
+
   setZoneLoaded();
 }
 

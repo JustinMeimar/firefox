@@ -71,6 +71,7 @@ class BaselineFrame {
   JSObject* envChain_;        // Environment chain (always initialized).
   ICScript* icScript_;        // IC script (initialized if Warp is enabled).
   ArgumentsObject* argsObj_;  // If HAS_ARGS_OBJ, the arguments object.
+  JS::Zone* zone_;  // Zone pointer (for AOT baseline interpreter).
 
   // We need to split the Value into 2 fields of 32 bits, otherwise the C++
   // compiler may add some padding between the fields.
@@ -393,6 +394,9 @@ class BaselineFrame {
   }
   static int reverseOffsetOfArgsObj() {
     return -int(Size()) + offsetof(BaselineFrame, argsObj_);
+  }
+  static int reverseOffsetOfZone() {
+    return -int(Size()) + offsetof(BaselineFrame, zone_);
   }
   static int reverseOffsetOfFlags() {
     return -int(Size()) + offsetof(BaselineFrame, flags_);

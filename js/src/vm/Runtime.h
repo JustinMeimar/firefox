@@ -368,6 +368,9 @@ struct JSRuntime {
  public:
   JSContext* mainContextFromAnyThread() const { return mainContext_; }
   const void* addressOfMainContext() { return &mainContext_; }
+  static constexpr size_t offsetOfMainContext() {
+    return offsetof(JSRuntime, mainContext_);
+  }
   js::Fprinter parserWatcherFile;
 
   inline JSContext* mainContextFromOwnThread();
