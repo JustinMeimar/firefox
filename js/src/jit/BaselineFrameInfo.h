@@ -194,6 +194,9 @@ class FrameInfo {
   Address addressOfICScript() const {
     return Address(FramePointer, BaselineFrame::reverseOffsetOfICScript());
   }
+  Address addressOfZone() const {
+    return Address(FramePointer, BaselineFrame::reverseOffsetOfZone());
+  }
   Address addressOfFlags() const {
     return Address(FramePointer, BaselineFrame::reverseOffsetOfFlags());
   }

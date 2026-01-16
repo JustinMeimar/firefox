@@ -103,17 +103,11 @@ BaselineCodeGen<Handler>::BaselineCodeGen(TempAllocator& alloc,
     : handler(masmArg, std::forward<HandlerArgs>(args)...),
       runtime(runtimeArg),
       masm(masmArg),
-      frame(handler.frame())
+      frame(handler.frame()) {
 #ifdef ENABLE_JS_AOT_ICS
-      , isAOTCompile_(true)
-      {
-        // No variable avaiable here like in BaselineCacheIRCompiler:1945
-        masm.setZoneReg(R0.scratchReg());
-        masm.loadZone();  
-      }
-#else
-      {}
+  isAOTCompile_ = true;
 #endif
+}
 
 BaselineCompiler::BaselineCompiler(TempAllocator& alloc,
                                    CompileRuntime* runtime,
@@ -907,18 +901,52 @@ bool BaselineCodeGen<Handler>::callVM(RetAddrEntry::Kind kind,
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emitStackCheck() {
   Label skipCall;
-  if (handler.mustIncludeSlotsInStackCheck()) {
-    // Subtract the size of script->nslots() first.
-    Register scratch = R1.scratchReg();
-    masm.moveStackPtrTo(scratch);
-    subtractScriptSlotsSize(scratch, R2.scratchReg());
-    masm.branchPtr(Assembler::BelowOrEqual,
-                   AbsoluteAddress(runtime->addressOfJitStackLimit()), scratch,
-                   &skipCall);
-  } else {
-    masm.branchStackPtrRhs(Assembler::BelowOrEqual,
-                           AbsoluteAddress(runtime->addressOfJitStackLimit()),
-                           &skipCall);
+
+#ifdef ENABLE_JS_AOT_ICS
+  if (isAOTCompile_) {
+    // For AOT baseline, we can't use absolute addresses. Instead, load the
+    // jitStackLimit dynamically from the runtime via the zone register.
+    Register runtimeReg = R2.scratchReg();
+    Register stackLimitReg = R1.scratchReg();
+
+    // Load runtime from zone (zone is already in zoneReg_).
+    masm.loadRuntime(runtimeReg);
+
+    // Load mainContext from runtime.
+    masm.loadPtr(Address(runtimeReg, JSRuntime::offsetOfMainContext()),
+                 runtimeReg);
+
+    // Load jitStackLimit from context.
+    masm.loadPtr(Address(runtimeReg, offsetof(JSContext, jitStackLimit)),
+                 stackLimitReg);
+
+    if (handler.mustIncludeSlotsInStackCheck()) {
+      // Subtract the size of script->nslots() first.
+      Register scratch = R0.scratchReg();
+      masm.moveStackPtrTo(scratch);
+      subtractScriptSlotsSize(scratch, runtimeReg);  // Use runtimeReg as temp
+      masm.branchPtr(Assembler::BelowOrEqual, stackLimitReg, scratch,
+                     &skipCall);
+    } else {
+      masm.branchStackPtrRhs(Assembler::BelowOrEqual, stackLimitReg, &skipCall);
+    }
+  } else
+#endif
+  {
+    // Non-AOT path: use absolute address.
+    if (handler.mustIncludeSlotsInStackCheck()) {
+      // Subtract the size of script->nslots() first.
+      Register scratch = R1.scratchReg();
+      masm.moveStackPtrTo(scratch);
+      subtractScriptSlotsSize(scratch, R2.scratchReg());
+      masm.branchPtr(Assembler::BelowOrEqual,
+                     AbsoluteAddress(runtime->addressOfJitStackLimit()), scratch,
+                     &skipCall);
+    } else {
+      masm.branchStackPtrRhs(Assembler::BelowOrEqual,
+                             AbsoluteAddress(runtime->addressOfJitStackLimit()),
+                             &skipCall);
+    }
   }
 
   prepareVMCall();
@@ -1372,6 +1400,17 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   }
   masm.bind(&done);
   masm.storePtr(scratch1, frame.addressOfInterpreterScript());
+
+  // Initialize zone pointer for AOT baseline interpreter.
+  // At this point scratch1 contains the script pointer.
+  // We need to extract the zone from the script's arena.
+  Register tempZone = nonFunctionEnv;  // Reuse this register temporarily
+  masm.movePtr(scratch1, tempZone);
+  // Mask to get arena address
+  masm.andPtr(Imm32(int32_t(~js::gc::ArenaMask)), tempZone);
+  // Load zone from arena header
+  masm.loadPtr(Address(tempZone, js::gc::ArenaZoneOffset), tempZone);
+  masm.storePtr(tempZone, frame.addressOfZone());
 
   // Load the ICScript in scratch2..
   Label inlined, haveICScript;
@@ -6880,6 +6919,15 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   // case GC gets run during stack check). For global and eval scripts, the env
   // chain is in R1. For function scripts, the env chain is in the callee.
   emitInitFrameFields(R1.scratchReg());
+
+#ifdef ENABLE_JS_AOT_ICS
+  // For AOT baseline interpreter, load the zone pointer into a pinned register
+  // so we can use it for runtime-dependent operations like stack checks.
+  if (isAOTCompile_) {
+    masm.setZoneReg(R0.scratchReg());
+    masm.loadBaselineZone();
+  }
+#endif
 
   // When compiling with Debugger instrumentation, set the debuggeeness of
   // the frame before any operation that can call into the VM.
