@@ -858,6 +858,18 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
     return offsetof(Zone, arenas) + decltype(arenas)::offsetOfFreeList(thingKind);
   }
 
+  static constexpr size_t offsetOfPreservedWrappers() {
+    return offsetof(Zone, preservedWrappers_);
+  }
+
+  static constexpr size_t offsetOfPreservedWrappersCount() {
+    return offsetof(Zone, preservedWrappersCount_);
+  }
+
+  static constexpr size_t offsetOfPreservedWrappersCapacity() {
+    return offsetof(Zone, preservedWrappersCapacity_);
+  }
+
   js::gc::Heap minHeapToTenure(JS::TraceKind kind) const {
     switch (kind) {
       case JS::TraceKind::Object:
