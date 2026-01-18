@@ -201,6 +201,10 @@ class GeckoProfilerRuntime {
 
   const uint32_t* addressOfEnabled() const { return &enabled_; }
 
+  static constexpr size_t offsetOfEnabled() {
+    return offsetof(GeckoProfilerRuntime, enabled_);
+  }
+
   void fixupStringsMapAfterMovingGC();
 #ifdef JSGC_HASH_TABLE_CHECKS
   void checkStringsMapAfterMovingGC();

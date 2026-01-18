@@ -422,6 +422,14 @@ class JitRuntime {
     return trampolineCode(doubleToInt32ValueStubOffset_);
   }
 
+  static constexpr size_t offsetOfTrampolineCode() {
+    return offsetof(JitRuntime, trampolineCode_);
+  }
+
+  static constexpr size_t offsetOfDoubleToInt32ValueStubOffset() {
+    return offsetof(JitRuntime, doubleToInt32ValueStubOffset_);
+  }
+
   TrampolinePtr getIonGenericCallStub(IonGenericCallKind kind) const {
     return trampolineCode(ionGenericCallStubOffset_[kind]);
   }

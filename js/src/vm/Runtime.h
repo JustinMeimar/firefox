@@ -740,6 +740,14 @@ struct JSRuntime {
   js::jit::JitRuntime* jitRuntime() const { return jitRuntime_.ref(); }
   bool hasJitRuntime() const { return !!jitRuntime_; }
 
+  static constexpr size_t offsetOfJitRuntime() {
+    return offsetof(JSRuntime, jitRuntime_);
+  }
+
+  static constexpr size_t offsetOfGeckoProfiler() {
+    return offsetof(JSRuntime, geckoProfiler_);
+  }
+
  private:
   // Used to generate random keys for hash tables.
   mozilla::Maybe<mozilla::non_crypto::XorShift128PlusRNG> randomKeyGenerator_;

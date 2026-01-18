@@ -5819,8 +5819,33 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
 
   // Call a stub to convert R0 from double to int32 if needed.
   // Note: this stub may clobber scratch1.
-  // MARK_RUNTIME: This looks similar to emit_Symbol  
+#ifdef ENABLE_JS_AOT_ICS
+  // For AOT code, compute the stub address dynamically through zone->runtime.
+  // We need scratch1 and scratch2 temporarily.
+  Register jitRuntimeReg = scratch1;
+  Register stubReg = scratch2;
+  // Load runtime from zone
+  masm.loadRuntime(jitRuntimeReg);
+  // Load jitRuntime pointer: jitRuntimeReg = runtime->jitRuntime_
+  masm.loadPtr(Address(jitRuntimeReg, JSRuntime::offsetOfJitRuntime()),
+               jitRuntimeReg);
+  // Load the stub offset value into stubReg
+  masm.load32(Address(jitRuntimeReg,
+                      JitRuntime::offsetOfDoubleToInt32ValueStubOffset()),
+              stubReg);
+  // Load trampolineCode pointer into jitRuntimeReg
+  masm.loadPtr(Address(jitRuntimeReg, JitRuntime::offsetOfTrampolineCode()),
+               jitRuntimeReg);
+  // Load raw code pointer: jitRuntimeReg = trampolineCode->raw()
+  masm.loadPtr(Address(jitRuntimeReg, JitCode::offsetOfCode()), jitRuntimeReg);
+  // Add the stub offset: stubReg = trampolineCode->raw() + stubOffset
+  masm.addPtr(jitRuntimeReg, stubReg);
+  // Call the stub
+  masm.call(stubReg);
+#else
+  // MARK_RUNTIME: This looks similar to emit_Symbol
   masm.call(runtime->jitRuntime()->getDoubleToInt32ValueStub());
+#endif
 
   // Load the index in the jump table in |key|, or branch to default pc if not
   // int32 or out-of-range.
@@ -6513,10 +6538,26 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   {
     Register scratchReg = scratch2;
     Label skip;
+
+#ifdef ENABLE_JS_AOT_ICS
+    // For AOT code, compute the profiler enabled flag address dynamically.
+    Register runtimeReg = scratch1;
+    masm.loadRuntime(runtimeReg);
+    // Compute address of geckoProfiler_.enabled_
+    // geckoProfiler_ is inline in JSRuntime, so we compute:
+    // &runtime->geckoProfiler_.enabled_
+    masm.branch32(
+        Assembler::Equal,
+        Address(runtimeReg, JSRuntime::offsetOfGeckoProfiler() +
+                                GeckoProfilerRuntime::offsetOfEnabled()),
+        Imm32(0), &skip);
+#else
     // MARK_RUNTIME: possibly lower priority because of profiling.
     AbsoluteAddress addressOfEnabled(
         runtime->geckoProfiler().addressOfEnabled());
     masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skip);
+#endif
+
     masm.loadJSContext(scratchReg);
     masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
                  scratchReg);
