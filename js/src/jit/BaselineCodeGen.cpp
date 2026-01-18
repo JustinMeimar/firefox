@@ -629,6 +629,7 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
 
   // Check one element cache to avoid VM call.
   Label skipBarrier;
+  // MARK_RUNTIME: Same scenario as emit_Symbol
   auto* lastCellAddr = runtime->addressOfLastBufferedWholeCell();
   masm.branchPtr(Assembler::Equal, AbsoluteAddress(lastCellAddr), objReg,
                  &skipBarrier);
@@ -857,7 +858,7 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
   MOZ_ASSERT(inCall_);
   inCall_ = false;
 #endif
-
+  // MARK_RUNTIME: The address of trampolines will vary between runs.
   TrampolinePtr code = runtime->jitRuntime()->getVMWrapper(id);
   const VMFunctionData& fun = GetVMFunction(id);
 
@@ -1600,6 +1601,7 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
   frame.syncStack(0);
 
   Label done;
+  // MARK_RUNTIME:
   masm.branch32(Assembler::Equal,
                 AbsoluteAddress(runtime->addressOfInterruptBits()), Imm32(0),
                 &done);
@@ -1773,6 +1775,7 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
       AbsoluteAddress addressOfEnabled(
           runtime->geckoProfiler().addressOfEnabled());
       masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
+      //MARK_RUNTIME: This looks like one to catch.
       masm.loadPtr(AbsoluteAddress(runtime->addressOfJitActivation()),
                    scratchReg);
       masm.loadPtr(
@@ -1986,6 +1989,7 @@ bool BaselineCompiler::emitDebugTrap() {
                  DebugAPI::hasBreakpointsAt(script, handler.pc());
 
   // Emit patchable call to debug trap handler.
+  // MARK_RUNTIME 
   JitCode* handlerCode =
       runtime->jitRuntime()->debugTrapHandler(DebugTrapHandlerKind::Compiler);
   CodeOffset nativeOffset = masm.toggledCall(handlerCode, enabled);
@@ -2839,9 +2843,19 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   Register scratch2 = R1.scratchReg();
   LoadUint8Operand(masm, scratch1);
 
-  masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
-  masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
+#ifdef ENABLE_JS_AOT_ICS
+  // Load runtime from zone (zone is already in zoneReg_).
+  masm.loadRuntime(scratch2);
 
+  // Compute address of wellKnownSymbols
+  masm.loadPtr(Address(scratch2, offsetof(JSRuntime, wellKnownSymbols)),
+               scratch2);
+#else
+  // MARK_RUNTIME: The initially observed runtime pointer which varies between
+  // invocations.
+  masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
+#endif
+  masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
   frame.push(R0);
   return true;
@@ -5805,6 +5819,7 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
 
   // Call a stub to convert R0 from double to int32 if needed.
   // Note: this stub may clobber scratch1.
+  // MARK_RUNTIME: This looks similar to emit_Symbol  
   masm.call(runtime->jitRuntime()->getDoubleToInt32ValueStub());
 
   // Load the index in the jump table in |key|, or branch to default pc if not
@@ -6266,6 +6281,7 @@ bool BaselineInterpreterCodeGen::emitAfterYieldDebugInstrumentation(
   if (!handler.addDebugInstrumentationOffset(toggleOffset)) {
     return false;
   }
+  // MARK_RUNTIME:
   masm.loadPtr(AbsoluteAddress(runtime->addressOfRealm()), scratch);
   masm.branchTest32(Assembler::Zero,
                     Address(scratch, Realm::offsetOfDebugModeBits()),
@@ -6497,6 +6513,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   {
     Register scratchReg = scratch2;
     Label skip;
+    // MARK_RUNTIME: possibly lower priority because of profiling.
     AbsoluteAddress addressOfEnabled(
         runtime->geckoProfiler().addressOfEnabled());
     masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skip);
@@ -6923,8 +6940,10 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
 #ifdef ENABLE_JS_AOT_ICS
   // For AOT baseline interpreter, load the zone pointer into a pinned register
   // so we can use it for runtime-dependent operations like stack checks.
+  // We use ABINonVolatileReg (r13 on x64) to avoid conflicts with R0/R1/R2
+  // scratch registers used throughout the baseline interpreter.
   if (isAOTCompile_) {
-    masm.setZoneReg(R0.scratchReg());
+    masm.setZoneReg(ABINonVolatileReg);
     masm.loadBaselineZone();
   }
 #endif
@@ -7218,6 +7237,8 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   // Emit debug trap handler code (target of patchable call instructions). This
   // is just a tail call to the debug trap handler trampoline code.
   {
+    // MARK_RUNTIME: If this is a jump to an absolute address it will break. If
+    // it is a PC-relative jump, it should be fine.
     JitCode* handlerCode = runtime->jitRuntime()->debugTrapHandler(
         DebugTrapHandlerKind::Interpreter);
     debugTrapHandlerOffset_ = masm.currentOffset();
