@@ -6,6 +6,7 @@
 
 #include "jit/BaselineCodeGen.h"
 
+#include "BaselineAOT.h"
 #include "JitOptions.h"
 #include "mozilla/Casting.h"
 
@@ -7326,18 +7327,18 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     const Label& opLabel = opLabels[i];
     MOZ_ASSERT(opLabel.bound());
     CodeLabel cl;
+#ifdef ENABLE_JS_AOT_ICS
+    uint32_t handlerOffset = opLabel.offset();
+    uint32_t handlerPtrOffset = masm.currentOffset();
+    DispatchTablePatch patch(handlerOffset, handlerPtrOffset);
+    if (!aotAccumulator_.addPatch(std::move(patch))) {
+      fprintf(stderr, "ERROR: Failed to add dispatch table patch for op %zu\n", i);
+      return false;
+    }
+    MOZ_ASSERT(opHandlerOffsets_.append(handlerOffset) && "handler Offset recorded");
+#endif
     masm.writeCodePointer(&cl);
     cl.target()->bind(opLabel.offset());
-
-#ifdef ENABLE_JS_AOT_ICS
-    // Todo(justin): Supply the patches better. 
-    // uint32_t patchOffset = cl.patchAt()->offset();
-    // if (!aotAccumulator_.addPatch(patchOffset, i)) {
-    //   fprintf(stderr, "Failed to register a dispatch table patch\n");
-    //   return false;
-    // }
-    // opHandlerOffsets_[i] = CodeOffset(opLabel.offset());
-#endif
     masm.addCodeLabel(cl);
   }
 
@@ -7415,6 +7416,8 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   aotAccumulator_.set(BaselineMetadataID::CallVMDebugPrologue, handler.callVMOffsets().debugPrologueOffset);
   aotAccumulator_.set(BaselineMetadataID::CallVMDebugEpilogue, handler.callVMOffsets().debugEpilogueOffset);
   aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield, handler.callVMOffsets().debugAfterYieldOffset);
+  aotAccumulator_.set(BaselineMetadataID::HeaderSize, code->headerSize());
+  fprintf(stderr, "INFO: Storing headerSize=%zu in AOT manifest\n", code->headerSize());
   aotAccumulator_.set(BaselineMetadataID::DebugInstrumentationCount, handler.debugInstrumentationOffsets().length());
   aotAccumulator_.set(BaselineMetadataID::DebugTrapCount, aotAccumulator_.debugTraps.length());
   aotAccumulator_.set(BaselineMetadataID::CodeCoverageCount, handler.codeCoverageOffsets().length());
@@ -7541,10 +7544,14 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
   
   uint32_t codeSize = footer->manifestOffset;
   JitZone* jitZone = cx->zone()->getJitZone(cx);
-  MOZ_ASSERT(jitZone && "Could not attain the JitZone."); 
+  MOZ_ASSERT(jitZone && "Could not attain the JitZone.");
 
-  size_t bytesNeeded = codeSize + sizeof(JitCodeHeader);
-  uint32_t headerSize = sizeof(JitCodeHeader);
+  // Read headerSize from manifest first to allocate correctly
+  auto* manifest = reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
+  uint32_t headerSize = manifest->metadata[uint32_t(BaselineMetadataID::HeaderSize)];
+  fprintf(stderr, "INFO: Using headerSize=%u from AOT manifest\n", headerSize);
+
+  size_t bytesNeeded = codeSize + headerSize;
 
   ExecutablePool* pool;
   uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
@@ -7554,7 +7561,7 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
     return false;
   }
 
-  // The code starts after the JitCodeHeader
+  // The code starts after the JitCodeHeader (with proper alignment)
   uint8_t* codeStart = result + headerSize;
   JitCode* code = JitCode::New<NoGC>(cx, codeStart, codeSize, headerSize, pool,
                                      CodeKind::Other);
@@ -7675,16 +7682,6 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
     if (!code) {
       return false;
     }
-
-#ifdef ENABLE_JS_AOT_ICS
-    // Serialize the baseline interpreter code and embedded manifest to binary.
-    if (JitOptions.dumpBaselineInterpreter) {
-      if (!serializeAOTManifest(code)) {
-        fprintf(stderr, "ERROR: Failed to serialize AOT manifest\n");
-        return false;
-      }
-    }
-#endif
     
     // Register BaselineInterpreter code with the profiler's JitCode table.
     {
@@ -7717,6 +7714,16 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 #ifdef MOZ_VTUNE
     vtune::MarkStub(code, "BaselineInterpreter");
 #endif  
+
+#ifdef ENABLE_JS_AOT_ICS
+    // Serialize the baseline interpreter code and embedded manifest to binary.
+    if (JitOptions.dumpBaselineInterpreter) {
+      if (!serializeAOTManifest(code)) {
+        fprintf(stderr, "ERROR: Failed to serialize AOT manifest\n");
+        return false;
+      }
+    }
+#endif
 
     interpreter.init(
         code, interpretOpOffset_, interpretOpNoDebugTrapOffset_,

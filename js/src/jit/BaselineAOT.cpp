@@ -10,8 +10,10 @@
 namespace js::jit {
 
 void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry) {
+    // target: where the pointer is stored in the dispatch table
     uint8_t* target = ctx.codeBase + entry.handlerPtrOffset;
-    uintptr_t val = uintptr_t(ctx.codeBase + entry.handlerPtrOffset);
+    // val: the new absolute address of the handler
+    uintptr_t val = uintptr_t(ctx.codeBase + entry.handlerOffset);
     *reinterpret_cast<uintptr_t*>(target) = val;
 }
 

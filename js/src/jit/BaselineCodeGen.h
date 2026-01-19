@@ -610,9 +610,8 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
       metadata[uint32_t(id)] = val;
     }
 
-    [[nodiscard]] bool addPatch(uint32_t offset, uint32_t payload = 0) {
-      DispatchTablePatch entry{offset, payload};
-      return patches.append(entry);
+    [[nodiscard]] bool addPatch(DispatchTablePatch&& patch) {
+      return patches.append(std::move(patch));
     }
   } aotAccumulator_;
 
