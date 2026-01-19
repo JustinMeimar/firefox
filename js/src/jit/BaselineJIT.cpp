@@ -6,17 +6,20 @@
 
 #include "jit/BaselineJIT.h"
 
+#include "JitOptions.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ScopeExit.h"
 
 #include <algorithm>
+#include <fstream>
 
 #include "debugger/DebugAPI.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #include "jit/AutoWritableJitCode.h"
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineCodeGen.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineDebugModeOSR.h"
@@ -1310,6 +1313,110 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
   icReturnOffsets_ = std::move(icReturnOffsets);
   callVMOffsets_ = callVMOffsets;
 }
+
+#ifdef ENABLE_JS_AOT_ICS
+
+bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size, JitCode* code) {
+  
+  MOZ_ASSERT(size > sizeof(BaselineAOTFooter));
+
+  auto* footer = reinterpret_cast<BaselineAOTFooter*>(
+    blob + size - sizeof(BaselineAOTFooter));
+
+  MOZ_ASSERT(footer->magic == 0x424C494E);
+  MOZ_ASSERT(footer->version == 1);
+   
+  // Load metadata from the binary manifest.
+  auto* manifest = reinterpret_cast<BaselineManifest*>(blob + footer->manifestOffset);
+  auto getMeta = [&](BaselineMetadataID id) -> uint32_t {
+    return manifest->metadata[uint32_t(id)];
+  };
+  code_ = code;
+  interpretOpOffset_ = getMeta(BaselineMetadataID::InterpretOp);
+  interpretOpNoDebugTrapOffset_ = getMeta(BaselineMetadataID::InterpretOpNoDebugTrap);
+  bailoutPrologueOffset_ = getMeta(BaselineMetadataID::BailoutPrologue);
+  profilerEnterToggleOffset_ = getMeta(BaselineMetadataID::ProfilerEnterToggle);
+  profilerExitToggleOffset_ = getMeta(BaselineMetadataID::ProfilerExitToggle);
+  debugTrapHandlerOffset_ = getMeta(BaselineMetadataID::DebugTrapHandler);
+
+  callVMOffsets_.debugPrologueOffset = getMeta(BaselineMetadataID::CallVMDebugPrologue);
+  callVMOffsets_.debugEpilogueOffset = getMeta(BaselineMetadataID::CallVMDebugEpilogue);
+  callVMOffsets_.debugAfterYieldOffset = getMeta(BaselineMetadataID::CallVMDebugAfterYield);
+
+  fprintf(stderr, "INFO: Loaded scalar offsets from AOT manifest\n");
+  fprintf(stderr, "  interpretOp: %u\n", interpretOpOffset_);
+  fprintf(stderr, "  bailoutPrologue: %u\n", bailoutPrologueOffset_);
+
+  uint8_t* payloadPtr = reinterpret_cast<uint8_t*>(manifest) +
+                        sizeof(manifest->metadata);
+
+  auto loadVec = [&](auto& destVec, BaselineMetadataID countId) -> bool {
+    uint32_t count = getMeta(countId);
+    if (count == 0) {
+      return true;
+    }
+
+    using T = typename std::remove_reference_t<decltype(destVec)>::ElementType;
+  
+    // Todo: This may be an accounting bug if sizeof(T) varies for different
+    // element types. It uses the sizeof current T to skip over previous
+    // entries. What if the previous entries are larger than T?
+    size_t bytesNeeded = count * sizeof(T);
+    size_t payloadOffset = payloadPtr - blob;
+    if (payloadOffset + bytesNeeded > size - sizeof(BaselineAOTFooter)) {
+      fprintf(stderr, "ERROR: Vector payload exceeds blob bounds\n");
+      return false;
+    }
+
+    T* src = reinterpret_cast<T*>(payloadPtr);
+    if (!destVec.append(src, count)) {
+      fprintf(stderr, "ERROR: Failed to allocate vector (count: %u)\n", count);
+      return false;
+    }
+
+    payloadPtr += bytesNeeded;
+    return true;
+  };
+
+  // Define vector to hold loaded offsets
+  Vector<uint32_t, 0, SystemAllocPolicy> opHandlerOffsets;
+
+  // Load each vector in order
+  if (!loadVec(debugInstrumentationOffsets_, BaselineMetadataID::DebugInstrumentationCount) ||
+      !loadVec(debugTrapOffsets_, BaselineMetadataID::DebugTrapCount) ||
+      !loadVec(codeCoverageOffsets_, BaselineMetadataID::CodeCoverageCount) ||
+      !loadVec(icReturnOffsets_, BaselineMetadataID::ICReturnCount) ||
+      !loadVec(patchEntries_, BaselineMetadataID::PatchCount) ||
+      !loadVec(opHandlerOffsets, BaselineMetadataID::OpHandlerOffsetCount)
+  ) {
+    fprintf(stderr, "ERROR: Failed to load AOT vectors\n");
+    return false;
+  }
+
+  fprintf(stderr, "INFO: AOT manifest loaded successfully\n");
+  fprintf(stderr, "  Debug instrumentation: %zu entries\n", debugInstrumentationOffsets_.length());
+  fprintf(stderr, "  Debug traps: %zu entries\n", debugTrapOffsets_.length());
+  fprintf(stderr, "  Code coverage: %zu entries\n", codeCoverageOffsets_.length());
+  fprintf(stderr, "  IC returns: %zu entries\n", icReturnOffsets_.length());
+  fprintf(stderr, "  Patches: %zu entries\n", patchEntries_.length());
+  fprintf(stderr, "  OpHandler offsets: %zu entries\n", opHandlerOffsets.length());
+
+  fprintf(stderr, "INFO: Applying %zu patches...\n", patchEntries_.length());
+
+  PatchContext patchCtx;
+  patchCtx.codeBase = code_->raw();
+  patchCtx.opHandlerOffsets = opHandlerOffsets.begin();
+
+  for (const auto& entry : patchEntries_) {
+    uintptr_t val = PatchRegistry::Resolve(entry.type, patchCtx, entry.payload);
+    uint8_t* target = patchCtx.codeBase + entry.offset;
+    *reinterpret_cast<uintptr_t*>(target) = val;
+  }
+
+  fprintf(stderr, "INFO: Successfully applied all patches\n");
+  return true;
+}
+#endif
 
 uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
   for (const ICReturnOffset& entry : icReturnOffsets_) {

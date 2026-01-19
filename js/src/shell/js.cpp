@@ -13021,6 +13021,8 @@ bool InitOptionParser(OptionParser& op) {
           '\0', "enforce-aot-ics",
           "Enable enforcing only use of ahead-of-time-known ICs") ||
 #endif
+      !op.addBoolOption('\0', "dump-baseline-interpreter", "Dump baseline binary for AOT patching.") ||
+      !op.addBoolOption('\0', "use-aot-baseline", "Use AOT compiled Baseline Interpreter.") ||
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
           "Wait for COUNT calls or iterations before baseline-compiling "
@@ -14042,6 +14044,14 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
 
   if (op.getBoolOption("no-baseline")) {
     jit::JitOptions.baselineJit = false;
+  }
+
+  if (op.getBoolOption("dump-baseline-interpreter")) {
+    jit::JitOptions.dumpBaselineInterpreter = true;
+  }
+
+  if (op.getBoolOption("use-aot-baseline")) {
+    jit::JitOptions.useAOTBaseline = true;
   }
 
   if (op.getBoolOption("no-ion")) {

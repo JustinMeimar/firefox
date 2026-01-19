@@ -6,10 +6,13 @@
 
 #include "jit/BaselineCodeGen.h"
 
+#include "JitOptions.h"
 #include "mozilla/Casting.h"
 
 #include "gc/GC.h"
+#include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineCompileQueue.h"
+#include "jit/BaselineInterpreterMetadata.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
@@ -18,11 +21,13 @@
 #include "jit/CalleeToken.h"
 #include "jit/FixedList.h"
 #include "jit/IonOptimizationLevels.h"
+#include "jit/JitCode.h"
 #include "jit/JitcodeMap.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/Linker.h"
+#include "jit/ProcessExecutableMemory.h"
 #include "jit/PerfSpewer.h"
 #include "jit/SharedICHelpers.h"
 #include "jit/TemplateObject.h"
@@ -30,6 +35,7 @@
 #include "jit/VMFunctions.h"
 #include "js/friend/ErrorMessages.h"  // JSMSG_*
 #include "js/UniquePtr.h"
+#include <fstream>
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/BuiltinObjectKind.h"
@@ -6969,6 +6975,9 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
 
   masm.checkStackAlignment();
 
+#ifdef ENABLE_JS_AOT_ICS
+  // masm.printf("Start bl interp prologue.\n");
+#endif
   emitProfilerEnterFrame();
 
   masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
@@ -7029,6 +7038,10 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   if (!emitWarmUpCounterIncrement()) {
     return false;
   }
+
+#ifdef ENABLE_JS_AOT_ICS
+  // masm.printf("Finish bl interp prologue.\n");
+#endif
 
   warmUpCheckPrologueOffset_ = CodeOffset(masm.currentOffset());
 
@@ -7155,6 +7168,11 @@ bool BaselineInterpreterGenerator::emitDebugTrap() {
   if (!debugTrapOffsets_.append(offset.offset())) {
     return false;
   }
+#ifdef ENABLE_JS_AOT_ICS
+  if (!aotAccumulator_.debugTraps.append(offset.offset())) {
+    return false;
+  }
+#endif
 
   return true;
 }
@@ -7232,7 +7250,11 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     if (!tableLabels_.append(label)) {
       return false;
     }
+
     BaseIndex pointer(scratch2, scratch1, ScalePointer);
+#ifdef ENABLE_JS_AOT_ICS
+    // masm.printf("Exiting op epilogue..");
+#endif
     masm.branchToComputedAddress(pointer);
     return true;
   };
@@ -7252,7 +7274,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
       return false;                               \
     }                                             \
     handler.resetCurrentOp();                     \
-  }
+  } 
   FOR_EACH_OPCODE(EMIT_OP)
 #undef EMIT_OP
 
@@ -7296,12 +7318,26 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 
   tableOffset_ = masm.currentOffset();
 
+#ifdef ENABLE_JS_AOT_ICS
+  MOZ_ASSERT(opHandlerOffsets_.resizeUninitialized(JSOP_LIMIT));
+#endif 
+
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
     const Label& opLabel = opLabels[i];
     MOZ_ASSERT(opLabel.bound());
     CodeLabel cl;
     masm.writeCodePointer(&cl);
     cl.target()->bind(opLabel.offset());
+
+#ifdef ENABLE_JS_AOT_ICS
+    uint32_t patchOffset = cl.patchAt()->offset();
+    if (!aotAccumulator_.addPatch(patchOffset, DispatchTablePatch::ID, i)) {
+      fprintf(stderr, "Failed to register a dispatch table patch\n");
+      return false;
+    }
+    opHandlerOffsets_[i] = CodeOffset(opLabel.offset());
+#endif
+
     masm.addCodeLabel(cl);
   }
 
@@ -7348,8 +7384,306 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   masm.ret();
 }
 
+#ifdef ENABLE_JS_AOT_ICS
+bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
+  // 1. Open binary output file
+  std::ofstream binFile("./baseline_interpreter.bin",
+                        std::ios::binary | std::ios::trunc);
+  if (!binFile) {
+    fprintf(stderr, "ERROR: Failed to open baseline_interpreter.bin for writing\n");
+    return false;
+  }
+
+  // 2. Write machine code
+  uint8_t* codeStart = code->raw();
+  uint8_t* codeEnd = code->rawEnd();
+  size_t codeSize = codeEnd - codeStart;
+
+  binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
+  if (!binFile) {
+    fprintf(stderr, "ERROR: Failed to write machine code (%zu bytes)\n", codeSize);
+    return false;
+  }
+
+  fprintf(stderr, "INFO: Wrote %zu bytes of machine code\n", codeSize);
+
+  // 3. Record manifest offset (before writing manifest)
+  size_t manifestOffset = binFile.tellp();
+
+  // 4. Populate all AOT metadata in one place
+  // Scalar offsets for entry points
+  aotAccumulator_.set(BaselineMetadataID::InterpretOp, interpretOpOffset_);
+  aotAccumulator_.set(BaselineMetadataID::InterpretOpNoDebugTrap, interpretOpNoDebugTrapOffset_);
+  aotAccumulator_.set(BaselineMetadataID::BailoutPrologue, bailoutPrologueOffset_.offset());
+  aotAccumulator_.set(BaselineMetadataID::DebugTrapHandler, debugTrapHandlerOffset_);
+  aotAccumulator_.set(BaselineMetadataID::DispatchTableOffset, tableOffset_);
+
+  // Profiler toggle offsets
+  aotAccumulator_.set(BaselineMetadataID::ProfilerEnterToggle,
+                      profilerEnterFrameToggleOffset_.offset());
+  aotAccumulator_.set(BaselineMetadataID::ProfilerExitToggle,
+                      profilerExitFrameToggleOffset_.offset());
+
+  // CallVM debug offsets
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugPrologue,
+                      handler.callVMOffsets().debugPrologueOffset);
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugEpilogue,
+                      handler.callVMOffsets().debugEpilogueOffset);
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield,
+                      handler.callVMOffsets().debugAfterYieldOffset);
+
+  // Vector counts
+  aotAccumulator_.set(BaselineMetadataID::DebugInstrumentationCount,
+                      handler.debugInstrumentationOffsets().length());
+  aotAccumulator_.set(BaselineMetadataID::DebugTrapCount,
+                      aotAccumulator_.debugTraps.length());
+  aotAccumulator_.set(BaselineMetadataID::CodeCoverageCount,
+                      handler.codeCoverageOffsets().length());
+  aotAccumulator_.set(BaselineMetadataID::ICReturnCount,
+                      handler.icReturnOffsets().length());
+  aotAccumulator_.set(BaselineMetadataID::PatchCount,
+                      aotAccumulator_.patches.length());
+  aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount,
+                      opHandlerOffsets_.length());
+
+  fprintf(stderr, "INFO: Serializing %zu patch entries\n",
+          aotAccumulator_.patches.length());
+
+  // 6. Write manifest metadata array (now fully populated)
+  binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),
+                sizeof(aotAccumulator_.metadata));
+  if (!binFile) {
+    fprintf(stderr, "ERROR: Failed to write manifest header\n");
+    return false;
+  }
+
+  // 7. Write CompileRuntime* placeholder
+  uintptr_t runtimePtrPlaceholder = 0;
+  binFile.write(reinterpret_cast<const char*>(&runtimePtrPlaceholder),
+                sizeof(uintptr_t));
+  if (!binFile) {
+    fprintf(stderr, "ERROR: Failed to write CompileRuntime pointer placeholder\n");
+    return false;
+  }
+
+  // 8. Write vector payloads sequentially
+
+  // Debug instrumentation offsets
+  const auto& debugInstr = handler.debugInstrumentationOffsets();
+  if (debugInstr.length() > 0) {
+    binFile.write(reinterpret_cast<const char*>(debugInstr.begin()),
+                  debugInstr.length() * sizeof(uint32_t));
+    if (!binFile) {
+      fprintf(stderr, "ERROR: Failed to write debug instrumentation offsets\n");
+      return false;
+    }
+  }
+
+  // Debug trap offsets
+  if (aotAccumulator_.debugTraps.length() > 0) {
+    binFile.write(reinterpret_cast<const char*>(aotAccumulator_.debugTraps.begin()),
+                  aotAccumulator_.debugTraps.length() * sizeof(uint32_t));
+    if (!binFile) {
+      fprintf(stderr, "ERROR: Failed to write debug trap offsets\n");
+      return false;
+    }
+  }
+
+  // Code coverage offsets
+  const auto& codeCov = handler.codeCoverageOffsets();
+  if (codeCov.length() > 0) {
+    binFile.write(reinterpret_cast<const char*>(codeCov.begin()),
+                  codeCov.length() * sizeof(uint32_t));
+    if (!binFile) {
+      fprintf(stderr, "ERROR: Failed to write code coverage offsets\n");
+      return false;
+    }
+  }
+
+  // IC return offsets (need to convert to ICReturnOffsetEntry format)
+  const auto& icReturns = handler.icReturnOffsets();
+  for (const auto& ic : icReturns) {
+    ICReturnOffsetEntry entry;
+    entry.offset = ic.offset;
+    entry.opcode = uint32_t(ic.op);
+    binFile.write(reinterpret_cast<const char*>(&entry), sizeof(entry));
+    if (!binFile) {
+      fprintf(stderr, "ERROR: Failed to write IC return offset\n");
+      return false;
+    }
+  }
+
+  // Patch entries
+  if (aotAccumulator_.patches.length() > 0) {
+    binFile.write(reinterpret_cast<const char*>(aotAccumulator_.patches.begin()),
+                  aotAccumulator_.patches.length() * sizeof(PatchEntry));
+    if (!binFile) {
+      fprintf(stderr, "ERROR: Failed to write patch entries\n");
+      return false;
+    }
+    fprintf(stderr, "INFO: Wrote %zu patch entries (%zu bytes)\n",
+            aotAccumulator_.patches.length(),
+            aotAccumulator_.patches.length() * sizeof(PatchEntry));
+  }
+  
+
+  // OpHandler offsets
+  if (opHandlerOffsets_.length() > 0) {
+    // Write the raw uint32_t offsets of the handlers relative to blob start
+    binFile.write(reinterpret_cast<const char*>(opHandlerOffsets_.begin()),
+                  opHandlerOffsets_.length() * sizeof(uint32_t));
+
+    if (!binFile) {
+      fprintf(stderr, "ERROR: Failed to write op handler offsets\n");
+      return false;
+    }
+
+    fprintf(stderr, "INFO: Wrote %zu op handler offsets\n",
+            opHandlerOffsets_.length());
+  } 
+
+  // 7. Write footer
+  BaselineAOTFooter footer;
+  footer.manifestOffset = manifestOffset;
+  binFile.write(reinterpret_cast<const char*>(&footer), sizeof(footer));
+  if (!binFile) {
+    fprintf(stderr, "ERROR: Failed to write footer\n");
+    return false;
+  }
+
+  binFile.close();
+
+  size_t totalSize = manifestOffset + sizeof(aotAccumulator_.metadata) +
+                     sizeof(uintptr_t) +  // CompileRuntime pointer
+                     debugInstr.length() * sizeof(uint32_t) +
+                     aotAccumulator_.debugTraps.length() * sizeof(uint32_t) +
+                     codeCov.length() * sizeof(uint32_t) +
+                     icReturns.length() * sizeof(ICReturnOffsetEntry) +
+                     aotAccumulator_.patches.length() * sizeof(PatchEntry) +
+                     sizeof(footer);
+
+  fprintf(stderr, "INFO: AOT manifest serialized successfully\n");
+  fprintf(stderr, "  Code size: %zu bytes\n", codeSize);
+  fprintf(stderr, "  Manifest offset: %zu\n", manifestOffset);
+  fprintf(stderr, "  Total size: %zu bytes\n", totalSize);
+  fprintf(stderr, "  Debug instrumentation: %u entries\n",
+          aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)]);
+  fprintf(stderr, "  Debug traps: %u entries\n",
+          aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)]);
+  fprintf(stderr, "  Code coverage: %u entries\n",
+          aotAccumulator_.metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)]);
+  fprintf(stderr, "  IC returns: %u entries\n",
+          aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)]);
+
+  return true;
+}
+#endif
+
+
+#ifdef ENABLE_JS_AOT_ICS
+
+bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterpreter& interpreter) { 
+  uint8_t* aotBlob = GetAOTBaselineBlob();
+  size_t blobSize = GetAOTBaselineSize();
+  MOZ_ASSERT(blobSize != 0, "AOT blob size is 0!");
+  
+  fprintf(stderr, "DEBUG: AOT Baseline blob: start=%p, size=%zu\n",
+    (void*)aotBlob, blobSize);
+
+  auto* footer = reinterpret_cast<BaselineAOTFooter*>(
+    aotBlob + blobSize - sizeof(BaselineAOTFooter));
+
+  MOZ_ASSERT(footer->magic == 0x424C494E); // Todo replace hex with const
+                                           // static member.
+  
+  uint32_t codeSize = footer->manifestOffset;
+  JitZone* jitZone = cx->zone()->getJitZone(cx);
+  MOZ_ASSERT(jitZone && "Could not attain the JitZone."); 
+
+  size_t bytesNeeded = codeSize + sizeof(JitCodeHeader);
+  uint32_t headerSize = sizeof(JitCodeHeader);
+
+  ExecutablePool* pool;
+  uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
+                                                          CodeKind::Other);
+  if (!result) {
+    js::ReportOutOfMemory(cx);
+    return false;
+  }
+
+  // The code starts after the JitCodeHeader
+  uint8_t* codeStart = result + headerSize;
+  JitCode* code = JitCode::New<NoGC>(cx, codeStart, codeSize, headerSize, pool,
+                                     CodeKind::Other);
+  if (!code) {
+    js::ReportOutOfMemory(cx);
+    return false;
+  }
+
+  // Make code writable, copy blob, initialize and patch, then make executable
+  {
+    AutoWritableJitCodeFallible writable(code);
+    if (!writable.makeWritable()) {
+      js::ReportOutOfMemory(cx);
+      return false;
+    }
+    memcpy(codeStart, aotBlob, codeSize);
+    JitCodeHeader::FromExecutable(codeStart)->init(code);
+    code->setInstructionsSize(codeSize);
+
+    // Initialize interpreter from self-describing binary (includes patching)
+    if (!interpreter.initFromAOT(cx, aotBlob, blobSize, code)) {
+      fprintf(stderr, "ERROR: Failed to initialize from AOT manifest\n");
+      return false;
+    }
+  }
+
+  // Register with profiler's JitCode table
+  {
+    auto entry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
+        cx, code, code->raw(), code->rawEnd());
+    if (!entry) {
+      return false;
+    }
+
+    JitcodeGlobalTable* globalTable =
+        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+    if (!globalTable->addEntry(std::move(entry))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+
+    code->setHasBytecodeMap();
+  }
+  fprintf(stderr, "INFO: Registered BaselineInterpreter with JitcodeGlobalTable\n");
+
+  // Enable profiler and coverage instrumentation if needed
+  if (cx->runtime()->geckoProfiler().enabled()) {
+    interpreter.toggleProfilerInstrumentation(true);
+  }
+
+  if (coverage::IsLCovEnabled()) {
+    interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
+  }
+
+  fprintf(stderr, "SUCCESS: AOT Baseline Interpreter loaded\n");
+  return true;
+}
+#endif
+
+
 bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
+
+#ifdef ENABLE_JS_AOT_ICS 
+  if (JitOptions.useAOTBaseline) {
+    if (!loadAOTBaseline(cx, interpreter)) {
+      return false;
+    }
+    return true;
+  }
+#endif
+
   AutoCreatedBy acb(masm, "BaselineInterpreterGenerator::generate");
 
   if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
@@ -7360,18 +7694,21 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
   perfSpewer_.startRecording();
   perfSpewer_.recordOffset(masm, "Prologue");
   if (!emitPrologue()) {
+    fprintf(stderr, "ERROR: emitPrologue failed\n");
     ReportOutOfMemory(cx);
     return false;
   }
 
   perfSpewer_.recordOffset(masm, "InterpreterLoop");
   if (!emitInterpreterLoop()) {
+    fprintf(stderr, "ERROR: emitInterpreterLoop failed\n");
     ReportOutOfMemory(cx);
     return false;
   }
 
   perfSpewer_.recordOffset(masm, "Epilogue");
   if (!emitEpilogue()) {
+    fprintf(stderr, "ERROR: emitEpilogue failed\n");
     ReportOutOfMemory(cx);
     return false;
   }
@@ -7385,16 +7722,27 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
   {
     AutoCreatedBy acb(masm, "everything_else");
     Linker linker(masm);
+
     if (masm.oom()) {
       ReportOutOfMemory(cx);
       return false;
     }
-
+   
     JitCode* code = linker.newCode(cx, CodeKind::Other);
     if (!code) {
       return false;
     }
 
+#ifdef ENABLE_JS_AOT_ICS
+    // Serialize the baseline interpreter code and embedded manifest to binary.
+    if (JitOptions.dumpBaselineInterpreter) {
+      if (!serializeAOTManifest(code)) {
+        fprintf(stderr, "ERROR: Failed to serialize AOT manifest\n");
+        return false;
+      }
+    }
+#endif
+    
     // Register BaselineInterpreter code with the profiler's JitCode table.
     {
       auto entry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
@@ -7425,7 +7773,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 
 #ifdef MOZ_VTUNE
     vtune::MarkStub(code, "BaselineInterpreter");
-#endif
+#endif  
 
     interpreter.init(
         code, interpretOpOffset_, interpretOpNoDebugTrapOffset_,

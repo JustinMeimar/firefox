@@ -17,6 +17,7 @@ UNIFIED_SOURCES += [
     "AlignmentMaskAnalysis.cpp",
     "BacktrackingAllocator.cpp",
     "Bailouts.cpp",
+    "BaselineAOT.cpp",
     "BaselineBailouts.cpp",
     "BaselineCacheIRCompiler.cpp",
     "BaselineCodeGen.cpp",
@@ -254,6 +255,24 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
         "wasm32/MacroAssembler-wasm32.cpp",
         "wasm32/Trampoline-wasm32.cpp",
     ]
+
+
+### Baseline AOT binary embedding
+# The baseline_interpreter.bin now contains a self-describing manifest
+# with all metadata embedded directly in the binary using the
+# "Manifest + Footer" pattern. No separate YAML or header generation needed.
+
+# Generate assembly wrapper for the AOT Baseline interpreter binary.
+GeneratedFile(
+    "AOTBaselineInterpreter.S",
+    script="GenerateAOTBaselineInterpreter.py",
+    inputs=["../../../baseline_interpreter.bin"],
+)
+
+# Build the generated .s into the project.
+SOURCES += [
+    "!AOTBaselineInterpreter.S"
+]
 
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(
