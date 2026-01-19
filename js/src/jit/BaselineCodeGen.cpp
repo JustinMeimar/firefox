@@ -7330,14 +7330,14 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     cl.target()->bind(opLabel.offset());
 
 #ifdef ENABLE_JS_AOT_ICS
-    uint32_t patchOffset = cl.patchAt()->offset();
-    if (!aotAccumulator_.addPatch(patchOffset, DispatchTablePatch::ID, i)) {
-      fprintf(stderr, "Failed to register a dispatch table patch\n");
-      return false;
-    }
-    opHandlerOffsets_[i] = CodeOffset(opLabel.offset());
+    // Todo(justin): Supply the patches better. 
+    // uint32_t patchOffset = cl.patchAt()->offset();
+    // if (!aotAccumulator_.addPatch(patchOffset, i)) {
+    //   fprintf(stderr, "Failed to register a dispatch table patch\n");
+    //   return false;
+    // }
+    // opHandlerOffsets_[i] = CodeOffset(opLabel.offset());
 #endif
-
     masm.addCodeLabel(cl);
   }
 
@@ -7386,119 +7386,76 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 
 #ifdef ENABLE_JS_AOT_ICS
 bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
-  // 1. Open binary output file
+  
   std::ofstream binFile("./baseline_interpreter.bin",
                         std::ios::binary | std::ios::trunc);
-  if (!binFile) {
-    fprintf(stderr, "ERROR: Failed to open baseline_interpreter.bin for writing\n");
-    return false;
-  }
+  
+  MOZ_ASSERT(binFile && "Failed to open AOT dump file.");
 
-  // 2. Write machine code
   uint8_t* codeStart = code->raw();
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
-
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
-  if (!binFile) {
-    fprintf(stderr, "ERROR: Failed to write machine code (%zu bytes)\n", codeSize);
-    return false;
-  }
+  
+  MOZ_ASSERT(binFile && "Failed to write machine code.");
 
   fprintf(stderr, "INFO: Wrote %zu bytes of machine code\n", codeSize);
 
   // 3. Record manifest offset (before writing manifest)
   size_t manifestOffset = binFile.tellp();
 
-  // 4. Populate all AOT metadata in one place
-  // Scalar offsets for entry points
+  // 4. There is a way to macro out this ugliness once AOT is actually working. 
   aotAccumulator_.set(BaselineMetadataID::InterpretOp, interpretOpOffset_);
   aotAccumulator_.set(BaselineMetadataID::InterpretOpNoDebugTrap, interpretOpNoDebugTrapOffset_);
   aotAccumulator_.set(BaselineMetadataID::BailoutPrologue, bailoutPrologueOffset_.offset());
   aotAccumulator_.set(BaselineMetadataID::DebugTrapHandler, debugTrapHandlerOffset_);
   aotAccumulator_.set(BaselineMetadataID::DispatchTableOffset, tableOffset_);
-
-  // Profiler toggle offsets
-  aotAccumulator_.set(BaselineMetadataID::ProfilerEnterToggle,
-                      profilerEnterFrameToggleOffset_.offset());
-  aotAccumulator_.set(BaselineMetadataID::ProfilerExitToggle,
-                      profilerExitFrameToggleOffset_.offset());
-
-  // CallVM debug offsets
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugPrologue,
-                      handler.callVMOffsets().debugPrologueOffset);
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugEpilogue,
-                      handler.callVMOffsets().debugEpilogueOffset);
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield,
-                      handler.callVMOffsets().debugAfterYieldOffset);
-
-  // Vector counts
-  aotAccumulator_.set(BaselineMetadataID::DebugInstrumentationCount,
-                      handler.debugInstrumentationOffsets().length());
-  aotAccumulator_.set(BaselineMetadataID::DebugTrapCount,
-                      aotAccumulator_.debugTraps.length());
-  aotAccumulator_.set(BaselineMetadataID::CodeCoverageCount,
-                      handler.codeCoverageOffsets().length());
-  aotAccumulator_.set(BaselineMetadataID::ICReturnCount,
-                      handler.icReturnOffsets().length());
-  aotAccumulator_.set(BaselineMetadataID::PatchCount,
-                      aotAccumulator_.patches.length());
-  aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount,
-                      opHandlerOffsets_.length());
+  aotAccumulator_.set(BaselineMetadataID::ProfilerEnterToggle, profilerEnterFrameToggleOffset_.offset());
+  aotAccumulator_.set(BaselineMetadataID::ProfilerExitToggle, profilerExitFrameToggleOffset_.offset());
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugPrologue, handler.callVMOffsets().debugPrologueOffset);
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugEpilogue, handler.callVMOffsets().debugEpilogueOffset);
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield, handler.callVMOffsets().debugAfterYieldOffset);
+  aotAccumulator_.set(BaselineMetadataID::DebugInstrumentationCount, handler.debugInstrumentationOffsets().length());
+  aotAccumulator_.set(BaselineMetadataID::DebugTrapCount, aotAccumulator_.debugTraps.length());
+  aotAccumulator_.set(BaselineMetadataID::CodeCoverageCount, handler.codeCoverageOffsets().length());
+  aotAccumulator_.set(BaselineMetadataID::ICReturnCount, handler.icReturnOffsets().length());
+  aotAccumulator_.set(BaselineMetadataID::PatchCount, aotAccumulator_.patches.length());
+  aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount, opHandlerOffsets_.length());
 
   fprintf(stderr, "INFO: Serializing %zu patch entries\n",
           aotAccumulator_.patches.length());
 
-  // 6. Write manifest metadata array (now fully populated)
+  // Write manifest metadata array (now fully populated)
   binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),
                 sizeof(aotAccumulator_.metadata));
-  if (!binFile) {
-    fprintf(stderr, "ERROR: Failed to write manifest header\n");
-    return false;
-  }
+  
+  MOZ_ASSERT(binFile && "Failed to write manifest header.");
 
-  // 7. Write CompileRuntime* placeholder
-  uintptr_t runtimePtrPlaceholder = 0;
-  binFile.write(reinterpret_cast<const char*>(&runtimePtrPlaceholder),
-                sizeof(uintptr_t));
-  if (!binFile) {
-    fprintf(stderr, "ERROR: Failed to write CompileRuntime pointer placeholder\n");
-    return false;
-  }
-
-  // 8. Write vector payloads sequentially
-
-  // Debug instrumentation offsets
+  // Write vector payloads sequentially debug instrumentation offsets
   const auto& debugInstr = handler.debugInstrumentationOffsets();
   if (debugInstr.length() > 0) {
     binFile.write(reinterpret_cast<const char*>(debugInstr.begin()),
                   debugInstr.length() * sizeof(uint32_t));
-    if (!binFile) {
-      fprintf(stderr, "ERROR: Failed to write debug instrumentation offsets\n");
-      return false;
-    }
   }
+
+  MOZ_ASSERT(binFile && "Failed to write vector payloads.");
 
   // Debug trap offsets
   if (aotAccumulator_.debugTraps.length() > 0) {
     binFile.write(reinterpret_cast<const char*>(aotAccumulator_.debugTraps.begin()),
-                  aotAccumulator_.debugTraps.length() * sizeof(uint32_t));
-    if (!binFile) {
-      fprintf(stderr, "ERROR: Failed to write debug trap offsets\n");
-      return false;
-    }
+                  aotAccumulator_.debugTraps.length() * sizeof(uint32_t)); 
   }
+  
+  MOZ_ASSERT(binFile && "Failed to write debug trap offsets.");
 
   // Code coverage offsets
   const auto& codeCov = handler.codeCoverageOffsets();
   if (codeCov.length() > 0) {
     binFile.write(reinterpret_cast<const char*>(codeCov.begin()),
-                  codeCov.length() * sizeof(uint32_t));
-    if (!binFile) {
-      fprintf(stderr, "ERROR: Failed to write code coverage offsets\n");
-      return false;
-    }
+                  codeCov.length() * sizeof(uint32_t)); 
   }
+
+  MOZ_ASSERT(binFile && "Failed to write code coverage offsets.");
 
   // IC return offsets (need to convert to ICReturnOffsetEntry format)
   const auto& icReturns = handler.icReturnOffsets();
@@ -7507,24 +7464,19 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     entry.offset = ic.offset;
     entry.opcode = uint32_t(ic.op);
     binFile.write(reinterpret_cast<const char*>(&entry), sizeof(entry));
-    if (!binFile) {
-      fprintf(stderr, "ERROR: Failed to write IC return offset\n");
-      return false;
-    }
+    
+    MOZ_ASSERT(binFile && "Failed to write IC return offsets."); 
   }
 
   // Patch entries
   if (aotAccumulator_.patches.length() > 0) {
     binFile.write(reinterpret_cast<const char*>(aotAccumulator_.patches.begin()),
-                  aotAccumulator_.patches.length() * sizeof(PatchEntry));
-    if (!binFile) {
-      fprintf(stderr, "ERROR: Failed to write patch entries\n");
-      return false;
-    }
+                  aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
     fprintf(stderr, "INFO: Wrote %zu patch entries (%zu bytes)\n",
             aotAccumulator_.patches.length(),
-            aotAccumulator_.patches.length() * sizeof(PatchEntry));
+            aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
   }
+  MOZ_ASSERT(binFile && "Failed to write patches."); 
   
 
   // OpHandler offsets
@@ -7533,47 +7485,38 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     binFile.write(reinterpret_cast<const char*>(opHandlerOffsets_.begin()),
                   opHandlerOffsets_.length() * sizeof(uint32_t));
 
-    if (!binFile) {
-      fprintf(stderr, "ERROR: Failed to write op handler offsets\n");
-      return false;
-    }
-
-    fprintf(stderr, "INFO: Wrote %zu op handler offsets\n",
-            opHandlerOffsets_.length());
+    MOZ_ASSERT(binFile && "Failed to write opHandler offsets."); 
   } 
 
   // 7. Write footer
   BaselineAOTFooter footer;
   footer.manifestOffset = manifestOffset;
   binFile.write(reinterpret_cast<const char*>(&footer), sizeof(footer));
-  if (!binFile) {
-    fprintf(stderr, "ERROR: Failed to write footer\n");
-    return false;
-  }
-
+  MOZ_ASSERT(binFile && "Failed to write footer.");  
   binFile.close();
-
-  size_t totalSize = manifestOffset + sizeof(aotAccumulator_.metadata) +
-                     sizeof(uintptr_t) +  // CompileRuntime pointer
-                     debugInstr.length() * sizeof(uint32_t) +
-                     aotAccumulator_.debugTraps.length() * sizeof(uint32_t) +
-                     codeCov.length() * sizeof(uint32_t) +
-                     icReturns.length() * sizeof(ICReturnOffsetEntry) +
-                     aotAccumulator_.patches.length() * sizeof(PatchEntry) +
-                     sizeof(footer);
-
-  fprintf(stderr, "INFO: AOT manifest serialized successfully\n");
-  fprintf(stderr, "  Code size: %zu bytes\n", codeSize);
-  fprintf(stderr, "  Manifest offset: %zu\n", manifestOffset);
-  fprintf(stderr, "  Total size: %zu bytes\n", totalSize);
-  fprintf(stderr, "  Debug instrumentation: %u entries\n",
-          aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)]);
-  fprintf(stderr, "  Debug traps: %u entries\n",
-          aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)]);
-  fprintf(stderr, "  Code coverage: %u entries\n",
-          aotAccumulator_.metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)]);
-  fprintf(stderr, "  IC returns: %u entries\n",
-          aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)]);
+  
+  {
+    // DEBUG
+    size_t totalSize = manifestOffset + sizeof(aotAccumulator_.metadata) +
+                       sizeof(uintptr_t) +  // CompileRuntime pointer
+                       debugInstr.length() * sizeof(uint32_t) +
+                       aotAccumulator_.debugTraps.length() * sizeof(uint32_t) +
+                       codeCov.length() * sizeof(uint32_t) +
+                       icReturns.length() * sizeof(ICReturnOffsetEntry) +
+                       aotAccumulator_.patches.length() * sizeof(DispatchTablePatch) +
+                       sizeof(footer);
+    fprintf(stderr, "INFO: AOT manifest serialized successfully\n");
+    fprintf(stderr, "  Code size: %zu bytes\n", codeSize);
+    fprintf(stderr, "  Total size: %zu bytes\n", totalSize);
+    fprintf(stderr, "  Debug instrumentation: %u entries\n",
+            aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)]);
+    fprintf(stderr, "  Debug traps: %u entries\n",
+            aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)]);
+    fprintf(stderr, "  Code coverage: %u entries\n",
+            aotAccumulator_.metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)]);
+    fprintf(stderr, "  IC returns: %u entries\n",
+            aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)]);
+  }
 
   return true;
 }

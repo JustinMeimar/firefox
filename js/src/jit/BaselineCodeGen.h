@@ -597,26 +597,21 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   uint32_t compileRuntimePtrOffset_ = 0;
 
 #ifdef ENABLE_JS_AOT_ICS
-
-  /*
-   *
-   * */
+  // TODO(justin): Simplify
   struct BaselineAOTAccumulator {
     uint32_t metadata[uint32_t(BaselineMetadataID::Count)] = {0};
-
     Vector<uint32_t, 0, SystemAllocPolicy> debugInstr;
     Vector<uint32_t, 0, SystemAllocPolicy> debugTraps;
     Vector<uint32_t, 0, SystemAllocPolicy> codeCoverage;
     Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy> icReturns;
-    Vector<PatchEntry, 0, SystemAllocPolicy> patches;
+    Vector<DispatchTablePatch, 0, SystemAllocPolicy> patches;
 
     void set(BaselineMetadataID id, uint32_t val) {
       metadata[uint32_t(id)] = val;
     }
 
-    [[nodiscard]] bool addPatch(uint32_t offset, PatchHandlerID type,
-                                uint32_t payload = 0) {
-      PatchEntry entry{offset, type, payload};
+    [[nodiscard]] bool addPatch(uint32_t offset, uint32_t payload = 0) {
+      DispatchTablePatch entry{offset, payload};
       return patches.append(entry);
     }
   } aotAccumulator_;

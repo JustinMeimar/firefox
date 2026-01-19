@@ -61,59 +61,41 @@ enum class BaselineMetadataID : uint32_t {
 };
 
 class CompileRuntime;
-using PatchHandlerID = uint32_t;
 
-/* 
- * */
+// In order to perform the patch, the AOT loader must saturate the
+// pointer to the AOT code.
 struct PatchContext {
     uint8_t* codeBase;
     const uint32_t* opHandlerOffsets;
+    
+    PatchContext(uint8_t* codeBase_, const uint32_t* opHandlerOffsets_)
+      : codeBase(codeBase_), opHandlerOffsets(opHandlerOffsets_) {}
 };
 
+// NOTE: this is just data that is already in the BaselineMetaData, so
+// in theory we do not need dedicated patch entries if the only patches
+// we perform are for the dispatch table. We will confirm that is the case
+// however before dispensing with the patch infrastructure.
 
-/* Patch embedded into the binary. Associates an offset with a
- * Resolve function to patch with through the PatchHandlerID,
- * which effectively acts like a Key. A payload may also be 
- * associated to parameterize the Resolve call, though this is
- * still unclear, as only one Patch type uses it for the dispatch
- * table (to parameterize which op handler to patch.)
- * */
-struct alignas(8) PatchEntry {
-    uint32_t offset;
-    PatchHandlerID type;
-    uintptr_t payload;
+struct alignas(8) DispatchTablePatch { 
+    /// Offset from the blob to the start of the opcode handler.
+    /// (What the patch points to.)
+    uint32_t handlerOffset;  
+
+    /// Offset from the blob to the dipatch table entry.
+    /// (The target of the patch itself).
+    uint32_t handlerPtrOffset; 
 };
 
-using PatchResolverFn = uintptr_t (*)(const PatchContext& ctx, uintptr_t payload);
+void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry);
 
-class PatchRegistry {
-public:
-    static void Register(PatchHandlerID id, PatchResolverFn fn);
-    static uintptr_t Resolve(PatchHandlerID id, const PatchContext& ctx, uintptr_t payload);
-};
-
-
-// Patch type 1: Used in `BaselineInterpreterGenerator::emitInterpreterLoop`
-struct DispatchTablePatch {
-    static constexpr PatchHandlerID ID = 102;
-    static uintptr_t Resolve(const PatchContext& ctx, uintptr_t payload) {
-        uint32_t offset = ctx.opHandlerOffsets[payload];
-        return uintptr_t(ctx.codeBase + offset);
-    }
-};
-
-// TODO: These inits can be macro'd out once stable.
-void InitBaselinePatches();
-
-static const uint32_t AOT_BASELINE_FOOTER_MAGIC = 0x424C494E;
-
+static const uint32_t AOT_FOOTER_MAGIC = 0x424C494E;
 struct alignas(4) BaselineAOTFooter {
-  uint32_t magic = AOT_BASELINE_FOOTER_MAGIC; // 'BLIN'
+  uint32_t magic = AOT_FOOTER_MAGIC; // 'BLIN'
   uint32_t version = 1;
   uint32_t manifestOffset = 0; // Absolute offset from blob start
 };
 
-/** */
 struct alignas(4) BaselineManifest {
   uint32_t metadata[uint32_t(BaselineMetadataID::Count)];
   // uint32_t debugInstrumentation[DebugInstrumentationCount]
@@ -132,7 +114,25 @@ static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) ==
     static_cast<uint32_t>(BaselineMetadataID::Count) * 4, "Manifest must be 68 bytes (17 fields × 4)");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
-static_assert(sizeof(PatchEntry) == 16, "PatchEntry must be 16 bytes");
+static_assert(sizeof(DispatchTablePatch) == 8, "PatchEntry must be 16 bytes");
+
+// using PatchResolverFn = uintptr_t (*)(const PatchContext& ctx, uintptr_t payload);
+// class PatchRegistry {
+// public:
+//     static void Register(PatchResolverFn fn);
+//     static uintptr_t Resolve(const PatchContext& ctx, uintptr_t payload);
+// };
+
+// struct DispatchTablePatch {
+//     // static constexpr PatchHandlerID ID = 102;
+//     static uintptr_t Resolve(const PatchContext& ctx, uintptr_t payload) {
+//         uint32_t offset = ctx.opHandlerOffsets[payload];
+//         return uintptr_t(ctx.codeBase + offset);
+//     }
+// };
+
+// TODO: These inits can be macro'd out once stable.
+
 
 }  // namespace js::jit
 

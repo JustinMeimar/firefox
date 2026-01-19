@@ -114,9 +114,12 @@ JS_AOT_IC_DATA(IC_LASTUSED)
         IC##idx,                                                        \
         sizeof(IC##idx)},
 
+namespace js {
+namespace jit {
+
 static const CacheIRAOTStub stubs[] = {JS_AOT_IC_DATA(IC_TOP)};
 
-mozilla::Span<const CacheIRAOTStub> js::jit::GetAOTStubs() {
+mozilla::Span<const CacheIRAOTStub> GetAOTStubs() {
   return mozilla::Span(stubs, sizeof(stubs) / sizeof(stubs[0]));
 }
 
@@ -144,3 +147,7 @@ CacheIRWriter::CacheIRWriter(JSContext* cx, const CacheIRAOTStub& stub)
 }
 
 #endif /* ENABLE_JS_AOT_ICS */
+
+} // namespace js 
+} // namespace jit
+
