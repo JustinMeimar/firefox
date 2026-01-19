@@ -1399,19 +1399,13 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   fprintf(stderr, "  Patches: %zu entries\n", patchEntries_.length());
   fprintf(stderr, "  OpHandler offsets: %zu entries\n", opHandlerOffsets.length());
 
-  fprintf(stderr, "INFO: Applying %zu patches...\n", patchEntries_.length());
-
-  PatchContext patchCtx(code_->raw(), opHandlerOffsets.begin());
+  fprintf(stderr, "INFO: Applying %zu dispatch table patches...\n", patchEntries_.length());
+  PatchContext patchCtx(code_->raw());
   for (const auto& entry : patchEntries_) {
-    (void)entry;
-    // TODO: Apply the patch.
-    // uintptr_t val = resolvePatch(patchCtx, entry.opHandlerIdx);
-    // applyPatch(patchCtx, entry, val);
-    // uint8_t* target = patchCtx.codeBase + entry.offset;
-    // *reinterpret_cast<uintptr_t*>(target) = val;
+    applyPatch(patchCtx, entry);
   }
 
-  fprintf(stderr, "INFO: Successfully applied all patches\n");
+  fprintf(stderr, "INFO: Successfully applied all %zu patches\n", patchEntries_.length());
   return true;
 }
 #endif

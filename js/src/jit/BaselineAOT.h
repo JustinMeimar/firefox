@@ -49,6 +49,7 @@ enum class BaselineMetadataID : uint32_t {
   CallVMDebugPrologue,
   CallVMDebugEpilogue,
   CallVMDebugAfterYield,
+  HeaderSize,
 
   // Counts for vectors
   DebugInstrumentationCount,
@@ -66,10 +67,7 @@ class CompileRuntime;
 // pointer to the AOT code.
 struct PatchContext {
     uint8_t* codeBase;
-    const uint32_t* opHandlerOffsets;
-    
-    PatchContext(uint8_t* codeBase_, const uint32_t* opHandlerOffsets_)
-      : codeBase(codeBase_), opHandlerOffsets(opHandlerOffsets_) {}
+    PatchContext(uint8_t* codeBase_) : codeBase(codeBase_){}
 };
 
 // NOTE: this is just data that is already in the BaselineMetaData, so
@@ -85,6 +83,9 @@ struct alignas(8) DispatchTablePatch {
     /// Offset from the blob to the dipatch table entry.
     /// (The target of the patch itself).
     uint32_t handlerPtrOffset; 
+
+    DispatchTablePatch(uint32_t handlerOffset_, uint32_t handlerPtrOffset_)
+      : handlerOffset(handlerOffset_), handlerPtrOffset(handlerPtrOffset_) {}
 };
 
 void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry);
@@ -112,7 +113,7 @@ struct alignas(4) ICReturnOffsetEntry {
 
 static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) ==
-    static_cast<uint32_t>(BaselineMetadataID::Count) * 4, "Manifest must be 68 bytes (17 fields × 4)");
+    static_cast<uint32_t>(BaselineMetadataID::Count) * 4, "Manifest must be 72 bytes (18 fields × 4)");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
 static_assert(sizeof(DispatchTablePatch) == 8, "PatchEntry must be 16 bytes");
 
