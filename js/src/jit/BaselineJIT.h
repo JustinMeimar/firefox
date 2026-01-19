@@ -18,6 +18,7 @@
 
 #include "jsfriendapi.h"
 
+#include "jit/BaselineAOT.h"
 #include "jit/IonTypes.h"
 #include "jit/JitCode.h"
 #include "jit/JitContext.h"
@@ -477,6 +478,7 @@ MethodStatus BaselineCompile(JSContext* cx, JSScript* script,
 
 // Class storing the generated Baseline Interpreter code for the runtime.
 class BaselineInterpreter {
+ friend class BaselineInterpreterGenerator;
  public:
   struct CallVMOffsets {
     uint32_t debugPrologueOffset = 0;
@@ -529,6 +531,12 @@ class BaselineInterpreter {
   // Offsets of some callVMs for BaselineDebugModeOSR.
   CallVMOffsets callVMOffsets_;
 
+#ifdef ENABLE_JS_AOT_ICS
+  // Patch entries for runtime pointer relocation (AOT only).
+  using PatchVector = Vector<PatchEntry, 0, SystemAllocPolicy>;
+  PatchVector patchEntries_;
+#endif
+
   uint8_t* codeAtOffset(uint32_t offset) const {
     MOZ_ASSERT(offset > 0);
     MOZ_ASSERT(offset < code_->instructionsSize());
@@ -551,7 +559,12 @@ class BaselineInterpreter {
             ICReturnOffsetVector&& icReturnOffsets,
             const CallVMOffsets& callVMOffsets);
 
+#ifdef ENABLE_JS_AOT_ICS
+  [[nodiscard]] bool initFromAOT(JSContext* cx, uint8_t* blob, size_t size, JitCode* code);
+#endif
+
   uint8_t* codeRaw() const { return code_->raw(); }
+  size_t codeSize() const { return code_->instructionsSize(); }
 
   uint8_t* retAddrForDebugPrologueCallVM() const {
     return codeAtOffset(callVMOffsets_.debugPrologueOffset);

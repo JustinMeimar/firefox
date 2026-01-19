@@ -132,6 +132,12 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether the Baseline Interpreter is enabled.
   SET_DEFAULT(baselineInterpreter, true);
 
+  // Whether to dump the Baseline Interpreter binary for AOT patching.
+  SET_DEFAULT(dumpBaselineInterpreter, false);
+
+  // Whether to use the AOT compiled Baseline Interpreter instead of generating at runtime.
+  SET_DEFAULT(useAOTBaseline, false);
+
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   // Whether the Portable Baseline Interpreter is enabled.
   SET_DEFAULT(portableBaselineInterpreter, false);

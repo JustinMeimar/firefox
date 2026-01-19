@@ -7,6 +7,7 @@
 #ifndef jit_BaselineCodeGen_h
 #define jit_BaselineCodeGen_h
 
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineFrameInfo.h"
 #include "jit/BytecodeAnalysis.h"
 #include "jit/CompileWrappers.h"
@@ -570,11 +571,14 @@ class BaselineInterpreterHandler {
 using BaselineInterpreterCodeGen = BaselineCodeGen<BaselineInterpreterHandler>;
 
 class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
+  friend class BaselineCodeGen<BaselineInterpreterHandler>;
   // Offsets of patchable call instructions for debugger breakpoints/stepping.
   Vector<uint32_t, 0, SystemAllocPolicy> debugTrapOffsets_;
 
   // Offsets of move instructions for tableswitch base address.
   Vector<CodeOffset, 0, SystemAllocPolicy> tableLabels_;
+
+  Vector<CodeOffset, 0, SystemAllocPolicy> opHandlerOffsets_;
 
   // Offset of the first tableswitch entry.
   uint32_t tableOffset_ = 0;
@@ -589,6 +593,37 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   // When the debugger is enabled, NOPs are patched to calls to this location.
   uint32_t debugTrapHandlerOffset_ = 0;
 
+  // Offset of the runtime pointer slot.
+  uint32_t compileRuntimePtrOffset_ = 0;
+
+#ifdef ENABLE_JS_AOT_ICS
+
+  /*
+   *
+   * */
+  struct BaselineAOTAccumulator {
+    uint32_t metadata[uint32_t(BaselineMetadataID::Count)] = {0};
+
+    Vector<uint32_t, 0, SystemAllocPolicy> debugInstr;
+    Vector<uint32_t, 0, SystemAllocPolicy> debugTraps;
+    Vector<uint32_t, 0, SystemAllocPolicy> codeCoverage;
+    Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy> icReturns;
+    Vector<PatchEntry, 0, SystemAllocPolicy> patches;
+
+    void set(BaselineMetadataID id, uint32_t val) {
+      metadata[uint32_t(id)] = val;
+    }
+
+    [[nodiscard]] bool addPatch(uint32_t offset, PatchHandlerID type,
+                                uint32_t payload = 0) {
+      PatchEntry entry{offset, type, payload};
+      return patches.append(entry);
+    }
+  } aotAccumulator_;
+
+  [[nodiscard]] bool serializeAOTManifest(JitCode* code);
+#endif
+
   BaselineInterpreterPerfSpewer perfSpewer_;
 
  public:
@@ -600,6 +635,10 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
  private:
   [[nodiscard]] bool emitInterpreterLoop();
   [[nodiscard]] bool emitDebugTrap();
+#ifdef ENABLE_JS_AOT_ICS
+  [[nodiscard]] bool loadAOTBaseline(JSContext* cx,
+                                     BaselineInterpreter& interpreter);
+#endif
 
   void emitOutOfLineCodeCoverageInstrumentation();
 };
