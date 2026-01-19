@@ -1354,13 +1354,11 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
     uint32_t count = getMeta(countId);
     if (count == 0) {
       return true;
-    }
-
-    using T = typename std::remove_reference_t<decltype(destVec)>::ElementType;
-  
+    } 
     // Todo: This may be an accounting bug if sizeof(T) varies for different
     // element types. It uses the sizeof current T to skip over previous
     // entries. What if the previous entries are larger than T?
+    using T = typename std::remove_reference_t<decltype(destVec)>::ElementType;
     size_t bytesNeeded = count * sizeof(T);
     size_t payloadOffset = payloadPtr - blob;
     if (payloadOffset + bytesNeeded > size - sizeof(BaselineAOTFooter)) {
@@ -1403,14 +1401,14 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
 
   fprintf(stderr, "INFO: Applying %zu patches...\n", patchEntries_.length());
 
-  PatchContext patchCtx;
-  patchCtx.codeBase = code_->raw();
-  patchCtx.opHandlerOffsets = opHandlerOffsets.begin();
-
+  PatchContext patchCtx(code_->raw(), opHandlerOffsets.begin());
   for (const auto& entry : patchEntries_) {
-    uintptr_t val = PatchRegistry::Resolve(entry.type, patchCtx, entry.payload);
-    uint8_t* target = patchCtx.codeBase + entry.offset;
-    *reinterpret_cast<uintptr_t*>(target) = val;
+    (void)entry;
+    // TODO: Apply the patch.
+    // uintptr_t val = resolvePatch(patchCtx, entry.opHandlerIdx);
+    // applyPatch(patchCtx, entry, val);
+    // uint8_t* target = patchCtx.codeBase + entry.offset;
+    // *reinterpret_cast<uintptr_t*>(target) = val;
   }
 
   fprintf(stderr, "INFO: Successfully applied all patches\n");

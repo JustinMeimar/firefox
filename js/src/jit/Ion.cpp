@@ -146,7 +146,7 @@ bool JitRuntime::initialize(JSContext* cx) {
       return false;
     }
   }
-
+ 
   if (!GenerateBaselineInterpreter(cx, baselineInterpreter_)) {
     return false;
   }

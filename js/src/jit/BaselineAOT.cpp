@@ -9,20 +9,26 @@
 
 namespace js::jit {
 
-static PatchResolverFn s_PatchHandlers[256] = { nullptr };
-
-void PatchRegistry::Register(PatchHandlerID id, PatchResolverFn fn) {
-    MOZ_ASSERT(id < 256);
-    s_PatchHandlers[id] = fn;
+void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry) {
+    uint8_t* target = ctx.codeBase + entry.handlerPtrOffset;
+    uintptr_t val = uintptr_t(ctx.codeBase + entry.handlerPtrOffset);
+    *reinterpret_cast<uintptr_t*>(target) = val;
 }
 
-uintptr_t PatchRegistry::Resolve(PatchHandlerID id, const PatchContext& ctx, uintptr_t payload) {
-    MOZ_ASSERT(s_PatchHandlers[id]);
-    return s_PatchHandlers[id](ctx, payload);
-}
+// static PatchResolverFn s_PatchHandlers[256] = { nullptr };
 
-void InitBaselinePatches() {
-    PatchRegistry::Register(DispatchTablePatch::ID, DispatchTablePatch::Resolve);
-}
+// void PatchRegistry::Register(PatchHandlerID id, PatchResolverFn fn) {
+//     MOZ_ASSERT(id < 256);
+//     s_PatchHandlers[id] = fn;
+// }
+//
+// uintptr_t PatchRegistry::Resolve(PatchHandlerID id, const PatchContext& ctx, uintptr_t payload) {
+//     MOZ_ASSERT(s_PatchHandlers[id]);
+//     return s_PatchHandlers[id](ctx, payload);
+// }
+
+// void InitBaselinePatches() {
+//     PatchRegistry::Register(DispatchTablePatch::ID, DispatchTablePatch::Resolve);
+// }
 
 }  // namespace js::jit
