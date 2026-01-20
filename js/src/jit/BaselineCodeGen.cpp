@@ -891,12 +891,11 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
   if (isAOTCompile_) {
     // In AOT mode, we need to load the VMWrapper trampoline dynamically at
     // runtime since trampoline addresses vary between runs.
-    // All VM call arguments are already on the stack, so we can use scratch regs.
-    AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
-    MOZ_ASSERT(!regs.has(FramePointer));
-    Register scratch1 = regs.takeAny();
-    Register scratch2 = regs.takeAny();
-    Register indexReg = regs.takeAny();
+    // All VM call arguments are already on the stack, so we can use R0/R1/R2.
+    // These are safe because prepareVMCall() already synced the frame stack.
+    Register scratch1 = R0.scratchReg();
+    Register scratch2 = R1.scratchReg();
+    Register indexReg = R2.scratchReg();
 
     // Load the VMFunctionId into a register for indexing.
     masm.move32(Imm32(size_t(id)), indexReg);
@@ -7445,11 +7444,12 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   uint8_t* codeStart = code->raw();
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
-  binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
-  
+  binFile.write(reinterpret_cast<const char*>(codeStart), codeSize); 
   MOZ_ASSERT(binFile && "Failed to write machine code.");
 
+#if 0
   fprintf(stderr, "INFO: Wrote %zu bytes of machine code\n", codeSize);
+#endif
 
   // 3. Record manifest offset (before writing manifest)
   size_t manifestOffset = binFile.tellp();
@@ -7473,10 +7473,12 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   aotAccumulator_.set(BaselineMetadataID::PatchCount, aotAccumulator_.patches.length());
   aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount, opHandlerOffsets_.length());
 
+#if 0
   fprintf(stderr, "INFO: Storing dispatch table offset: %u\n", tableOffset_);
   fprintf(stderr, "INFO: Storing headerSize=%zu in AOT manifest\n", code->headerSize());
   fprintf(stderr, "INFO: Serializing %zu patch entries\n",
           aotAccumulator_.patches.length());
+#endif
 
   // Write manifest metadata array (now fully populated)
   binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),
@@ -7522,9 +7524,11 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     binFile.write(reinterpret_cast<const char*>(aotAccumulator_.patches.begin()),
                   aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
     MOZ_ASSERT(binFile && "Failed to write patches."); 
+#if 0
     fprintf(stderr, "INFO: Wrote %zu patch entries (%zu bytes)\n",
             aotAccumulator_.patches.length(),
             aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
+#endif
   }
   
 
@@ -7544,6 +7548,7 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   MOZ_ASSERT(binFile && "Failed to write footer.");  
   binFile.close();
   
+#if 0
   {
     // DEBUG
     size_t totalSize = manifestOffset + sizeof(aotAccumulator_.metadata) +
@@ -7566,6 +7571,7 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     fprintf(stderr, "  IC returns: %u entries\n",
             aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)]);
   }
+#endif
 
   return true;
 }
@@ -7579,8 +7585,10 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
   size_t blobSize = GetAOTBaselineSize();
   MOZ_ASSERT(blobSize != 0, "AOT blob size is 0!");
   
+#if 0
   fprintf(stderr, "DEBUG: AOT Baseline blob: start=%p, size=%zu\n",
     (void*)aotBlob, blobSize);
+#endif
 
   auto* footer = reinterpret_cast<BaselineAOTFooter*>(
     aotBlob + blobSize - sizeof(BaselineAOTFooter));
@@ -7593,7 +7601,10 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
   // Read headerSize from manifest first to allocate correctly
   auto* manifest = reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
   uint32_t headerSize = manifest->metadata[uint32_t(BaselineMetadataID::HeaderSize)];
+  
+#if 0
   fprintf(stderr, "INFO: Using headerSize=%u from AOT manifest\n", headerSize);
+#endif
 
   size_t bytesNeeded = codeSize + headerSize;
   ExecutablePool* pool;
@@ -7648,7 +7659,7 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
 
     code->setHasBytecodeMap();
   }
-  fprintf(stderr, "INFO: Registered BaselineInterpreter with JitcodeGlobalTable\n");
+  // fprintf(stderr, "INFO: Registered BaselineInterpreter with JitcodeGlobalTable\n");
 
   // Enable profiler and coverage instrumentation if needed
   if (cx->runtime()->geckoProfiler().enabled()) {
@@ -7659,7 +7670,7 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
     interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
   }
 
-  fprintf(stderr, "SUCCESS: AOT Baseline Interpreter loaded\n");
+  // fprintf(stderr, "SUCCESS: AOT Baseline Interpreter loaded\n");
   return true;
 }
 #endif

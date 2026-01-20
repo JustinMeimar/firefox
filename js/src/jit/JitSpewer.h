@@ -82,6 +82,8 @@ namespace jit {
                                            \
   /* Aborting Script Compilation. */       \
   _(BaselineAbort)                         \
+  /* Basline AOT compilation. */           \
+  _(BaselineAOT)                           \
   /* Script Compilation. */                \
   _(BaselineScripts)                       \
   /* Detailed op-specific spew. */         \

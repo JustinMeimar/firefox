@@ -1344,10 +1344,10 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   callVMOffsets_.debugAfterYieldOffset = getMeta(BaselineMetadataID::CallVMDebugAfterYield);
   
   uint32_t dispatchTableOffset = getMeta(BaselineMetadataID::DispatchTableOffset);
-  fprintf(stderr, "INFO: Dispatch table offset retreived as: %u\n", dispatchTableOffset);
-  fprintf(stderr, "INFO: Loaded scalar offsets from AOT manifest\n");
-  fprintf(stderr, "  interpretOp: %u\n", interpretOpOffset_);
-  fprintf(stderr, "  bailoutPrologue: %u\n", bailoutPrologueOffset_);
+  // fprintf(stderr, "INFO: Dispatch table offset retreived as: %u\n", dispatchTableOffset);
+  // fprintf(stderr, "INFO: Loaded scalar offsets from AOT manifest\n");
+  // fprintf(stderr, "  interpretOp: %u\n", interpretOpOffset_);
+  // fprintf(stderr, "  bailoutPrologue: %u\n", bailoutPrologueOffset_);
 
   uint8_t* payloadPtr = reinterpret_cast<uint8_t*>(manifest) +
                         sizeof(manifest->metadata);
@@ -1393,21 +1393,20 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
     return false;
   }
 
-  fprintf(stderr, "INFO: AOT manifest loaded successfully\n");
-  fprintf(stderr, "  Debug instrumentation: %zu entries\n", debugInstrumentationOffsets_.length());
-  fprintf(stderr, "  Debug traps: %zu entries\n", debugTrapOffsets_.length());
-  fprintf(stderr, "  Code coverage: %zu entries\n", codeCoverageOffsets_.length());
-  fprintf(stderr, "  IC returns: %zu entries\n", icReturnOffsets_.length());
-  fprintf(stderr, "  Patches: %zu entries\n", patchEntries_.length());
-  fprintf(stderr, "  OpHandler offsets: %zu entries\n", opHandlerOffsets.length());
-
-  fprintf(stderr, "INFO: Applying %zu dispatch table patches...\n", patchEntries_.length());
+  // fprintf(stderr, "INFO: AOT manifest loaded successfully\n");
+  // fprintf(stderr, "  Debug instrumentation: %zu entries\n", debugInstrumentationOffsets_.length());
+  // fprintf(stderr, "  Debug traps: %zu entries\n", debugTrapOffsets_.length());
+  // fprintf(stderr, "  Code coverage: %zu entries\n", codeCoverageOffsets_.length());
+  // fprintf(stderr, "  IC returns: %zu entries\n", icReturnOffsets_.length());
+  // fprintf(stderr, "  Patches: %zu entries\n", patchEntries_.length());
+  // fprintf(stderr, "  OpHandler offsets: %zu entries\n", opHandlerOffsets.length());
+  // fprintf(stderr, "INFO: Applying %zu dispatch table patches...\n", patchEntries_.length());
   PatchContext patchCtx(code_->raw(), dispatchTableOffset);
   for (const auto& entry : patchEntries_) {
     applyPatch(patchCtx, entry);
   }
 
-  fprintf(stderr, "INFO: Successfully applied all %zu patches\n", patchEntries_.length());
+  // fprintf(stderr, "INFO: Successfully applied all %zu patches\n", patchEntries_.length());
   return true;
 }
 #endif
