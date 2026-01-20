@@ -63,11 +63,13 @@ enum class BaselineMetadataID : uint32_t {
 
 class CompileRuntime;
 
-// In order to perform the patch, the AOT loader must saturate the
-// pointer to the AOT code.
+// In order to perform the patch, the AOT loader must provide the
+// code base address and the dispatch table offset.
 struct PatchContext {
     uint8_t* codeBase;
-    PatchContext(uint8_t* codeBase_) : codeBase(codeBase_){}
+    uint32_t dispatchTableOffset;
+    PatchContext(uint8_t* codeBase_, uint32_t dispatchTableOffset_)
+      : codeBase(codeBase_), dispatchTableOffset(dispatchTableOffset_) {}
 };
 
 // NOTE: this is just data that is already in the BaselineMetaData, so
@@ -75,17 +77,17 @@ struct PatchContext {
 // we perform are for the dispatch table. We will confirm that is the case
 // however before dispensing with the patch infrastructure.
 
-struct alignas(8) DispatchTablePatch { 
+struct alignas(8) DispatchTablePatch {
     /// Offset from the blob to the start of the opcode handler.
     /// (What the patch points to.)
-    uint32_t handlerOffset;  
+    uint32_t handlerOffset;
 
-    /// Offset from the blob to the dipatch table entry.
-    /// (The target of the patch itself).
-    uint32_t handlerPtrOffset; 
+    /// Index into the dispatch table (0 to JSOP_LIMIT-1).
+    /// The actual offset is computed as: dispatchTableOffset + (dispatchTableIndex * 8)
+    uint32_t dispatchTableIndex;
 
-    DispatchTablePatch(uint32_t handlerOffset_, uint32_t handlerPtrOffset_)
-      : handlerOffset(handlerOffset_), handlerPtrOffset(handlerPtrOffset_) {}
+    DispatchTablePatch(uint32_t handlerOffset_, uint32_t dispatchTableIndex_)
+      : handlerOffset(handlerOffset_), dispatchTableIndex(dispatchTableIndex_) {}
 };
 
 void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry);

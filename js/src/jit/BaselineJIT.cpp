@@ -1342,7 +1342,9 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   callVMOffsets_.debugPrologueOffset = getMeta(BaselineMetadataID::CallVMDebugPrologue);
   callVMOffsets_.debugEpilogueOffset = getMeta(BaselineMetadataID::CallVMDebugEpilogue);
   callVMOffsets_.debugAfterYieldOffset = getMeta(BaselineMetadataID::CallVMDebugAfterYield);
-
+  
+  uint32_t dispatchTableOffset = getMeta(BaselineMetadataID::DispatchTableOffset);
+  fprintf(stderr, "INFO: Dispatch table offset retreived as: %u\n", dispatchTableOffset);
   fprintf(stderr, "INFO: Loaded scalar offsets from AOT manifest\n");
   fprintf(stderr, "  interpretOp: %u\n", interpretOpOffset_);
   fprintf(stderr, "  bailoutPrologue: %u\n", bailoutPrologueOffset_);
@@ -1400,7 +1402,7 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   fprintf(stderr, "  OpHandler offsets: %zu entries\n", opHandlerOffsets.length());
 
   fprintf(stderr, "INFO: Applying %zu dispatch table patches...\n", patchEntries_.length());
-  PatchContext patchCtx(code_->raw());
+  PatchContext patchCtx(code_->raw(), dispatchTableOffset);
   for (const auto& entry : patchEntries_) {
     applyPatch(patchCtx, entry);
   }
