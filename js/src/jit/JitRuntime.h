@@ -426,6 +426,10 @@ class JitRuntime {
     return offsetof(JitRuntime, trampolineCode_);
   }
 
+  static constexpr size_t offsetOfFunctionWrapperOffsets() {
+    return offsetof(JitRuntime, functionWrapperOffsets_);
+  }
+
   static constexpr size_t offsetOfDoubleToInt32ValueStubOffset() {
     return offsetof(JitRuntime, doubleToInt32ValueStubOffset_);
   }
