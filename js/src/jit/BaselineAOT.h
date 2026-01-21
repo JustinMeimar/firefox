@@ -8,7 +8,6 @@
 #define jit_BaselineAOT_h
 
 #include <cstdint>
-#include "CompileWrappers.h"
 
 namespace js::jit {
 
@@ -25,18 +24,9 @@ inline std::size_t GetAOTBaselineSize() {
   return baseline_blob_end - baseline_blob_start;
 }
 
-/* This baseline metadata is used at load time to reconstruct the
+/* NOTE(justin): Baseline metadata is used at load time to reconstruct the
  * BaslineInterpreter class, which needs all the offsets as data members.
- * I think there must be a more elegant way to encode this information,
- * currently we lay out the counts and vectors in a sensitive order:
- *
- * ----------------------------------
- *  VEC_1_COUNT, VEC_2_COUNT, ....
- * ----------------------------------
- *  VEC_1_1, ... VEC_1_N
- *  VEC_2_1, ... VEC_2_M
- *  ...
- * ----------------------------------
+ * There must be a more elegant way to encode this information.
  * */
 enum class BaselineMetadataID : uint32_t {
   InterpretOp = 0,
@@ -50,7 +40,6 @@ enum class BaselineMetadataID : uint32_t {
   CallVMDebugEpilogue,
   CallVMDebugAfterYield,
   HeaderSize,
-
   // Counts for vectors
   DebugInstrumentationCount,
   DebugTrapCount,
@@ -61,8 +50,6 @@ enum class BaselineMetadataID : uint32_t {
   Count
 };
 
-class CompileRuntime;
-
 // In order to perform the patch, the AOT loader must provide the
 // code base address and the dispatch table offset.
 struct PatchContext {
@@ -72,20 +59,12 @@ struct PatchContext {
       : codeBase(codeBase_), dispatchTableOffset(dispatchTableOffset_) {}
 };
 
-// NOTE: this is just data that is already in the BaselineMetaData, so
-// in theory we do not need dedicated patch entries if the only patches
-// we perform are for the dispatch table. We will confirm that is the case
-// however before dispensing with the patch infrastructure.
-
 struct alignas(8) DispatchTablePatch {
-    /// Offset from the blob to the start of the opcode handler.
-    /// (What the patch points to.)
+    /// Offset from the blob to the start of the opcode handler (what the
+    /// patch'ed pointer points to.)
     uint32_t handlerOffset;
-
-    /// Index into the dispatch table (0 to JSOP_LIMIT-1).
-    /// The actual offset is computed as: dispatchTableOffset + (dispatchTableIndex * 8)
+    /// Index into the dispatch table 
     uint32_t dispatchTableIndex;
-
     DispatchTablePatch(uint32_t handlerOffset_, uint32_t dispatchTableIndex_)
       : handlerOffset(handlerOffset_), dispatchTableIndex(dispatchTableIndex_) {}
 };
@@ -114,30 +93,12 @@ struct alignas(4) ICReturnOffsetEntry {
 };
 
 static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
-static_assert(sizeof(BaselineManifest) ==
-    static_cast<uint32_t>(BaselineMetadataID::Count) * 4, "Manifest must be 72 bytes (18 fields × 4)");
+static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>
+    (BaselineMetadataID::Count) * 4, "Manifest must be 72 bytes (18 fields × 4)");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
 static_assert(sizeof(DispatchTablePatch) == 8, "PatchEntry must be 16 bytes");
 
-// using PatchResolverFn = uintptr_t (*)(const PatchContext& ctx, uintptr_t payload);
-// class PatchRegistry {
-// public:
-//     static void Register(PatchResolverFn fn);
-//     static uintptr_t Resolve(const PatchContext& ctx, uintptr_t payload);
-// };
-
-// struct DispatchTablePatch {
-//     // static constexpr PatchHandlerID ID = 102;
-//     static uintptr_t Resolve(const PatchContext& ctx, uintptr_t payload) {
-//         uint32_t offset = ctx.opHandlerOffsets[payload];
-//         return uintptr_t(ctx.codeBase + offset);
-//     }
-// };
-
-// TODO: These inits can be macro'd out once stable.
-
-
 }  // namespace js::jit
 
-
 #endif  // jit_BaselineAOT_h
+

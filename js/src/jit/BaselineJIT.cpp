@@ -1331,6 +1331,8 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   auto getMeta = [&](BaselineMetadataID id) -> uint32_t {
     return manifest->metadata[uint32_t(id)];
   };
+  
+  // Initialize all the necessary members of the `BaselineInterpreter` class.
   code_ = code;
   interpretOpOffset_ = getMeta(BaselineMetadataID::InterpretOp);
   interpretOpNoDebugTrapOffset_ = getMeta(BaselineMetadataID::InterpretOpNoDebugTrap);
@@ -1338,28 +1340,22 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   profilerEnterToggleOffset_ = getMeta(BaselineMetadataID::ProfilerEnterToggle);
   profilerExitToggleOffset_ = getMeta(BaselineMetadataID::ProfilerExitToggle);
   debugTrapHandlerOffset_ = getMeta(BaselineMetadataID::DebugTrapHandler);
-
   callVMOffsets_.debugPrologueOffset = getMeta(BaselineMetadataID::CallVMDebugPrologue);
   callVMOffsets_.debugEpilogueOffset = getMeta(BaselineMetadataID::CallVMDebugEpilogue);
   callVMOffsets_.debugAfterYieldOffset = getMeta(BaselineMetadataID::CallVMDebugAfterYield);
   
   uint32_t dispatchTableOffset = getMeta(BaselineMetadataID::DispatchTableOffset);
-  // fprintf(stderr, "INFO: Dispatch table offset retreived as: %u\n", dispatchTableOffset);
-  // fprintf(stderr, "INFO: Loaded scalar offsets from AOT manifest\n");
-  // fprintf(stderr, "  interpretOp: %u\n", interpretOpOffset_);
-  // fprintf(stderr, "  bailoutPrologue: %u\n", bailoutPrologueOffset_);
-
   uint8_t* payloadPtr = reinterpret_cast<uint8_t*>(manifest) +
                         sizeof(manifest->metadata);
-
+  
+  // Baseline metadata which is serialized into arrays must be deserailzed into
+  // `mozilla::Vector` types as this class expects.
   auto loadVec = [&](auto& destVec, BaselineMetadataID countId) -> bool {
     uint32_t count = getMeta(countId);
     if (count == 0) {
       return true;
     } 
-    // Todo: This may be an accounting bug if sizeof(T) varies for different
-    // element types. It uses the sizeof current T to skip over previous
-    // entries. What if the previous entries are larger than T?
+    
     using T = typename std::remove_reference_t<decltype(destVec)>::ElementType;
     size_t bytesNeeded = count * sizeof(T);
     size_t payloadOffset = payloadPtr - blob;
@@ -1378,29 +1374,18 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
     return true;
   };
 
-  // Define vector to hold loaded offsets
-  Vector<uint32_t, 0, SystemAllocPolicy> opHandlerOffsets;
-
-  // Load each vector in order
+  // Load each vector in order and initialize the respective class member.
   if (!loadVec(debugInstrumentationOffsets_, BaselineMetadataID::DebugInstrumentationCount) ||
       !loadVec(debugTrapOffsets_, BaselineMetadataID::DebugTrapCount) ||
       !loadVec(codeCoverageOffsets_, BaselineMetadataID::CodeCoverageCount) ||
       !loadVec(icReturnOffsets_, BaselineMetadataID::ICReturnCount) ||
-      !loadVec(patchEntries_, BaselineMetadataID::PatchCount) ||
-      !loadVec(opHandlerOffsets, BaselineMetadataID::OpHandlerOffsetCount)
+      !loadVec(patchEntries_, BaselineMetadataID::PatchCount)
   ) {
     fprintf(stderr, "ERROR: Failed to load AOT vectors\n");
     return false;
   }
-
-  // fprintf(stderr, "INFO: AOT manifest loaded successfully\n");
-  // fprintf(stderr, "  Debug instrumentation: %zu entries\n", debugInstrumentationOffsets_.length());
-  // fprintf(stderr, "  Debug traps: %zu entries\n", debugTrapOffsets_.length());
-  // fprintf(stderr, "  Code coverage: %zu entries\n", codeCoverageOffsets_.length());
-  // fprintf(stderr, "  IC returns: %zu entries\n", icReturnOffsets_.length());
-  // fprintf(stderr, "  Patches: %zu entries\n", patchEntries_.length());
-  // fprintf(stderr, "  OpHandler offsets: %zu entries\n", opHandlerOffsets.length());
-  // fprintf(stderr, "INFO: Applying %zu dispatch table patches...\n", patchEntries_.length());
+   
+  JitSpew(JitSpew_BaselineAOT, "Applying %zu dispatch table patches", patchEntries_.length());
   PatchContext patchCtx(code_->raw(), dispatchTableOffset);
   for (const auto& entry : patchEntries_) {
     applyPatch(patchCtx, entry);
