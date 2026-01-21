@@ -892,42 +892,32 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
     // In AOT mode, we need to load the VMWrapper trampoline dynamically at
     // runtime since trampoline addresses vary between runs.
     // All VM call arguments are already on the stack, so we can use R0/R1/R2.
-    // These are safe because prepareVMCall() already synced the frame stack.
-    Register scratch1 = R0.scratchReg();
-    Register scratch2 = R1.scratchReg();
-    Register indexReg = R2.scratchReg();
-
+    Register scratch0 = R0.scratchReg();
+    Register scratch1 = R1.scratchReg();
+    Register scratch2 = R2.scratchReg();
     // Load the VMFunctionId into a register for indexing.
-    masm.move32(Imm32(size_t(id)), indexReg);
-
+    masm.move32(Imm32(size_t(id)), scratch2);
     // Load runtime from zone.
-    masm.loadRuntime(scratch1);
-
+    masm.loadRuntime(scratch0);
     // Load jitRuntime from runtime.
-    masm.loadPtr(Address(scratch1, JSRuntime::offsetOfJitRuntime()), scratch1);
-
+    masm.loadPtr(Address(scratch0, JSRuntime::offsetOfJitRuntime()), scratch0);
     // Load trampolineCode_ pointer into scratch2.
-    masm.loadPtr(Address(scratch1, JitRuntime::offsetOfTrampolineCode()),
-                 scratch2);
-
+    masm.loadPtr(Address(scratch0, JitRuntime::offsetOfTrampolineCode()),
+                 scratch1);
     // functionWrapperOffsets_ is a Vector<uint32_t>. We need to load mBegin.
     // First compute the address of the Vector object.
     masm.computeEffectiveAddress(
-        Address(scratch1, JitRuntime::offsetOfFunctionWrapperOffsets()),
-        scratch1);
+        Address(scratch0, JitRuntime::offsetOfFunctionWrapperOffsets()),
+        scratch0);
     // Then load mBegin (first field at offset 0).
-    masm.loadPtr(Address(scratch1, 0), scratch1);
-
-    // Load the offset at index [id]. Since functionWrapperOffsets_ is uint32_t[],
-    // use TimesFour scale.
-    masm.load32(BaseIndex(scratch1, indexReg, Scale::TimesFour), scratch1);
-
+    masm.loadPtr(Address(scratch0, 0), scratch0);
+    // Load the offset at index [id] from uint32_t array. 
+    masm.load32(BaseIndex(scratch0, scratch2, Scale::TimesFour), scratch0);
     // Load trampolineCode_->raw() and add offset to get final address.
-    masm.loadPtr(Address(scratch2, JitCode::offsetOfCode()), scratch2);
-    masm.addPtr(scratch1, scratch2);
-
+    masm.loadPtr(Address(scratch1, JitCode::offsetOfCode()), scratch1);
+    masm.addPtr(scratch0, scratch1);
     // Call through register.
-    callOffset = masm.call(scratch2).offset();
+    callOffset = masm.call(scratch1).offset();
   } else
 #endif
   {
@@ -961,29 +951,28 @@ bool BaselineCodeGen<Handler>::emitStackCheck() {
   if (isAOTCompile_) {
     // For AOT baseline, we can't use absolute addresses. Instead, load the
     // jitStackLimit dynamically from the runtime via the zone register.
-    Register runtimeReg = R2.scratchReg();
-    Register stackLimitReg = R1.scratchReg();
-
+    Register scratch1 = R2.scratchReg();
+    Register scratch2 = R1.scratchReg();
     // Load runtime from zone (zone is already in zoneReg_).
-    masm.loadRuntime(runtimeReg);
-
+    masm.loadRuntime(scratch1);
     // Load mainContext from runtime.
-    masm.loadPtr(Address(runtimeReg, JSRuntime::offsetOfMainContext()),
-                 runtimeReg);
-
+    masm.loadPtr(Address(scratch1, JSRuntime::offsetOfMainContext()),
+                 scratch1);
     // Load jitStackLimit from context.
-    masm.loadPtr(Address(runtimeReg, offsetof(JSContext, jitStackLimit)),
-                 stackLimitReg);
+    masm.loadPtr(Address(scratch1, offsetof(JSContext, jitStackLimit)),
+                 scratch2);
 
+    // NOTE(Justin): The remaining code is somewhat duplicated with the
+    // prior non-AOT impl of stack check. Could potentially factor this code.
     if (handler.mustIncludeSlotsInStackCheck()) {
       // Subtract the size of script->nslots() first.
-      Register scratch = R0.scratchReg();
-      masm.moveStackPtrTo(scratch);
-      subtractScriptSlotsSize(scratch, runtimeReg);  // Use runtimeReg as temp
-      masm.branchPtr(Assembler::BelowOrEqual, stackLimitReg, scratch,
+      Register scratch0 = R0.scratchReg();
+      masm.moveStackPtrTo(scratch0);
+      subtractScriptSlotsSize(scratch0, scratch1);
+      masm.branchPtr(Assembler::BelowOrEqual, scratch2, scratch0,
                      &skipCall);
     } else {
-      masm.branchStackPtrRhs(Assembler::BelowOrEqual, stackLimitReg, &skipCall);
+      masm.branchStackPtrRhs(Assembler::BelowOrEqual, scratch2, &skipCall);
     }
   } else
 #endif
@@ -995,8 +984,8 @@ bool BaselineCodeGen<Handler>::emitStackCheck() {
       masm.moveStackPtrTo(scratch);
       subtractScriptSlotsSize(scratch, R2.scratchReg());
       masm.branchPtr(Assembler::BelowOrEqual,
-                     AbsoluteAddress(runtime->addressOfJitStackLimit()), scratch,
-                     &skipCall);
+                     AbsoluteAddress(runtime->addressOfJitStackLimit()),
+                     scratch, &skipCall);
     } else {
       masm.branchStackPtrRhs(Assembler::BelowOrEqual,
                              AbsoluteAddress(runtime->addressOfJitStackLimit()),
@@ -1829,7 +1818,7 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
       AbsoluteAddress addressOfEnabled(
           runtime->geckoProfiler().addressOfEnabled());
       masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
-      //MARK_RUNTIME: This looks like one to catch.
+      // MARK_RUNTIME: This looks like one to catch.
       masm.loadPtr(AbsoluteAddress(runtime->addressOfJitActivation()),
                    scratchReg);
       masm.loadPtr(
@@ -2043,7 +2032,7 @@ bool BaselineCompiler::emitDebugTrap() {
                  DebugAPI::hasBreakpointsAt(script, handler.pc());
 
   // Emit patchable call to debug trap handler.
-  // MARK_RUNTIME 
+  // MARK_RUNTIME
   JitCode* handlerCode =
       runtime->jitRuntime()->debugTrapHandler(DebugTrapHandlerKind::Compiler);
   CodeOffset nativeOffset = masm.toggledCall(handlerCode, enabled);
@@ -2900,13 +2889,10 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
 #ifdef ENABLE_JS_AOT_ICS
   // Load runtime from zone (zone is already in zoneReg_).
   masm.loadRuntime(scratch2);
-
   // Compute address of wellKnownSymbols
   masm.loadPtr(Address(scratch2, offsetof(JSRuntime, wellKnownSymbols)),
                scratch2);
 #else
-  // MARK_RUNTIME: The initially observed runtime pointer which varies between
-  // invocations.
   masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
 #endif
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
@@ -5875,7 +5861,6 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
   // Note: this stub may clobber scratch1.
 #ifdef ENABLE_JS_AOT_ICS
   // For AOT code, compute the stub address dynamically through zone->runtime.
-  // We need scratch1 and scratch2 temporarily.
   Register jitRuntimeReg = scratch1;
   Register stubReg = scratch2;
   // Load runtime from zone
@@ -6594,19 +6579,16 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     Label skip;
 
 #ifdef ENABLE_JS_AOT_ICS
-    // For AOT code, compute the profiler enabled flag address dynamically.
+    // NOTE(Justin): This is not a critical path indirection, but the offest
+    // for the profiler is already exposed so this case is quite simple. 
     Register runtimeReg = scratch1;
     masm.loadRuntime(runtimeReg);
-    // Compute address of geckoProfiler_.enabled_
-    // geckoProfiler_ is inline in JSRuntime, so we compute:
-    // &runtime->geckoProfiler_.enabled_
     masm.branch32(
         Assembler::Equal,
         Address(runtimeReg, JSRuntime::offsetOfGeckoProfiler() +
                                 GeckoProfilerRuntime::offsetOfEnabled()),
         Imm32(0), &skip);
 #else
-    // MARK_RUNTIME: possibly lower priority because of profiling.
     AbsoluteAddress addressOfEnabled(
         runtime->geckoProfiler().addressOfEnabled());
     masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skip);
@@ -7035,14 +7017,14 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
 #ifdef ENABLE_JS_AOT_ICS
   // For AOT baseline interpreter, load the zone pointer into a pinned register
   // so we can use it for runtime-dependent operations like stack checks.
-  // We use ABINonVolatileReg (r13 on x64) to avoid conflicts with R0/R1/R2
+  // We use `ABINonVolatileReg` to avoid conflicts with R0/R1/R2
   // scratch registers used throughout the baseline interpreter.
+  //
+  // NOTE(Justin): Revisit register allocation to understand implications of
+  // using `ABINonVolatileReg`.
   if (isAOTCompile_) {
     masm.setZoneReg(ABINonVolatileReg);
     masm.loadBaselineZone();
-    // Note: masm.printf uses callWithABI which can trigger AutoUnsafeCallWithABI
-    // assertions in the prologue. Avoid using it here.
-    // masm.printf("In the baseline interpreter!\n");
   }
 #endif
 
@@ -7322,7 +7304,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
       return false;                               \
     }                                             \
     handler.resetCurrentOp();                     \
-  } 
+  }
   FOR_EACH_OPCODE(EMIT_OP)
 #undef EMIT_OP
 
@@ -7368,7 +7350,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 
 #ifdef ENABLE_JS_AOT_ICS
   MOZ_ASSERT(opHandlerOffsets_.resizeUninitialized(JSOP_LIMIT));
-#endif 
+#endif
 
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
     const Label& opLabel = opLabels[i];
@@ -7383,7 +7365,8 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 
     bool patchResult = aotAccumulator_.addPatch(std::move(patch));
     MOZ_ASSERT(patchResult, "Failed to add dispatch table patch for op");
-    MOZ_ASSERT(opHandlerOffsets_.append(handlerOffset) && "handler Offset recorded");
+    MOZ_ASSERT(opHandlerOffsets_.append(handlerOffset) &&
+               "handler Offset recorded");
 #endif
     masm.writeCodePointer(&cl);
     cl.target()->bind(opLabel.offset());
@@ -7435,16 +7418,15 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 
 #ifdef ENABLE_JS_AOT_ICS
 bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
-  
   std::ofstream binFile("./baseline_interpreter.bin",
                         std::ios::binary | std::ios::trunc);
-  
+
   MOZ_ASSERT(binFile && "Failed to open AOT dump file.");
 
   uint8_t* codeStart = code->raw();
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
-  binFile.write(reinterpret_cast<const char*>(codeStart), codeSize); 
+  binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
   MOZ_ASSERT(binFile && "Failed to write machine code.");
 
   JitSpew(JitSpew_BaselineAOT, "Wrote %zu bytes of machine code", codeSize);
@@ -7452,28 +7434,45 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   // 3. Record manifest offset (before writing manifest)
   size_t manifestOffset = binFile.tellp();
 
-  // 4. There is a way to macro out this ugliness once AOT is actually working. 
+  // 4. There is a way to macro out this ugliness once AOT is actually working.
   aotAccumulator_.set(BaselineMetadataID::InterpretOp, interpretOpOffset_);
-  aotAccumulator_.set(BaselineMetadataID::InterpretOpNoDebugTrap, interpretOpNoDebugTrapOffset_);
-  aotAccumulator_.set(BaselineMetadataID::BailoutPrologue, bailoutPrologueOffset_.offset());
-  aotAccumulator_.set(BaselineMetadataID::DebugTrapHandler, debugTrapHandlerOffset_);
+  aotAccumulator_.set(BaselineMetadataID::InterpretOpNoDebugTrap,
+                      interpretOpNoDebugTrapOffset_);
+  aotAccumulator_.set(BaselineMetadataID::BailoutPrologue,
+                      bailoutPrologueOffset_.offset());
+  aotAccumulator_.set(BaselineMetadataID::DebugTrapHandler,
+                      debugTrapHandlerOffset_);
   aotAccumulator_.set(BaselineMetadataID::DispatchTableOffset, tableOffset_);
-  aotAccumulator_.set(BaselineMetadataID::ProfilerEnterToggle, profilerEnterFrameToggleOffset_.offset());
-  aotAccumulator_.set(BaselineMetadataID::ProfilerExitToggle, profilerExitFrameToggleOffset_.offset());
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugPrologue, handler.callVMOffsets().debugPrologueOffset);
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugEpilogue, handler.callVMOffsets().debugEpilogueOffset);
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield, handler.callVMOffsets().debugAfterYieldOffset);
+  aotAccumulator_.set(BaselineMetadataID::ProfilerEnterToggle,
+                      profilerEnterFrameToggleOffset_.offset());
+  aotAccumulator_.set(BaselineMetadataID::ProfilerExitToggle,
+                      profilerExitFrameToggleOffset_.offset());
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugPrologue,
+                      handler.callVMOffsets().debugPrologueOffset);
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugEpilogue,
+                      handler.callVMOffsets().debugEpilogueOffset);
+  aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield,
+                      handler.callVMOffsets().debugAfterYieldOffset);
   aotAccumulator_.set(BaselineMetadataID::HeaderSize, code->headerSize());
-  aotAccumulator_.set(BaselineMetadataID::DebugInstrumentationCount, handler.debugInstrumentationOffsets().length());
-  aotAccumulator_.set(BaselineMetadataID::DebugTrapCount, aotAccumulator_.debugTraps.length());
-  aotAccumulator_.set(BaselineMetadataID::CodeCoverageCount, handler.codeCoverageOffsets().length());
-  aotAccumulator_.set(BaselineMetadataID::ICReturnCount, handler.icReturnOffsets().length());
-  aotAccumulator_.set(BaselineMetadataID::PatchCount, aotAccumulator_.patches.length());
-  aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount, opHandlerOffsets_.length());
+  aotAccumulator_.set(BaselineMetadataID::DebugInstrumentationCount,
+                      handler.debugInstrumentationOffsets().length());
+  aotAccumulator_.set(BaselineMetadataID::DebugTrapCount,
+                      aotAccumulator_.debugTraps.length());
+  aotAccumulator_.set(BaselineMetadataID::CodeCoverageCount,
+                      handler.codeCoverageOffsets().length());
+  aotAccumulator_.set(BaselineMetadataID::ICReturnCount,
+                      handler.icReturnOffsets().length());
+  aotAccumulator_.set(BaselineMetadataID::PatchCount,
+                      aotAccumulator_.patches.length());
+  aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount,
+                      opHandlerOffsets_.length());
 
-  JitSpew(JitSpew_BaselineAOT, "Storing dispatch table offset: %u", tableOffset_);
-  JitSpew(JitSpew_BaselineAOT, "Storing headerSize=%zu in AOT manifest", code->headerSize());
-  JitSpew(JitSpew_BaselineAOT, "Serializing %zu patch entries", aotAccumulator_.patches.length());
+  JitSpew(JitSpew_BaselineAOT, "Storing dispatch table offset: %u",
+          tableOffset_);
+  JitSpew(JitSpew_BaselineAOT, "Storing headerSize=%zu in AOT manifest",
+          code->headerSize());
+  JitSpew(JitSpew_BaselineAOT, "Serializing %zu patch entries",
+          aotAccumulator_.patches.length());
 
   // Write manifest metadata array (now fully populated)
   binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),
@@ -7490,8 +7489,9 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
 
   // Debug trap offsets
   if (aotAccumulator_.debugTraps.length() > 0) {
-    binFile.write(reinterpret_cast<const char*>(aotAccumulator_.debugTraps.begin()),
-                  aotAccumulator_.debugTraps.length() * sizeof(uint32_t)); 
+    binFile.write(
+        reinterpret_cast<const char*>(aotAccumulator_.debugTraps.begin()),
+        aotAccumulator_.debugTraps.length() * sizeof(uint32_t));
     MOZ_ASSERT(binFile && "Failed to write debug trap offsets.");
   }
 
@@ -7499,10 +7499,9 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   const auto& codeCov = handler.codeCoverageOffsets();
   if (codeCov.length() > 0) {
     binFile.write(reinterpret_cast<const char*>(codeCov.begin()),
-                  codeCov.length() * sizeof(uint32_t)); 
+                  codeCov.length() * sizeof(uint32_t));
     MOZ_ASSERT(binFile && "Failed to write code coverage offsets.");
   }
-
 
   // IC return offsets (need to convert to ICReturnOffsetEntry format)
   const auto& icReturns = handler.icReturnOffsets();
@@ -7510,20 +7509,20 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     ICReturnOffsetEntry entry;
     entry.offset = ic.offset;
     entry.opcode = uint32_t(ic.op);
-    binFile.write(reinterpret_cast<const char*>(&entry), sizeof(entry)); 
-    MOZ_ASSERT(binFile && "Failed to write IC return offsets."); 
+    binFile.write(reinterpret_cast<const char*>(&entry), sizeof(entry));
+    MOZ_ASSERT(binFile && "Failed to write IC return offsets.");
   }
 
   // Patch entries
   if (aotAccumulator_.patches.length() > 0) {
-    binFile.write(reinterpret_cast<const char*>(aotAccumulator_.patches.begin()),
-                  aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
+    binFile.write(
+        reinterpret_cast<const char*>(aotAccumulator_.patches.begin()),
+        aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
     MOZ_ASSERT(binFile && "Failed to write patches.");
     JitSpew(JitSpew_BaselineAOT, "Wrote %zu patch entries (%zu bytes)",
             aotAccumulator_.patches.length(),
             aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
   }
-  
 
   // OpHandler offsets
   if (opHandlerOffsets_.length() > 0) {
@@ -7531,8 +7530,8 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     binFile.write(reinterpret_cast<const char*>(opHandlerOffsets_.begin()),
                   opHandlerOffsets_.length() * sizeof(uint32_t));
 
-    MOZ_ASSERT(binFile && "Failed to write opHandler offsets."); 
-  } 
+    MOZ_ASSERT(binFile && "Failed to write opHandler offsets.");
+  }
 
   // 7. Write footer
   BaselineAOTFooter footer;
@@ -7542,35 +7541,31 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   binFile.close();
 
   {
-    size_t totalSize = manifestOffset + sizeof(aotAccumulator_.metadata) +
-                       sizeof(uintptr_t) +  // CompileRuntime pointer
-                       debugInstr.length() * sizeof(uint32_t) +
-                       aotAccumulator_.debugTraps.length() * sizeof(uint32_t) +
-                       codeCov.length() * sizeof(uint32_t) +
-                       icReturns.length() * sizeof(ICReturnOffsetEntry) +
-                       aotAccumulator_.patches.length() * sizeof(DispatchTablePatch) +
-                       sizeof(footer);
     JitSpew(JitSpew_BaselineAOT, "AOT manifest serialized successfully");
     JitSpew(JitSpew_BaselineAOT, "  Code size: %zu bytes", codeSize);
-    JitSpew(JitSpew_BaselineAOT, "  Total size: %zu bytes", totalSize);
-    JitSpew(JitSpew_BaselineAOT, "  Debug instrumentation: %u entries",
-            aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)]);
-    JitSpew(JitSpew_BaselineAOT, "  Debug traps: %u entries",
-            aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)]);
+    JitSpew(
+        JitSpew_BaselineAOT, "  Debug instrumentation: %u entries",
+        aotAccumulator_
+            .metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)]);
+    JitSpew(
+        JitSpew_BaselineAOT, "  Debug traps: %u entries",
+        aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)]);
     JitSpew(JitSpew_BaselineAOT, "  Code coverage: %u entries",
-            aotAccumulator_.metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)]);
-    JitSpew(JitSpew_BaselineAOT, "  IC returns: %u entries",
-            aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)]);
+            aotAccumulator_
+                .metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)]);
+    JitSpew(
+        JitSpew_BaselineAOT, "  IC returns: %u entries",
+        aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)]);
   }
 
   return true;
 }
 #endif
 
-
 #ifdef ENABLE_JS_AOT_ICS
 
-bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterpreter& interpreter) { 
+bool BaselineInterpreterGenerator::loadAOTBaseline(
+    JSContext* cx, BaselineInterpreter& interpreter) {
   uint8_t* aotBlob = GetAOTBaselineBlob();
   size_t blobSize = GetAOTBaselineSize();
   MOZ_ASSERT(blobSize != 0, "AOT blob size is 0!");
@@ -7579,23 +7574,26 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
           (void*)aotBlob, blobSize);
 
   auto* footer = reinterpret_cast<BaselineAOTFooter*>(
-    aotBlob + blobSize - sizeof(BaselineAOTFooter));
-  MOZ_ASSERT(footer->magic == AOT_FOOTER_MAGIC);                                         
-  
+      aotBlob + blobSize - sizeof(BaselineAOTFooter));
+  MOZ_ASSERT(footer->magic == AOT_FOOTER_MAGIC);
+
   uint32_t codeSize = footer->manifestOffset;
   JitZone* jitZone = cx->zone()->getJitZone(cx);
   MOZ_ASSERT(jitZone && "Could not attain the JitZone.");
 
   // Read headerSize from manifest first to allocate correctly
-  auto* manifest = reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
-  uint32_t headerSize = manifest->metadata[uint32_t(BaselineMetadataID::HeaderSize)];
+  auto* manifest =
+      reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
+  uint32_t headerSize =
+      manifest->metadata[uint32_t(BaselineMetadataID::HeaderSize)];
 
-  JitSpew(JitSpew_BaselineAOT, "Using headerSize=%u from AOT manifest", headerSize);
+  JitSpew(JitSpew_BaselineAOT, "Using headerSize=%u from AOT manifest",
+          headerSize);
 
   size_t bytesNeeded = codeSize + headerSize;
   ExecutablePool* pool;
   uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
-                                                          CodeKind::Other);
+                                                         CodeKind::Other);
   if (!result) {
     js::ReportOutOfMemory(cx);
     return false;
@@ -7603,8 +7601,8 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
 
   // The code starts after the JitCodeHeader (with proper alignment)
   uint8_t* codeStart = result + headerSize;
-  JitCode* code = JitCode::New<NoGC>(cx, codeStart, bytesNeeded, headerSize, pool,
-                                     CodeKind::Other);
+  JitCode* code = JitCode::New<NoGC>(cx, codeStart, bytesNeeded, headerSize,
+                                     pool, CodeKind::Other);
   if (!code) {
     js::ReportOutOfMemory(cx);
     return false;
@@ -7660,11 +7658,9 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
 }
 #endif
 
-
 bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
-
-#ifdef ENABLE_JS_AOT_ICS 
+#ifdef ENABLE_JS_AOT_ICS
   if (JitOptions.useAOTBaseline) {
     if (!loadAOTBaseline(cx, interpreter)) {
       return false;
@@ -7716,12 +7712,12 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
       ReportOutOfMemory(cx);
       return false;
     }
-   
+
     JitCode* code = linker.newCode(cx, CodeKind::Other);
     if (!code) {
       return false;
     }
-    
+
     // Register BaselineInterpreter code with the profiler's JitCode table.
     {
       auto entry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
@@ -7752,7 +7748,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 
 #ifdef MOZ_VTUNE
     vtune::MarkStub(code, "BaselineInterpreter");
-#endif  
+#endif
 
 #ifdef ENABLE_JS_AOT_ICS
     // Serialize the baseline interpreter code and embedded manifest to binary.
@@ -7761,6 +7757,8 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
         fprintf(stderr, "ERROR: Failed to serialize AOT manifest\n");
         return false;
       }
+      // TODO(Justin): We could abort the program here. Once the dump is
+      // complete this run has served it's purpose.
     }
 #endif
 
