@@ -7447,9 +7447,7 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize); 
   MOZ_ASSERT(binFile && "Failed to write machine code.");
 
-#if 0
-  fprintf(stderr, "INFO: Wrote %zu bytes of machine code\n", codeSize);
-#endif
+  JitSpew(JitSpew_BaselineAOT, "Wrote %zu bytes of machine code", codeSize);
 
   // 3. Record manifest offset (before writing manifest)
   size_t manifestOffset = binFile.tellp();
@@ -7473,12 +7471,9 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   aotAccumulator_.set(BaselineMetadataID::PatchCount, aotAccumulator_.patches.length());
   aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount, opHandlerOffsets_.length());
 
-#if 0
-  fprintf(stderr, "INFO: Storing dispatch table offset: %u\n", tableOffset_);
-  fprintf(stderr, "INFO: Storing headerSize=%zu in AOT manifest\n", code->headerSize());
-  fprintf(stderr, "INFO: Serializing %zu patch entries\n",
-          aotAccumulator_.patches.length());
-#endif
+  JitSpew(JitSpew_BaselineAOT, "Storing dispatch table offset: %u", tableOffset_);
+  JitSpew(JitSpew_BaselineAOT, "Storing headerSize=%zu in AOT manifest", code->headerSize());
+  JitSpew(JitSpew_BaselineAOT, "Serializing %zu patch entries", aotAccumulator_.patches.length());
 
   // Write manifest metadata array (now fully populated)
   binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),
@@ -7523,12 +7518,10 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   if (aotAccumulator_.patches.length() > 0) {
     binFile.write(reinterpret_cast<const char*>(aotAccumulator_.patches.begin()),
                   aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
-    MOZ_ASSERT(binFile && "Failed to write patches."); 
-#if 0
-    fprintf(stderr, "INFO: Wrote %zu patch entries (%zu bytes)\n",
+    MOZ_ASSERT(binFile && "Failed to write patches.");
+    JitSpew(JitSpew_BaselineAOT, "Wrote %zu patch entries (%zu bytes)",
             aotAccumulator_.patches.length(),
             aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
-#endif
   }
   
 
@@ -7545,12 +7538,10 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   BaselineAOTFooter footer;
   footer.manifestOffset = manifestOffset;
   binFile.write(reinterpret_cast<const char*>(&footer), sizeof(footer));
-  MOZ_ASSERT(binFile && "Failed to write footer.");  
+  MOZ_ASSERT(binFile && "Failed to write footer.");
   binFile.close();
-  
-#if 0
+
   {
-    // DEBUG
     size_t totalSize = manifestOffset + sizeof(aotAccumulator_.metadata) +
                        sizeof(uintptr_t) +  // CompileRuntime pointer
                        debugInstr.length() * sizeof(uint32_t) +
@@ -7559,19 +7550,18 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
                        icReturns.length() * sizeof(ICReturnOffsetEntry) +
                        aotAccumulator_.patches.length() * sizeof(DispatchTablePatch) +
                        sizeof(footer);
-    fprintf(stderr, "INFO: AOT manifest serialized successfully\n");
-    fprintf(stderr, "  Code size: %zu bytes\n", codeSize);
-    fprintf(stderr, "  Total size: %zu bytes\n", totalSize);
-    fprintf(stderr, "  Debug instrumentation: %u entries\n",
+    JitSpew(JitSpew_BaselineAOT, "AOT manifest serialized successfully");
+    JitSpew(JitSpew_BaselineAOT, "  Code size: %zu bytes", codeSize);
+    JitSpew(JitSpew_BaselineAOT, "  Total size: %zu bytes", totalSize);
+    JitSpew(JitSpew_BaselineAOT, "  Debug instrumentation: %u entries",
             aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)]);
-    fprintf(stderr, "  Debug traps: %u entries\n",
+    JitSpew(JitSpew_BaselineAOT, "  Debug traps: %u entries",
             aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)]);
-    fprintf(stderr, "  Code coverage: %u entries\n",
+    JitSpew(JitSpew_BaselineAOT, "  Code coverage: %u entries",
             aotAccumulator_.metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)]);
-    fprintf(stderr, "  IC returns: %u entries\n",
+    JitSpew(JitSpew_BaselineAOT, "  IC returns: %u entries",
             aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)]);
   }
-#endif
 
   return true;
 }
@@ -7584,11 +7574,9 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
   uint8_t* aotBlob = GetAOTBaselineBlob();
   size_t blobSize = GetAOTBaselineSize();
   MOZ_ASSERT(blobSize != 0, "AOT blob size is 0!");
-  
-#if 0
-  fprintf(stderr, "DEBUG: AOT Baseline blob: start=%p, size=%zu\n",
-    (void*)aotBlob, blobSize);
-#endif
+
+  JitSpew(JitSpew_BaselineAOT, "AOT Baseline blob: start=%p, size=%zu",
+          (void*)aotBlob, blobSize);
 
   auto* footer = reinterpret_cast<BaselineAOTFooter*>(
     aotBlob + blobSize - sizeof(BaselineAOTFooter));
@@ -7601,10 +7589,8 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
   // Read headerSize from manifest first to allocate correctly
   auto* manifest = reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
   uint32_t headerSize = manifest->metadata[uint32_t(BaselineMetadataID::HeaderSize)];
-  
-#if 0
-  fprintf(stderr, "INFO: Using headerSize=%u from AOT manifest\n", headerSize);
-#endif
+
+  JitSpew(JitSpew_BaselineAOT, "Using headerSize=%u from AOT manifest", headerSize);
 
   size_t bytesNeeded = codeSize + headerSize;
   ExecutablePool* pool;
@@ -7659,7 +7645,6 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
 
     code->setHasBytecodeMap();
   }
-  // fprintf(stderr, "INFO: Registered BaselineInterpreter with JitcodeGlobalTable\n");
 
   // Enable profiler and coverage instrumentation if needed
   if (cx->runtime()->geckoProfiler().enabled()) {
@@ -7670,7 +7655,7 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(JSContext* cx, BaselineInterp
     interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
   }
 
-  // fprintf(stderr, "SUCCESS: AOT Baseline Interpreter loaded\n");
+  JitSpew(JitSpew_BaselineAOT, "Successfully loaded AOT baseline interpreter.");
   return true;
 }
 #endif

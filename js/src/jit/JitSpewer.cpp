@@ -358,6 +358,7 @@ static void PrintHelpAndExit(int status = 0) {
       "  bl-osr        Baseline IC OSR messages\n"
       "  bl-bails      Baseline bailouts\n"
       "  bl-dbg-osr    Baseline debug mode on stack recompile messages\n"
+      "  bl-aot        Baseline AOT messages\n"
       "  bl-all        All baseline spew\n"
       "\n"
       "See also SPEW=help for information on the Structured Spewer."
@@ -483,6 +484,8 @@ void jit::CheckLogging() {
       EnableChannel(JitSpew_BaselineBailouts);
     } else if (IsFlag(found, "bl-dbg-osr")) {
       EnableChannel(JitSpew_BaselineDebugModeOSR);
+    } else if (IsFlag(found, "bl-aot")) {
+      EnableChannel(JitSpew_BaselineAOT);
     } else if (IsFlag(found, "bl-all")) {
       EnableChannel(JitSpew_BaselineAbort);
       EnableChannel(JitSpew_BaselineScripts);
@@ -492,6 +495,7 @@ void jit::CheckLogging() {
       EnableChannel(JitSpew_BaselineOSR);
       EnableChannel(JitSpew_BaselineBailouts);
       EnableChannel(JitSpew_BaselineDebugModeOSR);
+      EnableChannel(JitSpew_BaselineAOT);
     } else {
       fprintf(stderr, "Unknown flag.\n");
       PrintHelpAndExit(64);
