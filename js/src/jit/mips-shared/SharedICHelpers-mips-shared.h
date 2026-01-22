@@ -51,6 +51,12 @@ inline void EmitBaselineLeaveStubFrame(MacroAssembler& masm) {
   masm.loadPtr(
       Address(FramePointer, BaselineStubFrameLayout::ICStubOffsetFromFP),
       ICStubReg);
+#ifdef ENABLE_JS_AOT_ICS
+  if (masm.isAOTFill) {
+    // Need to reload the zone.
+    masm.loadZone();
+  }
+#endif
   masm.movePtr(FramePointer, StackPointer);
   masm.Pop(FramePointer);
 
