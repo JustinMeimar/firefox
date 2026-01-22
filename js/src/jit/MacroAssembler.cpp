@@ -76,11 +76,6 @@ Register MacroAssembler::zoneReg() {
 }
 #endif
 
-TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
-  const JitRuntime* rt = runtime()->jitRuntime();
-  return rt->preBarrier(type);
-}
-
 template <typename T>
 void MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType,
                                             FloatRegister value, const T& dest,
@@ -4257,7 +4252,7 @@ void MacroAssembler::loadRuntime(Register reg) {
 void MacroAssembler::handleFailure() {
   // Re-entry code is irrelevant because the exception will leave the
   // running function and never come back
-  TrampolinePtr excTail = runtime()->jitRuntime()->getExceptionTail();
+  TrampolinePtr excTail = getExceptionTailTrampoline();
   jump(excTail);
 }
 
@@ -4756,9 +4751,11 @@ void MacroAssembler::alignJitStackBasedOnNArgs(uint32_t argc,
 
 MacroAssembler::MacroAssembler(TempAllocator& alloc,
                                CompileRuntime* maybeRuntime,
-                               CompileRealm* maybeRealm, bool isAOTFill)
+                               CompileRealm* maybeRealm, bool isAOTFill,
+                               mozilla::Maybe<TrampolinePtrs> trampolinePtrs)
     : maybeRuntime_(maybeRuntime),
       maybeRealm_(maybeRealm),
+      trampolinePtrs_(trampolinePtrs),
       isAOTFill_(isAOTFill),
       framePushed_(0),
       abiArgs_(/* This will be overwritten for every ABI call, the initial value
@@ -4773,17 +4770,20 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
   MOZ_ASSERT(!isAOTFill);
 #endif
   // AOT IC compilation must not have access to runtime information.
-  // MOZ_ASSERT_IF(isAOTFill, maybeRuntime == nullptr);
-  MOZ_ASSERT_IF(isAOTFill, maybeRealm == nullptr);
+  MOZ_ASSERT_IF(isAOTFill_, maybeRuntime_ == nullptr);
+  MOZ_ASSERT_IF(isAOTFill_, maybeRealm == nullptr);
+  MOZ_ASSERT_IF(isAOTFill_, trampolinePtrs.isSome());
   moveResolver_.setAllocator(alloc);
 }
 
 StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
                                          bool isAOTFill)
     : MacroAssembler(
-          alloc,
-          /* isAOTFill ? nullptr : */ CompileRuntime::get(cx->runtime()),
-          isAOTFill ? nullptr : CompileRealm::get(cx->realm()), isAOTFill) {}
+          alloc, isAOTFill ? nullptr : CompileRuntime::get(cx->runtime()),
+          isAOTFill ? nullptr : CompileRealm::get(cx->realm()), isAOTFill,
+          isAOTFill ?
+            mozilla::Some(TrampolinePtrs(cx->runtime()->jitRuntime()))
+            : mozilla::Nothing()) {}
 
 OffThreadMacroAssembler::OffThreadMacroAssembler(TempAllocator& alloc,
                                                  CompileRealm* realm)

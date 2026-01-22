@@ -39,6 +39,7 @@
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
+#include "jit/TrampolinePtrs.h"
 #include "jit/VMFunctions.h"
 #include "js/ScalarType.h"  // js::Scalar::Type
 #include "util/Memory.h"
@@ -383,6 +384,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Furthermore, this is also nullptr for AOT IC compilations.
   CompileRealm* maybeRealm_ = nullptr;
 
+  // Pointers to the trampolines that may be jumped to as needed.
+  // This will be only be set for AOT IC compilations. The others
+  // may utilize the runtime pointer when necessary.
+  mozilla::Maybe<TrampolinePtrs> trampolinePtrs_;
+
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
 
@@ -398,7 +404,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   explicit MacroAssembler(TempAllocator& alloc,
                           CompileRuntime* maybeRuntime = nullptr,
                           CompileRealm* maybeRealm = nullptr,
-                          bool isAOTFill = false);
+                          bool isAOTFill = false,
+                          mozilla::Maybe<TrampolinePtrs> trampolinePtrs = {});
 
  public:
   MoveResolver& moveResolver() {
@@ -5213,7 +5220,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void storeCallResultValue(TypedOrValueRegister dest);
 
  private:
-  TrampolinePtr preBarrierTrampoline(MIRType type);
+  TrampolinePtr preBarrierTrampoline(MIRType type) {
+    if (isAOTFill_) {
+        return trampolinePtrs_.ref().preBarrier(type);
+    }
+    return runtime()->jitRuntime()->preBarrier(type);
+  }
+
+  TrampolinePtr getExceptionTailTrampoline() const {
+    if (isAOTFill_) {
+        return trampolinePtrs_.ref().exceptionTail;
+    }
+    return runtime()->jitRuntime()->getExceptionTail();
+  }
 
   template <typename T>
   void unguardedCallPreBarrier(const T& address, MIRType type) {
