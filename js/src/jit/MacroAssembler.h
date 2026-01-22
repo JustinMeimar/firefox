@@ -372,9 +372,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
 
-  // Whether or not the IC being compiled is an AOT IC, and thus will be shared across runtimes.
-  bool isAOTFill_ = false;
-
   // Indicator to track whether or not the code for loading the zone into
   // zoneReg_ has been emitted.
   bool zoneLoaded_ = false;
@@ -5250,14 +5247,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  private:
   TrampolinePtr preBarrierTrampoline(MIRType type) {
-    if (isAOTFill_) {
+    if (isAOTFill) {
         return trampolinePtrs_.ref().preBarrier(type);
     }
     return runtime()->jitRuntime()->preBarrier(type);
   }
 
   TrampolinePtr getExceptionTailTrampoline() const {
-    if (isAOTFill_) {
+    if (isAOTFill) {
         return trampolinePtrs_.ref().exceptionTail;
     }
     return runtime()->jitRuntime()->getExceptionTail();

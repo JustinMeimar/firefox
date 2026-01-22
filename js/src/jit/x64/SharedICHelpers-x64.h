@@ -39,6 +39,12 @@ inline void EmitReturnFromIC(MacroAssembler& masm) { masm.ret(); }
 inline void EmitBaselineLeaveStubFrame(MacroAssembler& masm) {
   Address stubAddr(FramePointer, BaselineStubFrameLayout::ICStubOffsetFromFP);
   masm.loadPtr(stubAddr, ICStubReg);
+#ifdef ENABLE_JS_AOT_ICS
+  if (masm.isAOTFill) {
+    // Need to reload the zone.
+    masm.loadZone();
+  }
+#endif
 
   masm.mov(FramePointer, StackPointer);
   masm.Pop(FramePointer);
