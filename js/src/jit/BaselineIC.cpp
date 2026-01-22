@@ -122,6 +122,9 @@ AllocatableGeneralRegisterSet BaselineICAvailableGeneralRegs(size_t numInputs) {
   MOZ_ASSERT(!regs.has(ICTailCallReg));
 #endif
   regs.take(ICStubReg);
+#ifdef ENABLE_JS_AOT_ICS
+  regs.take(ZoneReg);
+#endif
 
   switch (numInputs) {
     case 0:

@@ -69,6 +69,13 @@ using JS::GenericNaN;
 
 using mozilla::CheckedInt;
 
+#ifdef ENABLE_JS_AOT_ICS
+Register MacroAssembler::zoneReg() {
+  MOZ_ASSERT(zoneLoaded_);
+  return ZoneReg;
+}
+#endif
+
 TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
   const JitRuntime* rt = runtime()->jitRuntime();
   return rt->preBarrier(type);
@@ -4230,16 +4237,12 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 #ifdef ENABLE_JS_AOT_ICS
 void MacroAssembler::loadZone() {
   // This function is only valid in the context of AOT IC compilation.
-  MOZ_ASSERT(isAOTFill_);
-  // A valid register for the zone is required for AOT IC compilation.
-  MOZ_ASSERT(zoneReg_ != InvalidReg);
-  // The zone only needs to be loaded once per stub.
-  MOZ_ASSERT(!isZoneLoaded());
+  MOZ_ASSERT(isAOTFill);
   // Load the Zone via the ICStub field.
   Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
-  loadPtr(zonePtr, zoneReg_);
+  loadPtr(zonePtr, ZoneReg);
   // Note that the zone loading code has been emitted by now.
-  setZoneLoaded();
+  zoneLoaded_ = true;
 }
 
 void MacroAssembler::loadRuntime(Register reg) {

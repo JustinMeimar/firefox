@@ -389,10 +389,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Whether or not the IC being compiled is an AOT IC, and thus will be shared across runtimes.
   bool isAOTFill_ = false;
 
-  // Register containing the dynamically loaded zone in case of AOT ICs.
-  // This should be a valid register when isAOTFill_ = true.
-  Register zoneReg_ = InvalidReg;
-
   // Indicator to track whether or not the code for loading the zone into
   // zoneReg_ has been emitted.
   bool zoneLoaded_ = false;
@@ -5932,28 +5928,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Load the runtime ptr from the zone, into given register.
   // See 'Runtime agnostic code generation'.
   void loadRuntime(Register reg);
-  void setZoneReg(Register zoneReg) {
-    MOZ_ASSERT(isAOTFill_);
-    // Must not overwrite existing register (if already set).
-    MOZ_ASSERT(zoneReg_ == InvalidReg);
-    zoneReg_ = zoneReg;
-  }
-  Register zoneReg() {
-    MOZ_ASSERT(isZoneLoaded());
-    return zoneReg_;
-  }
+  Register zoneReg();
   // Load the zone into zoneReg at runtime.
   // See 'Runtime agnostic code generation'.
   void loadZone();
-
- private:
-  void setZoneLoaded() {
-    MOZ_ASSERT(isAOTFill_);
-    MOZ_ASSERT(zoneReg_ != InvalidReg);
-    zoneLoaded_ = true;
-  }
-
-  bool isZoneLoaded() { return zoneLoaded_; }
 #endif
 
  public:

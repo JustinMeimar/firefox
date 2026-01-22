@@ -2036,12 +2036,6 @@ bool BaselineCacheIRCompiler::init(CacheKind kind) {
     baselineFrameReg_ = available.takeAny();
   }
 
-#ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill_) {
-    masm.setZoneReg(available.takeAny());
-  }
-#endif
-
   allocator.initAvailableRegs(available);
   return true;
 }
