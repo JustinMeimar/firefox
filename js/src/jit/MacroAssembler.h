@@ -5104,16 +5104,18 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void loadRuntimeFuse(RuntimeFuses::FuseIndex index, Register dest);
 
-  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail);
+  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail,
+                        Register scratch = InvalidReg);
 
-  void switchToRealm(Register realm);
+  void switchToRealm(Register realm, Register scratch = InvalidReg);
   void switchToRealm(const void* realm, Register scratch);
-  void switchToObjectRealm(Register obj, Register scratch);
-  void switchToBaselineFrameRealm(Register scratch);
+  void switchToObjectRealm(Register obj, Register scratch, Register scratchForAOT = InvalidReg);
+  void switchToBaselineFrameRealm(Register scratch, Register scratchForAOT = InvalidReg);
   void switchToWasmInstanceRealm(Register scratch1, Register scratch2);
   void debugAssertContextRealm(const void* realm, Register scratch);
 
-  void guardObjectHasSameRealm(Register obj, Register scratch, Label* fail);
+  void guardObjectHasSameRealm(Register obj, Register scratch, Label* fail,
+                               Register scratch2 = InvalidReg);
 
   template <typename ValueType>
   void storeLocalAllocSite(ValueType value, Register scratch);
@@ -5745,7 +5747,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
     isCallableOrConstructor(false, obj, output, isProxy);
   }
 
-  void setIsCrossRealmArrayConstructor(Register obj, Register output);
+  void setIsCrossRealmArrayConstructor(Register obj, Register output,
+                                       Register scratch = InvalidReg);
 
   void setIsDefinitelyTypedArrayConstructor(Register obj, Register output);
 

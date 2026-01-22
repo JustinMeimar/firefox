@@ -270,9 +270,18 @@ void MacroAssembler::checkAllocatorState(Register temp, gc::AllocKind allocKind,
 
 #ifdef JS_GC_ZEAL
   // Don't execute the inline path if gc zeal or tracing are active.
-  const uint32_t* ptrZealModeBits = runtime()->addressOfGCZealModeBits();
-  branch32(Assembler::NotEqual, AbsoluteAddress(ptrZealModeBits), Imm32(0),
-           fail);
+  if (!isAOTFill_) {
+    const uint32_t* ptrZealModeBits = runtime()->addressOfGCZealModeBits();
+    branch32(Assembler::NotEqual, AbsoluteAddress(ptrZealModeBits), Imm32(0),
+             fail);
+  }
+#  ifdef ENABLE_JS_AOT_ICS
+  else {
+    loadRuntime(temp);
+    Address gcZealModeBitsAddr(temp, JSRuntime::offsetOfGCZealModeBits());
+    branch32(Assembler::NotEqual, gcZealModeBitsAddr, Imm32(0), fail);
+  }
+#  endif
 #endif
 
   // If the zone has a realm with an object allocation metadata hook, emit a
@@ -2874,7 +2883,16 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 void MacroAssembler::loadJSContext(Register dest) {
-  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
+  if (!isAOTFill_) {
+    movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    loadRuntime(dest);
+    loadPtr(Address(dest, JSRuntime::offsetOfMainContext()),
+                            dest);
+  }
+#endif
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
@@ -2882,53 +2900,122 @@ static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
           JSContext::offsetOfRealm());
 }
 
+#ifdef ENABLE_JS_AOT_ICS
+static void ContextRealmLoadRuntime(MacroAssembler* masm,
+                                    Register scratch) {
+  masm->loadRuntime(scratch);
+  masm->loadPtr(Address(scratch, JSRuntime::offsetOfMainContext()),
+                scratch);
+  Address realmAddr(scratch, JSContext::offsetOfRealm());
+  masm->loadPtr(realmAddr, scratch);
+}
+
+// N.B: The returned address is only valid while scratch maintains its value set within.
+static Address ContextRealmAddressRuntime(MacroAssembler* masm, Register scratch) {
+  masm->loadRuntime(scratch);
+  masm->loadPtr(Address(scratch, JSRuntime::offsetOfMainContext()),
+                scratch);
+  return Address(scratch, JSContext::offsetOfRealm());
+}
+
+static void ContextRealmPtrRuntime(MacroAssembler* masm, Register scratch) {
+  masm->loadRuntime(scratch);
+  masm->loadPtr(Address(scratch, JSRuntime::offsetOfMainContext()),
+                scratch);
+  // runtimeTemp now contains the JSContext ptr.
+  Address realmAddr(scratch, JSContext::offsetOfRealm());
+  masm->computeEffectiveAddress(realmAddr, scratch);
+}
+#endif
+
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  if (!isAOTFill_) {
+    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    ContextRealmLoadRuntime(this, dest);
+  }
+#endif
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
 
-void MacroAssembler::switchToRealm(Register realm) {
-  storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
+void MacroAssembler::switchToRealm(Register realm, Register scratch) {
+  if (!isAOTFill_) {
+    storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    MOZ_ASSERT(scratch != InvalidReg);
+    storePtr(realm, ContextRealmAddressRuntime(this, scratch));
+  }
+#endif
 }
 
 void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
   // Load Realm pointer
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  if (!isAOTFill_) {
+    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    ContextRealmLoadRuntime(this, dest);
+  }
+#endif
   loadPtr(Address(dest, RealmFuses::offsetOfFuseWordRelativeToRealm(index)),
           dest);
 }
 
 void MacroAssembler::loadRuntimeFuse(RuntimeFuses::FuseIndex index,
                                      Register dest) {
-  loadPtr(AbsoluteAddress(runtime()->addressOfRuntimeFuse(index)), dest);
+  if (!isAOTFill_) {
+    loadPtr(AbsoluteAddress(runtime()->addressOfRuntimeFuse(index)), dest);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    loadRuntime(dest);
+    loadPtr(Address(dest, JSRuntime::offsetOfRuntimeFuse(index)), dest);
+  }
+#endif
 }
 
 void MacroAssembler::guardRuntimeFuse(RuntimeFuses::FuseIndex index,
-                                      Label* fail) {
-  AbsoluteAddress addr(runtime()->addressOfRuntimeFuse(index));
-  branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
+                                      Label* fail, Register scratch) {
+  if (!isAOTFill_) {
+    AbsoluteAddress addr(runtime()->addressOfRuntimeFuse(index));
+    branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    MOZ_ASSERT(scratch != InvalidReg);
+    loadRuntime(scratch);
+    Address addr(scratch, JSRuntime::offsetOfRuntimeFuse(index));
+    branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
+  }
+#endif
 }
 
 void MacroAssembler::switchToRealm(const void* realm, Register scratch) {
   MOZ_ASSERT(realm);
+  MOZ_ASSERT(!isAOTFill_);
 
   movePtr(ImmPtr(realm), scratch);
   switchToRealm(scratch);
 }
 
-void MacroAssembler::switchToObjectRealm(Register obj, Register scratch) {
+void MacroAssembler::switchToObjectRealm(Register obj, Register scratch, Register scratchForAOT) {
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  switchToRealm(scratch);
+  switchToRealm(scratch, scratchForAOT);
 }
 
-void MacroAssembler::switchToBaselineFrameRealm(Register scratch) {
+void MacroAssembler::switchToBaselineFrameRealm(Register scratch, Register scratchForAOT) {
   Address envChain(FramePointer,
                    BaselineFrame::reverseOffsetOfEnvironmentChain());
   loadPtr(envChain, scratch);
-  switchToObjectRealm(scratch, scratch);
+  switchToObjectRealm(scratch, scratch, scratchForAOT);
 }
 
 void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
@@ -2940,7 +3027,14 @@ void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
 
 template <typename ValueType>
 void MacroAssembler::storeLocalAllocSite(ValueType value, Register scratch) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), scratch);
+  if (!isAOTFill_) {
+    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), scratch);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    ContextRealmLoadRuntime(this, scratch);
+  }
+#endif
   storePtr(value, Address(scratch, JS::Realm::offsetOfLocalAllocSite()));
 }
 
@@ -2961,7 +3055,8 @@ void MacroAssembler::debugAssertContextRealm(const void* realm,
 }
 
 void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
-                                                     Register output) {
+                                                     Register output,
+                                                     Register scratch) {
 #ifdef DEBUG
   Label notProxy;
   branchTestObjectIsProxy(false, obj, output, &notProxy);
@@ -2974,8 +3069,17 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
   loadPtr(Address(obj, JSObject::offsetOfShape()), output);
   loadPtr(Address(output, Shape::offsetOfBaseShape()), output);
   loadPtr(Address(output, BaseShape::offsetOfRealm()), output);
-  branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr(runtime())),
-            output, &isFalse);
+  if (!isAOTFill_) {
+    branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr(runtime())),
+              output, &isFalse);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    MOZ_ASSERT(scratch != InvalidReg);
+    ContextRealmPtrRuntime(this, scratch);
+    branchPtr(Assembler::Equal, scratch, output, &isFalse);
+  }
+#endif
 
   // The object must be a function.
   branchTestObjIsFunction(Assembler::NotEqual, obj, output, obj, &isFalse);
@@ -2995,12 +3099,21 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
 }
 
 void MacroAssembler::guardObjectHasSameRealm(Register obj, Register scratch,
-                                             Label* fail) {
+                                             Label* fail, Register scratch2) {
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
-            scratch, fail);
+  if (!isAOTFill_) {
+    branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
+              scratch, fail);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    MOZ_ASSERT(scratch2 != InvalidReg);
+    ContextRealmPtrRuntime(this, scratch2);
+    branchPtr(Assembler::NotEqual, scratch2, scratch, fail);
+  }
+#endif
 }
 
 void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
@@ -3037,10 +3150,28 @@ void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
 }
 
 void MacroAssembler::loadMegamorphicCache(Register dest) {
-  movePtr(ImmPtr(runtime()->addressOfMegamorphicCache()), dest);
+  if (!isAOTFill_) {
+    movePtr(ImmPtr(runtime()->addressOfMegamorphicCache()), dest);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    loadRuntime(dest);
+    computeEffectiveAddress(
+        Address(dest, JSRuntime::offsetOfMegamorphicCache()), dest);
+  }
+#endif
 }
 void MacroAssembler::loadMegamorphicSetPropCache(Register dest) {
-  movePtr(ImmPtr(runtime()->addressOfMegamorphicSetPropCache()), dest);
+  if (!isAOTFill_) {
+    movePtr(ImmPtr(runtime()->addressOfMegamorphicSetPropCache()), dest);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    loadRuntime(dest);
+    loadPtr(Address(dest, JSRuntime::offsetOfMegamorphicSetPropCachePtr()),
+            dest);
+  }
+#endif
 }
 
 void MacroAssembler::tryFastAtomize(Register str, Register scratch,
@@ -3053,9 +3184,20 @@ void MacroAssembler::tryFastAtomize(Register str, Register scratch,
   jump(&done);
   bind(&notAtomRef);
 
-  uintptr_t cachePtr = uintptr_t(runtime()->addressOfStringToAtomCache());
-  void* offset = (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups());
-  movePtr(ImmPtr(offset), scratch);
+  if (!isAOTFill_) {
+    uintptr_t cachePtr = uintptr_t(runtime()->addressOfStringToAtomCache());
+    void* offset = (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups());
+    movePtr(ImmPtr(offset), scratch);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    loadRuntime(scratch);
+    Address lastLookupAddr(scratch,
+                           JSRuntime::offsetOfStringToAtomCache() +
+                               StringToAtomCache::offsetOfLastLookups());
+    computeEffectiveAddress(lastLookupAddr, scratch);
+  }
+#endif
 
   static_assert(StringToAtomCache::NumLastLookups == 2);
   size_t stringOffset = StringToAtomCache::LastLookup::offsetOfString();
@@ -3096,6 +3238,17 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
                                              Label* cacheMiss) {
   Label isString, isSymbol, isNull, isUndefined, done, nonAtom, atom;
 
+#ifdef ENABLE_JS_AOT_ICS
+  if (isAOTFill_) {
+    // Load the runtime before the branches.
+    // Each branch is visited once, outId is clobbered and it jumps to done.
+    // So the runtime is only needed once but it is needed in several paths.
+    loadRuntime(outId);
+    loadPtr(Address(outId, JSRuntime::offsetOfCommonNames()), outId);
+    // outId contains the ptr to names.
+  }
+#endif
+
   {
     ScratchTagScope tag(*this, value);
     splitTagForTest(value, tag);
@@ -3105,15 +3258,38 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
     branchTestUndefined(Assembler::NotEqual, tag, cacheMiss);
   }
 
-  const JSAtomState& names = runtime()->names();
-  movePropertyKey(NameToId(names.undefined), outId);
-  move32(Imm32(names.undefined->hash()), outHash);
+  if (!isAOTFill_) {
+    const JSAtomState& names = runtime()->names();
+    movePropertyKey(NameToId(names.undefined), outId);
+    move32(Imm32(names.undefined->hash()), outHash);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    Address undefinedAddr(outId, NAME_OFFSET(undefined));
+    loadPtr(undefinedAddr, outId);
+    loadAtomHash(outId, outHash, nullptr);
+    // NameToId
+    orPtr(Imm32(js::PropertyKey::StringTypeTag), outId);
+  }
+#endif
   jump(&done);
 
   bind(&isNull);
-  movePropertyKey(NameToId(names.null), outId);
-  move32(Imm32(names.null->hash()), outHash);
-  jump(&done);
+  if (!isAOTFill_) {
+    const JSAtomState& names = runtime()->names();
+    movePropertyKey(NameToId(names.null), outId);
+    move32(Imm32(names.null->hash()), outHash);
+    jump(&done);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    Address nullAddr(outId, NAME_OFFSET(null));
+    loadPtr(nullAddr, outId);
+    loadAtomHash(outId, outHash, nullptr);
+    // NameToId
+    orPtr(Imm32(js::PropertyKey::StringTypeTag), outId);
+  }
+#endif
 
   bind(&isSymbol);
   unboxSymbol(value, outId);
@@ -3953,7 +4129,14 @@ void MacroAssembler::loadJitActivation(Register dest) {
 }
 
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  if (!isAOTFill_) {
+    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  }
+#ifdef ENABLE_JS_AOT_ICS
+  else {
+    ContextRealmLoadRuntime(this, dest);
+  }
+#endif
   computeEffectiveAddress(Address(dest, Realm::offsetOfBaselineCompileQueue()),
                           dest);
 }
@@ -4232,7 +4415,7 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 #ifdef ENABLE_JS_AOT_ICS
 void MacroAssembler::loadZone() {
   // This function is only valid in the context of AOT IC compilation.
-  MOZ_ASSERT(isAOTFill);
+  MOZ_ASSERT(isAOTFill_);
   // Load the Zone via the ICStub field.
   Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
   loadPtr(zonePtr, ZoneReg);
@@ -4770,9 +4953,9 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
   MOZ_ASSERT(!isAOTFill);
 #endif
   // AOT IC compilation must not have access to runtime information.
-  MOZ_ASSERT_IF(isAOTFill_, maybeRuntime_ == nullptr);
-  MOZ_ASSERT_IF(isAOTFill_, maybeRealm == nullptr);
-  MOZ_ASSERT_IF(isAOTFill_, trampolinePtrs.isSome());
+  MOZ_ASSERT_IF(isAOTFill, maybeRuntime_ == nullptr);
+  MOZ_ASSERT_IF(isAOTFill, maybeRealm == nullptr);
+  MOZ_ASSERT_IF(isAOTFill, trampolinePtrs.isSome());
   moveResolver_.setAllocator(alloc);
 }
 
@@ -4780,7 +4963,7 @@ StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
                                          bool isAOTFill)
     : MacroAssembler(
           alloc, isAOTFill ? nullptr : CompileRuntime::get(cx->runtime()),
-          isAOTFill ? nullptr : CompileRealm::get(cx->realm()), isAOTFill,
+          isAOTFill ? nullptr : CompileRealm::get(cx->realm()), isAOTFill_,
           isAOTFill ?
             mozilla::Some(TrampolinePtrs(cx->runtime()->jitRuntime()))
             : mozilla::Nothing()) {}

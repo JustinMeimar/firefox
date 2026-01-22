@@ -368,6 +368,9 @@ struct JSRuntime {
  public:
   JSContext* mainContextFromAnyThread() const { return mainContext_; }
   const void* addressOfMainContext() { return &mainContext_; }
+  static constexpr size_t offsetOfMainContext() {
+    return offsetof(JSRuntime, mainContext_);
+  }
   js::Fprinter parserWatcherFile;
 
   inline JSContext* mainContextFromOwnThread();
@@ -737,6 +740,11 @@ struct JSRuntime {
   js::jit::JitRuntime* jitRuntime() const { return jitRuntime_.ref(); }
   bool hasJitRuntime() const { return !!jitRuntime_; }
 
+  static size_t offsetOfJitRuntime() {
+    return offsetof(JSRuntime, jitRuntime_) +
+           decltype(jitRuntime_)::offsetOfValue();
+  }
+
  private:
   // Used to generate random keys for hash tables.
   mozilla::Maybe<mozilla::non_crypto::XorShift128PlusRNG> randomKeyGenerator_;
@@ -825,6 +833,12 @@ struct JSRuntime {
     return offsetof(JSRuntime, gc) + js::gc::GCRuntime::offsetOfNursery();
   }
 
+#ifdef JS_GC_ZEAL
+  static size_t offsetOfGCZealModeBits() {
+    return offsetof(JSRuntime, gc) + js::gc::GCRuntime::offsetOfZealModeBits();
+  }
+#endif
+
 #if !JS_HAS_INTL_API
   /* Number localization, used by jsnum.cpp. */
   js::WriteOnceData<const char*> thousandsSeparator;
@@ -898,6 +912,11 @@ struct JSRuntime {
 
   // Cached pointers to various permanent property names.
   js::WriteOnceData<JSAtomState*> commonNames;
+
+  static size_t offsetOfCommonNames() {
+    return offsetof(JSRuntime, commonNames) +
+           decltype(commonNames)::offsetOfValue();
+  }
 
   // All permanent atoms in the runtime, other than those in staticStrings.
   // Access to this does not require a lock because it is frozen and thus
@@ -1113,6 +1132,24 @@ struct JSRuntime {
     }
   }
 
+  static size_t offsetOfMegamorphicCache() {
+    return offsetof(JSRuntime, caches_) + decltype(caches_)::offsetOfValue() +
+           offsetof(js::RuntimeCaches, megamorphicCache);
+  }
+
+  // N.B: This is the offset where the _pointer_ to the MegamorphicSetPropCache
+  // **resides**. This relative address must be loaded in order to obtain the
+  // _pointer_ itself.
+  static size_t offsetOfMegamorphicSetPropCachePtr() {
+    return offsetof(JSRuntime, caches_) + decltype(caches_)::offsetOfValue() +
+           offsetof(js::RuntimeCaches, megamorphicSetPropCache);
+  }
+
+  static size_t offsetOfStringToAtomCache() {
+    return offsetof(JSRuntime, caches_) + decltype(caches_)::offsetOfValue() +
+           offsetof(js::RuntimeCaches, stringToAtomCache);
+  }
+
  public:
 #if defined(NIGHTLY_BUILD)
   // Support for informing the embedding of any error thrown.
@@ -1150,6 +1187,12 @@ struct JSRuntime {
       shadowRealmGlobalCreationCallback;
 
   js::MainThreadData<js::RuntimeFuses> runtimeFuses;
+
+  static size_t offsetOfRuntimeFuse(js::RuntimeFuses::FuseIndex index) {
+    return offsetof(JSRuntime, runtimeFuses) +
+           decltype(runtimeFuses)::offsetOfValue() +
+           js::RuntimeFuses::offsetOfFuseByIndex(index);
+  }
 };
 
 namespace js {
