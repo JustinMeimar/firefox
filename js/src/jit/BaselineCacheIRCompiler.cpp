@@ -3641,6 +3641,12 @@ void BaselineCacheIRCompiler::createThis(Register argcReg, Register calleeReg,
   // discarded JIT code.
   Address stubAddr(FramePointer, BaselineStubFrameLayout::ICStubOffsetFromFP);
   masm.loadPtr(stubAddr, ICStubReg);
+#ifdef ENABLE_JS_AOT_ICS
+  if (isAOTFill_) {
+    // Reload the zone as well.
+    masm.loadZone();
+  }
+#endif
 
   // Save |this| value back into pushed arguments on stack.
   MOZ_ASSERT(!liveNonGCRegs.aliases(JSReturnOperand));
