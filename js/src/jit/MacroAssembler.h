@@ -40,6 +40,7 @@
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
+#include "jit/TrampolinePtrs.h"
 #include "jit/VMFunctions.h"
 #include "js/ScalarType.h"  // js::Scalar::Type
 #include "util/Memory.h"
@@ -5269,7 +5270,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void storeCallResultValue(TypedOrValueRegister dest);
 
  private:
-  TrampolinePtr preBarrierTrampoline(MIRType type);
+  TrampolinePtr preBarrierTrampoline(MIRType type) {
+    if (isAOTFill_) {
+        return trampolinePtrs_.ref().preBarrier(type);
+    }
+    return runtime()->jitRuntime()->preBarrier(type);
+  }
+
+  TrampolinePtr getExceptionTailTrampoline() const {
+    if (isAOTFill_) {
+        return trampolinePtrs_.ref().exceptionTail;
+    }
+    return runtime()->jitRuntime()->getExceptionTail();
+  }
 
   template <typename T>
   void unguardedCallPreBarrier(const T& address, MIRType type) {

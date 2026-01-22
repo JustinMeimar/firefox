@@ -77,12 +77,6 @@ Register MacroAssembler::zoneReg() {
 }
 #endif
 
-TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
-  MOZ_ASSERT(!isAOT());
-  const JitRuntime* rt = runtime()->jitRuntime();
-  return rt->preBarrier(type);
-}
-
 template <typename T>
 void MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType,
                                             FloatRegister value, const T& dest,
