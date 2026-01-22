@@ -5477,13 +5477,18 @@ bool CacheIRCompiler::emitGuardObjectHasSameRealm(ObjOperandId objId) {
 
   Register obj = allocator.useRegister(masm, objId);
   AutoScratchRegister scratch(allocator, masm);
+  Maybe<AutoScratchRegister> scratchForAOT;
+  if (isAOTFill_) {
+    scratchForAOT.emplace(allocator, masm);
+  }
 
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
     return false;
   }
 
-  masm.guardObjectHasSameRealm(obj, scratch, failure->label());
+  masm.guardObjectHasSameRealm(obj, scratch, failure->label(),
+                               scratchForAOT.refOr(InvalidReg));
   return true;
 }
 
@@ -5775,8 +5780,13 @@ bool CacheIRCompiler::emitIsCrossRealmArrayConstructorResult(
   AutoOutputRegister output(*this);
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   Register obj = allocator.useRegister(masm, objId);
+  Maybe<AutoScratchRegister> scratchForAOT;
+  if (isAOTFill_) {
+    scratchForAOT.emplace(allocator, masm);
+  }
 
-  masm.setIsCrossRealmArrayConstructor(obj, scratch);
+  masm.setIsCrossRealmArrayConstructor(obj, scratch,
+                                       scratchForAOT.refOr(InvalidReg));
   masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch, output.valueReg());
   return true;
 }
@@ -11645,12 +11655,18 @@ bool CacheIRCompiler::emitGuardFuse(RealmFuses::FuseIndex fuseIndex) {
 bool CacheIRCompiler::emitGuardRuntimeFuse(RuntimeFuses::FuseIndex fuseIndex) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
 
+  Maybe<AutoScratchRegister> scratchForAOT;
+  if (isAOTFill_) {
+    scratchForAOT.emplace(allocator, masm);
+  }
+
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
     return false;
   }
 
-  masm.guardRuntimeFuse(fuseIndex, failure->label());
+  masm.guardRuntimeFuse(fuseIndex, failure->label(),
+                        scratchForAOT.refOr(InvalidReg));
   return true;
 }
 
