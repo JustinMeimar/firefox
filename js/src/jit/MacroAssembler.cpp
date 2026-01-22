@@ -70,6 +70,13 @@ using JS::GenericNaN;
 
 using mozilla::CheckedInt;
 
+#ifdef ENABLE_JS_AOT_ICS
+Register MacroAssembler::zoneReg() {
+  MOZ_ASSERT(zoneLoaded_);
+  return ZoneReg;
+}
+#endif
+
 TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
   MOZ_ASSERT(!isAOT());
   const JitRuntime* rt = runtime()->jitRuntime();
@@ -4240,9 +4247,9 @@ void MacroAssembler::loadZone() {
   MOZ_ASSERT(zoneReg_ != InvalidReg);
   MOZ_ASSERT(!isZoneLoaded());
   Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
-  loadPtr(zonePtr, zoneReg_);
+  loadPtr(zonePtr, ZoneReg);
   // Note that the zone loading code has been emitted by now.
-  setZoneLoaded();
+  zoneLoaded_ = true;
 }
 
 void MacroAssembler::loadRuntime(Register reg) {

@@ -20,6 +20,10 @@ static constexpr ValueOperand R2(rax);
 
 static constexpr Register ICTailCallReg = rsi;
 static constexpr Register ICStubReg = rdi;
+#ifdef ENABLE_JS_AOT_ICS
+// We can re-use the register for heap reg as it is not active during IC compilation.
+static constexpr Register ZoneReg = HeapReg;
+#endif
 
 // FloatReg0 must be equal to ReturnFloatReg.
 static constexpr FloatRegister FloatReg0 = xmm0;
