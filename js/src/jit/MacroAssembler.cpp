@@ -3271,7 +3271,6 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
     const JSAtomState& names = runtime()->names();
     movePropertyKey(NameToId(names.null), outId);
     move32(Imm32(names.null->hash()), outHash);
-    jump(&done);
   }
 #ifdef ENABLE_JS_AOT_ICS
   else {
@@ -3282,6 +3281,7 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
     orPtr(Imm32(js::PropertyKey::StringTypeTag), outId);
   }
 #endif
+  jump(&done);
 
   bind(&isSymbol);
   unboxSymbol(value, outId);
