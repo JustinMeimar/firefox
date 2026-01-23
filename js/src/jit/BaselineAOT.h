@@ -98,6 +98,49 @@ static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
 static_assert(sizeof(DispatchTablePatch) == 8, "PatchEntry must be 16 bytes");
 
+struct AOTBlobLayout {
+  size_t codeSize;
+  uint32_t interpretOpOffset;
+  uint32_t dispatchTableOffset;
+  uint32_t debugInstrCount;
+  uint32_t debugTrapCount;
+  uint32_t codeCoverageCount;
+  uint32_t icReturnCount;
+  uint32_t patchCount;
+  uint32_t opHandlerCount;
+
+  size_t prologueSize() const { return interpretOpOffset; }
+  size_t handlersSize() const { return dispatchTableOffset - interpretOpOffset; }
+  size_t dispatchTableSize() const { return codeSize - dispatchTableOffset; }
+  size_t manifestSize() const { return sizeof(BaselineManifest); }
+  size_t debugInstrSize() const { return debugInstrCount * sizeof(uint32_t); }
+  size_t debugTrapSize() const { return debugTrapCount * sizeof(uint32_t); }
+  size_t codeCoverageSize() const { return codeCoverageCount * sizeof(uint32_t); }
+  size_t icReturnSize() const { return icReturnCount * sizeof(ICReturnOffsetEntry); }
+  size_t patchSize() const { return patchCount * sizeof(DispatchTablePatch); }
+  size_t opHandlerSize() const { return opHandlerCount * sizeof(uint32_t); }
+  size_t footerSize() const { return sizeof(BaselineAOTFooter); }
+
+  size_t manifestOffset() const { return codeSize; }
+  size_t debugInstrOffset() const { return manifestOffset() + manifestSize(); }
+  size_t debugTrapOffset() const { return debugInstrOffset() + debugInstrSize(); }
+  size_t codeCoverageOffset() const { return debugTrapOffset() + debugTrapSize(); }
+  size_t icReturnOffset() const { return codeCoverageOffset() + codeCoverageSize(); }
+  size_t patchOffset() const { return icReturnOffset() + icReturnSize(); }
+  size_t opHandlerOffset() const { return patchOffset() + patchSize(); }
+  size_t footerOffset() const { return opHandlerOffset() + opHandlerSize(); }
+
+  size_t metadataSize() const {
+    return manifestSize() + debugInstrSize() + debugTrapSize() +
+           codeCoverageSize() + icReturnSize() + patchSize() +
+           opHandlerSize() + footerSize();
+  }
+
+  size_t blobSize() const { return codeSize + metadataSize(); }
+
+  void dump(bool isLoad, void* blobStart = nullptr) const;
+};
+
 }  // namespace js::jit
 
 #endif  // jit_BaselineAOT_h

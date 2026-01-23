@@ -1385,13 +1385,12 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
     return false;
   }
    
-  JitSpew(JitSpew_BaselineAOT, "Applying %zu dispatch table patches", patchEntries_.length());
   PatchContext patchCtx(code_->raw(), dispatchTableOffset);
   for (const auto& entry : patchEntries_) {
     applyPatch(patchCtx, entry);
   }
+  JitSpew(JitSpew_BaselineAOT, "Applied %zu patches", patchEntries_.length());
 
-  // fprintf(stderr, "INFO: Successfully applied all %zu patches\n", patchEntries_.length());
   return true;
 }
 #endif
