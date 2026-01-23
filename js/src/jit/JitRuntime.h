@@ -434,6 +434,10 @@ class JitRuntime {
     return offsetof(JitRuntime, doubleToInt32ValueStubOffset_);
   }
 
+  static constexpr size_t offsetOfDebugTrapHandlers() {
+    return offsetof(JitRuntime, debugTrapHandlers_);
+  }
+
   TrampolinePtr getIonGenericCallStub(IonGenericCallKind kind) const {
     return trampolineCode(ionGenericCallStubOffset_[kind]);
   }
