@@ -392,6 +392,7 @@ bool JitRuntime::loadAOTTrampolines(JSContext* cx) {
   uint32_t codeSize = footer->manifestOffset;
 
   // Allocate JitCode for the trampolines
+  AutoAllocInAtomsZone az(cx);
   JitZone* jitZone = cx->zone()->getJitZone(cx);
   MOZ_ASSERT(jitZone && "Could not attain the JitZone.");
 
