@@ -11,6 +11,8 @@
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/MemoryReporting.h"
 
+#include <fstream>
+
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #include "jit/AliasAnalysis.h"
@@ -51,6 +53,7 @@
 #include "jit/ScriptFromCalleeToken.h"
 #include "jit/SimpleAllocator.h"
 #include "jit/Sink.h"
+#include "jit/TrampolineAOT.h"
 #include "jit/UnrollLoops.h"
 #include "jit/ValueNumbering.h"
 #include "jit/WarpBuilder.h"
@@ -120,8 +123,28 @@ bool JitRuntime::initialize(JSContext* cx) {
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
 
-  if (!generateTrampolines(cx)) {
-    return false;
+#ifdef ENABLE_AOT_TRAMPOLINES
+  if (JitOptions.useAOTTrampolines) {
+    if (!loadAOTTrampolines(cx)) {
+      fprintf(stderr, "ERROR: Failed to load AOT trampolines\n");
+      return false;
+    }
+  } else
+#endif
+  {
+    if (!generateTrampolines(cx)) {
+      return false;
+    }
+
+#ifdef ENABLE_AOT_TRAMPOLINES
+    // If dump flag is set, serialize the trampolines
+    if (JitOptions.dumpTrampolines) {
+      if (!serializeTrampolineManifest(trampolineCode_)) {
+        fprintf(stderr, "ERROR: Failed to serialize trampoline manifest\n");
+        return false;
+      }
+    }
+#endif
   }
 
   if (!generateBaselineICFallbackCode(cx)) {
@@ -260,6 +283,226 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
 
   return true;
 }
+
+#ifdef ENABLE_AOT_TRAMPOLINES
+bool JitRuntime::serializeTrampolineManifest(JitCode* code) {
+  std::ofstream binFile("./trampolines.bin",
+                        std::ios::binary | std::ios::trunc);
+  if (!binFile.is_open()) {
+    fprintf(stderr, "Failed to open trampoline AOT dump file.\n");
+    return false;
+  }
+
+  uint8_t* codeStart = code->raw();
+  uint8_t* codeEnd = code->rawEnd();
+  size_t codeSize = codeEnd - codeStart;
+
+  // Validate code size before serialization
+  MOZ_ASSERT(codeSize > 0);
+  MOZ_ASSERT(codeSize == code->instructionsSize());
+
+  // Write the machine code
+  binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
+  MOZ_ASSERT(binFile && "Failed to write trampoline machine code.");
+
+  // Record manifest offset (before writing manifest)
+  size_t manifestOffset = binFile.tellp();
+
+  // Build the manifest metadata array
+  TrampolineManifest manifest;
+  memset(&manifest, 0, sizeof(manifest));
+  
+  // TODO(Justin): macro out metadata 
+  manifest.metadata[uint32_t(TrampolineMetadataID::EnterJIT)] = enterJITOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::BailoutHandler)] = bailoutHandlerOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::Invalidator)] = invalidatorOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::ValuePreBarrier)] = valuePreBarrierOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::StringPreBarrier)] = stringPreBarrierOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::ObjectPreBarrier)] = objectPreBarrierOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::ShapePreBarrier)] = shapePreBarrierOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::WasmAnyRefPreBarrier)] = wasmAnyRefPreBarrierOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::LazyLinkStub)] = lazyLinkStubOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::InterpreterStub)] = interpreterStubOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::DoubleToInt32ValueStub)] = doubleToInt32ValueStubOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::ExceptionTail)] = exceptionTailOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::ExceptionTailReturnValueCheck)] = exceptionTailReturnValueCheckOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::ProfilerExitFrameTail)] = profilerExitFrameTailOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::IonGenericCall)] =
+      ionGenericCallStubOffset_[IonGenericCallKind::Call];
+  manifest.metadata[uint32_t(TrampolineMetadataID::IonGenericConstruct)] =
+      ionGenericCallStubOffset_[IonGenericCallKind::Construct];
+  manifest.metadata[uint32_t(TrampolineMetadataID::VMInterpreterEntry)] = vmInterpreterEntryOffset_;
+  manifest.metadata[uint32_t(TrampolineMetadataID::HeaderSize)] = code->headerSize();
+  manifest.metadata[uint32_t(TrampolineMetadataID::CodeSize)] = codeSize;
+  manifest.metadata[uint32_t(TrampolineMetadataID::VMWrapperCount)] = functionWrapperOffsets_.length();
+  manifest.metadata[uint32_t(TrampolineMetadataID::TrampolineNativeCount)] =
+      size_t(TrampolineNative::Count);
+
+  // Write manifest
+  binFile.write(reinterpret_cast<const char*>(&manifest), sizeof(manifest));
+  MOZ_ASSERT(binFile && "Failed to write trampoline manifest.");
+
+  // Write VM wrapper offsets
+  if (functionWrapperOffsets_.length() > 0) {
+    binFile.write(reinterpret_cast<const char*>(functionWrapperOffsets_.begin()),
+                  functionWrapperOffsets_.length() * sizeof(uint32_t));
+    MOZ_ASSERT(binFile && "Failed to write VM wrapper offsets.");
+  }
+
+  // Write trampoline native offsets
+  // Note: trampolineNativeJitEntries_ contains raw pointers, we need to convert to offsets
+  for (size_t i = 0; i < size_t(TrampolineNative::Count); i++) {
+    void* entryPtr = trampolineNativeJitEntries_[TrampolineNative(i)];
+    uint32_t offset = static_cast<uint32_t>(
+        reinterpret_cast<uint8_t*>(entryPtr) - codeStart);
+    binFile.write(reinterpret_cast<const char*>(&offset), sizeof(offset));
+  }
+  MOZ_ASSERT(binFile && "Failed to write trampoline native offsets.");
+
+  // Write footer
+  TrampolineAOTFooter footer;
+  footer.manifestOffset = manifestOffset;
+  binFile.write(reinterpret_cast<const char*>(&footer), sizeof(footer));
+  MOZ_ASSERT(binFile && "Failed to write trampoline footer.");
+  binFile.close();
+
+  // Log the layout
+  TrampolineAOTLayout layout;
+  layout.codeSize = codeSize;
+  layout.vmWrapperCount = functionWrapperOffsets_.length();
+  layout.trampolineNativeCount = size_t(TrampolineNative::Count);
+  layout.dump(false);
+
+  JitSpew(JitSpew_BaselineAOT, "Serialized trampoline blob to ./trampolines.bin");
+  return true;
+}
+
+bool JitRuntime::loadAOTTrampolines(JSContext* cx) {
+
+  uint8_t* aotBlob = GetAOTTrampolineBlob();
+  size_t blobSize = GetAOTTrampolineSize();
+  MOZ_ASSERT(blobSize != 0, "AOT trampoline blob size is 0!");
+
+  // Validate footer
+  auto* footer = reinterpret_cast<TrampolineAOTFooter*>(
+      aotBlob + blobSize - sizeof(TrampolineAOTFooter));
+  MOZ_ASSERT(footer->magic == AOT_TRAMPOLINE_MAGIC);
+  MOZ_ASSERT(footer->version == 1);
+
+  uint32_t codeSize = footer->manifestOffset;
+
+  // Allocate JitCode for the trampolines
+  JitZone* jitZone = cx->zone()->getJitZone(cx);
+  MOZ_ASSERT(jitZone && "Could not attain the JitZone.");
+
+  auto* manifest =
+      reinterpret_cast<TrampolineManifest*>(aotBlob + footer->manifestOffset);
+  uint32_t headerSize =
+      manifest->metadata[uint32_t(TrampolineMetadataID::HeaderSize)];
+
+  size_t bytesNeeded = codeSize + headerSize;
+  ExecutablePool* pool;
+  uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
+                                                         CodeKind::Other);
+  if (!result) {
+    js::ReportOutOfMemory(cx);
+    return false;
+  }
+  uint8_t* codeStart = result + headerSize;
+  JitCode* code = JitCode::New<NoGC>(cx, codeStart, bytesNeeded, headerSize,
+                                     pool, CodeKind::Other);
+  if (!code) {
+    js::ReportOutOfMemory(cx);
+    return false;
+  }
+
+  // Copy the AOT blob into the allocated JIT code.
+  {
+    AutoWritableJitCodeFallible writable(code);
+    if (!writable.makeWritable()) {
+      js::ReportOutOfMemory(cx);
+      return false;
+    }
+    memcpy(codeStart, aotBlob, codeSize);
+    JitCodeHeader::FromExecutable(codeStart)->init(code);
+    code->setInstructionsSize(codeSize);
+    MOZ_ASSERT(code->instructionsSize() == codeSize);
+    MOZ_ASSERT(code->raw() == codeStart);
+    MOZ_ASSERT(code->raw() != aotBlob);
+    MOZ_ASSERT(memcmp(code->raw(), aotBlob, codeSize) == 0);
+  }
+
+  // Set the trampoline code
+  trampolineCode_ = code;
+
+  // Load metadata from manifest
+  auto getMeta = [&](TrampolineMetadataID id) -> uint32_t {
+    return manifest->metadata[uint32_t(id)];
+  };
+  
+  // TODO(Justin): Macro out all the metadata AOT stuff.
+  enterJITOffset_ = getMeta(TrampolineMetadataID::EnterJIT);
+  bailoutHandlerOffset_ = getMeta(TrampolineMetadataID::BailoutHandler);
+  invalidatorOffset_ = getMeta(TrampolineMetadataID::Invalidator);
+  valuePreBarrierOffset_ = getMeta(TrampolineMetadataID::ValuePreBarrier);
+  stringPreBarrierOffset_ = getMeta(TrampolineMetadataID::StringPreBarrier);
+  objectPreBarrierOffset_ = getMeta(TrampolineMetadataID::ObjectPreBarrier);
+  shapePreBarrierOffset_ = getMeta(TrampolineMetadataID::ShapePreBarrier);
+  wasmAnyRefPreBarrierOffset_ = getMeta(TrampolineMetadataID::WasmAnyRefPreBarrier);
+  lazyLinkStubOffset_ = getMeta(TrampolineMetadataID::LazyLinkStub);
+  interpreterStubOffset_ = getMeta(TrampolineMetadataID::InterpreterStub);
+  doubleToInt32ValueStubOffset_ = getMeta(TrampolineMetadataID::DoubleToInt32ValueStub);
+  exceptionTailOffset_ = getMeta(TrampolineMetadataID::ExceptionTail);
+  exceptionTailReturnValueCheckOffset_ =
+      getMeta(TrampolineMetadataID::ExceptionTailReturnValueCheck);
+  profilerExitFrameTailOffset_ = getMeta(TrampolineMetadataID::ProfilerExitFrameTail);
+  ionGenericCallStubOffset_[IonGenericCallKind::Call] =
+      getMeta(TrampolineMetadataID::IonGenericCall);
+  ionGenericCallStubOffset_[IonGenericCallKind::Construct] =
+      getMeta(TrampolineMetadataID::IonGenericConstruct);
+  vmInterpreterEntryOffset_ = getMeta(TrampolineMetadataID::VMInterpreterEntry);
+
+  // Get counts for variable-length arrays
+  uint32_t vmWrapperCount = getMeta(TrampolineMetadataID::VMWrapperCount);
+  uint32_t trampolineNativeCount = getMeta(TrampolineMetadataID::TrampolineNativeCount);
+
+  // Load VM wrapper offsets
+  uint8_t* payloadPtr = aotBlob + footer->manifestOffset + sizeof(TrampolineManifest);
+
+  if (vmWrapperCount > 0) {
+    auto* vmWrapperOffsets = reinterpret_cast<uint32_t*>(payloadPtr);
+    if (!functionWrapperOffsets_.reserve(vmWrapperCount)) {
+      fprintf(stderr, "ERROR: Failed to reserve VM wrapper offsets vector\n");
+      return false;
+    }
+    for (uint32_t i = 0; i < vmWrapperCount; i++) {
+      functionWrapperOffsets_.infallibleAppend(vmWrapperOffsets[i]);
+    }
+    payloadPtr += vmWrapperCount * sizeof(uint32_t);
+  }
+
+  // Load trampoline native offsets and convert to raw pointers
+  if (trampolineNativeCount > 0) {
+    auto* nativeOffsets = reinterpret_cast<uint32_t*>(payloadPtr);
+    MOZ_ASSERT(trampolineNativeCount == size_t(TrampolineNative::Count));
+    for (size_t i = 0; i < trampolineNativeCount; i++) {
+      uint32_t offset = nativeOffsets[i];
+      MOZ_ASSERT(offset > 0 && offset < code->instructionsSize());
+      trampolineNativeJitEntries_[TrampolineNative(i)] = code->raw() + offset;
+    }
+  }
+
+  // Log the layout
+  TrampolineAOTLayout layout;
+  layout.codeSize = codeSize;
+  layout.vmWrapperCount = vmWrapperCount;
+  layout.trampolineNativeCount = trampolineNativeCount;
+  layout.dump(true, aotBlob);
+
+  JitSpew(JitSpew_BaselineAOT, "Loaded AOT trampoline blob successfully");
+  return true;
+}
+#endif
 
 bool JitRuntime::ensureDebugTrapHandler(JSContext* cx,
                                         DebugTrapHandlerKind kind) {

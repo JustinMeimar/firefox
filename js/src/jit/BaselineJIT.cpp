@@ -1386,6 +1386,20 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   }
    
   PatchContext patchCtx(code_->raw(), dispatchTableOffset);
+
+#ifdef DEBUG
+  // Validate all patch entries before applying them
+  size_t codeSize = code_->instructionsSize();
+  for (const auto& entry : patchEntries_) {
+    MOZ_ASSERT(entry.handlerOffset < codeSize);
+    size_t tableEntryOffset = dispatchTableOffset +
+                              (entry.dispatchTableIndex * sizeof(uintptr_t));
+    MOZ_ASSERT(tableEntryOffset + sizeof(uintptr_t) <=
+               dispatchTableOffset + (JSOP_LIMIT * sizeof(uintptr_t)));
+    MOZ_ASSERT(tableEntryOffset < codeSize);
+  }
+#endif
+
   for (const auto& entry : patchEntries_) {
     applyPatch(patchCtx, entry);
   }

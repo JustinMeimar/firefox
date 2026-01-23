@@ -241,6 +241,11 @@ class JitRuntime {
   bool generateTrampolines(JSContext* cx);
   bool generateBaselineICFallbackCode(JSContext* cx);
 
+#ifdef ENABLE_AOT_TRAMPOLINES
+  bool serializeTrampolineManifest(JitCode* code);
+  bool loadAOTTrampolines(JSContext* cx);
+#endif
+
   void generateLazyLinkStub(MacroAssembler& masm);
   void generateInterpreterStub(MacroAssembler& masm);
   void generateDoubleToInt32ValueStub(MacroAssembler& masm);

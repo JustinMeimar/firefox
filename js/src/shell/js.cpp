@@ -13021,8 +13021,10 @@ bool InitOptionParser(OptionParser& op) {
           '\0', "enforce-aot-ics",
           "Enable enforcing only use of ahead-of-time-known ICs") ||
 #endif
-      !op.addBoolOption('\0', "dump-baseline-interpreter", "Dump baseline binary for AOT patching.") ||
-      !op.addBoolOption('\0', "use-aot-baseline", "Use AOT compiled Baseline Interpreter.") ||
+      !op.addBoolOption('\0', "dump-bl", "Dump baseline interpreter binary for AOT patching.") ||
+      !op.addBoolOption('\0', "aot-bl", "Use AOT compiled Baseline Interpreter.") ||
+      !op.addBoolOption('\0', "dump-trampolines", "Dump trampolines binary for AOT usage.") ||
+      !op.addBoolOption('\0', "aot-trampolines", "Use AOT compiled trampolines.") ||
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
           "Wait for COUNT calls or iterations before baseline-compiling "
@@ -14046,12 +14048,20 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
     jit::JitOptions.baselineJit = false;
   }
 
-  if (op.getBoolOption("dump-baseline-interpreter")) {
+  if (op.getBoolOption("dump-bl")) {
     jit::JitOptions.dumpBaselineInterpreter = true;
   }
 
-  if (op.getBoolOption("use-aot-baseline")) {
+  if (op.getBoolOption("aot-bl")) {
     jit::JitOptions.useAOTBaseline = true;
+  }
+
+  if (op.getBoolOption("dump-trampolines")) {
+    jit::JitOptions.dumpTrampolines = true;
+  }
+
+  if (op.getBoolOption("aot-trampolines")) {
+    jit::JitOptions.useAOTTrampolines = true;
   }
 
   if (op.getBoolOption("no-ion")) {
