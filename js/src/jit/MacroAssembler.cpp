@@ -2923,15 +2923,6 @@ static Address ContextRealmAddressRuntime(MacroAssembler* masm, Register scratch
                 scratch);
   return Address(scratch, JSContext::offsetOfRealm());
 }
-
-static void ContextRealmPtrRuntime(MacroAssembler* masm, Register scratch) {
-  masm->loadRuntime(scratch);
-  masm->loadPtr(Address(scratch, JSRuntime::offsetOfMainContext()),
-                scratch);
-  // runtimeTemp now contains the JSContext ptr.
-  Address realmAddr(scratch, JSContext::offsetOfRealm());
-  masm->computeEffectiveAddress(realmAddr, scratch);
-}
 #endif
 
 void MacroAssembler::loadGlobalObjectData(Register dest) {
@@ -3082,7 +3073,7 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
 #ifdef ENABLE_JS_AOT_ICS
   else {
     MOZ_ASSERT(scratch != InvalidReg);
-    ContextRealmPtrRuntime(this, scratch);
+    ContextRealmLoadRuntime(this, scratch);
     branchPtr(Assembler::Equal, scratch, output, &isFalse);
   }
 #endif
@@ -3116,7 +3107,7 @@ void MacroAssembler::guardObjectHasSameRealm(Register obj, Register scratch,
 #ifdef ENABLE_JS_AOT_ICS
   else {
     MOZ_ASSERT(scratch2 != InvalidReg);
-    ContextRealmPtrRuntime(this, scratch2);
+    ContextRealmLoadRuntime(this, scratch2);
     branchPtr(Assembler::NotEqual, scratch2, scratch, fail);
   }
 #endif
