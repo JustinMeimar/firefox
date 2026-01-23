@@ -7330,12 +7330,27 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   // Emit debug trap handler code (target of patchable call instructions). This
   // is just a tail call to the debug trap handler trampoline code.
   {
-    // MARK_RUNTIME: If this is a jump to an absolute address it will break. If
-    // it is a PC-relative jump, it should be fine.
-    JitCode* handlerCode = runtime->jitRuntime()->debugTrapHandler(
-        DebugTrapHandlerKind::Interpreter);
     debugTrapHandlerOffset_ = masm.currentOffset();
-    masm.jump(handlerCode);
+#ifdef ENABLE_JS_AOT_ICS
+    if (isAOTCompile_) {
+      // NOTE(Justin): It's not clear which test could validate this indirection is
+      // correct.
+      Register scratch0 = R0.scratchReg();
+      masm.loadRuntime(scratch0);
+      masm.loadPtr(Address(scratch0, JSRuntime::offsetOfJitRuntime()), scratch0);
+      masm.computeEffectiveAddress(
+          Address(scratch0, JitRuntime::offsetOfDebugTrapHandlers()), scratch0);
+      masm.loadPtr(Address(scratch0, size_t(DebugTrapHandlerKind::Interpreter) * sizeof(void*)),
+                   scratch0);
+      masm.loadPtr(Address(scratch0, JitCode::offsetOfCode()), scratch0);
+      masm.jump(scratch0);
+    } else
+#endif
+    {
+      JitCode* handlerCode = runtime->jitRuntime()->debugTrapHandler(
+          DebugTrapHandlerKind::Interpreter);
+      masm.jump(handlerCode);
+    }
   }
 
   // Emit the table.
