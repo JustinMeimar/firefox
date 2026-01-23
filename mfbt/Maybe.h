@@ -596,8 +596,8 @@ class MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS MOZ_GSL_OWNER Maybe
   }
 
   template<typename R>
-  constexpr R refOr(R aDefault) const {
-    static_assert(std::is_convertible_v<T, R>, "refOr requires contained type be convertible to argument type");
+  constexpr R refOrConvertible(R aDefault) const {
+    static_assert(std::is_convertible_v<T, R>, "refOrConvertible requires contained type be convertible to argument type");
     if (isSome()) {
       return ref();
     }

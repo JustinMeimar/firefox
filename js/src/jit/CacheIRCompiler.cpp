@@ -5488,7 +5488,7 @@ bool CacheIRCompiler::emitGuardObjectHasSameRealm(ObjOperandId objId) {
   }
 
   masm.guardObjectHasSameRealm(obj, scratch, failure->label(),
-                               scratchForAOT.refOr(InvalidReg));
+                               scratchForAOT.refOrConvertible(InvalidReg));
   return true;
 }
 
@@ -5786,7 +5786,7 @@ bool CacheIRCompiler::emitIsCrossRealmArrayConstructorResult(
   }
 
   masm.setIsCrossRealmArrayConstructor(obj, scratch,
-                                       scratchForAOT.refOr(InvalidReg));
+                                       scratchForAOT.refOrConvertible(InvalidReg));
   masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch, output.valueReg());
   return true;
 }
@@ -11666,7 +11666,7 @@ bool CacheIRCompiler::emitGuardRuntimeFuse(RuntimeFuses::FuseIndex fuseIndex) {
   }
 
   masm.guardRuntimeFuse(fuseIndex, failure->label(),
-                        scratchForAOT.refOr(InvalidReg));
+                        scratchForAOT.refOrConvertible(InvalidReg));
   return true;
 }
 
