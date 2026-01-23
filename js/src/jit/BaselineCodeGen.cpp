@@ -7608,6 +7608,7 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
 
   layout.dump(true, aotBlob);
 
+  AutoAllocInAtomsZone az(cx);
   size_t bytesNeeded = codeSize + headerSize;
   ExecutablePool* pool;
   uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
