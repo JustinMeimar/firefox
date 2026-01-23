@@ -7444,8 +7444,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
   MOZ_ASSERT(binFile && "Failed to write machine code.");
 
-  JitSpew(JitSpew_BaselineAOT, "Wrote %zu bytes of machine code", codeSize);
-
   // 3. Record manifest offset (before writing manifest)
   size_t manifestOffset = binFile.tellp();
 
@@ -7482,12 +7480,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount,
                       opHandlerOffsets_.length());
 
-  JitSpew(JitSpew_BaselineAOT, "Storing dispatch table offset: %u",
-          tableOffset_);
-  JitSpew(JitSpew_BaselineAOT, "Storing headerSize=%zu in AOT manifest",
-          code->headerSize());
-  JitSpew(JitSpew_BaselineAOT, "Serializing %zu patch entries",
-          aotAccumulator_.patches.length());
 
   // Write manifest metadata array (now fully populated)
   binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),
@@ -7534,9 +7526,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
         reinterpret_cast<const char*>(aotAccumulator_.patches.begin()),
         aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
     MOZ_ASSERT(binFile && "Failed to write patches.");
-    JitSpew(JitSpew_BaselineAOT, "Wrote %zu patch entries (%zu bytes)",
-            aotAccumulator_.patches.length(),
-            aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
   }
 
   // OpHandler offsets
@@ -7555,23 +7544,17 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   MOZ_ASSERT(binFile && "Failed to write footer.");
   binFile.close();
 
-  {
-    JitSpew(JitSpew_BaselineAOT, "AOT manifest serialized successfully");
-    JitSpew(JitSpew_BaselineAOT, "  Code size: %zu bytes", codeSize);
-    JitSpew(
-        JitSpew_BaselineAOT, "  Debug instrumentation: %u entries",
-        aotAccumulator_
-            .metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)]);
-    JitSpew(
-        JitSpew_BaselineAOT, "  Debug traps: %u entries",
-        aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)]);
-    JitSpew(JitSpew_BaselineAOT, "  Code coverage: %u entries",
-            aotAccumulator_
-                .metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)]);
-    JitSpew(
-        JitSpew_BaselineAOT, "  IC returns: %u entries",
-        aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)]);
-  }
+  AOTBlobLayout layout;
+  layout.codeSize = codeSize;
+  layout.interpretOpOffset = interpretOpOffset_;
+  layout.dispatchTableOffset = tableOffset_;
+  layout.debugInstrCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)];
+  layout.debugTrapCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)];
+  layout.codeCoverageCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)];
+  layout.icReturnCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)];
+  layout.patchCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::PatchCount)];
+  layout.opHandlerCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::OpHandlerOffsetCount)];
+  layout.dump(false);
 
   return true;
 }
@@ -7585,9 +7568,6 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
   size_t blobSize = GetAOTBaselineSize();
   MOZ_ASSERT(blobSize != 0, "AOT blob size is 0!");
 
-  JitSpew(JitSpew_BaselineAOT, "AOT Baseline blob: start=%p, size=%zu",
-          (void*)aotBlob, blobSize);
-
   auto* footer = reinterpret_cast<BaselineAOTFooter*>(
       aotBlob + blobSize - sizeof(BaselineAOTFooter));
   MOZ_ASSERT(footer->magic == AOT_FOOTER_MAGIC);
@@ -7596,14 +7576,22 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
   JitZone* jitZone = cx->zone()->getJitZone(cx);
   MOZ_ASSERT(jitZone && "Could not attain the JitZone.");
 
-  // Read headerSize from manifest first to allocate correctly
   auto* manifest =
       reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
   uint32_t headerSize =
       manifest->metadata[uint32_t(BaselineMetadataID::HeaderSize)];
 
-  JitSpew(JitSpew_BaselineAOT, "Using headerSize=%u from AOT manifest",
-          headerSize);
+  AOTBlobLayout layout;
+  layout.codeSize = codeSize;
+  layout.interpretOpOffset = manifest->metadata[uint32_t(BaselineMetadataID::InterpretOp)];
+  layout.dispatchTableOffset = manifest->metadata[uint32_t(BaselineMetadataID::DispatchTableOffset)];
+  layout.debugInstrCount = manifest->metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)];
+  layout.debugTrapCount = manifest->metadata[uint32_t(BaselineMetadataID::DebugTrapCount)];
+  layout.codeCoverageCount = manifest->metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)];
+  layout.icReturnCount = manifest->metadata[uint32_t(BaselineMetadataID::ICReturnCount)];
+  layout.patchCount = manifest->metadata[uint32_t(BaselineMetadataID::PatchCount)];
+  layout.opHandlerCount = manifest->metadata[uint32_t(BaselineMetadataID::OpHandlerOffsetCount)];
+  layout.dump(true, aotBlob);
 
   size_t bytesNeeded = codeSize + headerSize;
   ExecutablePool* pool;
