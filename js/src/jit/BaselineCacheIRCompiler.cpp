@@ -627,7 +627,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedGetterShared(
   stubFrame.enter(masm, scratch);
 
   if (!sameRealm) {
-    masm.switchToObjectRealm(callee, scratch, scratchForAOT.refOr(InvalidReg));
+    masm.switchToObjectRealm(callee, scratch, scratchForAOT.refOrConvertible(InvalidReg));
   }
 
   if (isInlined) {
@@ -667,7 +667,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedGetterShared(
   stubFrame.leave(masm);
 
   if (!sameRealm) {
-    masm.switchToBaselineFrameRealm(R1.scratchReg(), scratchForAOT.refOr(InvalidReg));
+    masm.switchToBaselineFrameRealm(R1.scratchReg(), scratchForAOT.refOrConvertible(InvalidReg));
   }
 
   return true;
@@ -1577,7 +1577,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedSetterShared(
   stubFrame.enter(masm, scratch);
 
   if (!sameRealm) {
-    masm.switchToObjectRealm(callee, scratch, scratchForAOT.refOr(InvalidReg));
+    masm.switchToObjectRealm(callee, scratch, scratchForAOT.refOrConvertible(InvalidReg));
   }
 
   if (isInlined) {
@@ -1628,7 +1628,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedSetterShared(
   stubFrame.leave(masm);
 
   if (!sameRealm) {
-    masm.switchToBaselineFrameRealm(R1.scratchReg(), scratchForAOT.refOr(InvalidReg));
+    masm.switchToBaselineFrameRealm(R1.scratchReg(), scratchForAOT.refOrConvertible(InvalidReg));
   }
 
   return true;
@@ -3351,7 +3351,7 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(
   stubFrame.enter(masm, scratch);
 
   if (!isSameRealm) {
-    masm.switchToObjectRealm(calleeReg, scratch, scratchForAOT.refOr(InvalidReg));
+    masm.switchToObjectRealm(calleeReg, scratch, scratchForAOT.refOrConvertible(InvalidReg));
   }
 
   pushArguments(argcReg, calleeReg, scratch, scratch2, flags, argcFixed,
@@ -3423,7 +3423,7 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(
   stubFrame.leave(masm);
 
   if (!isSameRealm) {
-    masm.switchToBaselineFrameRealm(scratch2, scratchForAOT.refOr(InvalidReg));
+    masm.switchToBaselineFrameRealm(scratch2, scratchForAOT.refOrConvertible(InvalidReg));
   }
 
   // We will also unilaterally clear this on exception handling.
@@ -3716,7 +3716,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedFunctionShared(
   stubFrame.enter(masm, scratch);
 
   if (!isSameRealm) {
-    masm.switchToObjectRealm(calleeReg, scratch, scratchForAOT.refOr(InvalidReg));
+    masm.switchToObjectRealm(calleeReg, scratch, scratchForAOT.refOrConvertible(InvalidReg));
   }
   if (isInlined) {
     stubFrame.pushInlinedICScript(masm, stubAddress(*icScriptOffset));
@@ -3755,7 +3755,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedFunctionShared(
   stubFrame.leave(masm);
 
   if (!isSameRealm) {
-    masm.switchToBaselineFrameRealm(scratch2, scratchForAOT.refOr(InvalidReg));
+    masm.switchToBaselineFrameRealm(scratch2, scratchForAOT.refOrConvertible(InvalidReg));
   }
 
   return true;
@@ -3939,7 +3939,7 @@ bool BaselineCacheIRCompiler::emitCallBoundScriptedFunction(
   if (isConstructing) {
     if (!isSameRealm) {
       masm.unboxObject(boundTarget, scratch);
-      masm.switchToObjectRealm(scratch, scratch, scratchForAOT.refOr(InvalidReg));
+      masm.switchToObjectRealm(scratch, scratch, scratchForAOT.refOrConvertible(InvalidReg));
     }
     createThis(argcReg, calleeReg, scratch, flags,
                /* isBoundFunction = */ true);
@@ -3953,7 +3953,7 @@ bool BaselineCacheIRCompiler::emitCallBoundScriptedFunction(
   masm.unboxObject(boundTarget, calleeReg);
 
   if (!isConstructing && !isSameRealm) {
-    masm.switchToObjectRealm(calleeReg, scratch, scratchForAOT.refOr(InvalidReg));
+    masm.switchToObjectRealm(calleeReg, scratch, scratchForAOT.refOrConvertible(InvalidReg));
   }
 
   // Update argc.
@@ -3977,7 +3977,7 @@ bool BaselineCacheIRCompiler::emitCallBoundScriptedFunction(
   stubFrame.leave(masm);
 
   if (!isSameRealm) {
-    masm.switchToBaselineFrameRealm(scratch2, scratchForAOT.refOr(InvalidReg));
+    masm.switchToBaselineFrameRealm(scratch2, scratchForAOT.refOrConvertible(InvalidReg));
   }
 
   return true;
