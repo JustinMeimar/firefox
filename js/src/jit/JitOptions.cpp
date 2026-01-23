@@ -138,6 +138,12 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether to use the AOT compiled Baseline Interpreter instead of generating at runtime.
   SET_DEFAULT(useAOTBaseline, false);
 
+  // Whether to dump the Trampolines binary for AOT usage.
+  SET_DEFAULT(dumpTrampolines, false);
+
+  // Whether to use the AOT compiled Trampolines instead of generating at runtime.
+  SET_DEFAULT(useAOTTrampolines, false);
+
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   // Whether the Portable Baseline Interpreter is enabled.
   SET_DEFAULT(portableBaselineInterpreter, false);

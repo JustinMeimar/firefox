@@ -7372,16 +7372,13 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     MOZ_ASSERT(opLabel.bound());
     CodeLabel cl;
 #ifdef ENABLE_JS_AOT_ICS
+    // Create a PatchEntry for this code pointer.
     uint32_t handlerOffset = opLabel.offset();
-    // Store the dispatch table index (i) instead of the absolute offset.
-    // The actual offset will be computed at load time as:
-    // dispatchTableOffset + (i * sizeof(pointer))
     DispatchTablePatch patch(handlerOffset, uint32_t(i));
-
     bool patchResult = aotAccumulator_.addPatch(std::move(patch));
     MOZ_ASSERT(patchResult, "Failed to add dispatch table patch for op");
-    MOZ_ASSERT(opHandlerOffsets_.append(handlerOffset) &&
-               "handler Offset recorded");
+    // Use indexed assignment instead of append since we pre-allocated the vector
+    opHandlerOffsets_[i] = CodeOffset(handlerOffset);
 #endif
     masm.writeCodePointer(&cl);
     cl.target()->bind(opLabel.offset());
@@ -7435,12 +7432,29 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   std::ofstream binFile("./baseline_interpreter.bin",
                         std::ios::binary | std::ios::trunc);
-
-  MOZ_ASSERT(binFile && "Failed to open AOT dump file.");
+  if (!binFile.is_open()) {
+    fprintf(stderr, "Failed to open AOT dump file.");
+  }
 
   uint8_t* codeStart = code->raw();
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
+
+  // Validate code size and critical offsets before serialization
+  MOZ_ASSERT(codeSize > 0);
+  MOZ_ASSERT(codeSize == code->instructionsSize());
+  MOZ_ASSERT(interpretOpOffset_ < codeSize);
+  MOZ_ASSERT(tableOffset_ < codeSize);
+  MOZ_ASSERT(tableOffset_ + (JSOP_LIMIT * sizeof(uintptr_t)) <= codeSize);
+  MOZ_ASSERT(opHandlerOffsets_.length() == JSOP_LIMIT);
+
+#ifdef DEBUG
+  // Validate all handler offsets are within code bounds
+  for (size_t i = 0; i < JSOP_LIMIT; i++) {
+    MOZ_ASSERT(opHandlerOffsets_[i].offset() < codeSize);
+  }
+#endif
+
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
   MOZ_ASSERT(binFile && "Failed to write machine code.");
 
@@ -7484,14 +7498,12 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   // Write manifest metadata array (now fully populated)
   binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),
                 sizeof(aotAccumulator_.metadata));
-  MOZ_ASSERT(binFile && "Failed to write manifest header.");
 
   // Write vector payloads sequentially debug instrumentation offsets
   const auto& debugInstr = handler.debugInstrumentationOffsets();
   if (debugInstr.length() > 0) {
     binFile.write(reinterpret_cast<const char*>(debugInstr.begin()),
                   debugInstr.length() * sizeof(uint32_t));
-    MOZ_ASSERT(binFile && "Failed to write vector payloads.");
   }
 
   // Debug trap offsets
@@ -7499,7 +7511,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     binFile.write(
         reinterpret_cast<const char*>(aotAccumulator_.debugTraps.begin()),
         aotAccumulator_.debugTraps.length() * sizeof(uint32_t));
-    MOZ_ASSERT(binFile && "Failed to write debug trap offsets.");
   }
 
   // Code coverage offsets
@@ -7507,7 +7518,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   if (codeCov.length() > 0) {
     binFile.write(reinterpret_cast<const char*>(codeCov.begin()),
                   codeCov.length() * sizeof(uint32_t));
-    MOZ_ASSERT(binFile && "Failed to write code coverage offsets.");
   }
 
   // IC return offsets (need to convert to ICReturnOffsetEntry format)
@@ -7517,7 +7527,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     entry.offset = ic.offset;
     entry.opcode = uint32_t(ic.op);
     binFile.write(reinterpret_cast<const char*>(&entry), sizeof(entry));
-    MOZ_ASSERT(binFile && "Failed to write IC return offsets.");
   }
 
   // Patch entries
@@ -7525,7 +7534,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     binFile.write(
         reinterpret_cast<const char*>(aotAccumulator_.patches.begin()),
         aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
-    MOZ_ASSERT(binFile && "Failed to write patches.");
   }
 
   // OpHandler offsets
@@ -7533,8 +7541,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     // Write the raw uint32_t offsets of the handlers relative to blob start
     binFile.write(reinterpret_cast<const char*>(opHandlerOffsets_.begin()),
                   opHandlerOffsets_.length() * sizeof(uint32_t));
-
-    MOZ_ASSERT(binFile && "Failed to write opHandler offsets.");
   }
 
   // 7. Write footer
@@ -7591,6 +7597,15 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
   layout.icReturnCount = manifest->metadata[uint32_t(BaselineMetadataID::ICReturnCount)];
   layout.patchCount = manifest->metadata[uint32_t(BaselineMetadataID::PatchCount)];
   layout.opHandlerCount = manifest->metadata[uint32_t(BaselineMetadataID::OpHandlerOffsetCount)];
+
+  // TODO(Justin): Change these asserts to be precise equalities.
+  MOZ_ASSERT(codeSize > 0);
+  MOZ_ASSERT(codeSize <= blobSize);
+  MOZ_ASSERT(footer->manifestOffset < blobSize);
+  MOZ_ASSERT(layout.interpretOpOffset < codeSize);
+  MOZ_ASSERT(layout.dispatchTableOffset < codeSize);
+  MOZ_ASSERT(layout.dispatchTableOffset + (JSOP_LIMIT * sizeof(uintptr_t)) <= codeSize);
+
   layout.dump(true, aotBlob);
 
   size_t bytesNeeded = codeSize + headerSize;
@@ -7621,6 +7636,10 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
     memcpy(codeStart, aotBlob, codeSize);
     JitCodeHeader::FromExecutable(codeStart)->init(code);
     code->setInstructionsSize(codeSize);
+
+    // Validate the JitCode object was initialized correctly
+    MOZ_ASSERT(code->instructionsSize() == codeSize);
+    MOZ_ASSERT(code->raw() == codeStart);
 
     // Initialize interpreter from self-describing binary (includes patching)
     if (!interpreter.initFromAOT(cx, aotBlob, blobSize, code)) {
@@ -7720,6 +7739,10 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
     if (!code) {
       return false;
     }
+
+    // Validate that code size matches MacroAssembler's instruction size
+    MOZ_ASSERT(code->instructionsSize() == masm.instructionsSize());
+    MOZ_ASSERT(code->instructionsSize() > 0);
 
     // Register BaselineInterpreter code with the profiler's JitCode table.
     {

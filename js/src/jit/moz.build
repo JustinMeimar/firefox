@@ -94,6 +94,7 @@ UNIFIED_SOURCES += [
     "Sink.cpp",
     "Snapshots.cpp",
     "Trampoline.cpp",
+    "TrampolineAOT.cpp",
     "TrampolineNatives.cpp",
     "TrialInlining.cpp",
     "TypePolicy.cpp",
@@ -272,6 +273,22 @@ GeneratedFile(
 # Build the generated .s into the project.
 SOURCES += [
     "!AOTBaselineInterpreter.S"
+]
+
+### Trampoline AOT binary embedding
+# The trampolines.bin contains a self-describing manifest with all metadata
+# embedded directly in the binary using the "Manifest + Footer" pattern.
+
+# Generate assembly wrapper for the AOT Trampolines binary.
+GeneratedFile(
+    "AOTTrampolines.S",
+    script="GenerateAOTTrampolines.py",
+    inputs=["../../../trampolines.bin"],
+)
+
+# Build the generated .S into the project.
+SOURCES += [
+    "!AOTTrampolines.S"
 ]
 
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
