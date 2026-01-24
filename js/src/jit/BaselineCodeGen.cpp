@@ -911,7 +911,7 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
         scratch0);
     // Then load mBegin (first field at offset 0).
     masm.loadPtr(Address(scratch0, 0), scratch0);
-    // Load the offset at index [id] from uint32_t array. 
+    // Load the offset at index [id] from uint32_t array.
     masm.load32(BaseIndex(scratch0, scratch2, Scale::TimesFour), scratch0);
     // Load trampolineCode_->raw() and add offset to get final address.
     masm.loadPtr(Address(scratch1, JitCode::offsetOfCode()), scratch1);
@@ -956,8 +956,7 @@ bool BaselineCodeGen<Handler>::emitStackCheck() {
     // Load runtime from zone (zone is already in zoneReg_).
     masm.loadRuntime(scratch1);
     // Load mainContext from runtime.
-    masm.loadPtr(Address(scratch1, JSRuntime::offsetOfMainContext()),
-                 scratch1);
+    masm.loadPtr(Address(scratch1, JSRuntime::offsetOfMainContext()), scratch1);
     // Load jitStackLimit from context.
     masm.loadPtr(Address(scratch1, offsetof(JSContext, jitStackLimit)),
                  scratch2);
@@ -969,8 +968,7 @@ bool BaselineCodeGen<Handler>::emitStackCheck() {
       Register scratch0 = R0.scratchReg();
       masm.moveStackPtrTo(scratch0);
       subtractScriptSlotsSize(scratch0, scratch1);
-      masm.branchPtr(Assembler::BelowOrEqual, scratch2, scratch0,
-                     &skipCall);
+      masm.branchPtr(Assembler::BelowOrEqual, scratch2, scratch0, &skipCall);
     } else {
       masm.branchStackPtrRhs(Assembler::BelowOrEqual, scratch2, &skipCall);
     }
@@ -6580,7 +6578,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
 
 #ifdef ENABLE_JS_AOT_ICS
     // NOTE(Justin): This is not a critical path indirection, but the offest
-    // for the profiler is already exposed so this case is quite simple. 
+    // for the profiler is already exposed so this case is quite simple.
     Register runtimeReg = scratch1;
     masm.loadRuntime(runtimeReg);
     masm.branch32(
@@ -7333,14 +7331,16 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     debugTrapHandlerOffset_ = masm.currentOffset();
 #ifdef ENABLE_JS_AOT_ICS
     if (isAOTCompile_) {
-      // NOTE(Justin): It's not clear which test could validate this indirection is
-      // correct.
+      // NOTE(Justin): It's not clear which test could validate this indirection
+      // is correct.
       Register scratch0 = R0.scratchReg();
       masm.loadRuntime(scratch0);
-      masm.loadPtr(Address(scratch0, JSRuntime::offsetOfJitRuntime()), scratch0);
+      masm.loadPtr(Address(scratch0, JSRuntime::offsetOfJitRuntime()),
+                   scratch0);
       masm.computeEffectiveAddress(
           Address(scratch0, JitRuntime::offsetOfDebugTrapHandlers()), scratch0);
-      masm.loadPtr(Address(scratch0, size_t(DebugTrapHandlerKind::Interpreter) * sizeof(void*)),
+      masm.loadPtr(Address(scratch0, size_t(DebugTrapHandlerKind::Interpreter) *
+                                         sizeof(void*)),
                    scratch0);
       masm.loadPtr(Address(scratch0, JitCode::offsetOfCode()), scratch0);
       masm.jump(scratch0);
@@ -7377,7 +7377,8 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     DispatchTablePatch patch(handlerOffset, uint32_t(i));
     bool patchResult = aotAccumulator_.addPatch(std::move(patch));
     MOZ_ASSERT(patchResult, "Failed to add dispatch table patch for op");
-    // Use indexed assignment instead of append since we pre-allocated the vector
+    // Use indexed assignment instead of append since we pre-allocated the
+    // vector
     opHandlerOffsets_[i] = CodeOffset(handlerOffset);
 #endif
     masm.writeCodePointer(&cl);
@@ -7448,12 +7449,12 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   MOZ_ASSERT(tableOffset_ + (JSOP_LIMIT * sizeof(uintptr_t)) <= codeSize);
   MOZ_ASSERT(opHandlerOffsets_.length() == JSOP_LIMIT);
 
-#ifdef DEBUG
+#  ifdef DEBUG
   // Validate all handler offsets are within code bounds
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
     MOZ_ASSERT(opHandlerOffsets_[i].offset() < codeSize);
   }
-#endif
+#  endif
 
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
   MOZ_ASSERT(binFile && "Failed to write machine code.");
@@ -7493,7 +7494,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
                       aotAccumulator_.patches.length());
   aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount,
                       opHandlerOffsets_.length());
-
 
   // Write manifest metadata array (now fully populated)
   binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),
@@ -7554,12 +7554,20 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   layout.codeSize = codeSize;
   layout.interpretOpOffset = interpretOpOffset_;
   layout.dispatchTableOffset = tableOffset_;
-  layout.debugInstrCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)];
-  layout.debugTrapCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)];
-  layout.codeCoverageCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)];
-  layout.icReturnCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)];
-  layout.patchCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::PatchCount)];
-  layout.opHandlerCount = aotAccumulator_.metadata[uint32_t(BaselineMetadataID::OpHandlerOffsetCount)];
+  layout.debugInstrCount =
+      aotAccumulator_
+          .metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)];
+  layout.debugTrapCount =
+      aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)];
+  layout.codeCoverageCount =
+      aotAccumulator_.metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)];
+  layout.icReturnCount =
+      aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)];
+  layout.patchCount =
+      aotAccumulator_.metadata[uint32_t(BaselineMetadataID::PatchCount)];
+  layout.opHandlerCount =
+      aotAccumulator_
+          .metadata[uint32_t(BaselineMetadataID::OpHandlerOffsetCount)];
   layout.dump(false);
 
   return true;
@@ -7579,6 +7587,12 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
   MOZ_ASSERT(footer->magic == AOT_FOOTER_MAGIC);
 
   uint32_t codeSize = footer->manifestOffset;
+
+  mozilla::Maybe<AutoAllocInAtomsZone> az;
+  if (!cx->zone() || !cx->zone()->isAtomsZone()) {
+    az.emplace(cx);
+  }
+
   JitZone* jitZone = cx->zone()->getJitZone(cx);
   MOZ_ASSERT(jitZone && "Could not attain the JitZone.");
 
@@ -7589,14 +7603,23 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
 
   AOTBlobLayout layout;
   layout.codeSize = codeSize;
-  layout.interpretOpOffset = manifest->metadata[uint32_t(BaselineMetadataID::InterpretOp)];
-  layout.dispatchTableOffset = manifest->metadata[uint32_t(BaselineMetadataID::DispatchTableOffset)];
-  layout.debugInstrCount = manifest->metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)];
-  layout.debugTrapCount = manifest->metadata[uint32_t(BaselineMetadataID::DebugTrapCount)];
-  layout.codeCoverageCount = manifest->metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)];
-  layout.icReturnCount = manifest->metadata[uint32_t(BaselineMetadataID::ICReturnCount)];
-  layout.patchCount = manifest->metadata[uint32_t(BaselineMetadataID::PatchCount)];
-  layout.opHandlerCount = manifest->metadata[uint32_t(BaselineMetadataID::OpHandlerOffsetCount)];
+  layout.interpretOpOffset =
+      manifest->metadata[uint32_t(BaselineMetadataID::InterpretOp)];
+  layout.dispatchTableOffset =
+      manifest->metadata[uint32_t(BaselineMetadataID::DispatchTableOffset)];
+  layout.debugInstrCount =
+      manifest
+          ->metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)];
+  layout.debugTrapCount =
+      manifest->metadata[uint32_t(BaselineMetadataID::DebugTrapCount)];
+  layout.codeCoverageCount =
+      manifest->metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)];
+  layout.icReturnCount =
+      manifest->metadata[uint32_t(BaselineMetadataID::ICReturnCount)];
+  layout.patchCount =
+      manifest->metadata[uint32_t(BaselineMetadataID::PatchCount)];
+  layout.opHandlerCount =
+      manifest->metadata[uint32_t(BaselineMetadataID::OpHandlerOffsetCount)];
 
   // TODO(Justin): Change these asserts to be precise equalities.
   MOZ_ASSERT(codeSize > 0);
@@ -7604,11 +7627,11 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
   MOZ_ASSERT(footer->manifestOffset < blobSize);
   MOZ_ASSERT(layout.interpretOpOffset < codeSize);
   MOZ_ASSERT(layout.dispatchTableOffset < codeSize);
-  MOZ_ASSERT(layout.dispatchTableOffset + (JSOP_LIMIT * sizeof(uintptr_t)) <= codeSize);
+  MOZ_ASSERT(layout.dispatchTableOffset + (JSOP_LIMIT * sizeof(uintptr_t)) <=
+             codeSize);
 
   layout.dump(true, aotBlob);
 
-  AutoAllocInAtomsZone az(cx);
   size_t bytesNeeded = codeSize + headerSize;
   ExecutablePool* pool;
   uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
