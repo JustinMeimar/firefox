@@ -232,6 +232,22 @@ set_config(
     depends_if("--enable-aot-ics-enforce")(lambda _: True),
 )
 
+# Enable ahead-of-time trampolines
+option(
+    "--enable-aot-trampolines",
+    default=False,
+    help="{Enable|Disable} including ahead-of-time generated trampolines",
+)
+
+set_define(
+    "ENABLE_AOT_TRAMPOLINES",
+    depends_if("--enable-aot-trampolines")(lambda _: True),
+)
+set_config(
+    "ENABLE_AOT_TRAMPOLINES",
+    depends_if("--enable-aot-trampolines")(lambda _: True),
+)
+
 
 # JIT support
 # =======================================================
