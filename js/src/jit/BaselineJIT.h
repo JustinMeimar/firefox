@@ -531,7 +531,7 @@ class BaselineInterpreter {
   // Offsets of some callVMs for BaselineDebugModeOSR.
   CallVMOffsets callVMOffsets_;
 
-#ifdef ENABLE_JS_AOT_ICS
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
   // Patch entries for runtime pointer relocation (AOT only).
   using PatchVector = Vector<DispatchTablePatch, 0, SystemAllocPolicy>;
   PatchVector patchEntries_;
@@ -559,7 +559,7 @@ class BaselineInterpreter {
             ICReturnOffsetVector&& icReturnOffsets,
             const CallVMOffsets& callVMOffsets);
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   [[nodiscard]] bool initFromAOT(JSContext* cx, uint8_t* blob, size_t size, JitCode* code);
 #endif
 

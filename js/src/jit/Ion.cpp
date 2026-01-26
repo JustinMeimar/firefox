@@ -186,6 +186,11 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   TempAllocator temp(&cx->tempLifoAlloc());
   StackMacroAssembler masm(cx, temp);
   PerfSpewerRangeRecorder rangeRecorder(masm);
+  
+  // Note: Can we store the context pointer into a register here
+  // so that it is available through the register for codegen?
+  // Then in AOT mode, as long as the same register is also set
+  // with a JSContext*, we can reuse the code.
 
   Label bailoutTail;
   JitSpew(JitSpew_Codegen, "# Emitting bailout tail stub");
@@ -391,53 +396,18 @@ bool JitRuntime::loadAOTTrampolines(JSContext* cx) {
 
   uint32_t codeSize = footer->manifestOffset;
 
-  // Allocate JitCode for the trampolines
-  mozilla::Maybe<AutoAllocInAtomsZone> az;
-  if (!cx->zone() || !cx->zone()->isAtomsZone()) {
-    az.emplace(cx);
-  }
-  JitZone* jitZone = cx->zone()->getJitZone(cx);
-  MOZ_ASSERT(jitZone && "Could not attain the JitZone.");
-
   auto* manifest =
       reinterpret_cast<TrampolineManifest*>(aotBlob + footer->manifestOffset);
-  uint32_t headerSize =
-      manifest->metadata[uint32_t(TrampolineMetadataID::HeaderSize)];
 
-  size_t bytesNeeded = codeSize + headerSize;
-  ExecutablePool* pool;
-  uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
-                                                         CodeKind::Other);
-  if (!result) {
-    js::ReportOutOfMemory(cx);
-    return false;
-  }
-  uint8_t* codeStart = result + headerSize;
-  JitCode* code = JitCode::New<NoGC>(cx, codeStart, bytesNeeded, headerSize,
-                                     pool, CodeKind::Other);
-  if (!code) {
-    js::ReportOutOfMemory(cx);
-    return false;
-  }
+  // Store AOT trampoline pointer and size directly.
+  // No JitCode wrapper needed - AOT code lives in the text section and
+  // doesn't need GC tracking, memory management, or any JitCode infrastructure.
+  aotTrampolineCode_ = aotBlob;
+  aotTrampolineSize_ = codeSize;
 
-  // Copy the AOT blob into the allocated JIT code.
-  {
-    AutoWritableJitCodeFallible writable(code);
-    if (!writable.makeWritable()) {
-      js::ReportOutOfMemory(cx);
-      return false;
-    }
-    memcpy(codeStart, aotBlob, codeSize);
-    JitCodeHeader::FromExecutable(codeStart)->init(code);
-    code->setInstructionsSize(codeSize);
-    MOZ_ASSERT(code->instructionsSize() == codeSize);
-    MOZ_ASSERT(code->raw() == codeStart);
-    MOZ_ASSERT(code->raw() != aotBlob);
-    MOZ_ASSERT(memcmp(code->raw(), aotBlob, codeSize) == 0);
-  }
-
-  // Set the trampoline code
-  trampolineCode_ = code;
+  JitSpew(JitSpew_BaselineAOT,
+          "Loaded AOT trampolines directly from text section at %p (size: %u bytes)",
+          aotBlob, codeSize);
 
   // Load metadata from manifest
   auto getMeta = [&](TrampolineMetadataID id) -> uint32_t {
@@ -472,28 +442,27 @@ bool JitRuntime::loadAOTTrampolines(JSContext* cx) {
 
   // Load VM wrapper offsets
   uint8_t* payloadPtr = aotBlob + footer->manifestOffset + sizeof(TrampolineManifest);
+  
+  MOZ_ASSERT(vmWrapperCount > 0); 
+  MOZ_ASSERT(trampolineNativeCount> 0); 
 
-  if (vmWrapperCount > 0) {
-    auto* vmWrapperOffsets = reinterpret_cast<uint32_t*>(payloadPtr);
-    if (!functionWrapperOffsets_.reserve(vmWrapperCount)) {
-      fprintf(stderr, "ERROR: Failed to reserve VM wrapper offsets vector\n");
-      return false;
-    }
-    for (uint32_t i = 0; i < vmWrapperCount; i++) {
-      functionWrapperOffsets_.infallibleAppend(vmWrapperOffsets[i]);
-    }
-    payloadPtr += vmWrapperCount * sizeof(uint32_t);
+  auto* vmWrapperOffsets = reinterpret_cast<uint32_t*>(payloadPtr);
+  if (!functionWrapperOffsets_.reserve(vmWrapperCount)) {
+    fprintf(stderr, "ERROR: Failed to reserve VM wrapper offsets vector\n");
+    return false;
   }
-
+  for (uint32_t i = 0; i < vmWrapperCount; i++) {
+    functionWrapperOffsets_.infallibleAppend(vmWrapperOffsets[i]);
+  }
+  payloadPtr += vmWrapperCount * sizeof(uint32_t);
+  
   // Load trampoline native offsets and convert to raw pointers
-  if (trampolineNativeCount > 0) {
-    auto* nativeOffsets = reinterpret_cast<uint32_t*>(payloadPtr);
-    MOZ_ASSERT(trampolineNativeCount == size_t(TrampolineNative::Count));
-    for (size_t i = 0; i < trampolineNativeCount; i++) {
-      uint32_t offset = nativeOffsets[i];
-      MOZ_ASSERT(offset > 0 && offset < code->instructionsSize());
-      trampolineNativeJitEntries_[TrampolineNative(i)] = code->raw() + offset;
-    }
+  auto* nativeOffsets = reinterpret_cast<uint32_t*>(payloadPtr);
+  MOZ_ASSERT(trampolineNativeCount == size_t(TrampolineNative::Count));
+  for (size_t i = 0; i < trampolineNativeCount; i++) {
+    uint32_t offset = nativeOffsets[i];
+    MOZ_ASSERT(offset > 0 && offset < codeSize);
+    trampolineNativeJitEntries_[TrampolineNative(i)] = aotBlob + offset;
   }
 
   // Log the layout

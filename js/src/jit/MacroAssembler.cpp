@@ -6,6 +6,7 @@
 
 #include "jit/MacroAssembler-inl.h"
 
+#include "js/TracingAPI.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Latin1.h"
 #include "mozilla/MathAlgorithms.h"
@@ -823,7 +824,7 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   failIfNurseryAllocDisabledRuntime(this, traceKind, fail);
 
   // Load the zone into zoneReg_.
-  loadBaselineZone();
+  loadZone();
   // Copy zone to temp for accessing runtime.
   movePtr(zoneReg(), temp);
   // Load the nursery position via the zone's runtime.
@@ -906,14 +907,14 @@ void MacroAssembler::updateAllocSiteRuntime(Register temp, Register site) {
            Imm32(js::gc::NormalSiteAttentionThreshold), &done);
 
   // Load the nursery alloc sites via the zone's runtime.
-  loadBaselineZone();
+  loadZone();
   movePtr(zoneReg(), temp);
   Address allocSitesAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfNurseryAllocatedSites());
 
   loadPtr(allocSitesAddr, temp);
   storePtr(temp, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
   // Load the runtime again (since temp was used for allocSites).
-  loadBaselineZone();
+  loadZone();
   movePtr(zoneReg(), temp);
   storePtr(site, allocSitesAddr);
 
@@ -4408,6 +4409,7 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
   subPtr(Imm32(BaselineFrame::Size()), dest);
 }
 
+
 #ifdef ENABLE_JS_AOT_ICS
 void MacroAssembler::loadZone() {
   // This function is only valid in the context of AOT IC compilation.
@@ -4418,7 +4420,9 @@ void MacroAssembler::loadZone() {
   // Note that the zone loading code has been emitted by now.
   zoneLoaded_ = true;
 }
+#endif
 
+#ifdef ENABLE_AOT_BASELINE
 void MacroAssembler::loadBaselineZone() {
   // This function is only valid in the context of AOT Baseline compilation.
   MOZ_ASSERT(isAOTFill_);
@@ -4434,7 +4438,9 @@ void MacroAssembler::loadBaselineZone() {
 
   setZoneLoaded();
 }
+#endif
 
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
 void MacroAssembler::loadRuntime(Register reg) {
   Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
   // Load the runtime ptr stored in the zone.
