@@ -181,6 +181,12 @@ class JitRuntime {
   // Code for trampolines and VMFunction wrappers.
   WriteOnceData<JitCode*> trampolineCode_{nullptr};
 
+#ifdef ENABLE_AOT_TRAMPOLINES
+  // For AOT trampolines: direct pointer and size (no JitCode wrapper needed)
+  WriteOnceData<uint8_t*> aotTrampolineCode_{nullptr};
+  WriteOnceData<uint32_t> aotTrampolineSize_{0};
+#endif
+
   // Thunk that calls into the C++ interpreter from the interpreter
   // entry trampoline that is generated with --emit-interpreter-entry
   WriteOnceData<uint32_t> vmInterpreterEntryOffset_{0};
@@ -292,8 +298,13 @@ class JitRuntime {
 
   TrampolinePtr trampolineCode(uint32_t offset) const {
     MOZ_ASSERT(offset > 0);
+#ifdef ENABLE_AOT_TRAMPOLINES
+    MOZ_ASSERT(offset < aotTrampolineSize_);
+    return TrampolinePtr(aotTrampolineCode_ + offset);
+#else
     MOZ_ASSERT(offset < trampolineCode_->instructionsSize());
     return TrampolinePtr(trampolineCode_->raw() + offset);
+#endif
   }
 
   void generateBaselineInterpreterEntryTrampoline(MacroAssembler& masm);
@@ -449,9 +460,14 @@ class JitRuntime {
 
   void** trampolineNativeJitEntry(TrampolineNative native) {
     void** jitEntry = &trampolineNativeJitEntries_[native];
+#ifdef ENABLE_AOT_TRAMPOLINES
+    MOZ_ASSERT(*jitEntry >= aotTrampolineCode_);
+    MOZ_ASSERT(*jitEntry < aotTrampolineCode_ + aotTrampolineSize_);
+#else 
     MOZ_ASSERT(*jitEntry >= trampolineCode_->raw());
     MOZ_ASSERT(*jitEntry <
                trampolineCode_->raw() + trampolineCode_->instructionsSize());
+#endif 
     return jitEntry;
   }
   TrampolineNative trampolineNativeForJitEntry(void** entry) {

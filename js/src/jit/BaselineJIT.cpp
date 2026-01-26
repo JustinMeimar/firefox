@@ -1314,7 +1314,7 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
   callVMOffsets_ = callVMOffsets;
 }
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
 
 bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size, JitCode* code) {
   

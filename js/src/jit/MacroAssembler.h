@@ -5927,7 +5927,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void reserveStack(uint32_t amount);
 #endif
 
-#ifdef ENABLE_JS_AOT_ICS
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
  public:
   // Load the runtime ptr from the zone, into given register.
   // See 'Runtime agnostic code generation'.
@@ -5942,10 +5942,21 @@ class MacroAssembler : public MacroAssemblerSpecific {
     MOZ_ASSERT(isZoneLoaded());
     return zoneReg_;
   }
-  // Load the zone into zoneReg at runtime.
+#endif
+
+#ifdef ENABLE_JS_AOT_ICS
+  // Load the zone into zoneReg at runtime from ICStubReg.
   // See 'Runtime agnostic code generation'.
   void loadZone();
+#endif
+
+#ifdef ENABLE_AOT_BASELINE
+  // Load the zone into zoneReg at runtime from BaselineFrame.
+  // See 'Runtime agnostic code generation'.
   void loadBaselineZone();
+#endif
+
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
 
  private:
   void setZoneLoaded() {

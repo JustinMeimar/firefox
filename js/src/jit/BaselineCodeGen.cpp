@@ -111,7 +111,7 @@ BaselineCodeGen<Handler>::BaselineCodeGen(TempAllocator& alloc,
       runtime(runtimeArg),
       masm(masmArg),
       frame(handler.frame()) {
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   isAOTCompile_ = true;
 #endif
 }
@@ -887,7 +887,7 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
 
   // Perform the call.
   uint32_t callOffset;
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   if (isAOTCompile_) {
     // In AOT mode, we need to load the VMWrapper trampoline dynamically at
     // runtime since trampoline addresses vary between runs.
@@ -947,7 +947,7 @@ template <typename Handler>
 bool BaselineCodeGen<Handler>::emitStackCheck() {
   Label skipCall;
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   if (isAOTCompile_) {
     // For AOT baseline, we can't use absolute addresses. Instead, load the
     // jitStackLimit dynamically from the runtime via the zone register.
@@ -2884,7 +2884,7 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   Register scratch2 = R1.scratchReg();
   LoadUint8Operand(masm, scratch1);
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   // Load runtime from zone (zone is already in zoneReg_).
   masm.loadRuntime(scratch2);
   // Compute address of wellKnownSymbols
@@ -5857,7 +5857,7 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
 
   // Call a stub to convert R0 from double to int32 if needed.
   // Note: this stub may clobber scratch1.
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   // For AOT code, compute the stub address dynamically through zone->runtime.
   Register jitRuntimeReg = scratch1;
   Register stubReg = scratch2;
@@ -6576,7 +6576,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     Register scratchReg = scratch2;
     Label skip;
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
     // NOTE(Justin): This is not a critical path indirection, but the offest
     // for the profiler is already exposed so this case is quite simple.
     Register runtimeReg = scratch1;
@@ -7012,7 +7012,7 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   // chain is in R1. For function scripts, the env chain is in the callee.
   emitInitFrameFields(R1.scratchReg());
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   // For AOT baseline interpreter, load the zone pointer into a pinned register
   // so we can use it for runtime-dependent operations like stack checks.
   // We use `ABINonVolatileReg` to avoid conflicts with R0/R1/R2
@@ -7067,7 +7067,7 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
     return false;
   }
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   // masm.printf("Finish bl interp prologue.\n");
 #endif
 
@@ -7196,7 +7196,7 @@ bool BaselineInterpreterGenerator::emitDebugTrap() {
   if (!debugTrapOffsets_.append(offset.offset())) {
     return false;
   }
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   if (!aotAccumulator_.debugTraps.append(offset.offset())) {
     return false;
   }
@@ -7280,7 +7280,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     }
 
     BaseIndex pointer(scratch2, scratch1, ScalePointer);
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
     // masm.printf("Exiting op epilogue..");
 #endif
     masm.branchToComputedAddress(pointer);
@@ -7329,7 +7329,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   // is just a tail call to the debug trap handler trampoline code.
   {
     debugTrapHandlerOffset_ = masm.currentOffset();
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
     if (isAOTCompile_) {
       // NOTE(Justin): It's not clear which test could validate this indirection
       // is correct.
@@ -7363,7 +7363,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 
   tableOffset_ = masm.currentOffset();
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   MOZ_ASSERT(opHandlerOffsets_.resizeUninitialized(JSOP_LIMIT));
 #endif
 
@@ -7371,7 +7371,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     const Label& opLabel = opLabels[i];
     MOZ_ASSERT(opLabel.bound());
     CodeLabel cl;
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
     // Create a PatchEntry for this code pointer.
     uint32_t handlerOffset = opLabel.offset();
     DispatchTablePatch patch(handlerOffset, uint32_t(i));
@@ -7429,7 +7429,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   masm.ret();
 }
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
 bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   std::ofstream binFile("./baseline_interpreter.bin",
                         std::ios::binary | std::ios::trunc);
@@ -7574,7 +7574,7 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
 }
 #endif
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
 
 bool BaselineInterpreterGenerator::loadAOTBaseline(
     JSContext* cx, BaselineInterpreter& interpreter) {
@@ -7706,7 +7706,7 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
 
 bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   if (JitOptions.useAOTBaseline) {
     if (!loadAOTBaseline(cx, interpreter)) {
       return false;
@@ -7800,7 +7800,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
     vtune::MarkStub(code, "BaselineInterpreter");
 #endif
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
     // Serialize the baseline interpreter code and embedded manifest to binary.
     if (JitOptions.dumpBaselineInterpreter) {
       if (!serializeAOTManifest(code)) {

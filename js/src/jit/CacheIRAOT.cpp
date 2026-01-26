@@ -146,8 +146,8 @@ CacheIRWriter::CacheIRWriter(JSContext* cx, const CacheIRAOTStub& stub)
   buffer_.writeBytes(stub.data, stub.dataLength);
 }
 
-#endif /* ENABLE_JS_AOT_ICS */
-
-} // namespace js 
 } // namespace jit
+} // namespace js
+
+#endif /* ENABLE_JS_AOT_ICS */
 

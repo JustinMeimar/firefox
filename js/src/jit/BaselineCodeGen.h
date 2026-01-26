@@ -71,7 +71,7 @@ class BaselineCodeGen {
   bool inCall_ = false;
 #endif
 
-#ifdef ENABLE_JS_AOT_ICS
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
   bool isAOTCompile_ = false;
 #endif
 
@@ -596,7 +596,7 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   // Offset of the runtime pointer slot.
   uint32_t compileRuntimePtrOffset_ = 0;
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   // TODO(justin): Simplify
   struct BaselineAOTAccumulator {
     uint32_t metadata[uint32_t(BaselineMetadataID::Count)] = {0};
@@ -629,7 +629,7 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
  private:
   [[nodiscard]] bool emitInterpreterLoop();
   [[nodiscard]] bool emitDebugTrap();
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_AOT_BASELINE
   [[nodiscard]] bool loadAOTBaseline(JSContext* cx,
                                      BaselineInterpreter& interpreter);
 #endif
