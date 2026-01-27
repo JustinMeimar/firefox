@@ -81,6 +81,16 @@ static const LiveRegisterSet AllRegs =
 void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
   AutoCreatedBy acb(masm, "JitRuntime::generateEnterJIT");
 
+#ifdef ENABLE_AOT_TRAMPOLINES
+  // Set up AOT trampoline mode if compiling AOT code.
+  // This enables position-independent code generation.
+  if (masm.isAOTTrampoline()) {
+    // Pin the context register for all downstream trampoline code.
+    // We use r13 (ABINonVolatileReg) which is callee-saved.
+    masm.setContextReg(ABINonVolatileReg);
+  }
+#endif
+
   enterJITOffset_ = startTrampolineCode(masm);
 
   masm.assertStackAlignment(ABIStackAlignment,
@@ -117,6 +127,17 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
   masm.push(r13);
   masm.push(r14);
   masm.push(r15);
+
+#ifdef ENABLE_AOT_TRAMPOLINES
+  // For AOT trampolines: Load JSContext* from global variable into r13.
+  // This provides position-independent access to the context for all
+  // downstream trampoline code. The global address is linker-resolved.
+  // TODO(Justin): Replace with TLS-based loading for better robustness.
+  if (masm.isAOTTrampoline()) {
+    masm.loadPtr(AbsoluteAddress(&JitRuntime::g_aot_main_context), r13);
+    masm.setContextLoaded();
+  }
+#endif
 #if defined(_WIN64)
   masm.push(rdi);
   masm.push(rsi);

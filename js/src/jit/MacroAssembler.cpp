@@ -2857,19 +2857,21 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 void MacroAssembler::loadJSContext(Register dest) {
-
 #ifdef ENABLE_AOT_TRAMPOLINES
-  // TODO(Justin): Must figure out how to load the JS Context
-  // from a register or stable address for AOT trampoline code.
-  // ```  
-  // loadRuntime(dest);
-  // loadPtr(Address(dest, runtime()))
-  // ```  
-  
-  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
-#else
-  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
+  if (isAOTTrampoline()) {
+    // AOT mode: JSContext must already be pinned in contextReg_.
+    // This function just copies it to the destination if needed.
+    MOZ_ASSERT(isContextLoaded(),
+               "Context must be loaded before calling loadJSContext in AOT mode");
+    if (dest != contextReg()) {
+      movePtr(contextReg(), dest);
+    }
+    return;
+  }
 #endif
+
+  // JIT mode: Load from absolute address (runtime-specific)
+  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {

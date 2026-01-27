@@ -89,6 +89,13 @@ using mozilla::DebugOnly;
 using namespace js;
 using namespace js::jit;
 
+#ifdef ENABLE_AOT_TRAMPOLINES
+// Global JSContext pointer for AOT trampolines.
+// This is initialized once at JitRuntime initialization and provides
+// a position-independent way for AOT trampoline code to access the context.
+JSContext* JitRuntime::g_aot_main_context = nullptr;
+#endif
+
 JitRuntime::~JitRuntime() {
   MOZ_ASSERT(numFinishedOffThreadTasks_ == 0);
   MOZ_ASSERT(ionLazyLinkListSize_ == 0);
@@ -124,6 +131,10 @@ bool JitRuntime::initialize(JSContext* cx) {
   JitContext jctx(cx);
 
 #ifdef ENABLE_AOT_TRAMPOLINES
+  // Initialize the global context pointer for AOT trampolines.
+  // This must be set before loading or generating trampolines.
+  g_aot_main_context = cx;
+
   if (JitOptions.useAOTTrampolines) {
     if (!loadAOTTrampolines(cx)) {
       fprintf(stderr, "ERROR: Failed to load AOT trampolines\n");
