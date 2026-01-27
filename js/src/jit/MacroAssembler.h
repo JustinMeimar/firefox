@@ -49,6 +49,10 @@
 #include "vm/RuntimeFuses.h"
 #include "wasm/WasmAnyRef.h"
 
+#ifdef ENABLE_AOT_TRAMPOLINES
+#  include "vm/JSContext.h"  // For JSContext::offsetOfRuntime() in AOT mode
+#endif
+
 // [SMDOC] MacroAssembler multi-platform overview
 //
 // * How to read/write MacroAssembler method declarations:
@@ -395,6 +399,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Indicator to track whether or not the code for loading the zone into
   // zoneReg_ has been emitted.
   bool zoneLoaded_ = false;
+
+#ifdef ENABLE_AOT_TRAMPOLINES
+  // Whether or not we're generating AOT trampoline code.
+  bool isAOTTrampoline_ = false;
+
+  // Register containing the JSContext* for AOT trampolines.
+  // This should be a valid register when isAOTTrampoline_ = true.
+  Register contextReg_ = InvalidReg;
+
+  // Indicator to track whether or not the context has been loaded into
+  // contextReg_.
+  bool contextLoaded_ = false;
+#endif
 
  protected:
   // Constructor is protected. Use one of the derived classes!

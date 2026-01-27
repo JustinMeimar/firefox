@@ -2899,6 +2899,9 @@ void MacroAssembler::loadJSContext(Register dest) {
                             dest);
   }
 #endif
+
+  // JIT mode: Load from absolute address (runtime-specific)
+  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
