@@ -136,10 +136,12 @@ bool JitRuntime::initialize(JSContext* cx) {
   g_aot_main_context = cx;
 
   if (JitOptions.useAOTTrampolines) {
+    JitSpew(JitSpew_BaselineAOT, "Loading AOT trampolines...");
     if (!loadAOTTrampolines(cx)) {
       fprintf(stderr, "ERROR: Failed to load AOT trampolines\n");
       return false;
     }
+    JitSpew(JitSpew_BaselineAOT, "AOT trampolines loaded successfully");
   } else
 #endif
   {
@@ -197,11 +199,11 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   TempAllocator temp(&cx->tempLifoAlloc());
   StackMacroAssembler masm(cx, temp);
   PerfSpewerRangeRecorder rangeRecorder(masm);
-  
-  // Note: Can we store the context pointer into a register here
-  // so that it is available through the register for codegen?
-  // Then in AOT mode, as long as the same register is also set
-  // with a JSContext*, we can reuse the code.
+
+#ifdef ENABLE_AOT_TRAMPOLINES
+  JitSpew(JitSpew_BaselineAOT,
+          "Generating trampolines with PIC support for AOT use");
+#endif
 
   Label bailoutTail;
   JitSpew(JitSpew_Codegen, "# Emitting bailout tail stub");

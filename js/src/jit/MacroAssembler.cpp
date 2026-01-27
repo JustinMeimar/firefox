@@ -2898,10 +2898,11 @@ void MacroAssembler::loadJSContext(Register dest) {
     loadPtr(Address(dest, JSRuntime::offsetOfMainContext()),
                             dest);
   }
-#endif
-
+  // If dest == ABINonVolatileReg, context is already in the right place
+#else
   // JIT mode: Load from absolute address (runtime-specific)
   movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
+#endif
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
@@ -4427,8 +4428,6 @@ void MacroAssembler::loadZone() {
 
 #ifdef ENABLE_AOT_BASELINE
 void MacroAssembler::loadBaselineZone() {
-  // This function is only valid in the context of AOT Baseline compilation.
-  MOZ_ASSERT(isAOTFill_);
   // A valid register for the zone is required for AOT IC compilation.
   MOZ_ASSERT(zoneReg_ != InvalidReg);
   // The zone only needs to be loaded once per stub.

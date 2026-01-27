@@ -330,6 +330,9 @@ class JitRuntime {
 
   void bindLabelToOffset(Label* label, uint32_t offset) {
     MOZ_ASSERT(!trampolineCode_);
+#ifdef ENABLE_AOT_TRAMPOLINES
+    MOZ_ASSERT(!aotTrampolineCode_);
+#endif
     label->bind(offset);
   }
 
@@ -371,7 +374,14 @@ class JitRuntime {
   void freeIonOsrTempData();
 
   TrampolinePtr getVMWrapper(VMFunctionId funId) const {
-    MOZ_ASSERT(trampolineCode_);
+#ifdef ENABLE_AOT_TRAMPOLINES
+    if (JitOptions.useAOTTrampolines) {
+      MOZ_ASSERT(aotTrampolineCode_);
+    } else
+#endif
+    {
+      MOZ_ASSERT(trampolineCode_);
+    }
     return trampolineCode(functionWrapperOffsets_[size_t(funId)]);
   }
 
