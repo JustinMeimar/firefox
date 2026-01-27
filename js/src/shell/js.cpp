@@ -14051,15 +14051,15 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("no-baseline")) {
     jit::JitOptions.baselineJit = false;
   }
-
+#ifdef ENABLE_AOT_BASELINE
   if (op.getBoolOption("dump-bl")) {
     jit::JitOptions.dumpBaselineInterpreter = true;
   }
-
   if (op.getBoolOption("aot-bl")) {
     jit::JitOptions.useAOTBaseline = true;
   }
-
+#endif
+#ifdef ENABLE_AOT_TRAMPOLINES
   if (op.getBoolOption("dump-trampolines")) {
     jit::JitOptions.dumpTrampolines = true;
   }
@@ -14067,7 +14067,7 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("aot-trampolines")) {
     jit::JitOptions.useAOTTrampolines = true;
   }
-
+#endif
   if (op.getBoolOption("no-ion")) {
     jit::JitOptions.ion = false;
   }

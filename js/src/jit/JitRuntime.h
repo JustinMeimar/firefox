@@ -299,12 +299,15 @@ class JitRuntime {
   TrampolinePtr trampolineCode(uint32_t offset) const {
     MOZ_ASSERT(offset > 0);
 #ifdef ENABLE_AOT_TRAMPOLINES
-    MOZ_ASSERT(offset < aotTrampolineSize_);
-    return TrampolinePtr(aotTrampolineCode_ + offset);
-#else
-    MOZ_ASSERT(offset < trampolineCode_->instructionsSize());
-    return TrampolinePtr(trampolineCode_->raw() + offset);
+    if (JitOptions.useAOTTrampolines) {
+      MOZ_ASSERT(offset < aotTrampolineSize_);
+      return TrampolinePtr(aotTrampolineCode_ + offset);
+    } else
 #endif
+    {
+      MOZ_ASSERT(offset < trampolineCode_->instructionsSize());
+      return TrampolinePtr(trampolineCode_->raw() + offset);
+    } 
   }
 
   void generateBaselineInterpreterEntryTrampoline(MacroAssembler& masm);
@@ -461,13 +464,16 @@ class JitRuntime {
   void** trampolineNativeJitEntry(TrampolineNative native) {
     void** jitEntry = &trampolineNativeJitEntries_[native];
 #ifdef ENABLE_AOT_TRAMPOLINES
-    MOZ_ASSERT(*jitEntry >= aotTrampolineCode_);
-    MOZ_ASSERT(*jitEntry < aotTrampolineCode_ + aotTrampolineSize_);
-#else 
-    MOZ_ASSERT(*jitEntry >= trampolineCode_->raw());
-    MOZ_ASSERT(*jitEntry <
-               trampolineCode_->raw() + trampolineCode_->instructionsSize());
+    if (JitOptions.useAOTTrampolines) {
+      MOZ_ASSERT(*jitEntry >= aotTrampolineCode_);
+      MOZ_ASSERT(*jitEntry < aotTrampolineCode_ + aotTrampolineSize_);
+    } else
 #endif 
+    {
+      MOZ_ASSERT(*jitEntry >= trampolineCode_->raw());
+      MOZ_ASSERT(*jitEntry <
+                 trampolineCode_->raw() + trampolineCode_->instructionsSize());
+    }
     return jitEntry;
   }
   TrampolineNative trampolineNativeForJitEntry(void** entry) {
