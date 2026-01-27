@@ -2858,20 +2858,18 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 
 void MacroAssembler::loadJSContext(Register dest) {
 #ifdef ENABLE_AOT_TRAMPOLINES
-  if (isAOTTrampoline()) {
-    // AOT mode: JSContext must already be pinned in contextReg_.
-    // This function just copies it to the destination if needed.
-    MOZ_ASSERT(isContextLoaded(),
-               "Context must be loaded before calling loadJSContext in AOT mode");
-    if (dest != contextReg()) {
-      movePtr(contextReg(), dest);
-    }
-    return;
+  // When AOT trampolines are enabled, always generate PIC code.
+  // At runtime, JSContext* will be pinned in ABINonVolatileReg (r13 on x64).
+  // Note: We use ABINonVolatileReg directly here rather than contextReg()
+  // because during code generation (dump mode), contextReg_ may not be set yet.
+  if (dest != ABINonVolatileReg) {
+    movePtr(ABINonVolatileReg, dest);
   }
-#endif
-
+  // If dest == ABINonVolatileReg, context is already in the right place
+#else
   // JIT mode: Load from absolute address (runtime-specific)
   movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
+#endif
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
@@ -4245,8 +4243,6 @@ void MacroAssembler::loadZone() {
 
 #ifdef ENABLE_AOT_BASELINE
 void MacroAssembler::loadBaselineZone() {
-  // This function is only valid in the context of AOT Baseline compilation.
-  MOZ_ASSERT(isAOTFill_);
   // A valid register for the zone is required for AOT IC compilation.
   MOZ_ASSERT(zoneReg_ != InvalidReg);
   // The zone only needs to be loaded once per stub.

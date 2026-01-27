@@ -12,8 +12,10 @@
 #include "jit/PerfSpewer.h"
 #include "jit/VMFunctions.h"
 #include "jit/x64/SharedICRegisters-x64.h"
+#include "vm/GeckoProfiler.h"  // For GeckoProfiler::offsetOfEnabled()
 #include "vm/JitActivation.h"  // js::jit::JitActivation
 #include "vm/JSContext.h"
+#include "vm/Runtime.h"  // For JSRuntime::offsetOfGeckoProfiler()
 
 #include "jit/MacroAssembler-inl.h"
 
@@ -81,16 +83,6 @@ static const LiveRegisterSet AllRegs =
 void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
   AutoCreatedBy acb(masm, "JitRuntime::generateEnterJIT");
 
-#ifdef ENABLE_AOT_TRAMPOLINES
-  // Set up AOT trampoline mode if compiling AOT code.
-  // This enables position-independent code generation.
-  if (masm.isAOTTrampoline()) {
-    // Pin the context register for all downstream trampoline code.
-    // We use r13 (ABINonVolatileReg) which is callee-saved.
-    masm.setContextReg(ABINonVolatileReg);
-  }
-#endif
-
   enterJITOffset_ = startTrampolineCode(masm);
 
   masm.assertStackAlignment(ABIStackAlignment,
@@ -133,10 +125,7 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
   // This provides position-independent access to the context for all
   // downstream trampoline code. The global address is linker-resolved.
   // TODO(Justin): Replace with TLS-based loading for better robustness.
-  if (masm.isAOTTrampoline()) {
-    masm.loadPtr(AbsoluteAddress(&JitRuntime::g_aot_main_context), r13);
-    masm.setContextLoaded();
-  }
+  masm.loadPtr(AbsoluteAddress(&JitRuntime::g_aot_main_context), r13);
 #endif
 #if defined(_WIN64)
   masm.push(rdi);
@@ -242,10 +231,25 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
     // if profiler instrumentation is enabled.
     {
       Label skipProfilingInstrumentation;
+#ifdef ENABLE_AOT_TRAMPOLINES
+      // AOT mode: Load profiler enabled flag via context register
+      // Context is in r13/ABINonVolatileReg, scratch is available
+      masm.loadPtr(Address(ABINonVolatileReg, JSContext::offsetOfRuntime()), scratch);
+      // geckoProfiler_ is an embedded object in JSRuntime, not a pointer
+      // Compute address: runtime + offsetOfGeckoProfiler + offsetOfEnabled
+      uint32_t enabledOffset = JSRuntime::offsetOfGeckoProfiler() +
+                               GeckoProfilerRuntime::offsetOfEnabled();
+      masm.branch32(Assembler::Equal,
+                    Address(scratch, enabledOffset),
+                    Imm32(0),
+                    &skipProfilingInstrumentation);
+#else
+      // JIT mode: Use absolute address
       AbsoluteAddress addressOfEnabled(
           cx->runtime()->geckoProfiler().addressOfEnabled());
       masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0),
                     &skipProfilingInstrumentation);
+#endif
       masm.profilerEnterFrame(rbp, scratch);
       masm.bind(&skipProfilingInstrumentation);
     }
@@ -579,7 +583,14 @@ uint32_t JitRuntime::generatePreBarrier(JSContext* cx, MacroAssembler& masm,
                       FloatRegisterSet(FloatRegisters::VolatileMask));
   masm.PushRegsInMask(regs);
 
+#ifdef ENABLE_AOT_TRAMPOLINES
+  // AOT mode: Load runtime from pinned context register (r13/ABINonVolatileReg)
+  // Context is pinned at runtime by EnterJIT
+  masm.loadPtr(Address(ABINonVolatileReg, JSContext::offsetOfRuntime()), rcx);
+#else
+  // JIT mode: Use absolute runtime pointer
   masm.mov(ImmPtr(cx->runtime()), rcx);
+#endif
 
   masm.setupUnalignedABICall(rax);
   masm.passABIArg(rcx);

@@ -5950,7 +5950,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // See 'Runtime agnostic code generation'.
   void loadRuntime(Register reg);
   void setZoneReg(Register zoneReg) {
-    MOZ_ASSERT(isAOTFill_);
+    // MOZ_ASSERT(isAOTFill_); // Disabling for now since AOT baseline can use
+    // setZoneReg without AOT ics.
     // Must not overwrite existing register (if already set).
     MOZ_ASSERT(zoneReg_ == InvalidReg);
     zoneReg_ = zoneReg;
@@ -5977,7 +5978,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  private:
   void setZoneLoaded() {
-    MOZ_ASSERT(isAOTFill_);
+    // MOZ_ASSERT(isAOTFill_); // Disabling since AOT baseline can use also.
     MOZ_ASSERT(zoneReg_ != InvalidReg);
     zoneLoaded_ = true;
   }
