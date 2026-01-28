@@ -65,6 +65,7 @@
 #include "util/WindowsWrapper.h"
 #include "vm/HelperThreads.h"
 #include "vm/Realm.h"
+#include "x64/Assembler-x64.h"
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
 #endif
@@ -89,12 +90,6 @@ using mozilla::DebugOnly;
 using namespace js;
 using namespace js::jit;
 
-#ifdef ENABLE_AOT_TRAMPOLINES
-// Global JSContext pointer for AOT trampolines.
-// This is initialized once at JitRuntime initialization and provides
-// a position-independent way for AOT trampoline code to access the context.
-JSContext* JitRuntime::g_aot_main_context = nullptr;
-#endif
 
 JitRuntime::~JitRuntime() {
   MOZ_ASSERT(numFinishedOffThreadTasks_ == 0);
@@ -129,11 +124,21 @@ bool JitRuntime::initialize(JSContext* cx) {
 
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
-
+  
 #ifdef ENABLE_AOT_TRAMPOLINES
-  // Initialize the global context pointer for AOT trampolines.
-  // This must be set before loading or generating trampolines.
-  g_aot_main_context = cx;
+  
+  // HERE: The JSContext pointer needs to be in a register or
+  // in some stack frame that will be visible to BOTH the AOT
+  // loading code, and the JIT generation code. Then, when we
+  // emit the AOT code in serializeTrampolineManifest, it will
+  // contain code to load the JSContext from a particular register.
+  //
+  // In the AOT use, in loadAOTTrampolines, we will also expect
+  // this same register to have the JSContext. This is how we expect
+  // the AOT code to work. The register is the common interface.
+  // 
+  // The question is: How to put the JSRuntime?
+
 
   if (JitOptions.useAOTTrampolines) {
     JitSpew(JitSpew_BaselineAOT, "Loading AOT trampolines...");
@@ -150,7 +155,6 @@ bool JitRuntime::initialize(JSContext* cx) {
     }
 
 #ifdef ENABLE_AOT_TRAMPOLINES
-    // If dump flag is set, serialize the trampolines
     if (JitOptions.dumpTrampolines) {
       if (!serializeTrampolineManifest(trampolineCode_)) {
         fprintf(stderr, "ERROR: Failed to serialize trampoline manifest\n");
@@ -201,8 +205,10 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   PerfSpewerRangeRecorder rangeRecorder(masm);
 
 #ifdef ENABLE_AOT_TRAMPOLINES
-  JitSpew(JitSpew_BaselineAOT,
-          "Generating trampolines with PIC support for AOT use");
+//   masm.setAOTTrampolineMode();
+//   masm.setRuntimePtr(cx->runtime(), ABINonVolatileReg);
+//   JitSpew(JitSpew_BaselineAOT,
+//           "Generating trampolines with PIC support for AOT use");
 #endif
 
   Label bailoutTail;

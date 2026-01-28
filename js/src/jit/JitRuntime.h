@@ -182,15 +182,8 @@ class JitRuntime {
   WriteOnceData<JitCode*> trampolineCode_{nullptr};
 
 #ifdef ENABLE_AOT_TRAMPOLINES
-  // For AOT trampolines: direct pointer and size (no JitCode wrapper needed)
   WriteOnceData<uint8_t*> aotTrampolineCode_{nullptr};
   WriteOnceData<uint32_t> aotTrampolineSize_{0};
-
-  // Global JSContext pointer for AOT trampolines to load from.
-  // This is set once at JitRuntime initialization and used by AOT trampoline
-  // code to obtain the context pointer in a position-independent way.
-  // TODO(Justin): Replace with TLS-based loading for better robustness.
-  static JSContext* g_aot_main_context;
 #endif
 
   // Thunk that calls into the C++ interpreter from the interpreter

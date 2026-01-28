@@ -401,15 +401,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   bool zoneLoaded_ = false;
 
 #ifdef ENABLE_AOT_TRAMPOLINES
-  // Whether or not we're generating AOT trampoline code.
+  // Follows the same pattern as for AOT ICs
   bool isAOTTrampoline_ = false;
-
-  // Register containing the JSContext* for AOT trampolines.
-  // This should be a valid register when isAOTTrampoline_ = true.
   Register contextReg_ = InvalidReg;
-
-  // Indicator to track whether or not the context has been loaded into
-  // contextReg_.
   bool contextLoaded_ = false;
 #endif
 
@@ -5962,7 +5956,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void reserveStack(uint32_t amount);
 #endif
 
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE) || defined(ENABLE_AOT_TRAMPOLINES)
  public:
   // Load the runtime ptr from the zone, into given register.
   // See 'Runtime agnostic code generation'.
