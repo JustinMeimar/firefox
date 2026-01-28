@@ -120,13 +120,6 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
   masm.push(r14);
   masm.push(r15);
 
-#ifdef ENABLE_AOT_TRAMPOLINES
-  // For AOT trampolines: Load JSContext* from global variable into r13.
-  // This provides position-independent access to the context for all
-  // downstream trampoline code. The global address is linker-resolved.
-  // TODO(Justin): Replace with TLS-based loading for better robustness.
-  masm.loadPtr(AbsoluteAddress(&JitRuntime::g_aot_main_context), r13);
-#endif
 #if defined(_WIN64)
   masm.push(rdi);
   masm.push(rsi);
@@ -153,6 +146,24 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
   // starts at this rsp.
 
   masm.movq(token, r12);
+
+#ifdef ENABLE_AOT_TRAMPOLINES
+  // For AOT trampolines, set up r13 (ABINonVolatileReg) with JSRuntime*.
+  // This allows all trampolines to access runtime-dependent data without
+  // needing to know where they're called from.
+  //
+  // Strategy: Load JSRuntime* from JSContext, which is accessible via
+  // absolute address (for non-AOT) or will be accessed via RIP-relative
+  // in the future for true PIC.
+  if (JitOptions.useAOTTrampolines) {
+    // For now, use absolute address to load JSContext, then JSRuntime
+    // TODO: Make this truly PIC with RIP-relative addressing and
+    // a runtime pointer stored in the AOT binary's data section
+    masm.movePtr(ImmPtr(cx), r13);  // Load JSContext*
+    masm.loadPtr(Address(r13, JSContext::offsetOfRuntime()), r13);  // Load JSRuntime*
+  }
+#endif
+
   generateEnterJitShared(masm, reg_argc, reg_argv, r12, r13, r14, r15);
 
   // Push the descriptor.
@@ -583,14 +594,12 @@ uint32_t JitRuntime::generatePreBarrier(JSContext* cx, MacroAssembler& masm,
                       FloatRegisterSet(FloatRegisters::VolatileMask));
   masm.PushRegsInMask(regs);
 
-#ifdef ENABLE_AOT_TRAMPOLINES
-  // AOT mode: Load runtime from pinned context register (r13/ABINonVolatileReg)
-  // Context is pinned at runtime by EnterJIT
-  masm.loadPtr(Address(ABINonVolatileReg, JSContext::offsetOfRuntime()), rcx);
-#else
-  // JIT mode: Use absolute runtime pointer
+// #ifdef ENABLE_AOT_TRAMPOLINES
+//   // AOT mode: Load runtime from pinned context register (r13/ABINonVolatileReg)
+//   // Context is pinned at runtime by EnterJIT
+//   masm.loadPtr(Address(ABINonVolatileReg, JSContext::offsetOfRuntime()), rcx);
+//  #endif
   masm.mov(ImmPtr(cx->runtime()), rcx);
-#endif
 
   masm.setupUnalignedABICall(rax);
   masm.passABIArg(rcx);

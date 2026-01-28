@@ -2858,18 +2858,23 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 
 void MacroAssembler::loadJSContext(Register dest) {
 #ifdef ENABLE_AOT_TRAMPOLINES
-  // When AOT trampolines are enabled, always generate PIC code.
-  // At runtime, JSContext* will be pinned in ABINonVolatileReg (r13 on x64).
-  // Note: We use ABINonVolatileReg directly here rather than contextReg()
-  // because during code generation (dump mode), contextReg_ may not be set yet.
-  if (dest != ABINonVolatileReg) {
-    movePtr(ABINonVolatileReg, dest);
-  }
-  // If dest == ABINonVolatileReg, context is already in the right place
-#else
-  // JIT mode: Load from absolute address (runtime-specific)
-  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
+  if (isAOTTrampoline()) {
+    // We only want to load the JSContext through a pinned runtime register
+    // if we are compiling for AOT trampolines. This leaves the other codegen
+    // using this function unaffected.
+    MOZ_ASSERT(zoneReg_ != InvalidReg,
+               "Zone register must be set before calling loadJSContext in AOT mode");
+    MOZ_ASSERT(isZoneLoaded(),
+               "Zone must be loaded before calling loadJSContext in AOT mode");
+    Register temp = dest;
+    loadRuntime(temp);
+    loadJSContextFromRuntime(temp, dest);
+  } else
 #endif
+  {
+    // For non-AOT mode, use the compile-time JSContext pointer
+    movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
+  }
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
@@ -4257,13 +4262,59 @@ void MacroAssembler::loadBaselineZone() {
 }
 #endif
 
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE) || defined(ENABLE_AOT_TRAMPOLINES)
 void MacroAssembler::loadRuntime(Register reg) {
   Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
   // Load the runtime ptr stored in the zone.
   // N.B: temp is expected to hold the runtime ptr by the flows below.
   // Do not clobber it!
   loadPtr(runtimeAddr, reg);
+}
+#endif
+
+#ifdef ENABLE_AOT_TRAMPOLINES
+// Load JSRuntime* for AOT trampolines.
+// This function is platform-specific and implemented in MacroAssembler-<arch>.cpp
+void MacroAssembler::loadTrampolineRuntime(Register dest) {
+  MOZ_ASSERT(isAOTTrampoline(),
+             "loadTrampolineRuntime should only be called for AOT trampolines");
+
+  // On x64, we use RIP-relative addressing to load from a global pointer
+  // that's stored at the beginning of the AOT trampoline binary.
+  // The implementation is in x64/MacroAssembler-x64.cpp
+
+  // For now, emit a placeholder that loads from a symbol.
+  // This will be platform-specific.
+  #ifdef JS_CODEGEN_X64
+    // Load from the runtime pointer at a fixed offset from the code.
+    // The offset will be calculated based on the AOT binary layout.
+    // For now, we'll use a temporary approach: load via absolute address
+    // that gets patched at load time.
+
+    // Emit a mov instruction with RIP-relative addressing
+    // movq runtime_ptr(%rip), dest
+    // This will be properly implemented in the x64-specific file
+    static_assert(sizeof(JSRuntime*) == 8, "Pointer size mismatch");
+
+    // Temporary: For testing, we can use an absolute load
+    // In production, this needs to be RIP-relative
+    // TODO: Implement proper RIP-relative load
+    movePtr(ImmPtr(nullptr), dest);  // Placeholder - will be patched
+  #else
+    MOZ_CRASH("loadTrampolineRuntime not implemented for this architecture");
+  #endif
+}
+
+// Load Zone* from JSRuntime* that's already in a register
+void MacroAssembler::loadZoneFromRuntime(Register runtimeReg, Register dest) {
+  // For now, we need to load the main context first, then get its zone.
+  // JSRuntime stores the mainContext, and the context has a zone.
+
+  // Load mainContext from runtime
+  loadPtr(Address(runtimeReg, JSRuntime::offsetOfMainContext()), dest);
+
+  // Load zone from context
+  loadPtr(Address(dest, JSContext::offsetOfZone()), dest);
 }
 #endif
 

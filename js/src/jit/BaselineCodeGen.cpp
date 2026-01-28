@@ -7708,10 +7708,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
 #ifdef ENABLE_AOT_BASELINE
   if (JitOptions.useAOTBaseline) {
-    if (!loadAOTBaseline(cx, interpreter)) {
-      return false;
-    }
-    return true;
+    return loadAOTBaseline(cx, interpreter);
   }
 #endif
 

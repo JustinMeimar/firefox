@@ -402,15 +402,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   bool zoneLoaded_ = false;
 
 #ifdef ENABLE_AOT_TRAMPOLINES
-  // Whether or not we're generating AOT trampoline code.
+  // Follows the same pattern as for AOT ICs
   bool isAOTTrampoline_ = false;
-
-  // Register containing the JSContext* for AOT trampolines.
-  // This should be a valid register when isAOTTrampoline_ = true.
   Register contextReg_ = InvalidReg;
-
-  // Indicator to track whether or not the context has been loaded into
-  // contextReg_.
   bool contextLoaded_ = false;
 #endif
 
@@ -5944,7 +5938,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void reserveStack(uint32_t amount);
 #endif
 
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE) || defined(ENABLE_AOT_TRAMPOLINES)
  public:
   // Load the runtime ptr from the zone, into given register.
   // See 'Runtime agnostic code generation'.
@@ -5974,60 +5968,67 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void loadBaselineZone();
 #endif
 
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
+#ifdef ENABLE_AOT_TRAMPOLINES
+  // Load JSRuntime* into a register for AOT trampolines.
+  // Uses RIP-relative addressing to load from a global pointer.
+  void loadTrampolineRuntime(Register dest);
 
- private:
+  // Set the zone register from the runtime register.
+  void loadZoneFromRuntime(Register runtimeReg, Register dest);
+
+  // Emit the standard trampoline prologue that sets up the runtime register.
+  // This should be called at the start of every AOT trampoline.
+  // It loads JSRuntime* into ABINonVolatileReg (r13 on x64) so that the
+  // trampoline can access runtime-dependent data.
+  void emitTrampolinePrologue();
+#endif
+
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE) || defined(ENABLE_AOT_TRAMPOLINES)
   void setZoneLoaded() {
     // MOZ_ASSERT(isAOTFill_); // Disabling since AOT baseline can use also.
     MOZ_ASSERT(zoneReg_ != InvalidReg);
     zoneLoaded_ = true;
   }
 
+ private:
   bool isZoneLoaded() { return zoneLoaded_; }
 #endif
 
 #ifdef ENABLE_AOT_TRAMPOLINES
  public:
-  // Set the mode to AOT trampoline generation.
-  void setAOTTrampolineMode() {
-    isAOTTrampoline_ = true;
-  }
+  
+  void setAOTTrampolineMode() { isAOTTrampoline_ = true; }
+  bool isAOTTrampoline() const { return isAOTTrampoline_; }
+  bool isJSContextLoaded() const { return contextLoaded_; }
 
-  bool isAOTTrampoline() const {
-    return isAOTTrampoline_;
-  }
-
-  // Set the register that will hold the JSContext* pointer for AOT trampolines.
-  void setContextReg(Register ctxReg) {
+  void setRuntimePtr(JSRuntime* rt, Register reg) {
     MOZ_ASSERT(isAOTTrampoline_);
-    MOZ_ASSERT(contextReg_ == InvalidReg, "Context register already set");
-    contextReg_ = ctxReg;
+    MOZ_ASSERT(contextReg_ == InvalidReg, "Runtime register already set");
+    movePtr(ImmPtr(rt), reg);
+    contextReg_ = reg;
   }
 
-  // Get the register holding the JSContext* pointer.
-  Register contextReg() const {
-    MOZ_ASSERT(isContextLoaded());
+  // Helper to load Zone from a JSScript pointer.
+  // void loadZoneFromScript(Register script, Register dest);
+
+  // Helper to load JSContext from a Runtime pointer in a register.
+  void loadJSContextFromRuntime(Register runtimeReg, Register dest) {
+    Address contextAddr(runtimeReg, JSRuntime::offsetOfMainContext());
+    loadPtr(contextAddr, dest);
+  }
+
+  Register JSContextReg() const {
+    MOZ_ASSERT(isJSContextLoaded());
     return contextReg_;
   }
 
-  // Mark that the context has been loaded into contextReg_.
   void setContextLoaded() {
     MOZ_ASSERT(isAOTTrampoline_);
     MOZ_ASSERT(contextReg_ != InvalidReg);
     contextLoaded_ = true;
   }
 
-  // Check if the context register has been loaded.
-  bool isContextLoaded() const {
-    return contextLoaded_;
-  }
 
-  // Helper: Load the runtime pointer from the pinned context register.
-  void loadRuntimeFromContext(Register dest) {
-    MOZ_ASSERT(isAOTTrampoline());
-    MOZ_ASSERT(isContextLoaded());
-    loadPtr(Address(contextReg(), JSContext::offsetOfRuntime()), dest);
-  }
 #endif
 
  public:
