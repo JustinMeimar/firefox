@@ -597,18 +597,13 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   uint32_t compileRuntimePtrOffset_ = 0;
 
 #ifdef ENABLE_AOT_BASELINE
-  // TODO(justin): Simplify
   struct BaselineAOTAccumulator {
-    uint32_t metadata[uint32_t(BaselineMetadataID::Count)] = {0};
+    BaselineManifest manifest = {};
     Vector<uint32_t, 0, SystemAllocPolicy> debugInstr;
     Vector<uint32_t, 0, SystemAllocPolicy> debugTraps;
     Vector<uint32_t, 0, SystemAllocPolicy> codeCoverage;
     Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy> icReturns;
     Vector<DispatchTablePatch, 0, SystemAllocPolicy> patches;
-
-    void set(BaselineMetadataID id, uint32_t val) {
-      metadata[uint32_t(id)] = val;
-    }
 
     [[nodiscard]] bool addPatch(DispatchTablePatch&& patch) {
       return patches.append(std::move(patch));

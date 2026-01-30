@@ -24,30 +24,60 @@ inline std::size_t GetAOTBaselineSize() {
   return baseline_blob_end - baseline_blob_start;
 }
 
-/* NOTE(justin): Baseline metadata is used at load time to reconstruct the
- * BaslineInterpreter class, which needs all the offsets as data members.
- * There must be a more elegant way to encode this information.
- * */
+// =============================================================================
+// UNIFIED METADATA MACRO SYSTEM
+// =============================================================================
+//
+// This is the single source of truth for all baseline AOT metadata fields.
+// All enums, structs, and serialization/deserialization code are derived
+// from these macros to eliminate manual synchronization.
+//
+// Parameters for offset fields: (ENUM_NAME, SERIALIZE_EXPR, LAYOUT_FIELD, INTERP_FIELD, CALLVM_FIELD)
+//   - ENUM_NAME: Name in BaselineMetadataID enum
+//   - SERIALIZE_EXPR: Expression to get value during serialization (from BaselineInterpreterGenerator)
+//   - LAYOUT_FIELD: Field name in AOTBlobLayout (empty if not used)
+//   - INTERP_FIELD: Field name in BaselineInterpreter (empty if not used)
+//   - CALLVM_FIELD: Field name in callVMOffsets_ (empty if not CallVM-related)
+//
+// Parameters for count fields: (ENUM_NAME, SERIALIZE_EXPR, LAYOUT_FIELD)
+
+#define FOR_EACH_BASELINE_OFFSET_FIELD(X) \
+  X(InterpretOp, interpretOpOffset_, interpretOpOffset, interpretOpOffset_, ) \
+  X(InterpretOpNoDebugTrap, interpretOpNoDebugTrapOffset_, , interpretOpNoDebugTrapOffset_, ) \
+  X(BailoutPrologue, bailoutPrologueOffset_.offset(), , bailoutPrologueOffset_, ) \
+  X(ProfilerEnterToggle, profilerEnterFrameToggleOffset_.offset(), , profilerEnterToggleOffset_, ) \
+  X(ProfilerExitToggle, profilerExitFrameToggleOffset_.offset(), , profilerExitToggleOffset_, ) \
+  X(DebugTrapHandler, debugTrapHandlerOffset_, , debugTrapHandlerOffset_, ) \
+  X(DispatchTableOffset, tableOffset_, dispatchTableOffset, , ) \
+  X(CallVMDebugPrologue, handler.callVMOffsets().debugPrologueOffset, , , debugPrologueOffset) \
+  X(CallVMDebugEpilogue, handler.callVMOffsets().debugEpilogueOffset, , , debugEpilogueOffset) \
+  X(CallVMDebugAfterYield, handler.callVMOffsets().debugAfterYieldOffset, , , debugAfterYieldOffset) \
+  X(HeaderSize, code->headerSize(), , , ) \
+  X(PrologueEndOffset, warmUpCheckPrologueOffset_.offset(), prologueEndOffset, , )
+
+#define FOR_EACH_BASELINE_COUNT_FIELD(X) \
+  X(DebugInstrumentationCount, handler.debugInstrumentationOffsets().length(), debugInstrCount) \
+  X(DebugTrapCount, aotAccumulator_.debugTraps.length(), debugTrapCount) \
+  X(CodeCoverageCount, handler.codeCoverageOffsets().length(), codeCoverageCount) \
+  X(ICReturnCount, handler.icReturnOffsets().length(), icReturnCount) \
+  X(PatchCount, aotAccumulator_.patches.length(), patchCount) \
+  X(OpHandlerOffsetCount, opHandlerOffsets_.length(), opHandlerCount)
+
+// Master macro that includes all metadata fields
+#define FOR_EACH_BASELINE_METADATA_FIELD(X) \
+  FOR_EACH_BASELINE_OFFSET_FIELD(X) \
+  FOR_EACH_BASELINE_COUNT_FIELD(X)
+
+
+// Auto-generated enum from the unified metadata macros.
+// This eliminates manual synchronization between enum and field definitions.
 enum class BaselineMetadataID : uint32_t {
-  InterpretOp = 0,
-  InterpretOpNoDebugTrap,
-  BailoutPrologue,
-  ProfilerEnterToggle,
-  ProfilerExitToggle,
-  DebugTrapHandler,
-  DispatchTableOffset,
-  CallVMDebugPrologue,
-  CallVMDebugEpilogue,
-  CallVMDebugAfterYield,
-  HeaderSize, // NOTE(Justin):
-  PrologueEndOffset,  // Offset where prologue ends (warmUpCheckPrologueOffset)
-  // Counts for vectors
-  DebugInstrumentationCount,
-  DebugTrapCount,
-  CodeCoverageCount,
-  ICReturnCount,
-  PatchCount,
-  OpHandlerOffsetCount,
+#define ENUM_ENTRY_OFFSET(NAME, ...) NAME,
+#define ENUM_ENTRY_COUNT(NAME, ...) NAME,
+  FOR_EACH_BASELINE_OFFSET_FIELD(ENUM_ENTRY_OFFSET)
+  FOR_EACH_BASELINE_COUNT_FIELD(ENUM_ENTRY_COUNT)
+#undef ENUM_ENTRY_OFFSET
+#undef ENUM_ENTRY_COUNT
   Count
 };
 
@@ -79,13 +109,22 @@ struct alignas(4) BaselineAOTFooter {
   uint32_t manifestOffset = 0; // Absolute offset from blob start
 };
 
+// Auto-generated typed struct for baseline manifest.
+// Provides type-safe named field access instead of array indexing.
 struct alignas(4) BaselineManifest {
-  uint32_t metadata[uint32_t(BaselineMetadataID::Count)];
+#define FIELD_DECL_OFFSET(NAME, ...) uint32_t NAME;
+#define FIELD_DECL_COUNT(NAME, ...) uint32_t NAME;
+  FOR_EACH_BASELINE_OFFSET_FIELD(FIELD_DECL_OFFSET)
+  FOR_EACH_BASELINE_COUNT_FIELD(FIELD_DECL_COUNT)
+#undef FIELD_DECL_OFFSET
+#undef FIELD_DECL_COUNT
+  // Followed by variable-length arrays:
   // uint32_t debugInstrumentation[DebugInstrumentationCount]
   // uint32_t debugTraps[DebugTrapCount]
   // uint32_t codeCoverage[CodeCoverageCount]
   // ICReturnOffsetEntry icReturns[ICReturnCount]
-  // PatchEntry patches[PatchCount]
+  // DispatchTablePatch patches[PatchCount]
+  // uint32_t opHandlerOffsets[OpHandlerOffsetCount]
 };
 
 struct alignas(4) ICReturnOffsetEntry {
@@ -94,10 +133,10 @@ struct alignas(4) ICReturnOffsetEntry {
 };
 
 static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
-static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>
-    (BaselineMetadataID::Count) * 4, "Manifest must be 76 bytes (19 fields × 4)");
+static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>(BaselineMetadataID::Count) * 4,
+              "Manifest size must match metadata count");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
-static_assert(sizeof(DispatchTablePatch) == 8, "PatchEntry must be 16 bytes");
+static_assert(sizeof(DispatchTablePatch) == 8, "DispatchTablePatch must be 8 bytes");
 
 struct AOTBlobLayout {
   std::size_t codeSize;
@@ -122,7 +161,6 @@ struct AOTBlobLayout {
   std::size_t patchSize() const { return patchCount * sizeof(DispatchTablePatch); }
   std::size_t opHandlerSize() const { return opHandlerCount * sizeof(uint32_t); }
   std::size_t footerSize() const { return sizeof(BaselineAOTFooter); }
-
   std::size_t manifestOffset() const { return codeSize; }
   std::size_t debugInstrOffset() const { return manifestOffset() + manifestSize(); }
   std::size_t debugTrapOffset() const { return debugInstrOffset() + debugInstrSize(); }

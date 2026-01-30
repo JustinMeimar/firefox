@@ -7441,67 +7441,25 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
 
-  // Validate code size and critical offsets before serialization
-  MOZ_ASSERT(codeSize > 0);
-  MOZ_ASSERT(codeSize == code->instructionsSize());
-  MOZ_ASSERT(warmUpCheckPrologueOffset_.offset() < codeSize);
-  MOZ_ASSERT(warmUpCheckPrologueOffset_.offset() < tableOffset_);
-  MOZ_ASSERT(interpretOpOffset_ < codeSize);
-  MOZ_ASSERT(tableOffset_ < codeSize);
-  MOZ_ASSERT(tableOffset_ + (JSOP_LIMIT * sizeof(uintptr_t)) <= codeSize);
-  MOZ_ASSERT(opHandlerOffsets_.length() == JSOP_LIMIT);
-
-#ifdef DEBUG
-  // Validate all handler offsets are within code bounds
-  for (size_t i = 0; i < JSOP_LIMIT; i++) {
-    MOZ_ASSERT(opHandlerOffsets_[i].offset() < codeSize);
-  }
-#endif
-
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
   MOZ_ASSERT(binFile && "Failed to write machine code.");
 
   // 3. Record manifest offset (before writing manifest)
   size_t manifestOffset = binFile.tellp();
 
-  // 4. There is a way to macro out this ugliness once AOT is actually working.
-  aotAccumulator_.set(BaselineMetadataID::InterpretOp, interpretOpOffset_);
-  aotAccumulator_.set(BaselineMetadataID::InterpretOpNoDebugTrap,
-                      interpretOpNoDebugTrapOffset_);
-  aotAccumulator_.set(BaselineMetadataID::BailoutPrologue,
-                      bailoutPrologueOffset_.offset());
-  aotAccumulator_.set(BaselineMetadataID::DebugTrapHandler,
-                      debugTrapHandlerOffset_);
-  aotAccumulator_.set(BaselineMetadataID::DispatchTableOffset, tableOffset_);
-  aotAccumulator_.set(BaselineMetadataID::ProfilerEnterToggle,
-                      profilerEnterFrameToggleOffset_.offset());
-  aotAccumulator_.set(BaselineMetadataID::ProfilerExitToggle,
-                      profilerExitFrameToggleOffset_.offset());
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugPrologue,
-                      handler.callVMOffsets().debugPrologueOffset);
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugEpilogue,
-                      handler.callVMOffsets().debugEpilogueOffset);
-  aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield,
-                      handler.callVMOffsets().debugAfterYieldOffset);
-  aotAccumulator_.set(BaselineMetadataID::HeaderSize, code->headerSize());
-  aotAccumulator_.set(BaselineMetadataID::PrologueEndOffset,
-                      warmUpCheckPrologueOffset_.offset());
-  aotAccumulator_.set(BaselineMetadataID::DebugInstrumentationCount,
-                      handler.debugInstrumentationOffsets().length());
-  aotAccumulator_.set(BaselineMetadataID::DebugTrapCount,
-                      aotAccumulator_.debugTraps.length());
-  aotAccumulator_.set(BaselineMetadataID::CodeCoverageCount,
-                      handler.codeCoverageOffsets().length());
-  aotAccumulator_.set(BaselineMetadataID::ICReturnCount,
-                      handler.icReturnOffsets().length());
-  aotAccumulator_.set(BaselineMetadataID::PatchCount,
-                      aotAccumulator_.patches.length());
-  aotAccumulator_.set(BaselineMetadataID::OpHandlerOffsetCount,
-                      opHandlerOffsets_.length());
+  // 4. Populate manifest using X-macros - auto-generated from unified metadata definitions.
+#define SET_OFFSET(NAME, EXPR, ...) \
+  aotAccumulator_.manifest.NAME = (EXPR);
+#define SET_COUNT(NAME, EXPR, ...) \
+  aotAccumulator_.manifest.NAME = (EXPR);
+  FOR_EACH_BASELINE_OFFSET_FIELD(SET_OFFSET)
+  FOR_EACH_BASELINE_COUNT_FIELD(SET_COUNT)
+#undef SET_OFFSET
+#undef SET_COUNT
 
-  // Write manifest metadata array (now fully populated)
-  binFile.write(reinterpret_cast<const char*>(aotAccumulator_.metadata),
-                sizeof(aotAccumulator_.metadata));
+  // Write manifest (typed struct with named fields)
+  binFile.write(reinterpret_cast<const char*>(&aotAccumulator_.manifest),
+                sizeof(aotAccumulator_.manifest));
 
   // Write vector payloads sequentially debug instrumentation offsets
   const auto& debugInstr = handler.debugInstrumentationOffsets();
@@ -7559,20 +7517,12 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   layout.prologueEndOffset = warmUpCheckPrologueOffset_.offset();
   layout.interpretOpOffset = interpretOpOffset_;
   layout.dispatchTableOffset = tableOffset_;
-  layout.debugInstrCount =
-      aotAccumulator_
-          .metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)];
-  layout.debugTrapCount =
-      aotAccumulator_.metadata[uint32_t(BaselineMetadataID::DebugTrapCount)];
-  layout.codeCoverageCount =
-      aotAccumulator_.metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)];
-  layout.icReturnCount =
-      aotAccumulator_.metadata[uint32_t(BaselineMetadataID::ICReturnCount)];
-  layout.patchCount =
-      aotAccumulator_.metadata[uint32_t(BaselineMetadataID::PatchCount)];
-  layout.opHandlerCount =
-      aotAccumulator_
-          .metadata[uint32_t(BaselineMetadataID::OpHandlerOffsetCount)];
+  layout.debugInstrCount = aotAccumulator_.manifest.DebugInstrumentationCount;
+  layout.debugTrapCount = aotAccumulator_.manifest.DebugTrapCount;
+  layout.codeCoverageCount = aotAccumulator_.manifest.CodeCoverageCount;
+  layout.icReturnCount = aotAccumulator_.manifest.ICReturnCount;
+  layout.patchCount = aotAccumulator_.manifest.PatchCount;
+  layout.opHandlerCount = aotAccumulator_.manifest.OpHandlerOffsetCount;
   layout.dump(false);
 
   return true;
@@ -7603,44 +7553,25 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
 
   auto* manifest =
       reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
-  uint32_t headerSize =
-      manifest->metadata[uint32_t(BaselineMetadataID::HeaderSize)];
+  uint32_t headerSize = manifest->HeaderSize;
 
   AOTBlobLayout layout;
   layout.codeSize = codeSize;
-  layout.prologueEndOffset =
-      manifest->metadata[uint32_t(BaselineMetadataID::PrologueEndOffset)];
-  layout.interpretOpOffset =
-      manifest->metadata[uint32_t(BaselineMetadataID::InterpretOp)];
-  layout.dispatchTableOffset =
-      manifest->metadata[uint32_t(BaselineMetadataID::DispatchTableOffset)];
-  layout.debugInstrCount =
-      manifest
-          ->metadata[uint32_t(BaselineMetadataID::DebugInstrumentationCount)];
-  layout.debugTrapCount =
-      manifest->metadata[uint32_t(BaselineMetadataID::DebugTrapCount)];
-  layout.codeCoverageCount =
-      manifest->metadata[uint32_t(BaselineMetadataID::CodeCoverageCount)];
-  layout.icReturnCount =
-      manifest->metadata[uint32_t(BaselineMetadataID::ICReturnCount)];
-  layout.patchCount =
-      manifest->metadata[uint32_t(BaselineMetadataID::PatchCount)];
-  layout.opHandlerCount =
-      manifest->metadata[uint32_t(BaselineMetadataID::OpHandlerOffsetCount)];
+
+  // Load metadata into layout using type-safe named field access.
+  layout.interpretOpOffset = manifest->InterpretOp;
+  layout.dispatchTableOffset = manifest->DispatchTableOffset;
+  layout.prologueEndOffset = manifest->PrologueEndOffset;
+  layout.debugInstrCount = manifest->DebugInstrumentationCount;
+  layout.debugTrapCount = manifest->DebugTrapCount;
+  layout.codeCoverageCount = manifest->CodeCoverageCount;
+  layout.icReturnCount = manifest->ICReturnCount;
+  layout.patchCount = manifest->PatchCount;
+  layout.opHandlerCount = manifest->OpHandlerOffsetCount;
 
   // TODO(Justin): Change these asserts to be precise equalities.
-  MOZ_ASSERT(codeSize > 0);
   MOZ_ASSERT(codeSize <= blobSize);
-  MOZ_ASSERT(footer->manifestOffset < blobSize);
-  MOZ_ASSERT(layout.prologueEndOffset < codeSize);
-  MOZ_ASSERT(layout.prologueEndOffset < layout.dispatchTableOffset);
-  MOZ_ASSERT(layout.interpretOpOffset < codeSize);
-  MOZ_ASSERT(layout.dispatchTableOffset < codeSize);
-  MOZ_ASSERT(layout.dispatchTableOffset + (JSOP_LIMIT * sizeof(uintptr_t)) <=
-             codeSize);
-
   layout.dump(true, aotBlob);
-
   size_t bytesNeeded = codeSize + headerSize;
   ExecutablePool* pool;
   uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
