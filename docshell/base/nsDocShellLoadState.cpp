@@ -955,7 +955,7 @@ void nsDocShellLoadState::GetMaybeResultPrincipalURI(
 
 void nsDocShellLoadState::SetMaybeResultPrincipalURI(
     mozilla::Maybe<nsCOMPtr<nsIURI>> const& aRPURI) {
-  SetResultPrincipalURI(aRPURI.refOr(nullptr));
+  SetResultPrincipalURI(aRPURI.isSome() ? aRPURI.ref().get() : nullptr);
   SetResultPrincipalURIIsSome(aRPURI.isSome());
 }
 

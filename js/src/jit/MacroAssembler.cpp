@@ -841,6 +841,7 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
     // No allocation site supplied.
     // This is the when called from: e.g: EmitAllocateBigInt.
     gc::CatchAllAllocSite siteKind = allocSite.as<gc::CatchAllAllocSite>();
+    (void)siteKind;
     // Only the Unknown CatchAllAllocSite should be used by Baseline ICs.
     MOZ_ASSERT(siteKind == gc::CatchAllAllocSite::Unknown);
 
