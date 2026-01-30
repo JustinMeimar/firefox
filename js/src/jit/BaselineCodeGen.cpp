@@ -7444,17 +7444,19 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   // Validate code size and critical offsets before serialization
   MOZ_ASSERT(codeSize > 0);
   MOZ_ASSERT(codeSize == code->instructionsSize());
+  MOZ_ASSERT(warmUpCheckPrologueOffset_.offset() < codeSize);
+  MOZ_ASSERT(warmUpCheckPrologueOffset_.offset() < tableOffset_);
   MOZ_ASSERT(interpretOpOffset_ < codeSize);
   MOZ_ASSERT(tableOffset_ < codeSize);
   MOZ_ASSERT(tableOffset_ + (JSOP_LIMIT * sizeof(uintptr_t)) <= codeSize);
   MOZ_ASSERT(opHandlerOffsets_.length() == JSOP_LIMIT);
 
-#  ifdef DEBUG
+#ifdef DEBUG
   // Validate all handler offsets are within code bounds
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
     MOZ_ASSERT(opHandlerOffsets_[i].offset() < codeSize);
   }
-#  endif
+#endif
 
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
   MOZ_ASSERT(binFile && "Failed to write machine code.");
@@ -7482,6 +7484,8 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   aotAccumulator_.set(BaselineMetadataID::CallVMDebugAfterYield,
                       handler.callVMOffsets().debugAfterYieldOffset);
   aotAccumulator_.set(BaselineMetadataID::HeaderSize, code->headerSize());
+  aotAccumulator_.set(BaselineMetadataID::PrologueEndOffset,
+                      warmUpCheckPrologueOffset_.offset());
   aotAccumulator_.set(BaselineMetadataID::DebugInstrumentationCount,
                       handler.debugInstrumentationOffsets().length());
   aotAccumulator_.set(BaselineMetadataID::DebugTrapCount,
@@ -7552,6 +7556,7 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
 
   AOTBlobLayout layout;
   layout.codeSize = codeSize;
+  layout.prologueEndOffset = warmUpCheckPrologueOffset_.offset();
   layout.interpretOpOffset = interpretOpOffset_;
   layout.dispatchTableOffset = tableOffset_;
   layout.debugInstrCount =
@@ -7603,6 +7608,8 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
 
   AOTBlobLayout layout;
   layout.codeSize = codeSize;
+  layout.prologueEndOffset =
+      manifest->metadata[uint32_t(BaselineMetadataID::PrologueEndOffset)];
   layout.interpretOpOffset =
       manifest->metadata[uint32_t(BaselineMetadataID::InterpretOp)];
   layout.dispatchTableOffset =
@@ -7625,6 +7632,8 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
   MOZ_ASSERT(codeSize > 0);
   MOZ_ASSERT(codeSize <= blobSize);
   MOZ_ASSERT(footer->manifestOffset < blobSize);
+  MOZ_ASSERT(layout.prologueEndOffset < codeSize);
+  MOZ_ASSERT(layout.prologueEndOffset < layout.dispatchTableOffset);
   MOZ_ASSERT(layout.interpretOpOffset < codeSize);
   MOZ_ASSERT(layout.dispatchTableOffset < codeSize);
   MOZ_ASSERT(layout.dispatchTableOffset + (JSOP_LIMIT * sizeof(uintptr_t)) <=

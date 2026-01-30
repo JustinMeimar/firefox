@@ -24,7 +24,7 @@ void AOTBlobLayout::dump(bool isLoad, void* blobStart) const {
   }
   JitSpew(JitSpew_BaselineAOT, "Code: offset=0, size=%zu", codeSize);
   JitSpew(JitSpew_BaselineAOT, "  Prologue: offset=0, size=%zu", prologueSize());
-  JitSpew(JitSpew_BaselineAOT, "  Handlers: offset=%u, size=%zu", interpretOpOffset, handlersSize());
+  JitSpew(JitSpew_BaselineAOT, "  Handlers: offset=%u, size=%zu", prologueEndOffset, handlersSize());
   JitSpew(JitSpew_BaselineAOT, "  Dispatch table: offset=%u, size=%zu",
           dispatchTableOffset, dispatchTableSize());
   JitSpew(JitSpew_BaselineAOT, "Metadata: offset=%zu, size=%zu",
