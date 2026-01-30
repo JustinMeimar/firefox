@@ -39,7 +39,8 @@ enum class BaselineMetadataID : uint32_t {
   CallVMDebugPrologue,
   CallVMDebugEpilogue,
   CallVMDebugAfterYield,
-  HeaderSize, // NOTE(Justin):  
+  HeaderSize, // NOTE(Justin):
+  PrologueEndOffset,  // Offset where prologue ends (warmUpCheckPrologueOffset)
   // Counts for vectors
   DebugInstrumentationCount,
   DebugTrapCount,
@@ -94,12 +95,13 @@ struct alignas(4) ICReturnOffsetEntry {
 
 static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>
-    (BaselineMetadataID::Count) * 4, "Manifest must be 72 bytes (18 fields × 4)");
+    (BaselineMetadataID::Count) * 4, "Manifest must be 76 bytes (19 fields × 4)");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
 static_assert(sizeof(DispatchTablePatch) == 8, "PatchEntry must be 16 bytes");
 
 struct AOTBlobLayout {
   std::size_t codeSize;
+  uint32_t prologueEndOffset;
   uint32_t interpretOpOffset;
   uint32_t dispatchTableOffset;
   uint32_t debugInstrCount;
@@ -109,8 +111,8 @@ struct AOTBlobLayout {
   uint32_t patchCount;
   uint32_t opHandlerCount;
 
-  std::size_t prologueSize() const { return interpretOpOffset; }
-  std::size_t handlersSize() const { return dispatchTableOffset - interpretOpOffset; }
+  std::size_t prologueSize() const { return prologueEndOffset; }
+  std::size_t handlersSize() const { return dispatchTableOffset - prologueEndOffset; }
   std::size_t dispatchTableSize() const { return codeSize - dispatchTableOffset; }
   std::size_t manifestSize() const { return sizeof(BaselineManifest); }
   std::size_t debugInstrSize() const { return debugInstrCount * sizeof(uint32_t); }
