@@ -24,60 +24,31 @@ inline std::size_t GetAOTBaselineSize() {
   return baseline_blob_end - baseline_blob_start;
 }
 
-// =============================================================================
-// UNIFIED METADATA MACRO SYSTEM
-// =============================================================================
-//
-// This is the single source of truth for all baseline AOT metadata fields.
-// All enums, structs, and serialization/deserialization code are derived
-// from these macros to eliminate manual synchronization.
-//
-// Parameters for offset fields: (ENUM_NAME, SERIALIZE_EXPR, LAYOUT_FIELD, INTERP_FIELD, CALLVM_FIELD)
-//   - ENUM_NAME: Name in BaselineMetadataID enum
-//   - SERIALIZE_EXPR: Expression to get value during serialization (from BaselineInterpreterGenerator)
-//   - LAYOUT_FIELD: Field name in AOTBlobLayout (empty if not used)
-//   - INTERP_FIELD: Field name in BaselineInterpreter (empty if not used)
-//   - CALLVM_FIELD: Field name in callVMOffsets_ (empty if not CallVM-related)
-//
-// Parameters for count fields: (ENUM_NAME, SERIALIZE_EXPR, LAYOUT_FIELD)
-
-#define FOR_EACH_BASELINE_OFFSET_FIELD(X) \
-  X(InterpretOp, interpretOpOffset_, interpretOpOffset, interpretOpOffset_, ) \
-  X(InterpretOpNoDebugTrap, interpretOpNoDebugTrapOffset_, , interpretOpNoDebugTrapOffset_, ) \
-  X(BailoutPrologue, bailoutPrologueOffset_.offset(), , bailoutPrologueOffset_, ) \
-  X(ProfilerEnterToggle, profilerEnterFrameToggleOffset_.offset(), , profilerEnterToggleOffset_, ) \
-  X(ProfilerExitToggle, profilerExitFrameToggleOffset_.offset(), , profilerExitToggleOffset_, ) \
-  X(DebugTrapHandler, debugTrapHandlerOffset_, , debugTrapHandlerOffset_, ) \
-  X(DispatchTableOffset, tableOffset_, dispatchTableOffset, , ) \
-  X(CallVMDebugPrologue, handler.callVMOffsets().debugPrologueOffset, , , debugPrologueOffset) \
-  X(CallVMDebugEpilogue, handler.callVMOffsets().debugEpilogueOffset, , , debugEpilogueOffset) \
-  X(CallVMDebugAfterYield, handler.callVMOffsets().debugAfterYieldOffset, , , debugAfterYieldOffset) \
-  X(HeaderSize, code->headerSize(), , , ) \
-  X(PrologueEndOffset, warmUpCheckPrologueOffset_.offset(), prologueEndOffset, , )
-
-#define FOR_EACH_BASELINE_COUNT_FIELD(X) \
-  X(DebugInstrumentationCount, handler.debugInstrumentationOffsets().length(), debugInstrCount) \
-  X(DebugTrapCount, aotAccumulator_.debugTraps.length(), debugTrapCount) \
-  X(CodeCoverageCount, handler.codeCoverageOffsets().length(), codeCoverageCount) \
-  X(ICReturnCount, handler.icReturnOffsets().length(), icReturnCount) \
-  X(PatchCount, aotAccumulator_.patches.length(), patchCount) \
-  X(OpHandlerOffsetCount, opHandlerOffsets_.length(), opHandlerCount)
-
-// Master macro that includes all metadata fields
-#define FOR_EACH_BASELINE_METADATA_FIELD(X) \
-  FOR_EACH_BASELINE_OFFSET_FIELD(X) \
-  FOR_EACH_BASELINE_COUNT_FIELD(X)
-
-
-// Auto-generated enum from the unified metadata macros.
-// This eliminates manual synchronization between enum and field definitions.
+// Baseline AOT metadata IDs
+// These correspond to fields in the BaselineManifest struct
 enum class BaselineMetadataID : uint32_t {
-#define ENUM_ENTRY_OFFSET(NAME, ...) NAME,
-#define ENUM_ENTRY_COUNT(NAME, ...) NAME,
-  FOR_EACH_BASELINE_OFFSET_FIELD(ENUM_ENTRY_OFFSET)
-  FOR_EACH_BASELINE_COUNT_FIELD(ENUM_ENTRY_COUNT)
-#undef ENUM_ENTRY_OFFSET
-#undef ENUM_ENTRY_COUNT
+  // Offset fields
+  InterpretOp,
+  InterpretOpNoDebugTrap,
+  BailoutPrologue,
+  ProfilerEnterToggle,
+  ProfilerExitToggle,
+  DebugTrapHandler,
+  DispatchTableOffset,
+  CallVMDebugPrologue,
+  CallVMDebugEpilogue,
+  CallVMDebugAfterYield,
+  HeaderSize,
+  PrologueEndOffset,
+
+  // Count fields
+  DebugInstrumentationCount,
+  DebugTrapCount,
+  CodeCoverageCount,
+  ICReturnCount,
+  PatchCount,
+  OpHandlerOffsetCount,
+
   Count
 };
 
@@ -109,15 +80,31 @@ struct alignas(4) BaselineAOTFooter {
   uint32_t manifestOffset = 0; // Absolute offset from blob start
 };
 
-// Auto-generated typed struct for baseline manifest.
-// Provides type-safe named field access instead of array indexing.
+// Baseline manifest structure
+// Contains metadata about the AOT-compiled baseline interpreter
 struct alignas(4) BaselineManifest {
-#define FIELD_DECL_OFFSET(NAME, ...) uint32_t NAME;
-#define FIELD_DECL_COUNT(NAME, ...) uint32_t NAME;
-  FOR_EACH_BASELINE_OFFSET_FIELD(FIELD_DECL_OFFSET)
-  FOR_EACH_BASELINE_COUNT_FIELD(FIELD_DECL_COUNT)
-#undef FIELD_DECL_OFFSET
-#undef FIELD_DECL_COUNT
+  // Offset fields
+  uint32_t InterpretOp;
+  uint32_t InterpretOpNoDebugTrap;
+  uint32_t BailoutPrologue;
+  uint32_t ProfilerEnterToggle;
+  uint32_t ProfilerExitToggle;
+  uint32_t DebugTrapHandler;
+  uint32_t DispatchTableOffset;
+  uint32_t CallVMDebugPrologue;
+  uint32_t CallVMDebugEpilogue;
+  uint32_t CallVMDebugAfterYield;
+  uint32_t HeaderSize;
+  uint32_t PrologueEndOffset;
+
+  // Count fields
+  uint32_t DebugInstrumentationCount;
+  uint32_t DebugTrapCount;
+  uint32_t CodeCoverageCount;
+  uint32_t ICReturnCount;
+  uint32_t PatchCount;
+  uint32_t OpHandlerOffsetCount;
+
   // Followed by variable-length arrays:
   // uint32_t debugInstrumentation[DebugInstrumentationCount]
   // uint32_t debugTraps[DebugTrapCount]

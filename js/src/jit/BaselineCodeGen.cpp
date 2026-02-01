@@ -7456,15 +7456,26 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   // 3. Record manifest offset (before writing manifest)
   size_t manifestOffset = binFile.tellp();
 
-  // 4. Populate manifest using X-macros - auto-generated from unified metadata definitions.
-#define SET_OFFSET(NAME, EXPR, ...) \
-  aotAccumulator_.manifest.NAME = (EXPR);
-#define SET_COUNT(NAME, EXPR, ...) \
-  aotAccumulator_.manifest.NAME = (EXPR);
-  FOR_EACH_BASELINE_OFFSET_FIELD(SET_OFFSET)
-  FOR_EACH_BASELINE_COUNT_FIELD(SET_COUNT)
-#undef SET_OFFSET
-#undef SET_COUNT
+  // 4. Populate manifest fields
+  aotAccumulator_.manifest.InterpretOp = interpretOpOffset_;
+  aotAccumulator_.manifest.InterpretOpNoDebugTrap = interpretOpNoDebugTrapOffset_;
+  aotAccumulator_.manifest.BailoutPrologue = bailoutPrologueOffset_.offset();
+  aotAccumulator_.manifest.ProfilerEnterToggle = profilerEnterFrameToggleOffset_.offset();
+  aotAccumulator_.manifest.ProfilerExitToggle = profilerExitFrameToggleOffset_.offset();
+  aotAccumulator_.manifest.DebugTrapHandler = debugTrapHandlerOffset_;
+  aotAccumulator_.manifest.DispatchTableOffset = tableOffset_;
+  aotAccumulator_.manifest.CallVMDebugPrologue = handler.callVMOffsets().debugPrologueOffset;
+  aotAccumulator_.manifest.CallVMDebugEpilogue = handler.callVMOffsets().debugEpilogueOffset;
+  aotAccumulator_.manifest.CallVMDebugAfterYield = handler.callVMOffsets().debugAfterYieldOffset;
+  aotAccumulator_.manifest.HeaderSize = code->headerSize();
+  aotAccumulator_.manifest.PrologueEndOffset = warmUpCheckPrologueOffset_.offset();
+
+  aotAccumulator_.manifest.DebugInstrumentationCount = handler.debugInstrumentationOffsets().length();
+  aotAccumulator_.manifest.DebugTrapCount = aotAccumulator_.debugTraps.length();
+  aotAccumulator_.manifest.CodeCoverageCount = handler.codeCoverageOffsets().length();
+  aotAccumulator_.manifest.ICReturnCount = handler.icReturnOffsets().length();
+  aotAccumulator_.manifest.PatchCount = aotAccumulator_.patches.length();
+  aotAccumulator_.manifest.OpHandlerOffsetCount = opHandlerOffsets_.length();
 
   // Write manifest (typed struct with named fields)
   binFile.write(reinterpret_cast<const char*>(&aotAccumulator_.manifest),
