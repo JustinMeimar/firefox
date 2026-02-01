@@ -110,11 +110,7 @@ BaselineCodeGen<Handler>::BaselineCodeGen(TempAllocator& alloc,
     : handler(masmArg, std::forward<HandlerArgs>(args)...),
       runtime(runtimeArg),
       masm(masmArg),
-      frame(handler.frame()) {
-#ifdef ENABLE_AOT_BASELINE
-  isAOTCompile_ = true;
-#endif
-}
+      frame(handler.frame()) {}
 
 BaselineCompiler::BaselineCompiler(TempAllocator& alloc,
                                    CompileRuntime* runtime,
@@ -131,7 +127,11 @@ BaselineInterpreterGenerator::BaselineInterpreterGenerator(JSContext* cx,
                                                            TempAllocator& alloc,
                                                            MacroAssembler& masm)
     : BaselineCodeGen(alloc, masm, CompileRuntime::get(cx->runtime())
-                      /* no handlerArgs */) {}
+                      /* no handlerArgs */) {
+#ifdef ENABLE_AOT_BASELINE
+  isAOTCompile_ = JitOptions.dumpBaselineInterpreter;
+#endif
+}
 
 bool BaselineCompilerHandler::init() {
   if (!analysis_.init(alloc_)) {
@@ -2884,15 +2884,18 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   Register scratch2 = R1.scratchReg();
   LoadUint8Operand(masm, scratch1);
 
-#ifdef ENABLE_AOT_BASELINE
-  // Load runtime from zone (zone is already in zoneReg_).
-  masm.loadRuntime(scratch2);
-  // Compute address of wellKnownSymbols
-  masm.loadPtr(Address(scratch2, offsetof(JSRuntime, wellKnownSymbols)),
-               scratch2);
-#else
-  masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
+  if (isAOTCompile_) {
+    // Load runtime from zone (zone is already in zoneReg_).
+    masm.loadRuntime(scratch2);
+    // Compute address of wellKnownSymbols
+    masm.loadPtr(Address(scratch2, offsetof(JSRuntime, wellKnownSymbols)),
+                 scratch2);
+  } else
 #endif
+  {
+    masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
+  }
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
   frame.push(R0);
@@ -5857,32 +5860,35 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
 
   // Call a stub to convert R0 from double to int32 if needed.
   // Note: this stub may clobber scratch1.
-#ifdef ENABLE_AOT_BASELINE
-  // For AOT code, compute the stub address dynamically through zone->runtime.
-  Register jitRuntimeReg = scratch1;
-  Register stubReg = scratch2;
-  // Load runtime from zone
-  masm.loadRuntime(jitRuntimeReg);
-  // Load jitRuntime pointer: jitRuntimeReg = runtime->jitRuntime_
-  masm.loadPtr(Address(jitRuntimeReg, JSRuntime::offsetOfJitRuntime()),
-               jitRuntimeReg);
-  // Load the stub offset value into stubReg
-  masm.load32(Address(jitRuntimeReg,
-                      JitRuntime::offsetOfDoubleToInt32ValueStubOffset()),
-              stubReg);
-  // Load trampolineCode pointer into jitRuntimeReg
-  masm.loadPtr(Address(jitRuntimeReg, JitRuntime::offsetOfTrampolineCode()),
-               jitRuntimeReg);
-  // Load raw code pointer: jitRuntimeReg = trampolineCode->raw()
-  masm.loadPtr(Address(jitRuntimeReg, JitCode::offsetOfCode()), jitRuntimeReg);
-  // Add the stub offset: stubReg = trampolineCode->raw() + stubOffset
-  masm.addPtr(jitRuntimeReg, stubReg);
-  // Call the stub
-  masm.call(stubReg);
-#else
-  // MARK_RUNTIME: This looks similar to emit_Symbol
-  masm.call(runtime->jitRuntime()->getDoubleToInt32ValueStub());
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
+  if (isAOTCompile_) {
+    // For AOT code, compute the stub address dynamically through zone->runtime.
+    Register jitRuntimeReg = scratch1;
+    Register stubReg = scratch2;
+    // Load runtime from zone
+    masm.loadRuntime(jitRuntimeReg);
+    // Load jitRuntime pointer: jitRuntimeReg = runtime->jitRuntime_
+    masm.loadPtr(Address(jitRuntimeReg, JSRuntime::offsetOfJitRuntime()),
+                 jitRuntimeReg);
+    // Load the stub offset value into stubReg
+    masm.load32(Address(jitRuntimeReg,
+                        JitRuntime::offsetOfDoubleToInt32ValueStubOffset()),
+                stubReg);
+    // Load trampolineCode pointer into jitRuntimeReg
+    masm.loadPtr(Address(jitRuntimeReg, JitRuntime::offsetOfTrampolineCode()),
+                 jitRuntimeReg);
+    // Load raw code pointer: jitRuntimeReg = trampolineCode->raw()
+    masm.loadPtr(Address(jitRuntimeReg, JitCode::offsetOfCode()), jitRuntimeReg);
+    // Add the stub offset: stubReg = trampolineCode->raw() + stubOffset
+    masm.addPtr(jitRuntimeReg, stubReg);
+    // Call the stub
+    masm.call(stubReg);
+  } else
 #endif
+  {
+    // MARK_RUNTIME: This looks similar to emit_Symbol
+    masm.call(runtime->jitRuntime()->getDoubleToInt32ValueStub());
+  }
 
   // Load the index in the jump table in |key|, or branch to default pc if not
   // int32 or out-of-range.
@@ -6576,21 +6582,24 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     Register scratchReg = scratch2;
     Label skip;
 
-#ifdef ENABLE_AOT_BASELINE
-    // NOTE(Justin): This is not a critical path indirection, but the offest
-    // for the profiler is already exposed so this case is quite simple.
-    Register runtimeReg = scratch1;
-    masm.loadRuntime(runtimeReg);
-    masm.branch32(
-        Assembler::Equal,
-        Address(runtimeReg, JSRuntime::offsetOfGeckoProfiler() +
-                                GeckoProfilerRuntime::offsetOfEnabled()),
-        Imm32(0), &skip);
-#else
-    AbsoluteAddress addressOfEnabled(
-        runtime->geckoProfiler().addressOfEnabled());
-    masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skip);
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
+    if (isAOTCompile_) {
+      // NOTE(Justin): This is not a critical path indirection, but the offest
+      // for the profiler is already exposed so this case is quite simple.
+      Register runtimeReg = scratch1;
+      masm.loadRuntime(runtimeReg);
+      masm.branch32(
+          Assembler::Equal,
+          Address(runtimeReg, JSRuntime::offsetOfGeckoProfiler() +
+                                  GeckoProfilerRuntime::offsetOfEnabled()),
+          Imm32(0), &skip);
+    } else
 #endif
+    {
+      AbsoluteAddress addressOfEnabled(
+          runtime->geckoProfiler().addressOfEnabled());
+      masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skip);
+    }
 
     masm.loadJSContext(scratchReg);
     masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
