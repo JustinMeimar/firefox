@@ -403,7 +403,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
 #ifdef ENABLE_AOT_TRAMPOLINES
   // Follows the same pattern as for AOT ICs
-  bool isAOTTrampoline_ = false;
+  bool emitForAOTTrampolines_ = false;
   Register contextReg_ = InvalidReg;
   bool contextLoaded_ = false;
 #endif
@@ -5997,24 +5997,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #ifdef ENABLE_AOT_TRAMPOLINES
  public:
   
-  void setAOTTrampolineMode() { isAOTTrampoline_ = true; }
-  bool isAOTTrampoline() const { return isAOTTrampoline_; }
+  void setAOTTrampolineMode() { emitForAOTTrampolines_ = true; }
+  bool checkAOTTrampolineMode() const { return emitForAOTTrampolines_; }
   bool isJSContextLoaded() const { return contextLoaded_; }
 
   void setRuntimePtr(JSRuntime* rt, Register reg) {
-    MOZ_ASSERT(isAOTTrampoline_);
+    MOZ_ASSERT(emitForAOTTrampolines_);
     MOZ_ASSERT(contextReg_ == InvalidReg, "Runtime register already set");
     movePtr(ImmPtr(rt), reg);
     contextReg_ = reg;
-  }
-
-  // Helper to load Zone from a JSScript pointer.
-  // void loadZoneFromScript(Register script, Register dest);
-
-  // Helper to load JSContext from a Runtime pointer in a register.
-  void loadJSContextFromRuntime(Register runtimeReg, Register dest) {
-    Address contextAddr(runtimeReg, JSRuntime::offsetOfMainContext());
-    loadPtr(contextAddr, dest);
   }
 
   Register JSContextReg() const {
@@ -6023,12 +6014,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   void setContextLoaded() {
-    MOZ_ASSERT(isAOTTrampoline_);
+    MOZ_ASSERT(emitForAOTTrampolines_);
     MOZ_ASSERT(contextReg_ != InvalidReg);
     contextLoaded_ = true;
   }
-
-
 #endif
 
  public:

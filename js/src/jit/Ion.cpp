@@ -125,8 +125,7 @@ bool JitRuntime::initialize(JSContext* cx) {
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
   
-#ifdef ENABLE_AOT_TRAMPOLINES
-  
+#ifdef ENABLE_AOT_TRAMPOLINES 
   // HERE: The JSContext pointer needs to be in a register or
   // in some stack frame that will be visible to BOTH the AOT
   // loading code, and the JIT generation code. Then, when we
@@ -138,8 +137,6 @@ bool JitRuntime::initialize(JSContext* cx) {
   // the AOT code to work. The register is the common interface.
   // 
   // The question is: How to put the JSRuntime?
-
-
   if (JitOptions.useAOTTrampolines) {
     JitSpew(JitSpew_BaselineAOT, "Loading AOT trampolines...");
     if (!loadAOTTrampolines(cx)) {
@@ -205,8 +202,8 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   PerfSpewerRangeRecorder rangeRecorder(masm);
 
 #ifdef ENABLE_AOT_TRAMPOLINES
+//   Todo: Where should we set the AOT trampoline mode on the masm?
 //   masm.setAOTTrampolineMode();
-//   masm.setRuntimePtr(cx->runtime(), ABINonVolatileReg);
 //   JitSpew(JitSpew_BaselineAOT,
 //           "Generating trampolines with PIC support for AOT use");
 #endif

@@ -323,9 +323,6 @@ class JitRuntime {
 
   void bindLabelToOffset(Label* label, uint32_t offset) {
     MOZ_ASSERT(!trampolineCode_);
-#ifdef ENABLE_AOT_TRAMPOLINES
-    MOZ_ASSERT(!aotTrampolineCode_);
-#endif
     label->bind(offset);
   }
 

@@ -2858,17 +2858,19 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 
 void MacroAssembler::loadJSContext(Register dest) {
 #ifdef ENABLE_AOT_TRAMPOLINES
-  if (isAOTTrampoline()) {
+  if (checkAOTTrampolineMode()) {
+    MOZ_CRASH("Should not reach here.");
     // We only want to load the JSContext through a pinned runtime register
     // if we are compiling for AOT trampolines. This leaves the other codegen
     // using this function unaffected.
-    MOZ_ASSERT(zoneReg_ != InvalidReg,
-               "Zone register must be set before calling loadJSContext in AOT mode");
-    MOZ_ASSERT(isZoneLoaded(),
-               "Zone must be loaded before calling loadJSContext in AOT mode");
-    Register temp = dest;
-    loadRuntime(temp);
-    loadJSContextFromRuntime(temp, dest);
+    // MOZ_ASSERT(zoneReg_ != InvalidReg,
+    //            "Zone register must be set before calling loadJSContext in AOT mode");
+    // MOZ_ASSERT(isZoneLoaded(),
+    //            "Zone must be loaded before calling loadJSContext in AOT mode");
+    // Register temp = dest;
+    // loadRuntime(temp);
+    // Address contextAddr(temp, JSRuntime::offsetOfMainContext());
+    // loadPtr(contextAddr, dest);
   } else
 #endif
   {
@@ -4273,36 +4275,10 @@ void MacroAssembler::loadRuntime(Register reg) {
 #endif
 
 #ifdef ENABLE_AOT_TRAMPOLINES
-// Load JSRuntime* for AOT trampolines.
-// This function is platform-specific and implemented in MacroAssembler-<arch>.cpp
+
 void MacroAssembler::loadTrampolineRuntime(Register dest) {
-  MOZ_ASSERT(isAOTTrampoline(),
-             "loadTrampolineRuntime should only be called for AOT trampolines");
-
-  // On x64, we use RIP-relative addressing to load from a global pointer
-  // that's stored at the beginning of the AOT trampoline binary.
-  // The implementation is in x64/MacroAssembler-x64.cpp
-
-  // For now, emit a placeholder that loads from a symbol.
-  // This will be platform-specific.
-  #ifdef JS_CODEGEN_X64
-    // Load from the runtime pointer at a fixed offset from the code.
-    // The offset will be calculated based on the AOT binary layout.
-    // For now, we'll use a temporary approach: load via absolute address
-    // that gets patched at load time.
-
-    // Emit a mov instruction with RIP-relative addressing
-    // movq runtime_ptr(%rip), dest
-    // This will be properly implemented in the x64-specific file
-    static_assert(sizeof(JSRuntime*) == 8, "Pointer size mismatch");
-
-    // Temporary: For testing, we can use an absolute load
-    // In production, this needs to be RIP-relative
-    // TODO: Implement proper RIP-relative load
-    movePtr(ImmPtr(nullptr), dest);  // Placeholder - will be patched
-  #else
-    MOZ_CRASH("loadTrampolineRuntime not implemented for this architecture");
-  #endif
+  MOZ_ASSERT(checkAOTTrampolineMode(),
+             "Should set the MASM for AOT trampoline mode.");
 }
 
 // Load Zone* from JSRuntime* that's already in a register
