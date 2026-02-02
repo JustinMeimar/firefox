@@ -68,7 +68,8 @@ struct PatchContext {
 enum class RuntimePatchId : uint16_t {
   WellKnownSymbols,
   SelfHostingGlobal,
-  JitRuntime
+  JitRuntime,
+  ContextRealm  // Address of JSContext::realm_ field
 };
 
 struct alignas(8) RuntimePatch {
