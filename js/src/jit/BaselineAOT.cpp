@@ -15,13 +15,15 @@ namespace js::jit {
 uintptr_t RuntimePatch::apply(const PatchContext& ctx) const {
     switch(id) {
         case RuntimePatchId::WellKnownSymbols:
-            return (uintptr_t)&ctx.cx->runtime()->wellKnownSymbols;
+            return (uintptr_t)ctx.cx->runtime()->wellKnownSymbols.ref();
         case RuntimePatchId::JitRuntime:
             return (uintptr_t)ctx.cx->runtime()->jitRuntime();
         case RuntimePatchId::SelfHostingGlobal:
              return (uintptr_t)ctx.cx->runtime()->jitRuntime();
         case RuntimePatchId::ContextRealm:
             return (uintptr_t)(reinterpret_cast<const uint8_t*>(ctx.cx) + JSContext::offsetOfRealm());
+        case RuntimePatchId::JSContextPtr:
+            return (uintptr_t)ctx.cx;
         default:
             MOZ_CRASH("Unknown AOT patch ID");
     }
