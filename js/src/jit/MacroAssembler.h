@@ -404,8 +404,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #ifdef ENABLE_AOT_TRAMPOLINES
   // Follows the same pattern as for AOT ICs
   bool isAOTTrampoline_ = false;
-  Register contextReg_ = InvalidReg;
-  bool contextLoaded_ = false;
 #endif
 
  protected:
@@ -5938,7 +5936,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void reserveStack(uint32_t amount);
 #endif
 
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE) || defined(ENABLE_AOT_TRAMPOLINES)
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
  public:
   // Load the runtime ptr from the zone, into given register.
   // See 'Runtime agnostic code generation'.
@@ -5954,36 +5952,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
     MOZ_ASSERT(isZoneLoaded());
     return zoneReg_;
   }
-#endif
 
-#ifdef ENABLE_JS_AOT_ICS
-  // Load the zone into zoneReg at runtime from ICStubReg.
-  // See 'Runtime agnostic code generation'.
-  void loadZone();
-#endif
-
-#ifdef ENABLE_AOT_BASELINE
-  // Load the zone into zoneReg at runtime from BaselineFrame.
-  // See 'Runtime agnostic code generation'.
-  void loadBaselineZone();
-#endif
-
-#ifdef ENABLE_AOT_TRAMPOLINES
-  // Load JSRuntime* into a register for AOT trampolines.
-  // Uses RIP-relative addressing to load from a global pointer.
-  void loadTrampolineRuntime(Register dest);
-
-  // Set the zone register from the runtime register.
-  void loadZoneFromRuntime(Register runtimeReg, Register dest);
-
-  // Emit the standard trampoline prologue that sets up the runtime register.
-  // This should be called at the start of every AOT trampoline.
-  // It loads JSRuntime* into ABINonVolatileReg (r13 on x64) so that the
-  // trampoline can access runtime-dependent data.
-  void emitTrampolinePrologue();
-#endif
-
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE) || defined(ENABLE_AOT_TRAMPOLINES)
   void setZoneLoaded() {
     // MOZ_ASSERT(isAOTFill_); // Disabling since AOT baseline can use also.
     MOZ_ASSERT(zoneReg_ != InvalidReg);
@@ -5994,41 +5963,22 @@ class MacroAssembler : public MacroAssemblerSpecific {
   bool isZoneLoaded() { return zoneLoaded_; }
 #endif
 
+#ifdef ENABLE_JS_AOT_ICS
+  // Load the zone into zoneReg at runtime from ICStubReg.
+  // See 'Runtime agnostic code generation'.
+  public: 
+    void loadZone();
+#endif
+
+#ifdef ENABLE_AOT_BASELINE
+  public:
+    void loadBaselineZone();
+#endif
+
 #ifdef ENABLE_AOT_TRAMPOLINES
- public:
-  
+ public: 
   void setAOTTrampolineMode() { isAOTTrampoline_ = true; }
   bool isAOTTrampoline() const { return isAOTTrampoline_; }
-  bool isJSContextLoaded() const { return contextLoaded_; }
-
-  void setRuntimePtr(JSRuntime* rt, Register reg) {
-    MOZ_ASSERT(isAOTTrampoline_);
-    MOZ_ASSERT(contextReg_ == InvalidReg, "Runtime register already set");
-    movePtr(ImmPtr(rt), reg);
-    contextReg_ = reg;
-  }
-
-  // Helper to load Zone from a JSScript pointer.
-  // void loadZoneFromScript(Register script, Register dest);
-
-  // Helper to load JSContext from a Runtime pointer in a register.
-  void loadJSContextFromRuntime(Register runtimeReg, Register dest) {
-    Address contextAddr(runtimeReg, JSRuntime::offsetOfMainContext());
-    loadPtr(contextAddr, dest);
-  }
-
-  Register JSContextReg() const {
-    MOZ_ASSERT(isJSContextLoaded());
-    return contextReg_;
-  }
-
-  void setContextLoaded() {
-    MOZ_ASSERT(isAOTTrampoline_);
-    MOZ_ASSERT(contextReg_ != InvalidReg);
-    contextLoaded_ = true;
-  }
-
-
 #endif
 
  public:

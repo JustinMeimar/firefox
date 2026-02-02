@@ -151,14 +151,18 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
   // For AOT trampolines, set up r13 (ABINonVolatileReg) with JSRuntime*.
   // This allows all trampolines to access runtime-dependent data without
   // needing to know where they're called from.
-  //
-  // Strategy: Load JSRuntime* from JSContext, which is accessible via
-  // absolute address (for non-AOT) or will be accessed via RIP-relative
-  // in the future for true PIC.
-  if (JitOptions.useAOTTrampolines) {
-    // For now, use absolute address to load JSContext, then JSRuntime
-    // TODO: Make this truly PIC with RIP-relative addressing and
-    // a runtime pointer stored in the AOT binary's data section
+  if (masm.isAOTTrampoline()) {
+    // PIC mode: Call helper stub to get JSContext from TLS
+    // Use Label-based call for PIC-friendly relative addressing
+    Label helperStub;
+    helperStub.bind(getTlsContextStubOffset_);
+    masm.call(&helperStub);
+    // JSContext* is now in rax, move to r13
+    masm.mov(rax, r13);
+    // Load JSRuntime* from JSContext*
+    masm.loadPtr(Address(r13, JSContext::offsetOfRuntime()), r13);
+  } else if (JitOptions.useAOTTrampolines) {
+    // Non-PIC AOT mode: use absolute address
     masm.movePtr(ImmPtr(cx), r13);  // Load JSContext*
     masm.loadPtr(Address(r13, JSContext::offsetOfRuntime()), r13);  // Load JSRuntime*
   }

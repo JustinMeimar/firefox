@@ -58,6 +58,15 @@ using mozilla::Atomic;
 using mozilla::DebugOnly;
 
 /* static */ MOZ_THREAD_LOCAL(JSContext*) js::TlsContext;
+
+#ifdef ENABLE_AOT_TRAMPOLINES
+// Helper function for AOT trampolines to get JSContext from TLS.
+// This is called from generated JIT code, so it must use C linkage.
+extern "C" {
+JSContext* GetTlsContextForJit() { return js::TlsContext.get(); }
+}
+#endif
+
 /* static */
 Atomic<size_t> JSRuntime::liveRuntimesCount;
 Atomic<JS::LargeAllocationFailureCallback> js::OnLargeAllocationFailure;

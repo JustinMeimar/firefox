@@ -2857,24 +2857,7 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 void MacroAssembler::loadJSContext(Register dest) {
-#ifdef ENABLE_AOT_TRAMPOLINES
-  if (isAOTTrampoline()) {
-    // We only want to load the JSContext through a pinned runtime register
-    // if we are compiling for AOT trampolines. This leaves the other codegen
-    // using this function unaffected.
-    MOZ_ASSERT(zoneReg_ != InvalidReg,
-               "Zone register must be set before calling loadJSContext in AOT mode");
-    MOZ_ASSERT(isZoneLoaded(),
-               "Zone must be loaded before calling loadJSContext in AOT mode");
-    Register temp = dest;
-    loadRuntime(temp);
-    loadJSContextFromRuntime(temp, dest);
-  } else
-#endif
-  {
-    // For non-AOT mode, use the compile-time JSContext pointer
-    movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
-  }
+  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
@@ -2883,7 +2866,9 @@ static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
 }
 
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest); // HERE: gets hit
+                                                              // from
+                                                              // emit_GetGName
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }

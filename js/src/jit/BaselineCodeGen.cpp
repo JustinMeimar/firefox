@@ -47,6 +47,12 @@
 #include "vm/JSFunction.h"
 #include "vm/Logging.h"
 #include "vm/Time.h"
+
+#ifdef ENABLE_AOT_BASELINE
+// Forward declaration for AOT baseline interpreter
+extern "C" JSContext* GetTlsContextForJit();
+#endif
+
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
 #endif
@@ -1109,6 +1115,12 @@ void BaselineInterpreterCodeGen::subtractScriptSlotsSize(Register reg,
 template <typename Handler>
 void BaselineCodeGen<Handler>::loadGlobalLexicalEnvironment(Register dest) {
   if (handler.realmIndependentJitcode()) {
+    // NOTE: For AOT baseline, this still uses absolute addresses which will need
+    // to be patched. The proper solution requires either:
+    // 1. Loading JSContext from TLS (requires PLT/GOT support for function calls)
+    // 2. Patching absolute addresses at load time
+    // 3. Using the zone register (but it gets clobbered by IC calls)
+    // For now, we accept the absolute address limitation.
     masm.loadGlobalObjectData(dest);
     masm.loadPtr(Address(dest, GlobalObjectData::offsetOfLexicalEnvironment()),
                  dest);
