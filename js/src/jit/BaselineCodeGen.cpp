@@ -1115,15 +1115,32 @@ void BaselineInterpreterCodeGen::subtractScriptSlotsSize(Register reg,
 template <typename Handler>
 void BaselineCodeGen<Handler>::loadGlobalLexicalEnvironment(Register dest) {
   if (handler.realmIndependentJitcode()) {
-    // NOTE: For AOT baseline, this still uses absolute addresses which will need
-    // to be patched. The proper solution requires either:
-    // 1. Loading JSContext from TLS (requires PLT/GOT support for function calls)
-    // 2. Patching absolute addresses at load time
-    // 3. Using the zone register (but it gets clobbered by IC calls)
-    // For now, we accept the absolute address limitation.
-    masm.loadGlobalObjectData(dest);
-    masm.loadPtr(Address(dest, GlobalObjectData::offsetOfLexicalEnvironment()),
-                 dest);
+#ifdef ENABLE_AOT_BASELINE
+    if (isAOTCompile_) {
+      // Inline loadGlobalObjectData with patchable address
+      // Load address of JSContext::realm_ (will be patched at load time)
+      // Use movWithPatch to force a movabs with 8-byte immediate
+      CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), dest);
+      auto patch = RuntimePatch({
+        RuntimePatchId::ContextRealm,
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
+      });
+      if (!aotAccumulator_.addPatch(std::move(patch))) {
+        MOZ_CRASH("Failed to add patch");
+      }
+
+      // Now dest holds &JSContext::realm_, load the realm pointer from it
+      masm.loadPtr(Address(dest, 0), dest);
+      masm.loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
+      masm.loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
+      masm.loadPtr(Address(dest, GlobalObjectData::offsetOfLexicalEnvironment()), dest);
+    } else
+#endif
+    {
+      masm.loadGlobalObjectData(dest);
+      masm.loadPtr(Address(dest, GlobalObjectData::offsetOfLexicalEnvironment()),
+                   dest);
+    }
   } else {
     MOZ_ASSERT(!handler.maybeScript()->hasNonSyntacticScope());
     masm.movePtr(ImmGCPtr(handler.maybeGlobalLexicalEnvironment()), dest);
@@ -2898,14 +2915,13 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
 
 #if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
   if (isAOTCompile_) {
-    // Emit a mov instruction with placeholder 0 that will be patched at load time
-    masm.movePtr(ImmPtr(nullptr), scratch2);
+    // Emit a movabs instruction with placeholder 0 that will be patched at load time
+    CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), scratch2);
 
-    // Record the offset of the immediate operand within the instruction
-    // The immediate is typically at the end of a movabs instruction on x64
+    // Record the offset of the 8-byte immediate operand
     auto patch = RuntimePatch({
       RuntimePatchId::WellKnownSymbols,
-      static_cast<uint32_t>(masm.currentOffset() - sizeof(void*))
+      static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
     });
     if (!aotAccumulator_.addPatch(std::move(patch)))
       MOZ_CRASH("Failed to apply patch");
@@ -7769,8 +7785,9 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
         fprintf(stderr, "ERROR: Failed to serialize AOT manifest\n");
         return false;
       }
-      // TODO(Justin): We could abort the program here. Once the dump is
-      // complete this run has served it's purpose.
+
+      printf("Dumped the AOT baseline interpreter to ./baseline_interpreter.bin\n\
+              Rebuild the engine to allow running with AOT mode.");
     }
 #endif
 

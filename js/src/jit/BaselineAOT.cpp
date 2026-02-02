@@ -8,6 +8,7 @@
 #include <cstdint>
 #include "jit/JitSpewer.h"
 #include "mozilla/Assertions.h"
+#include "vm/JSContext.h"
 
 namespace js::jit {
 
@@ -19,6 +20,8 @@ uintptr_t RuntimePatch::apply(const PatchContext& ctx) const {
             return (uintptr_t)ctx.cx->runtime()->jitRuntime();
         case RuntimePatchId::SelfHostingGlobal:
              return (uintptr_t)ctx.cx->runtime()->jitRuntime();
+        case RuntimePatchId::ContextRealm:
+            return (uintptr_t)(reinterpret_cast<const uint8_t*>(ctx.cx) + JSContext::offsetOfRealm());
         default:
             MOZ_CRASH("Unknown AOT patch ID");
     }
