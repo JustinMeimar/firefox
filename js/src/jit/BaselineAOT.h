@@ -69,7 +69,8 @@ enum class RuntimePatchId : uint16_t {
   WellKnownSymbols,
   SelfHostingGlobal,
   JitRuntime,
-  ContextRealm  // Address of JSContext::realm_ field
+  ContextRealm,  // Address of JSContext::realm_ field
+  JSContextPtr   // JSContext* pointer
 };
 
 struct alignas(8) RuntimePatch {

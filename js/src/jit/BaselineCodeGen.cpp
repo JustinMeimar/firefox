@@ -2917,8 +2917,6 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   if (isAOTCompile_) {
     // Emit a movabs instruction with placeholder 0 that will be patched at load time
     CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), scratch2);
-
-    // Record the offset of the 8-byte immediate operand
     auto patch = RuntimePatch({
       RuntimePatchId::WellKnownSymbols,
       static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
@@ -6635,7 +6633,22 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
       masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skip);
     }
 
-    masm.loadJSContext(scratchReg);
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
+    if (isAOTCompile_) {
+      // Inline loadJSContext with patchable address
+      CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), scratchReg);
+      auto patch = RuntimePatch({
+        RuntimePatchId::JSContextPtr,
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
+      });
+      if (!aotAccumulator_.addPatch(std::move(patch))) {
+        MOZ_CRASH("Failed to add patch");
+      }
+    } else
+#endif
+    {
+      masm.loadJSContext(scratchReg);
+    }
     masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
                  scratchReg);
     masm.storePtr(
