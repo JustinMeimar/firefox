@@ -47,7 +47,8 @@ enum class BaselineMetadataID : uint32_t {
   DebugTrapCount,
   CodeCoverageCount,
   ICReturnCount,
-  PatchCount,
+  TablePatchCount,
+  RuntimePatchCount,
   OpHandlerOffsetCount,
 
   Count
@@ -58,10 +59,22 @@ enum class BaselineMetadataID : uint32_t {
 struct PatchContext {
     JSContext* cx; 
     uint8_t* codeBase;
-    uint32_t dispatchTableOffset;
-    
+    uint32_t dispatchTableOffset;    
     PatchContext(JSContext* cx_, uint8_t* codeBase_, uint32_t dispatchTableOffset_)
       : cx(cx_), codeBase(codeBase_), dispatchTableOffset(dispatchTableOffset_) {}
+};
+
+
+enum class RuntimePatchId : uint16_t {
+  WellKnownSymbols,
+  SelfHostingGlobal,
+  JitRuntime
+};
+
+struct alignas(8) RuntimePatch {
+  RuntimePatchId id; 
+  uint32_t targetOffset;
+  uintptr_t apply(const PatchContext& ctx) const;
 };
 
 struct alignas(8) DispatchTablePatch {
@@ -105,7 +118,8 @@ struct alignas(4) BaselineManifest {
   uint32_t DebugTrapCount;
   uint32_t CodeCoverageCount;
   uint32_t ICReturnCount;
-  uint32_t PatchCount;
+  uint32_t TablePatchCount;
+  uint32_t RuntimePatchCount;
   uint32_t OpHandlerOffsetCount;
 
   // Followed by variable-length arrays:
@@ -114,6 +128,7 @@ struct alignas(4) BaselineManifest {
   // uint32_t codeCoverage[CodeCoverageCount]
   // ICReturnOffsetEntry icReturns[ICReturnCount]
   // DispatchTablePatch patches[PatchCount]
+  // RuntimePatch patches[PatchCount]
   // uint32_t opHandlerOffsets[OpHandlerOffsetCount]
 };
 
@@ -127,49 +142,6 @@ static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>(BaselineMetadata
               "Manifest size must match metadata count");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
 static_assert(sizeof(DispatchTablePatch) == 8, "DispatchTablePatch must be 8 bytes");
-
-struct AOTBlobLayout {
-  std::size_t codeSize;
-  uint32_t prologueEndOffset;
-  uint32_t interpretOpOffset;
-  uint32_t dispatchTableOffset;
-  uint32_t debugInstrCount;
-  uint32_t debugTrapCount;
-  uint32_t codeCoverageCount;
-  uint32_t icReturnCount;
-  uint32_t patchCount;
-  uint32_t opHandlerCount;
-
-  std::size_t prologueSize() const { return prologueEndOffset; }
-  std::size_t handlersSize() const { return dispatchTableOffset - prologueEndOffset; }
-  std::size_t dispatchTableSize() const { return codeSize - dispatchTableOffset; }
-  std::size_t manifestSize() const { return sizeof(BaselineManifest); }
-  std::size_t debugInstrSize() const { return debugInstrCount * sizeof(uint32_t); }
-  std::size_t debugTrapSize() const { return debugTrapCount * sizeof(uint32_t); }
-  std::size_t codeCoverageSize() const { return codeCoverageCount * sizeof(uint32_t); }
-  std::size_t icReturnSize() const { return icReturnCount * sizeof(ICReturnOffsetEntry); }
-  std::size_t patchSize() const { return patchCount * sizeof(DispatchTablePatch); }
-  std::size_t opHandlerSize() const { return opHandlerCount * sizeof(uint32_t); }
-  std::size_t footerSize() const { return sizeof(BaselineAOTFooter); }
-  std::size_t manifestOffset() const { return codeSize; }
-  std::size_t debugInstrOffset() const { return manifestOffset() + manifestSize(); }
-  std::size_t debugTrapOffset() const { return debugInstrOffset() + debugInstrSize(); }
-  std::size_t codeCoverageOffset() const { return debugTrapOffset() + debugTrapSize(); }
-  std::size_t icReturnOffset() const { return codeCoverageOffset() + codeCoverageSize(); }
-  std::size_t patchOffset() const { return icReturnOffset() + icReturnSize(); }
-  std::size_t opHandlerOffset() const { return patchOffset() + patchSize(); }
-  std::size_t footerOffset() const { return opHandlerOffset() + opHandlerSize(); }
-
-  std::size_t metadataSize() const {
-    return manifestSize() + debugInstrSize() + debugTrapSize() +
-           codeCoverageSize() + icReturnSize() + patchSize() +
-           opHandlerSize() + footerSize();
-  }
-
-  std::size_t blobSize() const { return codeSize + metadataSize(); }
-
-  void dump(bool isLoad, void* blobStart = nullptr) const;
-};
 
 }  // namespace js::jit
 
