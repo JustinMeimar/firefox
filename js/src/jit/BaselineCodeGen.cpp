@@ -2898,11 +2898,17 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
 
 #if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
   if (isAOTCompile_) {
-    // Load runtime from zone (zone is already in zoneReg_).
-    masm.loadRuntime(scratch2);
-    // Compute address of wellKnownSymbols
-    masm.loadPtr(Address(scratch2, offsetof(JSRuntime, wellKnownSymbols)),
-                 scratch2);
+    // Emit a mov instruction with placeholder 0 that will be patched at load time
+    masm.movePtr(ImmPtr(nullptr), scratch2);
+
+    // Record the offset of the immediate operand within the instruction
+    // The immediate is typically at the end of a movabs instruction on x64
+    auto patch = RuntimePatch({
+      RuntimePatchId::WellKnownSymbols,
+      static_cast<uint32_t>(masm.currentOffset() - sizeof(void*))
+    });
+    if (!aotAccumulator_.addPatch(std::move(patch)))
+      MOZ_CRASH("Failed to apply patch");
   } else
 #endif
   {
@@ -7481,12 +7487,12 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   aotAccumulator_.manifest.CallVMDebugAfterYield = handler.callVMOffsets().debugAfterYieldOffset;
   aotAccumulator_.manifest.HeaderSize = code->headerSize();
   aotAccumulator_.manifest.PrologueEndOffset = warmUpCheckPrologueOffset_.offset();
-
   aotAccumulator_.manifest.DebugInstrumentationCount = handler.debugInstrumentationOffsets().length();
   aotAccumulator_.manifest.DebugTrapCount = aotAccumulator_.debugTraps.length();
   aotAccumulator_.manifest.CodeCoverageCount = handler.codeCoverageOffsets().length();
   aotAccumulator_.manifest.ICReturnCount = handler.icReturnOffsets().length();
-  aotAccumulator_.manifest.PatchCount = aotAccumulator_.patches.length();
+  aotAccumulator_.manifest.TablePatchCount = aotAccumulator_.tablePatches.length();
+  aotAccumulator_.manifest.RuntimePatchCount = aotAccumulator_.runtimePatches.length();
   aotAccumulator_.manifest.OpHandlerOffsetCount = opHandlerOffsets_.length();
 
   // Write manifest (typed struct with named fields)
@@ -7495,24 +7501,21 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
 
   // Write vector payloads sequentially debug instrumentation offsets
   const auto& debugInstr = handler.debugInstrumentationOffsets();
-  if (debugInstr.length() > 0) {
-    binFile.write(reinterpret_cast<const char*>(debugInstr.begin()),
-                  debugInstr.length() * sizeof(uint32_t));
-  }
+  MOZ_ASSERT(debugInstr.length() > 0);
+  binFile.write(reinterpret_cast<const char*>(debugInstr.begin()),
+                debugInstr.length() * sizeof(uint32_t));
 
   // Debug trap offsets
-  if (aotAccumulator_.debugTraps.length() > 0) {
-    binFile.write(
-        reinterpret_cast<const char*>(aotAccumulator_.debugTraps.begin()),
-        aotAccumulator_.debugTraps.length() * sizeof(uint32_t));
-  }
+  MOZ_ASSERT(aotAccumulator_.debugTraps.length() > 0);
+  binFile.write(
+      reinterpret_cast<const char*>(aotAccumulator_.debugTraps.begin()),
+      aotAccumulator_.debugTraps.length() * sizeof(uint32_t));
 
   // Code coverage offsets
   const auto& codeCov = handler.codeCoverageOffsets();
-  if (codeCov.length() > 0) {
-    binFile.write(reinterpret_cast<const char*>(codeCov.begin()),
-                  codeCov.length() * sizeof(uint32_t));
-  }
+  MOZ_ASSERT(codeCov.length() > 0);
+  binFile.write(reinterpret_cast<const char*>(codeCov.begin()),
+                codeCov.length() * sizeof(uint32_t));
 
   // IC return offsets (need to convert to ICReturnOffsetEntry format)
   const auto& icReturns = handler.icReturnOffsets();
@@ -7524,18 +7527,20 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   }
 
   // Patch entries
-  if (aotAccumulator_.patches.length() > 0) {
-    binFile.write(
-        reinterpret_cast<const char*>(aotAccumulator_.patches.begin()),
-        aotAccumulator_.patches.length() * sizeof(DispatchTablePatch));
-  }
+  MOZ_ASSERT(aotAccumulator_.tablePatches.length() > 0);
+  MOZ_ASSERT(aotAccumulator_.runtimePatches.length() > 0);
+  binFile.write(
+      reinterpret_cast<const char*>(aotAccumulator_.tablePatches.begin()),
+      aotAccumulator_.tablePatches.length() * sizeof(DispatchTablePatch));
+  
+  // Write in the runtime patches.
+  binFile.write(
+    reinterpret_cast<const char*>(aotAccumulator_.runtimePatches.begin()),
+    aotAccumulator_.runtimePatches.length() * sizeof(RuntimePatch));
 
-  // OpHandler offsets
-  if (opHandlerOffsets_.length() > 0) {
-    // Write the raw uint32_t offsets of the handlers relative to blob start
-    binFile.write(reinterpret_cast<const char*>(opHandlerOffsets_.begin()),
-                  opHandlerOffsets_.length() * sizeof(uint32_t));
-  }
+  MOZ_ASSERT(opHandlerOffsets_.length() > 0);
+  binFile.write(reinterpret_cast<const char*>(opHandlerOffsets_.begin()),
+                opHandlerOffsets_.length() * sizeof(uint32_t));
 
   // 7. Write footer
   BaselineAOTFooter footer;
@@ -7544,18 +7549,21 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   MOZ_ASSERT(binFile && "Failed to write footer.");
   binFile.close();
 
-  AOTBlobLayout layout;
-  layout.codeSize = codeSize;
-  layout.prologueEndOffset = warmUpCheckPrologueOffset_.offset();
-  layout.interpretOpOffset = interpretOpOffset_;
-  layout.dispatchTableOffset = tableOffset_;
-  layout.debugInstrCount = aotAccumulator_.manifest.DebugInstrumentationCount;
-  layout.debugTrapCount = aotAccumulator_.manifest.DebugTrapCount;
-  layout.codeCoverageCount = aotAccumulator_.manifest.CodeCoverageCount;
-  layout.icReturnCount = aotAccumulator_.manifest.ICReturnCount;
-  layout.patchCount = aotAccumulator_.manifest.PatchCount;
-  layout.opHandlerCount = aotAccumulator_.manifest.OpHandlerOffsetCount;
-  layout.dump(false);
+  // Log serialization layout
+  uint32_t prologueEnd = warmUpCheckPrologueOffset_.offset();
+  JitSpew(JitSpew_BaselineAOT,
+      "Code size=%zu:\n\tprologue=[0,%u)\n\thandlers=[%u,%u)\n\ttable=[%u,%zu)",
+      codeSize, prologueEnd, prologueEnd, tableOffset_, tableOffset_, codeSize);
+
+  auto& m = aotAccumulator_.manifest;
+  size_t metaOff = codeSize;
+  JitSpew(JitSpew_BaselineAOT,
+      "Metadata @%zu:\n\tmanifest=%zu\n\tdbgInstr=%u\n\tdbgTrap=%u\
+       \n\tcoverage=%u\n\ticRet=%u\n\ttable_patches=%u\n\truntime_patches=%u\
+       \n\topHandlerOffset=%u",
+      metaOff, sizeof(BaselineManifest), m.DebugInstrumentationCount, m.DebugTrapCount,
+      m.CodeCoverageCount, m.ICReturnCount, m.TablePatchCount, m.RuntimePatchCount,
+      m.OpHandlerOffsetCount);
 
   return true;
 }
@@ -7587,23 +7595,8 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
       reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
   uint32_t headerSize = manifest->HeaderSize;
 
-  AOTBlobLayout layout;
-  layout.codeSize = codeSize;
-
-  // Load metadata into layout using type-safe named field access.
-  layout.interpretOpOffset = manifest->InterpretOp;
-  layout.dispatchTableOffset = manifest->DispatchTableOffset;
-  layout.prologueEndOffset = manifest->PrologueEndOffset;
-  layout.debugInstrCount = manifest->DebugInstrumentationCount;
-  layout.debugTrapCount = manifest->DebugTrapCount;
-  layout.codeCoverageCount = manifest->CodeCoverageCount;
-  layout.icReturnCount = manifest->ICReturnCount;
-  layout.patchCount = manifest->PatchCount;
-  layout.opHandlerCount = manifest->OpHandlerOffsetCount;
-
   // TODO(Justin): Change these asserts to be precise equalities.
   MOZ_ASSERT(codeSize <= blobSize);
-  layout.dump(true, aotBlob);
   size_t bytesNeeded = codeSize + headerSize;
   ExecutablePool* pool;
   uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,

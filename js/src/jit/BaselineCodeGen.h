@@ -75,6 +75,27 @@ class BaselineCodeGen {
   bool isAOTCompile_ = false;
 #endif
 
+#ifdef ENABLE_AOT_BASELINE
+  struct BaselineAOTAccumulator {
+    BaselineManifest manifest = {};
+    Vector<uint32_t, 0, SystemAllocPolicy> debugInstr;
+    Vector<uint32_t, 0, SystemAllocPolicy> debugTraps;
+    Vector<uint32_t, 0, SystemAllocPolicy> codeCoverage;
+    Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy> icReturns;
+    
+    Vector<DispatchTablePatch, 0, SystemAllocPolicy> tablePatches;
+    Vector<RuntimePatch, 0, SystemAllocPolicy> runtimePatches;
+
+    [[nodiscard]] bool addPatch(DispatchTablePatch&& patch) {
+      return tablePatches.append(std::move(patch));
+    }
+
+    [[nodiscard]] bool addPatch(RuntimePatch&& patch) {
+      return runtimePatches.append(std::move(patch));
+    } 
+  } aotAccumulator_;
+#endif
+
   template <typename... HandlerArgs>
   explicit BaselineCodeGen(TempAllocator& alloc, MacroAssembler& masmArg,
                            CompileRuntime* runtimeArg, HandlerArgs&&... args);
@@ -597,19 +618,6 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   uint32_t compileRuntimePtrOffset_ = 0;
 
 #ifdef ENABLE_AOT_BASELINE
-  struct BaselineAOTAccumulator {
-    BaselineManifest manifest = {};
-    Vector<uint32_t, 0, SystemAllocPolicy> debugInstr;
-    Vector<uint32_t, 0, SystemAllocPolicy> debugTraps;
-    Vector<uint32_t, 0, SystemAllocPolicy> codeCoverage;
-    Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy> icReturns;
-    Vector<DispatchTablePatch, 0, SystemAllocPolicy> patches;
-
-    [[nodiscard]] bool addPatch(DispatchTablePatch&& patch) {
-      return patches.append(std::move(patch));
-    }
-  } aotAccumulator_;
-
   [[nodiscard]] bool serializeAOTManifest(JitCode* code);
 #endif
 
