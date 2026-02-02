@@ -126,20 +126,6 @@ bool JitRuntime::initialize(JSContext* cx) {
   JitContext jctx(cx);
   
 #ifdef ENABLE_AOT_TRAMPOLINES
-  
-  // HERE: The JSContext pointer needs to be in a register or
-  // in some stack frame that will be visible to BOTH the AOT
-  // loading code, and the JIT generation code. Then, when we
-  // emit the AOT code in serializeTrampolineManifest, it will
-  // contain code to load the JSContext from a particular register.
-  //
-  // In the AOT use, in loadAOTTrampolines, we will also expect
-  // this same register to have the JSContext. This is how we expect
-  // the AOT code to work. The register is the common interface.
-  // 
-  // The question is: How to put the JSRuntime?
-
-
   if (JitOptions.useAOTTrampolines) {
     JitSpew(JitSpew_BaselineAOT, "Loading AOT trampolines...");
     if (!loadAOTTrampolines(cx)) {
@@ -202,13 +188,21 @@ bool JitRuntime::initialize(JSContext* cx) {
 bool JitRuntime::generateTrampolines(JSContext* cx) {
   TempAllocator temp(&cx->tempLifoAlloc());
   StackMacroAssembler masm(cx, temp);
+  AutoCreatedBy acb(masm, "JitRuntime::generateTrampolines");
   PerfSpewerRangeRecorder rangeRecorder(masm);
 
 #ifdef ENABLE_AOT_TRAMPOLINES
-//   masm.setAOTTrampolineMode();
-//   masm.setRuntimePtr(cx->runtime(), ABINonVolatileReg);
-//   JitSpew(JitSpew_BaselineAOT,
-//           "Generating trampolines with PIC support for AOT use");
+  // Enable PIC mode for trampolines when dumping for AOT
+  if (JitOptions.dumpTrampolines) {
+    masm.setAOTTrampolineMode();
+    JitSpew(JitSpew_BaselineAOT, "Generating trampolines with PIC support for AOT use");
+    JitSpew(JitSpew_Codegen, "# Emitting TLS context helper stub");
+    getTlsContextStubOffset_ = startTrampolineCode(masm);
+    masm.call(ImmPtr(JS_FUNC_TO_DATA_PTR(void*, GetTlsContextForJit)));
+    masm.ret();
+    rangeRecorder.recordOffset("Trampoline: GetTlsContext");
+  }
+
 #endif
 
   Label bailoutTail;

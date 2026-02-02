@@ -403,8 +403,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #ifdef ENABLE_AOT_TRAMPOLINES
   // Follows the same pattern as for AOT ICs
   bool isAOTTrampoline_ = false;
-  Register contextReg_ = InvalidReg;
-  bool contextLoaded_ = false;
 #endif
 
  protected:
@@ -5956,7 +5954,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void reserveStack(uint32_t amount);
 #endif
 
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE) || defined(ENABLE_AOT_TRAMPOLINES)
+#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
  public:
   // Load the runtime ptr from the zone, into given register.
   // See 'Runtime agnostic code generation'.

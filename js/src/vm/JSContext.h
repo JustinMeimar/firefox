@@ -140,6 +140,10 @@ class AutoLockScriptData;
 /* Thread Local Storage slot for storing the context for a thread. */
 extern MOZ_THREAD_LOCAL(JSContext*) TlsContext;
 
+#ifdef ENABLE_AOT_TRAMPOLINES
+extern "C" JSContext* GetTlsContextForJit();
+#endif
+
 #ifdef DEBUG
 JSContext* MaybeGetJSContext();
 #endif

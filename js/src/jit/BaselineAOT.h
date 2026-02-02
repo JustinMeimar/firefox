@@ -8,6 +8,7 @@
 #define jit_BaselineAOT_h
 
 #include <cstdint>
+#include "vm/JSContext.h"
 
 namespace js::jit {
 
@@ -55,10 +56,12 @@ enum class BaselineMetadataID : uint32_t {
 // In order to perform the patch, the AOT loader must provide the
 // code base address and the dispatch table offset.
 struct PatchContext {
+    JSContext* cx; 
     uint8_t* codeBase;
     uint32_t dispatchTableOffset;
-    PatchContext(uint8_t* codeBase_, uint32_t dispatchTableOffset_)
-      : codeBase(codeBase_), dispatchTableOffset(dispatchTableOffset_) {}
+    
+    PatchContext(JSContext* cx_, uint8_t* codeBase_, uint32_t dispatchTableOffset_)
+      : cx(cx_), codeBase(codeBase_), dispatchTableOffset(dispatchTableOffset_) {}
 };
 
 struct alignas(8) DispatchTablePatch {

@@ -184,6 +184,9 @@ class JitRuntime {
 #ifdef ENABLE_AOT_TRAMPOLINES
   WriteOnceData<uint8_t*> aotTrampolineCode_{nullptr};
   WriteOnceData<uint32_t> aotTrampolineSize_{0};
+
+  // Offset to helper stub that returns TlsContext.get() for PIC trampolines
+  WriteOnceData<uint32_t> getTlsContextStubOffset_{0};
 #endif
 
   // Thunk that calls into the C++ interpreter from the interpreter

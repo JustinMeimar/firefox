@@ -1382,7 +1382,7 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
     return false;
   }
    
-  PatchContext patchCtx(code_->raw(), dispatchTableOffset);
+  PatchContext patchCtx(cx, code_->raw(), dispatchTableOffset);
 
 #ifdef DEBUG
   // Validate all patch entries before applying them
