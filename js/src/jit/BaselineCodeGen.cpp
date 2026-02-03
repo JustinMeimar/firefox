@@ -1122,10 +1122,10 @@ void BaselineCodeGen<Handler>::loadGlobalLexicalEnvironment(Register dest) {
       // Use movWithPatch to force a movabs with 8-byte immediate
       CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), dest);
       auto patch = RuntimePatch({
-        RuntimePatchId::ContextRealm,
+        RuntimePatch::Kind::ContextRealm,
         static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
       });
-      if (!aotAccumulator_.addPatch(std::move(patch))) {
+      if (!aotAccumulator_.registerPatch(std::move(patch))) {
         MOZ_CRASH("Failed to add patch");
       }
 
@@ -2918,10 +2918,10 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
     // Emit a movabs instruction with placeholder 0 that will be patched at load time
     CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), scratch2);
     auto patch = RuntimePatch({
-      RuntimePatchId::WellKnownSymbols,
+      RuntimePatch::Kind::WellKnownSymbols,
       static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
     });
-    if (!aotAccumulator_.addPatch(std::move(patch)))
+    if (!aotAccumulator_.registerPatch(std::move(patch)))
       MOZ_CRASH("Failed to apply patch");
   } else
 #endif
@@ -6638,10 +6638,10 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
       // Inline loadJSContext with patchable address
       CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), scratchReg);
       auto patch = RuntimePatch({
-        RuntimePatchId::JSContextPtr,
+        RuntimePatch::Kind::JSContextPtr,
         static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
       });
-      if (!aotAccumulator_.addPatch(std::move(patch))) {
+      if (!aotAccumulator_.registerPatch(std::move(patch))) {
         MOZ_CRASH("Failed to add patch");
       }
     } else
@@ -7430,8 +7430,8 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 #ifdef ENABLE_AOT_BASELINE
     // Create a PatchEntry for this code pointer.
     uint32_t handlerOffset = opLabel.offset();
-    DispatchTablePatch patch(handlerOffset, uint32_t(i));
-    bool patchResult = aotAccumulator_.addPatch(std::move(patch));
+    RuntimePatch patch(handlerOffset, uint32_t(i));
+    bool patchResult = aotAccumulator_.registerPatch(std::move(patch));
     MOZ_ASSERT(patchResult, "Failed to add dispatch table patch for op");
     // Use indexed assignment instead of append since we pre-allocated the
     // vector
@@ -7520,7 +7520,7 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   aotAccumulator_.manifest.DebugTrapCount = aotAccumulator_.debugTraps.length();
   aotAccumulator_.manifest.CodeCoverageCount = handler.codeCoverageOffsets().length();
   aotAccumulator_.manifest.ICReturnCount = handler.icReturnOffsets().length();
-  aotAccumulator_.manifest.TablePatchCount = aotAccumulator_.tablePatches.length();
+  // aotAccumulator_.manifest.TablePatchCount = aotAccumulator_.tablePatches.length();
   aotAccumulator_.manifest.RuntimePatchCount = aotAccumulator_.runtimePatches.length();
   aotAccumulator_.manifest.OpHandlerOffsetCount = opHandlerOffsets_.length();
 
@@ -7556,13 +7556,13 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   }
 
   // Patch entries
-  MOZ_ASSERT(aotAccumulator_.tablePatches.length() > 0);
-  MOZ_ASSERT(aotAccumulator_.runtimePatches.length() > 0);
-  binFile.write(
-      reinterpret_cast<const char*>(aotAccumulator_.tablePatches.begin()),
-      aotAccumulator_.tablePatches.length() * sizeof(DispatchTablePatch));
+  // MOZ_ASSERT(aotAccumulator_.tablePatches.length() > 0);
+  // binFile.write(
+  //     reinterpret_cast<const char*>(aotAccumulator_.tablePatches.begin()),
+  //     aotAccumulator_.tablePatches.length() * sizeof(DispatchTablePatch));
   
   // Write in the runtime patches.
+  MOZ_ASSERT(aotAccumulator_.runtimePatches.length() > 0);
   binFile.write(
     reinterpret_cast<const char*>(aotAccumulator_.runtimePatches.begin()),
     aotAccumulator_.runtimePatches.length() * sizeof(RuntimePatch));

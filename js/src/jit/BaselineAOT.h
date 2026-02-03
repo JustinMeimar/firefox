@@ -25,8 +25,8 @@ inline std::size_t GetAOTBaselineSize() {
   return baseline_blob_end - baseline_blob_start;
 }
 
-// Baseline AOT metadata IDs
-// These correspond to fields in the BaselineManifest struct
+// Baseline AOT metadata IDs which correspond to fields
+// in the BaselineManifest struct.
 enum class BaselineMetadataID : uint32_t {
   // Offset fields
   InterpretOp,
@@ -60,36 +60,84 @@ struct PatchContext {
     JSContext* cx; 
     uint8_t* codeBase;
     uint32_t dispatchTableOffset;    
-    PatchContext(JSContext* cx_, uint8_t* codeBase_, uint32_t dispatchTableOffset_)
-      : cx(cx_), codeBase(codeBase_), dispatchTableOffset(dispatchTableOffset_) {}
 };
 
 
-enum class RuntimePatchId : uint16_t {
-  WellKnownSymbols,
-  SelfHostingGlobal,
-  JitRuntime,
-  ContextRealm,  // Address of JSContext::realm_ field
-  JSContextPtr   // JSContext* pointer
-};
+// Each patch has a kind tag, telling us which kind of patch to apply, and a
+// targetOffset, representing at which byte in the AOT blob we should apply
+// the patch. 
+struct RuntimePatch {
 
-struct alignas(8) RuntimePatch {
-  RuntimePatchId id; 
-  uint32_t targetOffset;
-  uintptr_t apply(const PatchContext& ctx) const;
-};
-
-struct alignas(8) DispatchTablePatch {
-    /// Offset from the blob to the start of the opcode handler (what the
-    /// patch'ed pointer points to.)
+    enum class Kind : uint16_t {
+      WellKnownSymbols,
+      JitRuntime,         // JitRuntime*
+      ContextRealm,       // &JSContext::realm_ field
+      JSContextPtr,       // JSContext*
+      DispatchTable       // uintptr_t
+    };
+  
+    Kind kind;
+    uint32_t targetOffset; 
+    // Extra data used only by kind DispatchTable. Used to determine
+    // which handler index to use as the value to patch. This value could
+    // be computed from targetOffset - dispatchTableOffset to avoid this
+    // extra field.
     uint32_t handlerOffset;
-    /// Index into the dispatch table 
-    uint32_t dispatchTableIndex;
-    DispatchTablePatch(uint32_t handlerOffset_, uint32_t dispatchTableIndex_)
-      : handlerOffset(handlerOffset_), dispatchTableIndex(dispatchTableIndex_) {}
+    
+    RuntimePatch(Kind kind_, uint32_t targetOffset_) :
+      kind(kind_), targetOffset(targetOffset_) {}
+    
+    RuntimePatch(uint32_t targetOffset_, uint32_t handlerOffset_)
+      : kind(Kind::DispatchTable),
+        targetOffset(targetOffset_),
+        handlerOffset(handlerOffset_) {}
+
+    uintptr_t _getValueToPatch(const PatchContext& pc) const {
+        switch(kind) {
+            case Kind::WellKnownSymbols:
+                return (uintptr_t)pc.cx->runtime()->wellKnownSymbols.ref();
+            case Kind::JitRuntime:
+                return (uintptr_t)pc.cx->runtime()->jitRuntime();
+            case Kind::ContextRealm:
+                return (uintptr_t)(reinterpret_cast<const uint8_t*>(pc.cx)
+                        + JSContext::offsetOfRealm());
+            case Kind::JSContextPtr:
+                return (uintptr_t)pc.cx;
+            case Kind::DispatchTable:
+                return (uintptr_t)(pc.codeBase + handlerOffset);
+        }   
+        MOZ_CRASH("Unexpected Patch Type");
+    }
+
+    void apply(const PatchContext& pc) const {
+        uintptr_t val = _getValueToPatch(pc); 
+        uint8_t* target = pc.codeBase + targetOffset;
+#ifdef DEBUG   
+        uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
+        JitSpew(JitSpew_BaselineAOT, "Runtime patch @ offset %u: before=0x%016lx after=0x%016lx",
+                targetOffset, beforeValue, val);
+#endif
+        *reinterpret_cast<uintptr_t*>(target) = val;
+      }
 };
 
-void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry);
+// struct alignas(8) RuntimePatch {
+//   RuntimePatchId id; 
+//   uint32_t targetOffset;
+//   uintptr_t computePatch(const PatchContext& ctx) const;
+// };
+//
+// struct alignas(8) DispatchTablePatch {
+//     /// Offset from the blob to the start of the opcode handler (what the
+//     /// patch'ed pointer points to.)
+//     uint32_t handlerOffset;
+//     /// Index into the dispatch table 
+//     uint32_t dispatchTableIndex;
+//     DispatchTablePatch(uint32_t handlerOffset_, uint32_t dispatchTableIndex_)
+//       : handlerOffset(handlerOffset_), dispatchTableIndex(dispatchTableIndex_) {}
+// };
+
+// void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry);
 
 static const uint32_t AOT_FOOTER_MAGIC = 0x424C494E;
 struct alignas(4) BaselineAOTFooter {
@@ -143,7 +191,7 @@ static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>(BaselineMetadataID::Count) * 4,
               "Manifest size must match metadata count");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
-static_assert(sizeof(DispatchTablePatch) == 8, "DispatchTablePatch must be 8 bytes");
+// static_assert(sizeof(DispatchTablePatch) == 8, "DispatchTablePatch must be 8 bytes");
 
 }  // namespace js::jit
 
