@@ -1120,7 +1120,7 @@ void BaselineCodeGen<Handler>::loadGlobalLexicalEnvironment(Register dest) {
       // Inline loadGlobalObjectData with patchable address
       // Load address of JSContext::realm_ (will be patched at load time)
       // Use movWithPatch to force a movabs with 8-byte immediate
-      CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), dest);
+      CodeOffset patchOffset = masm.movWithPatch(ImmPtr((void*)0xdeadbeef), dest);
       auto patch = RuntimePatch({
         RuntimePatch::Kind::ContextRealm,
         static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
@@ -2915,8 +2915,8 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
 
 #if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
   if (isAOTCompile_) {
-    // Emit a movabs instruction with placeholder 0 that will be patched at load time
-    CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), scratch2);
+    // Emit a movabs instruction with placeholder that will be patched at load time
+    CodeOffset patchOffset = masm.movWithPatch(ImmPtr((void*)0xdeadbeef), scratch2);
     auto patch = RuntimePatch({
       RuntimePatch::Kind::WellKnownSymbols,
       static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
@@ -6636,7 +6636,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
 #if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
     if (isAOTCompile_) {
       // Inline loadJSContext with patchable address
-      CodeOffset patchOffset = masm.movWithPatch(ImmPtr(nullptr), scratchReg);
+      CodeOffset patchOffset = masm.movWithPatch(ImmPtr((void*)0xdeadbeef), scratchReg);
       auto patch = RuntimePatch({
         RuntimePatch::Kind::JSContextPtr,
         static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
@@ -7419,10 +7419,6 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 
   tableOffset_ = masm.currentOffset();
 
-#ifdef ENABLE_AOT_BASELINE
-  MOZ_ASSERT(opHandlerOffsets_.resizeUninitialized(JSOP_LIMIT));
-#endif
-
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
     const Label& opLabel = opLabels[i];
     MOZ_ASSERT(opLabel.bound());
@@ -7430,11 +7426,10 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 #ifdef ENABLE_AOT_BASELINE
     // Create a PatchEntry for this code pointer.
     uint32_t handlerOffset = opLabel.offset();
-    uint32_t targetOffset = tableOffset_+ i*sizeof(uintptr_t); 
+    uint32_t targetOffset = tableOffset_ + (i * sizeof(uintptr_t));
     RuntimePatch patch(targetOffset, handlerOffset);
     bool patchResult = aotAccumulator_.registerPatch(std::move(patch));
     MOZ_ASSERT(patchResult, "Failed to add dispatch table patch for op");
-    opHandlerOffsets_[i] = CodeOffset(handlerOffset);
 #endif
     masm.writeCodePointer(&cl);
     cl.target()->bind(opLabel.offset());
@@ -7519,9 +7514,7 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   aotAccumulator_.manifest.DebugTrapCount = aotAccumulator_.debugTraps.length();
   aotAccumulator_.manifest.CodeCoverageCount = handler.codeCoverageOffsets().length();
   aotAccumulator_.manifest.ICReturnCount = handler.icReturnOffsets().length();
-  // aotAccumulator_.manifest.TablePatchCount = aotAccumulator_.tablePatches.length();
   aotAccumulator_.manifest.RuntimePatchCount = aotAccumulator_.runtimePatches.length();
-  aotAccumulator_.manifest.OpHandlerOffsetCount = opHandlerOffsets_.length();
 
   // Write manifest (typed struct with named fields)
   binFile.write(reinterpret_cast<const char*>(&aotAccumulator_.manifest),
@@ -7554,21 +7547,11 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
     binFile.write(reinterpret_cast<const char*>(&entry), sizeof(entry));
   }
 
-  // Patch entries
-  // MOZ_ASSERT(aotAccumulator_.tablePatches.length() > 0);
-  // binFile.write(
-  //     reinterpret_cast<const char*>(aotAccumulator_.tablePatches.begin()),
-  //     aotAccumulator_.tablePatches.length() * sizeof(DispatchTablePatch));
-  
-  // Write in the runtime patches.
+  // Runtime patches (includes dispatch table patches)
   MOZ_ASSERT(aotAccumulator_.runtimePatches.length() > 0);
   binFile.write(
     reinterpret_cast<const char*>(aotAccumulator_.runtimePatches.begin()),
     aotAccumulator_.runtimePatches.length() * sizeof(RuntimePatch));
-
-  MOZ_ASSERT(opHandlerOffsets_.length() > 0);
-  binFile.write(reinterpret_cast<const char*>(opHandlerOffsets_.begin()),
-                opHandlerOffsets_.length() * sizeof(uint32_t));
 
   // 7. Write footer
   BaselineAOTFooter footer;
@@ -7587,11 +7570,9 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   size_t metaOff = codeSize;
   JitSpew(JitSpew_BaselineAOT,
       "Metadata @%zu:\n\tmanifest=%zu\n\tdbgInstr=%u\n\tdbgTrap=%u\
-       \n\tcoverage=%u\n\ticRet=%u\n\ttable_patches=%u\n\truntime_patches=%u\
-       \n\topHandlerOffset=%u",
+       \n\tcoverage=%u\n\ticRet=%u\n\truntime_patches=%u",
       metaOff, sizeof(BaselineManifest), m.DebugInstrumentationCount, m.DebugTrapCount,
-      m.CodeCoverageCount, m.ICReturnCount, m.TablePatchCount, m.RuntimePatchCount,
-      m.OpHandlerOffsetCount);
+      m.CodeCoverageCount, m.ICReturnCount, m.RuntimePatchCount);
 
   return true;
 }

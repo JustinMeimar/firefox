@@ -85,11 +85,6 @@ class BaselineCodeGen {
     
     Vector<RuntimePatch, 0, SystemAllocPolicy> runtimePatches;
 
-    // Vector<DispatchTablePatch, 0, SystemAllocPolicy> tablePatches;
-    // [[nodiscard]] bool addPatch(DispatchTablePatch&& patch) {
-    //   return tablePatches.append(std::move(patch));
-    // }
-
     [[nodiscard]] bool registerPatch(RuntimePatch&& patch) {
       return runtimePatches.append(std::move(patch));
     } 
@@ -598,8 +593,6 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
 
   // Offsets of move instructions for tableswitch base address.
   Vector<CodeOffset, 0, SystemAllocPolicy> tableLabels_;
-
-  Vector<CodeOffset, 0, SystemAllocPolicy> opHandlerOffsets_;
 
   // Offset of the first tableswitch entry.
   uint32_t tableOffset_ = 0;

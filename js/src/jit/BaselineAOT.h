@@ -47,9 +47,7 @@ enum class BaselineMetadataID : uint32_t {
   DebugTrapCount,
   CodeCoverageCount,
   ICReturnCount,
-  TablePatchCount,
   RuntimePatchCount,
-  OpHandlerOffsetCount,
 
   Count
 };
@@ -121,24 +119,6 @@ struct RuntimePatch {
       }
 };
 
-// struct alignas(8) RuntimePatch {
-//   RuntimePatchId id; 
-//   uint32_t targetOffset;
-//   uintptr_t computePatch(const PatchContext& ctx) const;
-// };
-//
-// struct alignas(8) DispatchTablePatch {
-//     /// Offset from the blob to the start of the opcode handler (what the
-//     /// patch'ed pointer points to.)
-//     uint32_t handlerOffset;
-//     /// Index into the dispatch table 
-//     uint32_t dispatchTableIndex;
-//     DispatchTablePatch(uint32_t handlerOffset_, uint32_t dispatchTableIndex_)
-//       : handlerOffset(handlerOffset_), dispatchTableIndex(dispatchTableIndex_) {}
-// };
-
-// void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry);
-
 static const uint32_t AOT_FOOTER_MAGIC = 0x424C494E;
 struct alignas(4) BaselineAOTFooter {
   uint32_t magic = AOT_FOOTER_MAGIC; // 'BLIN'
@@ -168,18 +148,14 @@ struct alignas(4) BaselineManifest {
   uint32_t DebugTrapCount;
   uint32_t CodeCoverageCount;
   uint32_t ICReturnCount;
-  uint32_t TablePatchCount;
   uint32_t RuntimePatchCount;
-  uint32_t OpHandlerOffsetCount;
 
   // Followed by variable-length arrays:
   // uint32_t debugInstrumentation[DebugInstrumentationCount]
   // uint32_t debugTraps[DebugTrapCount]
   // uint32_t codeCoverage[CodeCoverageCount]
   // ICReturnOffsetEntry icReturns[ICReturnCount]
-  // DispatchTablePatch patches[PatchCount]
-  // RuntimePatch patches[PatchCount]
-  // uint32_t opHandlerOffsets[OpHandlerOffsetCount]
+  // RuntimePatch patches[RuntimePatchCount]
 };
 
 struct alignas(4) ICReturnOffsetEntry {
@@ -191,7 +167,6 @@ static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>(BaselineMetadataID::Count) * 4,
               "Manifest size must match metadata count");
 static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
-// static_assert(sizeof(DispatchTablePatch) == 8, "DispatchTablePatch must be 8 bytes");
 
 }  // namespace js::jit
 
