@@ -83,14 +83,14 @@ class BaselineCodeGen {
     Vector<uint32_t, 0, SystemAllocPolicy> codeCoverage;
     Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy> icReturns;
     
-    Vector<DispatchTablePatch, 0, SystemAllocPolicy> tablePatches;
     Vector<RuntimePatch, 0, SystemAllocPolicy> runtimePatches;
 
-    [[nodiscard]] bool addPatch(DispatchTablePatch&& patch) {
-      return tablePatches.append(std::move(patch));
-    }
+    // Vector<DispatchTablePatch, 0, SystemAllocPolicy> tablePatches;
+    // [[nodiscard]] bool addPatch(DispatchTablePatch&& patch) {
+    //   return tablePatches.append(std::move(patch));
+    // }
 
-    [[nodiscard]] bool addPatch(RuntimePatch&& patch) {
+    [[nodiscard]] bool registerPatch(RuntimePatch&& patch) {
       return runtimePatches.append(std::move(patch));
     } 
   } aotAccumulator_;

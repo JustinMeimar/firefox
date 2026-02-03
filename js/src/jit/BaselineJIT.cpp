@@ -1376,43 +1376,43 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
       !loadVec(debugTrapOffsets_, manifest->DebugTrapCount) ||
       !loadVec(codeCoverageOffsets_, manifest->CodeCoverageCount) ||
       !loadVec(icReturnOffsets_, manifest->ICReturnCount) ||
-      !loadVec(tablePatches, manifest->TablePatchCount) ||
       !loadVec(runtimePatches, manifest->RuntimePatchCount)
   ) {
     fprintf(stderr, "ERROR: Failed to load AOT vectors\n");
     return false;
   }
-   
-  PatchContext patchCtx(cx, code_->raw(), dispatchTableOffset);
-
-#ifdef DEBUG
-  // Validate all patch entries before applying them
-  size_t codeSize = code_->instructionsSize();
-  for (const auto& entry : tablePatches) {
-    MOZ_ASSERT(entry.handlerOffset < codeSize);
-    size_t tableEntryOffset = dispatchTableOffset +
-                              (entry.dispatchTableIndex * sizeof(uintptr_t));
-    MOZ_ASSERT(tableEntryOffset + sizeof(uintptr_t) <=
-               dispatchTableOffset + (JSOP_LIMIT * sizeof(uintptr_t)));
-    MOZ_ASSERT(tableEntryOffset < codeSize);
-  }
-#endif
-
-  for (const auto& entry : tablePatches) {
-    applyPatch(patchCtx, entry);
-  }
+ 
+  PatchContext patchCtx({cx, code_->raw(), dispatchTableOffset});
   for (const RuntimePatch& patch: runtimePatches) {
-    uintptr_t runtimeAddr = patch.apply(patchCtx);
-    uint8_t* target = patchCtx.codeBase + patch.targetOffset;
-
-    uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
-    JitSpew(JitSpew_BaselineAOT, "Runtime patch @ offset %u: before=0x%016lx after=0x%016lx",
-            patch.targetOffset, beforeValue, runtimeAddr);
-
-    *reinterpret_cast<uintptr_t*>(target) = runtimeAddr;
-  }
-  JitSpew(JitSpew_BaselineAOT, "Applied %zu table patches, %zu runtime patches",
-          tablePatches.length(), runtimePatches.length());
+    patch.apply(patchCtx);
+  } 
+  
+  // #ifdef DEBUG
+  //   // Validate all patch entries before applying them
+  //   size_t codeSize = code_->instructionsSize();
+  //   for (const auto& entry : tablePatches) {
+  //     MOZ_ASSERT(entry.handlerOffset < codeSize);
+  //     size_t tableEntryOffset = dispatchTableOffset +
+  //                               (entry.dispatchTableIndex * sizeof(uintptr_t));
+  //     MOZ_ASSERT(tableEntryOffset + sizeof(uintptr_t) <=
+  //                dispatchTableOffset + (JSOP_LIMIT * sizeof(uintptr_t)));
+  //     MOZ_ASSERT(tableEntryOffset < codeSize);
+  //   }
+  // #endif
+  // for (const auto& entry : tablePatches) {
+  //   applyPatch(patchCtx, entry);
+  // }
+  // 
+  //   uintptr_t runtimeAddr = patch.computePatch(patchCtx);
+  //   uint8_t* target = patchCtx.codeBase + patch.targetOffset;
+  //
+  //   uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
+  //   JitSpew(JitSpew_BaselineAOT, "Runtime patch @ offset %u: before=0x%016lx after=0x%016lx",
+  //           patch.targetOffset, beforeValue, runtimeAddr);
+  //
+  //   *reinterpret_cast<uintptr_t*>(target) = runtimeAddr;
+  // JitSpew(JitSpew_BaselineAOT, "Applied %zu table patches, %zu runtime patches",
+  //         tablePatches.length(), runtimePatches.length());
 
   return true;
 }

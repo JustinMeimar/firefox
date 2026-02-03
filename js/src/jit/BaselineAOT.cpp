@@ -12,28 +12,28 @@
 
 namespace js::jit {
 
-uintptr_t RuntimePatch::apply(const PatchContext& ctx) const {
-    switch(id) {
-        case RuntimePatchId::WellKnownSymbols:
-            return (uintptr_t)ctx.cx->runtime()->wellKnownSymbols.ref();
-        case RuntimePatchId::JitRuntime:
-            return (uintptr_t)ctx.cx->runtime()->jitRuntime();
-        case RuntimePatchId::SelfHostingGlobal:
-             return (uintptr_t)ctx.cx->runtime()->jitRuntime();
-        case RuntimePatchId::ContextRealm:
-            return (uintptr_t)(reinterpret_cast<const uint8_t*>(ctx.cx) + JSContext::offsetOfRealm());
-        case RuntimePatchId::JSContextPtr:
-            return (uintptr_t)ctx.cx;
-        default:
-            MOZ_CRASH("Unknown AOT patch ID");
-    }
-}
+// uintptr_t RuntimePatch::computePatch(const PatchContext& ctx) const {
+//     switch(id) {
+//         case RuntimePatchId::WellKnownSymbols:
+//             return (uintptr_t)ctx.cx->runtime()->wellKnownSymbols.ref();
+//         case RuntimePatchId::JitRuntime:
+//             return (uintptr_t)ctx.cx->runtime()->jitRuntime();
+//         case RuntimePatchId::ContextRealm:
+//             return (uintptr_t)(reinterpret_cast<const uint8_t*>(ctx.cx) + JSContext::offsetOfRealm());
+//         case RuntimePatchId::JSContextPtr:
+//             return (uintptr_t)ctx.cx;
+//         case RuntimePatchId::DispatchTable:
+//             return (uintptr_t)ctx.dispatchTableOffset;
+//         default:
+//             MOZ_CRASH("Unknown AOT patch ID");
+//     }
+// }
 
-void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry) {
-    uint8_t* target = ctx.codeBase + ctx.dispatchTableOffset +
-                      (entry.dispatchTableIndex * sizeof(uintptr_t));
-    uintptr_t val = uintptr_t(ctx.codeBase + entry.handlerOffset);
-    *reinterpret_cast<uintptr_t*>(target) = val;
-}
+// void applyPatch(const PatchContext& ctx, const DispatchTablePatch& entry) {
+//     uint8_t* target = ctx.codeBase + ctx.dispatchTableOffset +
+//                       (entry.dispatchTableIndex * sizeof(uintptr_t));
+//     uintptr_t val = uintptr_t(ctx.codeBase + entry.handlerOffset);
+//     *reinterpret_cast<uintptr_t*>(target) = val;
+// }
 
 }  // namespace js::jit
