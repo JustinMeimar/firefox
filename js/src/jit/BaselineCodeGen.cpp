@@ -7430,11 +7430,10 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 #ifdef ENABLE_AOT_BASELINE
     // Create a PatchEntry for this code pointer.
     uint32_t handlerOffset = opLabel.offset();
-    RuntimePatch patch(handlerOffset, uint32_t(i));
+    uint32_t targetOffset = tableOffset_+ i*sizeof(uintptr_t); 
+    RuntimePatch patch(targetOffset, handlerOffset);
     bool patchResult = aotAccumulator_.registerPatch(std::move(patch));
     MOZ_ASSERT(patchResult, "Failed to add dispatch table patch for op");
-    // Use indexed assignment instead of append since we pre-allocated the
-    // vector
     opHandlerOffsets_[i] = CodeOffset(handlerOffset);
 #endif
     masm.writeCodePointer(&cl);
