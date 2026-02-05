@@ -73,7 +73,10 @@ class RuntimePatch {
       ContextRealm,       // &JSContext::realm_ field
       JSContextPtr,       // JSContext*
       DispatchTable,      // uintptr_t (handlerOffset)
-      VMWrapper           // (JitRuntime*)->TrampolinePtr(id)
+      VMWrapper,          // (JitRuntime*)->TrampolinePtr(id)
+      InterruptBits,      // JSRuntime*->addressOfInterruptBits()
+      JitActivation,      // JSRuntime*->addressOfJitActivation()
+      RealmPtr            // JSRuntime*->addressOfRealm()
     };
   
     Kind kind;

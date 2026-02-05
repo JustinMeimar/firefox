@@ -1689,10 +1689,25 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
   frame.syncStack(0);
 
   Label done;
-  // MARK_RUNTIME:
-  masm.branch32(Assembler::Equal,
-                AbsoluteAddress(runtime->addressOfInterruptBits()), Imm32(0),
-                &done);
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTCompile_) {
+    Register scratch = R0.scratchReg();
+    CodeOffset patchOffset = masm.movWithPatch(ImmPtr((void*)0xdeadbeefdeadbeef), scratch);
+    RuntimePatch patch({
+        RuntimePatch::Kind::InterruptBits,
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
+    });
+    if (!aotAccumulator_.registerPatch(std::move(patch))) {
+      MOZ_CRASH("Failed to add InterruptBits patch");
+    }
+    masm.branch32(Assembler::Equal, Address(scratch, 0), Imm32(0), &done);
+  } else
+#endif
+  {
+    masm.branch32(Assembler::Equal,
+                  AbsoluteAddress(runtime->addressOfInterruptBits()), Imm32(0),
+                  &done);
+  }
 
   prepareVMCall();
 
@@ -1863,9 +1878,24 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
       AbsoluteAddress addressOfEnabled(
           runtime->geckoProfiler().addressOfEnabled());
       masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
-      // MARK_RUNTIME: This looks like one to catch.
-      masm.loadPtr(AbsoluteAddress(runtime->addressOfJitActivation()),
-                   scratchReg);
+#ifdef ENABLE_AOT_BASELINE
+      if (isAOTCompile_) {
+        Register ptrReg = regs.takeAny();
+        CodeOffset patchOffset = masm.movWithPatch(ImmPtr((void*)0xdeadbeefdeadbeef), ptrReg);
+        RuntimePatch patch({
+            RuntimePatch::Kind::JitActivation,
+            static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
+        });
+        if (!aotAccumulator_.registerPatch(std::move(patch))) {
+          MOZ_CRASH("Failed to add JitActivation patch");
+        }
+        masm.loadPtr(Address(ptrReg, 0), scratchReg);
+      } else
+#endif
+      {
+        masm.loadPtr(AbsoluteAddress(runtime->addressOfJitActivation()),
+                     scratchReg);
+      }
       masm.loadPtr(
           Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
           scratchReg);
@@ -6399,8 +6429,23 @@ bool BaselineInterpreterCodeGen::emitAfterYieldDebugInstrumentation(
   if (!handler.addDebugInstrumentationOffset(toggleOffset)) {
     return false;
   }
-  // MARK_RUNTIME:
-  masm.loadPtr(AbsoluteAddress(runtime->addressOfRealm()), scratch);
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTCompile_) {
+    Register ptrReg = scratch;
+    CodeOffset patchOffset = masm.movWithPatch(ImmPtr((void*)0xdeadbeefdeadbeef), ptrReg);
+    RuntimePatch patch({
+        RuntimePatch::Kind::RealmPtr,
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
+    });
+    if (!aotAccumulator_.registerPatch(std::move(patch))) {
+      MOZ_CRASH("Failed to add RealmPtr patch");
+    }
+    masm.loadPtr(Address(ptrReg, 0), scratch);
+  } else
+#endif
+  {
+    masm.loadPtr(AbsoluteAddress(runtime->addressOfRealm()), scratch);
+  }
   masm.branchTest32(Assembler::Zero,
                     Address(scratch, Realm::offsetOfDebugModeBits()),
                     Imm32(Realm::debugModeIsDebuggeeBit()), &done);
