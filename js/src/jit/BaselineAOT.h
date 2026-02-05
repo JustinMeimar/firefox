@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include "vm/JSContext.h"
+#include "jit/VMFunctions.h"
 
 namespace js::jit {
 
@@ -64,14 +65,15 @@ struct PatchContext {
 // Each patch has a kind tag, telling us which kind of patch to apply, and a
 // targetOffset, representing at which byte in the AOT blob we should apply
 // the patch. 
-struct RuntimePatch {
-
+class RuntimePatch {
+  public:
     enum class Kind : uint16_t {
       WellKnownSymbols,
       JitRuntime,         // JitRuntime*
       ContextRealm,       // &JSContext::realm_ field
       JSContextPtr,       // JSContext*
-      DispatchTable       // uintptr_t
+      DispatchTable,      // uintptr_t (handlerOffset)
+      VMWrapper           // (JitRuntime*)->TrampolinePtr(id)
     };
   
     Kind kind;
@@ -81,42 +83,34 @@ struct RuntimePatch {
     // be computed from targetOffset - dispatchTableOffset to avoid this
     // extra field.
     uint32_t handlerOffset;
-    
+
+    // Also an optional data field only used by the `VMWrapper` kind.
+    // TODO(Justin): Put into a union with handler offset since their
+    // uses are mutually exclusive.
+    VMFunctionId vmId;
+  
+    // TODO(Justin): Make real constuctor private and expose some static
+    // constructors for particular patch kinds.
     RuntimePatch(Kind kind_, uint32_t targetOffset_) :
       kind(kind_), targetOffset(targetOffset_) {}
     
+    // Constructor for Dispatch Table patch
     RuntimePatch(uint32_t targetOffset_, uint32_t handlerOffset_)
       : kind(Kind::DispatchTable),
         targetOffset(targetOffset_),
         handlerOffset(handlerOffset_) {}
+    
+    // Constructor for VMWrapper patch
+    RuntimePatch(uint32_t targetOffset_, VMFunctionId vmId)
+      : kind(Kind::VMWrapper),
+        targetOffset(targetOffset_),
+        vmId(vmId) {}
 
-    uintptr_t _getValueToPatch(const PatchContext& pc) const {
-        switch(kind) {
-            case Kind::WellKnownSymbols:
-                return (uintptr_t)pc.cx->runtime()->wellKnownSymbols.ref();
-            case Kind::JitRuntime:
-                return (uintptr_t)pc.cx->runtime()->jitRuntime();
-            case Kind::ContextRealm:
-                return (uintptr_t)(reinterpret_cast<const uint8_t*>(pc.cx)
-                        + JSContext::offsetOfRealm());
-            case Kind::JSContextPtr:
-                return (uintptr_t)pc.cx;
-            case Kind::DispatchTable:
-                return (uintptr_t)(pc.codeBase + handlerOffset);
-        }   
-        MOZ_CRASH("Unexpected Patch Type");
-    }
-
-    void apply(const PatchContext& pc) const {
-        uintptr_t val = _getValueToPatch(pc); 
-        uint8_t* target = pc.codeBase + targetOffset;
-#ifdef DEBUG   
-        uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
-        JitSpew(JitSpew_BaselineAOT, "Runtime patch @ offset %u: before=0x%016lx after=0x%016lx",
-                targetOffset, beforeValue, val);
-#endif
-        *reinterpret_cast<uintptr_t*>(target) = val;
-      }
+    void apply(const PatchContext& pc) const;
+  
+  private:
+    // Declared here, defined in BaselineAOT.cpp
+    uintptr_t _getValueToPatch(const PatchContext& pc) const;
 };
 
 static const uint32_t AOT_FOOTER_MAGIC = 0x424C494E;
