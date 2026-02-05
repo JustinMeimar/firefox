@@ -26,9 +26,16 @@ uintptr_t RuntimePatch::_getValueToPatch(const PatchContext& pc) const {
       return (uintptr_t)pc.cx;
     case Kind::DispatchTable:
       return (uintptr_t)(pc.codeBase + handlerOffset);
-    case Kind::VMWrapper:
+    case Kind::VMWrapper: {
       TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getVMWrapper(vmId);
       return (uintptr_t)(ptr.value);
+    }
+    case Kind::InterruptBits:
+      return (uintptr_t)pc.cx->addressOfInterruptBits();
+    case Kind::JitActivation:
+      return (uintptr_t)pc.cx->addressOfJitActivation();
+    case Kind::RealmPtr:
+      return (uintptr_t)pc.cx->addressOfRealm();
   }
   MOZ_CRASH("Unexpected Patch Type");
 }
@@ -38,8 +45,20 @@ void RuntimePatch::apply(const PatchContext& pc) const {
   uint8_t* target = pc.codeBase + targetOffset;
 #ifdef DEBUG
   uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
-  JitSpew(JitSpew_BaselineAOT, "Runtime patch @ offset %u: before=0x%016lx after=0x%016lx",
-          targetOffset, beforeValue, val);
+  const char* kindStr = "Unknown";
+  switch(kind) {
+    case Kind::WellKnownSymbols: kindStr = "WellKnownSymbols"; break;
+    case Kind::JitRuntime: kindStr = "JitRuntime"; break;
+    case Kind::ContextRealm: kindStr = "ContextRealm"; break;
+    case Kind::JSContextPtr: kindStr = "JSContextPtr"; break;
+    case Kind::DispatchTable: kindStr = "DispatchTable"; break;
+    case Kind::VMWrapper: kindStr = "VMWrapper"; break;
+    case Kind::InterruptBits: kindStr = "InterruptBits"; break;
+    case Kind::JitActivation: kindStr = "JitActivation"; break;
+    case Kind::RealmPtr: kindStr = "RealmPtr"; break;
+  }
+  JitSpew(JitSpew_BaselineAOT, "Runtime patch [%s] @ offset %u: before=0x%016lx after=0x%016lx",
+          kindStr, targetOffset, beforeValue, val);
 #endif
   *reinterpret_cast<uintptr_t*>(target) = val;
 }
