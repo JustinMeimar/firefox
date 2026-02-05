@@ -404,6 +404,13 @@ static void SkipInterpreterFrameEntries(
 
 bool js::jit::RecompileBaselineScriptForDebugMode(
     JSContext* cx, JSScript* script, DebugAPI::IsObserving observing) {
+  // Scripts running in Baseline Interpreter don't have BaselineScript objects.
+  // They will continue running in the interpreter with debug instrumentation
+  // toggled globally via BaselineInterpreter::toggleDebuggerInstrumentation().
+  if (!script->hasJitScript() || !script->jitScript()->hasBaselineScript()) {
+    return true;
+  }
+
   // If a script is on the stack multiple times, it may have already
   // been recompiled.
   if (script->baselineScript()->hasDebugInstrumentation() == observing) {

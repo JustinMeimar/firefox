@@ -48,6 +48,7 @@
 #include "vm/Logging.h"
 #include "vm/Time.h"
 
+//TODO(Justin): remove this.
 #ifdef ENABLE_AOT_BASELINE
 // Forward declaration for AOT baseline interpreter
 extern "C" JSContext* GetTlsContextForJit();
@@ -642,10 +643,26 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
 
   // Check one element cache to avoid VM call.
   Label skipBarrier;
-  // MARK_RUNTIME: Same scenario as emit_Symbol
-  auto* lastCellAddr = runtime->addressOfLastBufferedWholeCell();
-  masm.branchPtr(Assembler::Equal, AbsoluteAddress(lastCellAddr), objReg,
-                 &skipBarrier);
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTCompile_) {
+    Register ptrReg = R1.scratchReg();
+    CodeOffset patchOffset = masm.movWithPatch(ImmPtr((void*)0xdeadbeefdeadbeef), ptrReg);
+    RuntimePatch patch({
+        RuntimePatch::Kind::LastBufferedCell,
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
+    });
+    if (!aotAccumulator_.registerPatch(std::move(patch))) {
+      MOZ_CRASH("Failed to add LastBufferedCell patch");
+    }
+    masm.loadPtr(Address(ptrReg, 0), ptrReg);
+    masm.branchPtr(Assembler::Equal, ptrReg, objReg, &skipBarrier);
+  } else
+#endif
+  {
+    auto* lastCellAddr = runtime->addressOfLastBufferedWholeCell();
+    masm.branchPtr(Assembler::Equal, AbsoluteAddress(lastCellAddr), objReg,
+                   &skipBarrier);
+  }
 
   saveInterpreterPCReg();
 
@@ -659,7 +676,14 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
 
   using Fn = void (*)(JSRuntime* rt, js::gc::Cell* cell);
   masm.setupUnalignedABICall(scratch);
-  masm.movePtr(ImmPtr(runtime), scratch);
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTCompile_) {
+    masm.loadRuntime(scratch);
+  } else
+#endif
+  {
+    masm.movePtr(ImmPtr(runtime), scratch);
+  }
   masm.passABIArg(scratch);
   masm.passABIArg(objReg);
   masm.callWithABI<Fn, PostWriteBarrier>();
@@ -1875,9 +1899,25 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     // the frame currently being OSR-ed
     {
       Label checkOk;
-      AbsoluteAddress addressOfEnabled(
-          runtime->geckoProfiler().addressOfEnabled());
-      masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
+#ifdef ENABLE_AOT_BASELINE
+      if (isAOTCompile_) {
+        Register ptrReg = regs.takeAny();
+        CodeOffset patchOffset = masm.movWithPatch(ImmPtr((void*)0xdeadbeefdeadbeef), ptrReg);
+        RuntimePatch patch({
+            RuntimePatch::Kind::ProfilerEnabled,
+            static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))
+        });
+        if (!aotAccumulator_.registerPatch(std::move(patch))) {
+          MOZ_CRASH("Failed to add ProfilerEnabled patch");
+        }
+        masm.branch32(Assembler::Equal, Address(ptrReg, 0), Imm32(0), &checkOk);
+      } else
+#endif
+      {
+        AbsoluteAddress addressOfEnabled(
+            runtime->geckoProfiler().addressOfEnabled());
+        masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
+      }
 #ifdef ENABLE_AOT_BASELINE
       if (isAOTCompile_) {
         Register ptrReg = regs.takeAny();

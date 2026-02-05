@@ -76,7 +76,9 @@ class RuntimePatch {
       VMWrapper,          // (JitRuntime*)->TrampolinePtr(id)
       InterruptBits,      // JSRuntime*->addressOfInterruptBits()
       JitActivation,      // JSRuntime*->addressOfJitActivation()
-      RealmPtr            // JSRuntime*->addressOfRealm()
+      RealmPtr,           // JSRuntime*->addressOfRealm()
+      LastBufferedCell,   // JSRuntime*->addressOfLastBufferedWholeCell()
+      ProfilerEnabled     // JSRuntime*->geckoProfiler().addressOfEnabled()
     };
   
     Kind kind;
