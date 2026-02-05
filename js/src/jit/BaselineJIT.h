@@ -533,8 +533,7 @@ class BaselineInterpreter {
 
 #if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
   // Patch entries for runtime pointer relocation (AOT only).
-  using RuntimePatchVec = Vector<RuntimePatch, 0, SystemAllocPolicy>;
-  RuntimePatchVec runtimePatches;
+  Vector<RuntimePatch, 0, SystemAllocPolicy> runtimePatches;
 #endif
 
   uint8_t* codeAtOffset(uint32_t offset) const {
