@@ -790,7 +790,19 @@ void MacroAssembler::branchTestNeedsIncrementalBarrierAnyZone(
   } else {
     // We are compiling the interpreter or another runtime-wide trampoline, so
     // we have to load cx->zone.
-    loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+#ifdef ENABLE_AOT_BASELINE
+    if (isAOTFill_) {
+      // For AOT baseline interpreter, use the pinned zone register for PIC.
+      // The zone register is loaded and pinned in the interpreter prologue.
+      MOZ_ASSERT(isZoneLoaded() && "Zone register should be pinned in "
+                                   "prologue from BaselineFrame");
+      mov(zoneReg(), scratch);
+    } else 
+#endif
+    {
+      // Not AOT mode: load zone pointer via absolute address (non-PIC).
+      loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+    } 
     Address needsBarrierAddr(scratch, Zone::offsetOfNeedsIncrementalBarrier());
     branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
   }

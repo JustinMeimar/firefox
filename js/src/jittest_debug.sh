@@ -18,4 +18,4 @@ fi
 
 echo "Running: $FULL_CMD"
 echo ""
-IONFLAGS=bl-aot gdb --args $FULL_CMD
+IONFLAGS=bl-aot eval "gdb --args $FULL_CMD"

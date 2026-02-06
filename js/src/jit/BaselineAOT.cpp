@@ -40,6 +40,8 @@ uintptr_t RuntimePatch::_getValueToPatch(const PatchContext& pc) const {
       return (uintptr_t)pc.cx->runtime()->gc.addressOfLastBufferedWholeCell();
     case Kind::ProfilerEnabled:
       return (uintptr_t)pc.cx->runtime()->geckoProfiler().addressOfEnabled();
+    case Kind::DebugTrapHandler:
+    return (uintptr_t)pc.cx->runtime()->jitRuntime()->debugTrapHandler(dbgKind);
   }
   MOZ_CRASH("Unexpected Patch Type");
 }
@@ -62,6 +64,7 @@ void RuntimePatch::apply(const PatchContext& pc) const {
     case Kind::RealmPtr: kindStr = "RealmPtr"; break;
     case Kind::LastBufferedCell: kindStr = "LastBufferedCell"; break;
     case Kind::ProfilerEnabled: kindStr = "ProfilerEnabled"; break;
+    case Kind::DebugTrapHandler: kindStr = "DebugTrapHandler"; break;
   }
   JitSpew(JitSpew_BaselineAOT, "Runtime patch [%s] @ offset %u: before=0x%016lx after=0x%016lx",
           kindStr, targetOffset, beforeValue, val);

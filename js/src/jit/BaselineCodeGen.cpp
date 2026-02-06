@@ -2147,9 +2147,23 @@ bool BaselineCompiler::emitDebugTrap() {
                  DebugAPI::hasBreakpointsAt(script, handler.pc());
 
   // Emit patchable call to debug trap handler.
-  // MARK_RUNTIME
   JitCode* handlerCode =
       runtime->jitRuntime()->debugTrapHandler(DebugTrapHandlerKind::Compiler);
+
+#ifdef ENABLE_AOT_BASELINE
+  // Note: This is baseline compiler, so it _shouldn't_ be triggering on
+  // AOT interpreter.
+  //
+  // Note: We need some way to regsiter a patch for the ImmPtr() that is
+  // emitted in masm.toggledCall to the JitCode* `handlerCode`. The problem
+  // is, we can't register patches directly in the masm methods. We may
+  // need to lift up this call?
+  //
+  // `masm.toggledCall` also calls `addPendingJump`. Compared to the other
+  // instances of ``
+#else
+ 
+#endif 
   CodeOffset nativeOffset = masm.toggledCall(handlerCode, enabled);
 
   uint32_t pcOffset = script->pcToOffset(handler.pc());
@@ -7352,6 +7366,7 @@ bool BaselineCompiler::emitBody() {
 }
 
 bool BaselineInterpreterGenerator::emitDebugTrap() {
+  // HERE: What is the call that gets patched? Is it PIC?
   CodeOffset offset = masm.nopPatchableToCall();
   if (!debugTrapOffsets_.append(offset.offset())) {
     return false;
@@ -7491,8 +7506,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     debugTrapHandlerOffset_ = masm.currentOffset();
 #ifdef ENABLE_AOT_BASELINE
     if (isAOTCompile_) {
-      // NOTE(Justin): It's not clear which test could validate this indirection
-      // is correct.
+      // TODO(Justin): Replace with a patch. Maybe this is wrong. 
       Register scratch0 = R0.scratchReg();
       masm.loadRuntime(scratch0);
       masm.loadPtr(Address(scratch0, JSRuntime::offsetOfJitRuntime()),

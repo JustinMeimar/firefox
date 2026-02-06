@@ -5019,7 +5019,7 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
 #endif
       dynamicAlignment_(false),
       emitProfilingInstrumentation_(false) {
-#ifndef ENABLE_JS_AOT_ICS
+#if !defined(ENABLE_JS_AOT_ICS) && !defined(ENABLE_AOT_BASELINE)
   MOZ_ASSERT(!isAOTFill);
 #endif
   // AOT IC compilation must not have access to runtime information.
