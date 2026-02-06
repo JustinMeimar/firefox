@@ -71,8 +71,9 @@ class BaselineFrame {
   JSObject* envChain_;        // Environment chain (always initialized).
   ICScript* icScript_;        // IC script (initialized if Warp is enabled).
   ArgumentsObject* argsObj_;  // If HAS_ARGS_OBJ, the arguments object.
+#ifdef ENABLE_AOT_BASELINE
   JS::Zone* zone_;  // Zone pointer (for AOT baseline interpreter).
-
+#endif
   // We need to split the Value into 2 fields of 32 bits, otherwise the C++
   // compiler may add some padding between the fields.
   uint32_t loScratchValue_;
