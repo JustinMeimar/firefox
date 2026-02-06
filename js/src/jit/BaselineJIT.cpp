@@ -1381,7 +1381,6 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
     fprintf(stderr, "ERROR: Failed to load AOT vectors\n");
     return false;
   }
- 
   PatchContext patchCtx({cx, code_->raw(), dispatchTableOffset});
   for (const RuntimePatch& patch: runtimePatches) {
     patch.apply(patchCtx);

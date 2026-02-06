@@ -7506,18 +7506,16 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     debugTrapHandlerOffset_ = masm.currentOffset();
 #ifdef ENABLE_AOT_BASELINE
     if (isAOTCompile_) {
-      // TODO(Justin): Replace with a patch. Maybe this is wrong. 
-      Register scratch0 = R0.scratchReg();
-      masm.loadRuntime(scratch0);
-      masm.loadPtr(Address(scratch0, JSRuntime::offsetOfJitRuntime()),
-                   scratch0);
-      masm.computeEffectiveAddress(
-          Address(scratch0, JitRuntime::offsetOfDebugTrapHandlers()), scratch0);
-      masm.loadPtr(Address(scratch0, size_t(DebugTrapHandlerKind::Interpreter) *
-                                         sizeof(void*)),
-                   scratch0);
-      masm.loadPtr(Address(scratch0, JitCode::offsetOfCode()), scratch0);
-      masm.jump(scratch0);
+      Register ptrReg = R1.scratchReg();
+      CodeOffset patchOffset = masm.movWithPatch(ImmPtr((void*)0xdeadbeefdeadbeef), ptrReg);
+      auto patch = RuntimePatch({
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*)),
+        DebugTrapHandlerKind::Interpreter
+      });
+      if (!aotAccumulator_.registerPatch(std::move(patch))) {
+        MOZ_CRASH("Failed to add patch");
+      }
+      masm.jump(ptrReg);
     } else
 #endif
     {
@@ -7738,6 +7736,13 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
                                      pool, CodeKind::Other);
   if (!code) {
     js::ReportOutOfMemory(cx);
+    return false;
+  }
+
+  // NOTE(Justin): We needed to add this in order for the patched debug trap
+  // handler offset to work.
+  if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
+          cx, DebugTrapHandlerKind::Interpreter)) {
     return false;
   }
 

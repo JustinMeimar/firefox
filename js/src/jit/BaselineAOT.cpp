@@ -41,7 +41,7 @@ uintptr_t RuntimePatch::_getValueToPatch(const PatchContext& pc) const {
     case Kind::ProfilerEnabled:
       return (uintptr_t)pc.cx->runtime()->geckoProfiler().addressOfEnabled();
     case Kind::DebugTrapHandler:
-    return (uintptr_t)pc.cx->runtime()->jitRuntime()->debugTrapHandler(dbgKind);
+      return (uintptr_t)pc.cx->runtime()->jitRuntime()->debugTrapHandler(dbgKind)->raw();
   }
   MOZ_CRASH("Unexpected Patch Type");
 }
