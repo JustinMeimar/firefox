@@ -390,10 +390,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
 
-  // Whether or not the IC being compiled is an AOT IC, and thus will be shared across runtimes.
+  // Whether or not this is AOT compilation (AOT ICs or AOT Baseline Interpreter).
+  // AOT-compiled code will be shared across runtimes and must be position-independent.
   bool isAOTFill_ = false;
 
-  // Register containing the dynamically loaded zone in case of AOT ICs.
+  // Register containing the dynamically loaded zone for AOT-compiled code.
   // This should be a valid register when isAOTFill_ = true.
   Register zoneReg_ = InvalidReg;
 
@@ -5942,8 +5943,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // See 'Runtime agnostic code generation'.
   void loadRuntime(Register reg);
   void setZoneReg(Register zoneReg) {
-    // MOZ_ASSERT(isAOTFill_); // Disabling for now since AOT baseline can use
-    // setZoneReg without AOT ics.
+    MOZ_ASSERT(isAOTFill_);  // Only needed for AOT compilation (ICs or Baseline).
     // Must not overwrite existing register (if already set).
     MOZ_ASSERT(zoneReg_ == InvalidReg);
     zoneReg_ = zoneReg;
@@ -5954,7 +5954,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   void setZoneLoaded() {
-    // MOZ_ASSERT(isAOTFill_); // Disabling since AOT baseline can use also.
+    MOZ_ASSERT(isAOTFill_);  // Only needed for AOT compilation (ICs or Baseline).
     MOZ_ASSERT(zoneReg_ != InvalidReg);
     zoneLoaded_ = true;
   }

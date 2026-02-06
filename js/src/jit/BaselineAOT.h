@@ -13,6 +13,9 @@
 
 namespace js::jit {
 
+// Forward declarations
+enum class DebugTrapHandlerKind;
+
 extern "C" {
   extern const uint8_t baseline_blob_start[];
   extern const uint8_t baseline_blob_end[];
@@ -78,7 +81,8 @@ class RuntimePatch {
       JitActivation,      // JSRuntime*->addressOfJitActivation()
       RealmPtr,           // JSRuntime*->addressOfRealm()
       LastBufferedCell,   // JSRuntime*->addressOfLastBufferedWholeCell()
-      ProfilerEnabled     // JSRuntime*->geckoProfiler().addressOfEnabled()
+      ProfilerEnabled ,   // JSRuntime*->geckoProfiler().addressOfEnabled()
+      DebugTrapHandler    // JitRuntime*->debugTrapHanler_[Kind]
     };
   
     Kind kind;
@@ -93,7 +97,10 @@ class RuntimePatch {
     // TODO(Justin): Put into a union with handler offset since their
     // uses are mutually exclusive.
     VMFunctionId vmId;
-  
+    
+    // TODO(Justin): Also put into union, since we have three now.
+    DebugTrapHandlerKind dbgKind;
+    
     // TODO(Justin): Make real constuctor private and expose some static
     // constructors for particular patch kinds.
     RuntimePatch(Kind kind_, uint32_t targetOffset_) :
@@ -110,6 +117,12 @@ class RuntimePatch {
       : kind(Kind::VMWrapper),
         targetOffset(targetOffset_),
         vmId(vmId) {}
+    
+    // Constructor for DebugTrapHandlerPatch
+    RuntimePatch(uint32_t targetOffset_, DebugTrapHandlerKind dbgKind_)
+      : kind(Kind::DebugTrapHandler),
+        targetOffset(targetOffset_),
+        dbgKind(dbgKind_) {}
 
     void apply(const PatchContext& pc) const;
   

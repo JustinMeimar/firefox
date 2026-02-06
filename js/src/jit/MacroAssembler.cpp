@@ -4818,10 +4818,12 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
 #endif
       dynamicAlignment_(false),
       emitProfilingInstrumentation_(false) {
-#ifndef ENABLE_JS_AOT_ICS
+#if !defined(ENABLE_JS_AOT_ICS) && !defined(ENABLE_AOT_BASELINE)
   MOZ_ASSERT(!isAOTFill);
 #endif
-  // AOT IC compilation must not have access to runtime information.
+  // AOT compilation (ICs or Baseline) must not have access to runtime information.
+  // Note: AOT Baseline needs maybeRuntime for some operations during compilation,
+  // so we only assert maybeRealm is null for position-independent code generation.
   // MOZ_ASSERT_IF(isAOTFill, maybeRuntime == nullptr);
   MOZ_ASSERT_IF(isAOTFill, maybeRealm == nullptr);
   moveResolver_.setAllocator(alloc);
