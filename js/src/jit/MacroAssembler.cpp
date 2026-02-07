@@ -2857,6 +2857,21 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 void MacroAssembler::loadJSContext(Register dest) {
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTFill_) {
+    // For AOT baseline interpreter, load JSContext via zone register.
+    MOZ_ASSERT(isZoneLoaded() && "Zone register should be pinned in "
+                                 "prologue from BaselineFrame");
+    // Load runtime from zone
+    loadPtr(Address(zoneReg(), Zone::offsetOfRuntime()), dest);
+
+    // Load mainContext from runtime
+    loadPtr(Address(dest, JSRuntime::offsetOfMainContext()), dest);
+    return;
+  }
+#endif
+
+  // Not AOT mode: use absolute pointer (non-PIC).
   movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
 }
 
@@ -5286,8 +5301,6 @@ void MacroAssembler::callWithABINoProfiler(void* fun, ABIType result,
   callWithABIPost(stackAdjust, result);
 
 #ifdef JS_CHECK_UNSAFE_CALL_WITH_ABI
-  // Skip this check in AOT mode because loadJSContext() uses absolute pointers
-  // that are invalid when the AOT code is loaded in a different process/context.
   if (check == CheckUnsafeCallWithABI::Check) {
     Label ok;
     push(ReturnReg);
