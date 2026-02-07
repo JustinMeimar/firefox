@@ -5487,8 +5487,6 @@ void MacroAssembler::callWithABINoProfiler(void* fun, ABIType result,
   callWithABIPost(stackAdjust, result);
 
 #ifdef JS_CHECK_UNSAFE_CALL_WITH_ABI
-  // Skip this check in AOT mode because loadJSContext() uses absolute pointers
-  // that are invalid when the AOT code is loaded in a different process/context.
   if (check == CheckUnsafeCallWithABI::Check) {
     Label ok;
     push(ReturnReg);

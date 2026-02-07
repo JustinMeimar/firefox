@@ -7176,9 +7176,6 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   masm.moveStackPtrTo(FramePointer);
 
   masm.checkStackAlignment();
-
-  emitProfilerEnterFrame();
-
   masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
 
   // Initialize BaselineFrame. Also handles env chain pre-initialization (in
@@ -7187,18 +7184,15 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   emitInitFrameFields(R1.scratchReg());
 
 #ifdef ENABLE_AOT_BASELINE
-  // For AOT baseline interpreter, load the zone pointer into a pinned register
-  // so we can use it for runtime-dependent operations like stack checks.
-  // We use `ABINonVolatileReg` to avoid conflicts with R0/R1/R2
-  // scratch registers used throughout the baseline interpreter.
-  //
-  // NOTE(Justin): Revisit register allocation to understand implications of
-  // using `ABINonVolatileReg`.
   if (isAOTCompile_) {
     masm.setZoneReg(ABINonVolatileReg);
     masm.loadBaselineZone();
   }
 #endif
+
+  // NOTE: emitProfilerEnterFrame() calls loadJSContext(), which in AOT mode
+  // requires the zone register to be loaded first.
+  emitProfilerEnterFrame();
 
   // When compiling with Debugger instrumentation, set the debuggeeness of
   // the frame before any operation that can call into the VM.
