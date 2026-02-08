@@ -85,8 +85,8 @@ class BaselineCodeGen {
     
     Vector<RuntimePatch, 0, SystemAllocPolicy> runtimePatches;
 
-    [[nodiscard]] bool registerPatch(RuntimePatch&& patch) {
-      return runtimePatches.append(std::move(patch));
+    void registerPatch(RuntimePatch&& patch) {
+      MOZ_ALWAYS_TRUE(runtimePatches.append(std::move(patch)));
     } 
   } aotAccumulator_;
 #endif

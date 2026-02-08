@@ -1385,6 +1385,7 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   for (const RuntimePatch& patch: runtimePatches) {
     patch.apply(patchCtx);
   }
+  JitSpew(JitSpew_BaselineAOT, "Applied %zu patches.\n", runtimePatches.length());
 
   return true;
 }

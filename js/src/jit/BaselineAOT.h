@@ -72,62 +72,60 @@ class RuntimePatch {
   public:
     enum class Kind : uint16_t {
       WellKnownSymbols,
-      JitRuntime,         // JitRuntime*
-      ContextRealm,       // &JSContext::realm_ field
-      JSContextPtr,       // JSContext*
-      DispatchTable,      // uintptr_t (handlerOffset)
-      VMWrapper,          // (JitRuntime*)->TrampolinePtr(id)
-      InterruptBits,      // JSRuntime*->addressOfInterruptBits()
-      JitActivation,      // JSRuntime*->addressOfJitActivation()
-      RealmPtr,           // JSRuntime*->addressOfRealm()
-      LastBufferedCell,   // JSRuntime*->addressOfLastBufferedWholeCell()
-      ProfilerEnabled ,   // JSRuntime*->geckoProfiler().addressOfEnabled()
-      DebugTrapHandler    // JitRuntime*->debugTrapHanler_[Kind]
+      JitRuntime,
+      ContextRealm,
+      JSContextPtr,
+      DispatchTable,
+      VMWrapper,
+      InterruptBits,
+      JitActivation,
+      RealmPtr,
+      LastBufferedCell,
+      ProfilerEnabled,
+      DebugTrapHandler,
+      ProfilerExitFrameTail
     };
-  
-    Kind kind;
-    uint32_t targetOffset; 
-    // Extra data used only by kind DispatchTable. Used to determine
-    // which handler index to use as the value to patch. This value could
-    // be computed from targetOffset - dispatchTableOffset to avoid this
-    // extra field.
-    uint32_t handlerOffset;
 
-    // Also an optional data field only used by the `VMWrapper` kind.
-    // TODO(Justin): Put into a union with handler offset since their
-    // uses are mutually exclusive.
-    VMFunctionId vmId;
-    
-    // TODO(Justin): Also put into union, since we have three now.
-    DebugTrapHandlerKind dbgKind;
-    
-    // TODO(Justin): Make real constuctor private and expose some static
-    // constructors for particular patch kinds.
-    RuntimePatch(Kind kind_, uint32_t targetOffset_) :
+    Kind kind;
+    uint32_t targetOffset;
+
+    union {
+      uint32_t handlerOffset;
+      VMFunctionId vmId;
+      DebugTrapHandlerKind dbgKind;
+    };
+
+    static RuntimePatch DispatchTablePatch(uint32_t targetOffset_, uint32_t handlerOffset_) {
+      RuntimePatch p;
+      p.kind = Kind::DispatchTable;
+      p.targetOffset = targetOffset_;
+      p.handlerOffset = handlerOffset_;
+      return p;
+    }
+
+    static RuntimePatch VMWrapperPatch(uint32_t targetOffset_, VMFunctionId vmId_) {
+      RuntimePatch p;
+      p.kind = Kind::VMWrapper;
+      p.targetOffset = targetOffset_;
+      p.vmId = vmId_;
+      return p;
+    }
+
+    static RuntimePatch DebugTrapPatch(uint32_t targetOffset_, DebugTrapHandlerKind dbgKind_) {
+      RuntimePatch p;
+      p.kind = Kind::DebugTrapHandler;
+      p.targetOffset = targetOffset_;
+      p.dbgKind = dbgKind_;
+      return p;
+    }
+
+    explicit RuntimePatch(Kind kind_, uint32_t targetOffset_) :
       kind(kind_), targetOffset(targetOffset_) {}
-    
-    // Constructor for Dispatch Table patch
-    RuntimePatch(uint32_t targetOffset_, uint32_t handlerOffset_)
-      : kind(Kind::DispatchTable),
-        targetOffset(targetOffset_),
-        handlerOffset(handlerOffset_) {}
-    
-    // Constructor for VMWrapper patch
-    RuntimePatch(uint32_t targetOffset_, VMFunctionId vmId)
-      : kind(Kind::VMWrapper),
-        targetOffset(targetOffset_),
-        vmId(vmId) {}
-    
-    // Constructor for DebugTrapHandlerPatch
-    RuntimePatch(uint32_t targetOffset_, DebugTrapHandlerKind dbgKind_)
-      : kind(Kind::DebugTrapHandler),
-        targetOffset(targetOffset_),
-        dbgKind(dbgKind_) {}
 
     void apply(const PatchContext& pc) const;
-  
+
   private:
-    // Declared here, defined in BaselineAOT.cpp
+    RuntimePatch() = default;
     uintptr_t _getValueToPatch(const PatchContext& pc) const;
 };
 
