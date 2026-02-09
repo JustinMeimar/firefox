@@ -16,6 +16,16 @@ namespace js::jit {
 // Forward declarations
 enum class DebugTrapHandlerKind;
 
+// IDs for C++ functions called via callWithABI from the baseline interpreter.
+// These are used to identify which function pointer to patch at AOT load time.
+enum class AOTCppFunctionId : uint32_t {
+  PostWriteBarrier,
+  FrameIsDebuggeeCheck,
+  HandleCodeCoverageAtPrologue,
+  HandleCodeCoverageAtPC,
+  Count
+};
+
 extern "C" {
   extern const uint8_t baseline_blob_start[];
   extern const uint8_t baseline_blob_end[];
@@ -83,7 +93,8 @@ class RuntimePatch {
       LastBufferedCell,
       ProfilerEnabled,
       DebugTrapHandler,
-      ProfilerExitFrameTail
+      ProfilerExitFrameTail,
+      CppFunction
     };
 
     Kind kind;
@@ -93,6 +104,7 @@ class RuntimePatch {
       uint32_t handlerOffset;
       VMFunctionId vmId;
       DebugTrapHandlerKind dbgKind;
+      AOTCppFunctionId cppFnId;
     };
 
     static RuntimePatch DispatchTablePatch(uint32_t targetOffset_, uint32_t handlerOffset_) {
@@ -116,6 +128,14 @@ class RuntimePatch {
       p.kind = Kind::DebugTrapHandler;
       p.targetOffset = targetOffset_;
       p.dbgKind = dbgKind_;
+      return p;
+    }
+
+    static RuntimePatch CppFunctionPatch(uint32_t targetOffset_, AOTCppFunctionId fnId) {
+      RuntimePatch p;
+      p.kind = Kind::CppFunction;
+      p.targetOffset = targetOffset_;
+      p.cppFnId = fnId;
       return p;
     }
 

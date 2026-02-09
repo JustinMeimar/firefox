@@ -683,7 +683,20 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   }
   masm.passABIArg(scratch);
   masm.passABIArg(objReg);
-  masm.callWithABI<Fn, PostWriteBarrier>();
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTCompile_) {
+    Register fnReg = regs.takeAny();
+    CodeOffset patchOffset =
+        masm.movWithPatch(ImmPtr((void*)0xAB10000000000001), fnReg);
+    aotAccumulator_.registerPatch(RuntimePatch::CppFunctionPatch(
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*)),
+        AOTCppFunctionId::PostWriteBarrier));
+    masm.callWithABI(fnReg);
+  } else
+#endif
+  {
+    masm.callWithABI<Fn, PostWriteBarrier>();
+  }
 
   restoreInterpreterPCReg();
 
@@ -1039,7 +1052,24 @@ bool BaselineInterpreterCodeGen::emitIsDebuggeeCheck() {
   CodeOffset toggleOffset = masm.toggledJump(&skipCheck);
   {
     saveInterpreterPCReg();
-    EmitCallFrameIsDebuggeeCheck(masm);
+#ifdef ENABLE_AOT_BASELINE
+    if (isAOTCompile_) {
+      // using Fn = void (*)(BaselineFrame* frame);
+      masm.setupUnalignedABICall(R0.scratchReg());
+      masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
+      masm.passABIArg(R0.scratchReg());
+      Register fnReg = R2.scratchReg();
+      CodeOffset patchOffset =
+          masm.movWithPatch(ImmPtr((void*)0xAB10000000000002), fnReg);
+      aotAccumulator_.registerPatch(RuntimePatch::CppFunctionPatch(
+          static_cast<uint32_t>(patchOffset.offset() - sizeof(void*)),
+          AOTCppFunctionId::FrameIsDebuggeeCheck));
+      masm.callWithABI(fnReg);
+    } else
+#endif
+    {
+      EmitCallFrameIsDebuggeeCheck(masm);
+    }
     restoreInterpreterPCReg();
   }
   masm.bind(&skipCheck);
@@ -2011,7 +2041,23 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
     masm.storePtr(ImmPtr(BaselineQueuedScriptPtr), baselineScriptAddr);
 
     Register queueReg = scratch;
-    masm.loadBaselineCompileQueue(queueReg);
+#ifdef ENABLE_AOT_BASELINE
+    if (isAOTCompile_) {
+      // AOT-safe loadBaselineCompileQueue: load cx->realm_ through a patched
+      // address, then compute the compile queue address from the realm.
+      CodeOffset patchOffset =
+          masm.movWithPatch(ImmPtr((void*)0xAB10000000000007), queueReg);
+      aotAccumulator_.registerPatch(RuntimePatch(
+          RuntimePatch::Kind::ContextRealm,
+          static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))));
+      masm.loadPtr(Address(queueReg, 0), queueReg);
+      masm.computeEffectiveAddress(
+          Address(queueReg, Realm::offsetOfBaselineCompileQueue()), queueReg);
+    } else
+#endif
+    {
+      masm.loadBaselineCompileQueue(queueReg);
+    }
 
     Address numQueuedAddr(queueReg, BaselineCompileQueue::offsetOfNumQueued());
     masm.load32(numQueuedAddr, countReg);
@@ -6794,7 +6840,27 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   masm.pushValue(JSVAL_TYPE_OBJECT, genObj);
   masm.pushValue(Address(callerStackPtr, 0));
 
-  masm.switchToObjectRealm(genObj, scratch2);
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTCompile_) {
+    // AOT-safe switchToObjectRealm: extract realm from genObj, then store
+    // to cx->realm_ via a patched address instead of AbsoluteAddress.
+    masm.loadObjShapeUnsafe(genObj, scratch2);
+    masm.loadPtr(Address(scratch2, Shape::offsetOfBaseShape()), scratch2);
+    masm.loadPtr(Address(scratch2, BaseShape::offsetOfRealm()), scratch2);
+    // scratch2 now holds the realm pointer. Store it to &cx->realm_.
+    Register realmDst = regs.takeAny();
+    CodeOffset patchOffset =
+        masm.movWithPatch(ImmPtr((void*)0xAB10000000000005), realmDst);
+    aotAccumulator_.registerPatch(RuntimePatch(
+        RuntimePatch::Kind::ContextRealm,
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))));
+    masm.storePtr(scratch2, Address(realmDst, 0));
+    regs.add(realmDst);
+  } else
+#endif
+  {
+    masm.switchToObjectRealm(genObj, scratch2);
+  }
 
   // Load script in scratch1.
   masm.unboxObject(
@@ -6838,7 +6904,31 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   if (!handler.realmIndependentJitcode()) {
     masm.switchToRealm(handler.maybeScript()->realm(), R2.scratchReg());
   } else {
-    masm.switchToBaselineFrameRealm(R2.scratchReg());
+#ifdef ENABLE_AOT_BASELINE
+    if (isAOTCompile_) {
+      // AOT-safe switchToBaselineFrameRealm: load realm from frame env chain,
+      // then store to cx->realm_ via a patched address.
+      Register scratch = R2.scratchReg();
+      Address envChain(FramePointer,
+                       BaselineFrame::reverseOffsetOfEnvironmentChain());
+      masm.loadPtr(envChain, scratch);
+      // switchToObjectRealm inline: obj → shape → baseshape → realm
+      masm.loadObjShapeUnsafe(scratch, scratch);
+      masm.loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
+      masm.loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
+      // Store realm to &cx->realm_ via patched address.
+      Register realmDst = R1.scratchReg();
+      CodeOffset patchOffset =
+          masm.movWithPatch(ImmPtr((void*)0xAB10000000000006), realmDst);
+      aotAccumulator_.registerPatch(RuntimePatch(
+          RuntimePatch::Kind::ContextRealm,
+          static_cast<uint32_t>(patchOffset.offset() - sizeof(void*))));
+      masm.storePtr(scratch, Address(realmDst, 0));
+    } else
+#endif
+    {
+      masm.switchToBaselineFrameRealm(R2.scratchReg());
+    }
   }
   restoreInterpreterPCReg();
   frame.popn(3);
@@ -7527,7 +7617,20 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   masm.setupUnalignedABICall(R0.scratchReg());
   masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
   masm.passABIArg(R0.scratchReg());
-  masm.callWithABI<Fn1, HandleCodeCoverageAtPrologue>();
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTCompile_) {
+    Register fnReg = R2.scratchReg();
+    CodeOffset patchOffset =
+        masm.movWithPatch(ImmPtr((void*)0xAB10000000000003), fnReg);
+    aotAccumulator_.registerPatch(RuntimePatch::CppFunctionPatch(
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*)),
+        AOTCppFunctionId::HandleCodeCoverageAtPrologue));
+    masm.callWithABI(fnReg);
+  } else
+#endif
+  {
+    masm.callWithABI<Fn1, HandleCodeCoverageAtPrologue>();
+  }
 
   restoreInterpreterPCReg();
   masm.ret();
@@ -7545,7 +7648,21 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   masm.passABIArg(R0.scratchReg());
   Register pcReg = LoadBytecodePC(masm, R2.scratchReg());
   masm.passABIArg(pcReg);
-  masm.callWithABI<Fn2, HandleCodeCoverageAtPC>();
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTCompile_) {
+    // R0 (rcx) and R2 (rax) are both used as args, use R1 (rbx).
+    Register fnReg = R1.scratchReg();
+    CodeOffset patchOffset =
+        masm.movWithPatch(ImmPtr((void*)0xAB10000000000004), fnReg);
+    aotAccumulator_.registerPatch(RuntimePatch::CppFunctionPatch(
+        static_cast<uint32_t>(patchOffset.offset() - sizeof(void*)),
+        AOTCppFunctionId::HandleCodeCoverageAtPC));
+    masm.callWithABI(fnReg);
+  } else
+#endif
+  {
+    masm.callWithABI<Fn2, HandleCodeCoverageAtPC>();
+  }
 
   restoreInterpreterPCReg();
   masm.ret();
