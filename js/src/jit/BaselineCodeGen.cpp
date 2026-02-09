@@ -13,7 +13,6 @@
 #include "gc/GC.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineCompileQueue.h"
-#include "jit/BaselineInterpreterMetadata.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
@@ -915,45 +914,6 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
 
   // Perform the call.
   uint32_t callOffset;
-#ifdef ENABLE_AOT_BASELINE
-  // NOTE(Justin): This has been replaced with a patch in order to avoid the
-  // half-dozen additional loads incurred for each VM call.
-#  if 0
-    if (isAOTCompile_) {
-      // In AOT mode, we need to load the VMWrapper trampoline dynamically at
-      // runtime since trampoline addresses vary between runs.
-      // All VM call arguments are already on the stack, so we can use R0/R1/R2.
-      Register scratch0 = R0.scratchReg();
-      Register scratch1 = R1.scratchReg();
-      Register scratch2 = R2.scratchReg();
-      // Load the VMFunctionId into a register for indexing.
-      masm.move32(Imm32(size_t(id)), scratch2);
-      // Load runtime from zone.
-      masm.loadRuntime(scratch0);
-      // Load jitRuntime from runtime.
-      masm.loadPtr(Address(scratch0, JSRuntime::offsetOfJitRuntime()), scratch0);
-      // Load trampolineCode_ pointer into scratch2.
-      masm.loadPtr(Address(scratch0, JitRuntime::offsetOfTrampolineCode()),
-                   scratch1);
-      // functionWrapperOffsets_ is a Vector<uint32_t>. We need to load mBegin.
-      // First compute the address of the Vector object.
-      masm.computeEffectiveAddress(
-          Address(scratch0, JitRuntime::offsetOfFunctionWrapperOffsets()),
-          scratch0);
-      // Then load mBegin (first field at offset 0).
-      masm.loadPtr(Address(scratch0, 0), scratch0);
-      // Load the offset at index [id] from uint32_t array.
-      masm.load32(BaseIndex(scratch0, scratch2, Scale::TimesFour), scratch0);
-      // Load trampolineCode_->raw() and add offset to get final address.
-      masm.loadPtr(Address(scratch1, JitCode::offsetOfCode()), scratch1);
-      masm.addPtr(scratch0, scratch1);
-      // Call through register.
-      callOffset = masm.call(scratch1).offset();
-    }
-#  endif
-
-#endif
-
 #ifdef ENABLE_AOT_BASELINE
   if (isAOTCompile_) {
     Register scratch = R0.scratchReg();
