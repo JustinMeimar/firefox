@@ -6296,11 +6296,14 @@ bool BaselineCodeGen<Handler>::emit_SuperFun() {
   masm.unboxObject(R0, callee);
 
 #ifdef DEBUG
-  Label classCheckDone;
-  masm.branchTestObjIsFunction(Assembler::Equal, callee, scratch, callee,
-                               &classCheckDone);
-  masm.assumeUnreachable("Unexpected non-JSFunction callee in JSOp::SuperFun");
-  masm.bind(&classCheckDone);
+  if (!masm.isAOTFill()) {
+    Label classCheckDone;
+    masm.branchTestObjIsFunction(Assembler::Equal, callee, scratch, callee,
+                                 &classCheckDone);
+    masm.assumeUnreachable(
+        "Unexpected non-JSFunction callee in JSOp::SuperFun");
+    masm.bind(&classCheckDone);
+  }
 #endif
 
   // Load prototype of callee
@@ -7680,6 +7683,53 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
 
+  // Safety net: verify every pointer-like movabs has a RuntimePatch.
+  {
+    const auto& imm64Offsets = masm.aotImm64Offsets();
+    const auto& patches = aotAccumulator_.runtimePatches;
+
+    auto hasMatchingPatch = [&](uint32_t offset) -> bool {
+      for (const auto& p : patches) {
+        if (p.targetOffset == offset) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Compile-time constants that pass the pointer heuristic but are not
+    // actual runtime pointers.  These are stable across builds/ASLR.
+    auto isKnownSafeConstant = [](uint64_t v) -> bool {
+      // NaN-boxing payload extraction mask used in write barriers.
+      return v == 0x7ffffff00000;
+    };
+
+    uint32_t leakCount = 0;
+    for (uint32_t offset : imm64Offsets) {
+      if (!hasMatchingPatch(offset)) {
+        uint64_t staleValue = 0;
+        memcpy(&staleValue, codeStart + offset, sizeof(uint64_t));
+        if (isKnownSafeConstant(staleValue)) {
+          continue;
+        }
+        fprintf(stderr,
+                "[AOT] UNPATCHED pointer-like movabs at offset 0x%x, "
+                "stale value = 0x%lx\n",
+                offset, staleValue);
+        leakCount++;
+      }
+    }
+
+    fprintf(stderr,
+            "[AOT] Relocation check: %zu tracked, %zu patched, %u unpatched\n",
+            imm64Offsets.length(), patches.length(), leakCount);
+
+    // TODO: Re-enable once all leaks are fixed.
+    // if (leakCount > 0) {
+    //   MOZ_CRASH("AOT blob has unpatched pointer-like immediates");
+    // }
+  }
+
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
   MOZ_ASSERT(binFile && "Failed to write machine code.");
 
@@ -7806,7 +7856,8 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
 
   // TODO(Justin): Change these asserts to be precise equalities.
   MOZ_ASSERT(codeSize <= blobSize);
-  size_t bytesNeeded = codeSize + headerSize;
+  size_t bytesNeeded = (codeSize + headerSize + (sizeof(void*) - 1)) &
+                        ~(sizeof(void*) - 1);
   ExecutablePool* pool;
   uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
                                                          CodeKind::Other);

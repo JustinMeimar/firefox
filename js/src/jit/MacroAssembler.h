@@ -393,6 +393,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Whether or not this is AOT compilation (AOT ICs or AOT Baseline Interpreter).
   // AOT-compiled code will be shared across runtimes and must be position-independent.
   bool isAOTFill_ = false;
+ public:
+  bool isAOTFill() const { return isAOTFill_; }
+ private:
 
   // Register containing the dynamically loaded zone for AOT-compiled code.
   // This should be a valid register when isAOTFill_ = true.

@@ -3899,6 +3899,13 @@ void MacroAssembler::computeImplicitThis(Register env, ValueOperand output,
   // Go to the slow path for possible debug environment proxies.
   branchTestClassIsProxy(true, scratch, slowPath);
 
+  if (isAOTFill_) {
+    // In AOT mode we cannot embed the WithEnvironmentObject::class_ pointer.
+    // Fall back to the VM call which handles all environment types correctly.
+    jump(slowPath);
+    return;
+  }
+
   // WithEnvironmentObjects have an actual implicit |this|.
   Label nonWithEnv, done;
   branchPtr(Assembler::NotEqual, scratch,
@@ -4327,7 +4334,7 @@ void MacroAssembler::handleFailure() {
 
 void MacroAssembler::assumeUnreachable(const char* output) {
 #ifdef JS_MASM_VERBOSE
-  if (!IsCompilingWasm()) {
+  if (!IsCompilingWasm() && !isAOTFill_) {
     AllocatableRegisterSet regs(RegisterSet::Volatile());
     LiveRegisterSet save(regs.asLiveSet());
     PushRegsInMask(save);
@@ -4349,40 +4356,44 @@ void MacroAssembler::assumeUnreachable(const char* output) {
 
 void MacroAssembler::printf(const char* output) {
 #ifdef JS_MASM_VERBOSE
-  AllocatableRegisterSet regs(RegisterSet::Volatile());
-  LiveRegisterSet save(regs.asLiveSet());
-  PushRegsInMask(save);
+  if (!isAOTFill_) {
+    AllocatableRegisterSet regs(RegisterSet::Volatile());
+    LiveRegisterSet save(regs.asLiveSet());
+    PushRegsInMask(save);
 
-  Register temp = regs.takeAnyGeneral();
+    Register temp = regs.takeAnyGeneral();
 
-  using Fn = void (*)(const char* output);
-  setupUnalignedABICall(temp);
-  movePtr(ImmPtr(output), temp);
-  passABIArg(temp);
-  callWithABI<Fn, Printf0>();
+    using Fn = void (*)(const char* output);
+    setupUnalignedABICall(temp);
+    movePtr(ImmPtr(output), temp);
+    passABIArg(temp);
+    callWithABI<Fn, Printf0>();
 
-  PopRegsInMask(save);
+    PopRegsInMask(save);
+  }
 #endif
 }
 
 void MacroAssembler::printf(const char* output, Register value) {
 #ifdef JS_MASM_VERBOSE
-  AllocatableRegisterSet regs(RegisterSet::Volatile());
-  LiveRegisterSet save(regs.asLiveSet());
-  PushRegsInMask(save);
+  if (!isAOTFill_) {
+    AllocatableRegisterSet regs(RegisterSet::Volatile());
+    LiveRegisterSet save(regs.asLiveSet());
+    PushRegsInMask(save);
 
-  regs.takeUnchecked(value);
+    regs.takeUnchecked(value);
 
-  Register temp = regs.takeAnyGeneral();
+    Register temp = regs.takeAnyGeneral();
 
-  using Fn = void (*)(const char* output, uintptr_t value);
-  setupUnalignedABICall(temp);
-  movePtr(ImmPtr(output), temp);
-  passABIArg(temp);
-  passABIArg(value);
-  callWithABI<Fn, Printf1>();
+    using Fn = void (*)(const char* output, uintptr_t value);
+    setupUnalignedABICall(temp);
+    movePtr(ImmPtr(output), temp);
+    passABIArg(temp);
+    passABIArg(value);
+    callWithABI<Fn, Printf1>();
 
-  PopRegsInMask(save);
+    PopRegsInMask(save);
+  }
 #endif
 }
 
@@ -4841,6 +4852,11 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
   // so we only assert maybeRealm is null for position-independent code generation.
   // MOZ_ASSERT_IF(isAOTFill, maybeRuntime == nullptr);
   MOZ_ASSERT_IF(isAOTFill, maybeRealm == nullptr);
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOTFill) {
+    setAOTRecordRelocations();
+  }
+#endif
   moveResolver_.setAllocator(alloc);
 }
 
@@ -8983,11 +8999,13 @@ void MacroAssembler::debugAssertObjHasFixedSlots(Register obj,
 void MacroAssembler::debugAssertObjectHasClass(Register obj, Register scratch,
                                                const JSClass* clasp) {
 #ifdef DEBUG
-  Label done;
-  branchTestObjClassNoSpectreMitigations(Assembler::Equal, obj, clasp, scratch,
-                                         &done);
-  assumeUnreachable("Class check failed");
-  bind(&done);
+  if (!isAOTFill_) {
+    Label done;
+    branchTestObjClassNoSpectreMitigations(Assembler::Equal, obj, clasp,
+                                           scratch, &done);
+    assumeUnreachable("Class check failed");
+    bind(&done);
+  }
 #endif
 }
 
@@ -9695,11 +9713,13 @@ static void LoadNativeIterator(MacroAssembler& masm, Register obj,
 
 #ifdef DEBUG
   // Assert we have a PropertyIteratorObject.
-  Label ok;
-  masm.branchTestObjClass(Assembler::Equal, obj,
-                          &PropertyIteratorObject::class_, dest, obj, &ok);
-  masm.assumeUnreachable("Expected PropertyIteratorObject!");
-  masm.bind(&ok);
+  if (!masm.isAOTFill()) {
+    Label ok;
+    masm.branchTestObjClass(Assembler::Equal, obj,
+                            &PropertyIteratorObject::class_, dest, obj, &ok);
+    masm.assumeUnreachable("Expected PropertyIteratorObject!");
+    masm.bind(&ok);
+  }
 #endif
 
   // Load NativeIterator object.
