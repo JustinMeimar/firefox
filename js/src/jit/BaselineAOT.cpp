@@ -8,10 +8,27 @@
 #include <cstdint>
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
+#include "jit/VMFunctions.h"
 #include "mozilla/Assertions.h"
 #include "vm/JSContext.h"
 
 namespace js::jit {
+
+static void* ResolveCppFunction(AOTCppFunctionId id) {
+  switch (id) {
+    case AOTCppFunctionId::PostWriteBarrier:
+      return reinterpret_cast<void*>(PostWriteBarrier);
+    case AOTCppFunctionId::FrameIsDebuggeeCheck:
+      return reinterpret_cast<void*>(FrameIsDebuggeeCheck);
+    case AOTCppFunctionId::HandleCodeCoverageAtPrologue:
+      return reinterpret_cast<void*>(HandleCodeCoverageAtPrologue);
+    case AOTCppFunctionId::HandleCodeCoverageAtPC:
+      return reinterpret_cast<void*>(HandleCodeCoverageAtPC);
+    case AOTCppFunctionId::Count:
+      break;
+  }
+  MOZ_CRASH("Unknown AOTCppFunctionId");
+}
 
 uintptr_t RuntimePatch::_getValueToPatch(const PatchContext& pc) const {
   switch(kind) {
@@ -46,6 +63,8 @@ uintptr_t RuntimePatch::_getValueToPatch(const PatchContext& pc) const {
       TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getProfilerExitFrameTail();
       return (uintptr_t)(ptr.value);
     }
+    case Kind::CppFunction:
+      return (uintptr_t)ResolveCppFunction(cppFnId);
   }
   MOZ_CRASH("Unexpected Patch Type");
 }
@@ -70,6 +89,7 @@ void RuntimePatch::apply(const PatchContext& pc) const {
     case Kind::ProfilerEnabled: kindStr = "ProfilerEnabled"; break;
     case Kind::DebugTrapHandler: kindStr = "DebugTrapHandler"; break;
     case Kind::ProfilerExitFrameTail: kindStr = "ProfilerExitFrameTail"; break;
+    case Kind::CppFunction: kindStr = "CppFunction"; break;
   }
   JitSpew(JitSpew_BaselineAOT, "Runtime patch [%s] @ offset %u: before=0x%016lx after=0x%016lx",
           kindStr, targetOffset, beforeValue, val);
