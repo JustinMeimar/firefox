@@ -2460,7 +2460,6 @@ static bool AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
 
 #ifdef ENABLE_JS_AOT_ICS
 void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
-  return; 
   // Generate a random filename (unlikely to conflict with others).
   char filename[64];
   snprintf(filename, sizeof(filename), "IC-%" PRIu64,
@@ -4208,7 +4207,7 @@ static void CallRegExpStub(MacroAssembler& masm, size_t jitZoneStubOffset,
   // pretenuring heuristics that affect behavior of the stub). This is uncommon
   // but can happen if we discarded all JIT code but had some active (Baseline)
   // scripts on the stack.
-  masm.loadJSContext(temp); //MARK:
+  masm.loadJSContext(temp);
   masm.loadPtr(Address(temp, JSContext::offsetOfZone()), temp);
   masm.loadPtr(Address(temp, Zone::offsetOfJitZone()), temp);
   masm.loadPtr(Address(temp, jitZoneStubOffset), temp);

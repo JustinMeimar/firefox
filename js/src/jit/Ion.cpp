@@ -129,7 +129,7 @@ bool JitRuntime::initialize(JSContext* cx) {
   if (JitOptions.useAOTTrampolines) {
     JitSpew(JitSpew_BaselineAOT, "Loading AOT trampolines...");
     if (!loadAOTTrampolines(cx)) {
-      fprintf(stderr, "ERROR: Failed to load AOT trampolines\n");
+      JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT trampolines");
       return false;
     }
     JitSpew(JitSpew_BaselineAOT, "AOT trampolines loaded successfully");
@@ -143,7 +143,8 @@ bool JitRuntime::initialize(JSContext* cx) {
 #ifdef ENABLE_AOT_TRAMPOLINES
     if (JitOptions.dumpTrampolines) {
       if (!serializeTrampolineManifest(trampolineCode_)) {
-        fprintf(stderr, "ERROR: Failed to serialize trampoline manifest\n");
+        JitSpew(JitSpew_BaselineAOT,
+                "ERROR: Failed to serialize trampoline manifest");
         return false;
       }
     }
@@ -192,7 +193,12 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   PerfSpewerRangeRecorder rangeRecorder(masm);
 
 #ifdef ENABLE_AOT_TRAMPOLINES
-  // Enable PIC mode for trampolines when dumping for AOT
+  // INCOMPLETE: The GetTlsContextForJit stub embeds an absolute function
+  // pointer via call(ImmPtr(...)).  This works when dumping from the same
+  // build, but the address is not relocatable across builds/ASLR.  A proper
+  // implementation should either:
+  //   (a) use a RuntimePatch-style movabs+indirect-call, or
+  //   (b) inline the TLS load (platform-specific).
   if (JitOptions.dumpTrampolines) {
     masm.setAOTTrampolineMode();
     JitSpew(JitSpew_BaselineAOT, "Generating trampolines with PIC support for AOT use");
@@ -307,7 +313,7 @@ bool JitRuntime::serializeTrampolineManifest(JitCode* code) {
   std::ofstream binFile("./trampolines.bin",
                         std::ios::binary | std::ios::trunc);
   if (!binFile.is_open()) {
-    fprintf(stderr, "Failed to open trampoline AOT dump file.\n");
+    JitSpew(JitSpew_BaselineAOT, "Failed to open trampoline AOT dump file.");
     return false;
   }
 
@@ -461,7 +467,8 @@ bool JitRuntime::loadAOTTrampolines(JSContext* cx) {
 
   auto* vmWrapperOffsets = reinterpret_cast<uint32_t*>(payloadPtr);
   if (!functionWrapperOffsets_.reserve(vmWrapperCount)) {
-    fprintf(stderr, "ERROR: Failed to reserve VM wrapper offsets vector\n");
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: Failed to reserve VM wrapper offsets vector");
     return false;
   }
   for (uint32_t i = 0; i < vmWrapperCount; i++) {
