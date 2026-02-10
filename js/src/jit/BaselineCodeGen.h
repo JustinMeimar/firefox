@@ -87,8 +87,43 @@ class BaselineCodeGen {
 
     void registerPatch(RuntimePatch&& patch) {
       MOZ_ALWAYS_TRUE(runtimePatches.append(std::move(patch)));
-    } 
+    }
   } aotAccumulator_;
+
+  // Emit a movabs with a patchable immediate and register it for runtime
+  // fixup.  This is the canonical way to emit a RuntimePatch site; all
+  // call-sites should go through one of these overloads rather than calling
+  // movWithPatch + registerPatch manually.
+
+  // Simple kind patch (no auxiliary data).
+  void emitPatchableMovImm(RuntimePatch::Kind kind, Register dest) {
+    CodeOffset off = masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
+    uint32_t immOff = off.offset() - sizeof(void*);
+    aotAccumulator_.registerPatch(RuntimePatch(kind, immOff));
+  }
+
+  // VM wrapper patch.
+  void emitVMWrapperPatchableMovImm(VMFunctionId id, Register dest) {
+    CodeOffset off = masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
+    uint32_t immOff = off.offset() - sizeof(void*);
+    aotAccumulator_.registerPatch(RuntimePatch::VMWrapperPatch(immOff, id));
+  }
+
+  // C++ function patch (callWithABI replacement).
+  void emitCppFunctionPatchableMovImm(AOTCppFunctionId fnId, Register dest) {
+    CodeOffset off = masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
+    uint32_t immOff = off.offset() - sizeof(void*);
+    aotAccumulator_.registerPatch(RuntimePatch::CppFunctionPatch(immOff, fnId));
+  }
+
+  // Debug trap handler patch.
+  void emitDebugTrapPatchableMovImm(DebugTrapHandlerKind dbgKind,
+                                    Register dest) {
+    CodeOffset off = masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
+    uint32_t immOff = off.offset() - sizeof(void*);
+    aotAccumulator_.registerPatch(
+        RuntimePatch::DebugTrapPatch(immOff, dbgKind));
+  }
 #endif
 
   template <typename... HandlerArgs>

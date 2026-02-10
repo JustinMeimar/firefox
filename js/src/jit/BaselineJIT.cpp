@@ -1357,13 +1357,14 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
     size_t bytesNeeded = count * sizeof(T);
     size_t payloadOffset = payloadPtr - blob;
     if (payloadOffset + bytesNeeded > size - sizeof(BaselineAOTFooter)) {
-      fprintf(stderr, "ERROR: Vector payload exceeds blob bounds\n");
+      JitSpew(JitSpew_BaselineAOT, "ERROR: Vector payload exceeds blob bounds");
       return false;
     }
 
     T* src = reinterpret_cast<T*>(payloadPtr);
     if (!destVec.append(src, count)) {
-      fprintf(stderr, "ERROR: Failed to allocate vector (count: %u)\n", count);
+      JitSpew(JitSpew_BaselineAOT,
+              "ERROR: Failed to allocate vector (count: %u)", count);
       return false;
     }
 
@@ -1378,7 +1379,7 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
       !loadVec(icReturnOffsets_, manifest->ICReturnCount) ||
       !loadVec(runtimePatches, manifest->RuntimePatchCount)
   ) {
-    fprintf(stderr, "ERROR: Failed to load AOT vectors\n");
+    JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT vectors");
     return false;
   }
   PatchContext patchCtx({cx, code_->raw(), dispatchTableOffset});

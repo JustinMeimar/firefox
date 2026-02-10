@@ -2881,9 +2881,7 @@ static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
 }
 
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest); // HERE: gets hit
-                                                              // from
-                                                              // emit_GetGName
+  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
@@ -4280,42 +4278,33 @@ void MacroAssembler::loadRuntime(Register reg) {
 #endif
 
 #ifdef ENABLE_AOT_TRAMPOLINES
-// Load JSRuntime* for AOT trampolines.
-// This function is platform-specific and implemented in MacroAssembler-<arch>.cpp
+// INCOMPLETE: AOT trampoline runtime-pointer loading.
+//
+// This is a placeholder for loading JSRuntime* inside AOT trampolines.
+// The intended design is RIP-relative addressing into a fixed slot at the
+// start of the trampoline binary (written at load time).  Currently emits a
+// bare nullptr that is never patched, so AOT trampolines that call this
+// will crash.
+//
+// TODO: Implement RIP-relative load from a patchable slot in the AOT
+//       trampoline binary header, analogous to RuntimePatch for the
+//       baseline interpreter.
 void MacroAssembler::loadTrampolineRuntime(Register dest) {
   MOZ_ASSERT(isAOTTrampoline(),
              "loadTrampolineRuntime should only be called for AOT trampolines");
 
-  // On x64, we use RIP-relative addressing to load from a global pointer
-  // that's stored at the beginning of the AOT trampoline binary.
-  // The implementation is in x64/MacroAssembler-x64.cpp
-
-  // For now, emit a placeholder that loads from a symbol.
-  // This will be platform-specific.
-  #ifdef JS_CODEGEN_X64
-    // Load from the runtime pointer at a fixed offset from the code.
-    // The offset will be calculated based on the AOT binary layout.
-    // For now, we'll use a temporary approach: load via absolute address
-    // that gets patched at load time.
-
-    // Emit a mov instruction with RIP-relative addressing
-    // movq runtime_ptr(%rip), dest
-    // This will be properly implemented in the x64-specific file
-    static_assert(sizeof(JSRuntime*) == 8, "Pointer size mismatch");
-
-    // Temporary: For testing, we can use an absolute load
-    // In production, this needs to be RIP-relative
-    // TODO: Implement proper RIP-relative load
-    movePtr(ImmPtr(nullptr), dest);  // Placeholder - will be patched
-  #else
-    MOZ_CRASH("loadTrampolineRuntime not implemented for this architecture");
-  #endif
+#ifdef JS_CODEGEN_X64
+  static_assert(sizeof(JSRuntime*) == 8, "Pointer size mismatch");
+  movePtr(ImmPtr(nullptr), dest);  // Placeholder — NOT patched at load time.
+#else
+  MOZ_CRASH("loadTrampolineRuntime not implemented for this architecture");
+#endif
 }
 
-// Load Zone* from JSRuntime* that's already in a register
+// Load Zone* from JSRuntime* that's already in a register.
+// Part of the incomplete AOT trampoline infrastructure — see
+// loadTrampolineRuntime above.
 void MacroAssembler::loadZoneFromRuntime(Register runtimeReg, Register dest) {
-  // For now, we need to load the main context first, then get its zone.
-  // JSRuntime stores the mainContext, and the context has a zone.
 
   // Load mainContext from runtime
   loadPtr(Address(runtimeReg, JSRuntime::offsetOfMainContext()), dest);

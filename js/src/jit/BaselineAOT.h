@@ -149,6 +149,13 @@ class RuntimePatch {
     uintptr_t _getValueToPatch(const PatchContext& pc) const;
 };
 
+// Sentinel value used as the placeholder immediate in movWithPatch calls.
+// At dump time, every movabs containing this value must have a corresponding
+// RuntimePatch entry.  The actual value is arbitrary (it just needs to be a
+// recognisable non-zero, canonical-user-space pointer so the relocation
+// tracker picks it up).
+static constexpr uintptr_t AOT_PATCH_SENTINEL = 0x0000A070DEADBEEF;
+
 static const uint32_t AOT_FOOTER_MAGIC = 0x424C494E;
 struct alignas(4) BaselineAOTFooter {
   uint32_t magic = AOT_FOOTER_MAGIC; // 'BLIN'
