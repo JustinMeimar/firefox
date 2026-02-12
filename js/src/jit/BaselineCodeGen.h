@@ -124,6 +124,16 @@ class BaselineCodeGen {
     aotAccumulator_.registerPatch(
         RuntimePatch::DebugTrapPatch(immOff, dbgKind));
   }
+
+  // AOT-safe realm switch: load realm from obj, store via patched address.
+  void emitAOTSwitchToObjectRealm(Register obj, Register scratch,
+                                  Register realmDst) {
+    masm.loadObjShapeUnsafe(obj, scratch);
+    masm.loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
+    masm.loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
+    emitPatchableMovImm(RuntimePatch::Kind::ContextRealm, realmDst);
+    masm.storePtr(scratch, Address(realmDst, 0));
+  }
 #endif
 
   template <typename... HandlerArgs>

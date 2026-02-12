@@ -1316,76 +1316,61 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
 
 #ifdef ENABLE_AOT_BASELINE
 
-bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size, JitCode* code) {
-  
-  MOZ_ASSERT(size > sizeof(BaselineAOTFooter));
-
-  auto* footer = reinterpret_cast<BaselineAOTFooter*>(
-    blob + size - sizeof(BaselineAOTFooter));
-
-  MOZ_ASSERT(footer->magic == 0x424C494E);
-  MOZ_ASSERT(footer->version == 1);
-   
-  auto* manifest = reinterpret_cast<BaselineManifest*>(blob + footer->manifestOffset);
-
-  using F = BaselineManifestField;
-  auto getMeta = [&](F id) { return manifest->metadata[uint32_t(id)]; };
+bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code) {
+  static_assert(sizeof(ICReturnOffset) == 8,
+                "ICReturnOffset size must match Python VECTORS element size");
 
   code_ = code;
-  interpretOpOffset_ = getMeta(F::InterpretOp);
-  interpretOpNoDebugTrapOffset_ = getMeta(F::InterpretOpNoDebugTrap);
-  bailoutPrologueOffset_ = getMeta(F::BailoutPrologue);
-  profilerEnterToggleOffset_ = getMeta(F::ProfilerEnterToggle);
-  profilerExitToggleOffset_ = getMeta(F::ProfilerExitToggle);
-  debugTrapHandlerOffset_ = getMeta(F::DebugTrapHandler);
-  callVMOffsets_.debugPrologueOffset = getMeta(F::CallVMDebugPrologue);
-  callVMOffsets_.debugEpilogueOffset = getMeta(F::CallVMDebugEpilogue);
-  callVMOffsets_.debugAfterYieldOffset = getMeta(F::CallVMDebugAfterYield);
 
-  uint32_t dispatchTableOffset = getMeta(F::DispatchTableOffset);
-  uint8_t* payloadPtr = reinterpret_cast<uint8_t*>(manifest) + sizeof(*manifest);
-  
-  // Baseline metadata which is serialized into arrays must be deserialized into
-  // `mozilla::Vector` types as this class expects.
-  auto loadVec = [&](auto& destVec, uint32_t count) -> bool {
-    if (count == 0) {
-      return true;
-    }
+  // Scalar fields — read directly from .S symbols.
+  interpretOpOffset_ = bl_aot_InterpretOp;
+  interpretOpNoDebugTrapOffset_ = bl_aot_InterpretOpNoDebugTrap;
+  bailoutPrologueOffset_ = bl_aot_BailoutPrologue;
+  profilerEnterToggleOffset_ = bl_aot_ProfilerEnterToggle;
+  profilerExitToggleOffset_ = bl_aot_ProfilerExitToggle;
+  debugTrapHandlerOffset_ = bl_aot_DebugTrapHandler;
+  callVMOffsets_.debugPrologueOffset = bl_aot_CallVMDebugPrologue;
+  callVMOffsets_.debugEpilogueOffset = bl_aot_CallVMDebugEpilogue;
+  callVMOffsets_.debugAfterYieldOffset = bl_aot_CallVMDebugAfterYield;
 
+  // Load vectors from start/end symbol pairs.
+  auto loadVec = [](auto& destVec, const uint8_t* start, const uint8_t* end) -> bool {
     using T = typename std::remove_reference_t<decltype(destVec)>::ElementType;
-    size_t bytesNeeded = count * sizeof(T);
-    size_t payloadOffset = payloadPtr - blob;
-    if (payloadOffset + bytesNeeded > size - sizeof(BaselineAOTFooter)) {
-      JitSpew(JitSpew_BaselineAOT, "ERROR: Vector payload exceeds blob bounds");
-      return false;
-    }
-
-    T* src = reinterpret_cast<T*>(payloadPtr);
-    if (!destVec.append(src, count)) {
-      JitSpew(JitSpew_BaselineAOT,
-              "ERROR: Failed to allocate vector (count: %u)", count);
-      return false;
-    }
-
-    payloadPtr += bytesNeeded;
-    return true;
+    size_t count = (end - start) / sizeof(T);
+    if (count == 0) return true;
+    return destVec.append(reinterpret_cast<const T*>(start), count);
   };
 
-  // Load each vector in order and initialize the respective class member.
-  if (!loadVec(debugInstrumentationOffsets_, getMeta(F::DebugInstrumentationCount)) ||
-      !loadVec(debugTrapOffsets_, getMeta(F::DebugTrapCount)) ||
-      !loadVec(codeCoverageOffsets_, getMeta(F::CodeCoverageCount)) ||
-      !loadVec(icReturnOffsets_, getMeta(F::ICReturnCount)) ||
-      !loadVec(runtimePatches, getMeta(F::RuntimePatchCount))
-  ) {
+  auto asBytes = [](const uint32_t* p) {
+    return reinterpret_cast<const uint8_t*>(p);
+  };
+
+  if (!loadVec(debugInstrumentationOffsets_,
+               asBytes(bl_aot_DebugInstrumentationOffsets_start),
+               asBytes(bl_aot_DebugInstrumentationOffsets_end)) ||
+      !loadVec(debugTrapOffsets_,
+               asBytes(bl_aot_DebugTrapOffsets_start),
+               asBytes(bl_aot_DebugTrapOffsets_end)) ||
+      !loadVec(codeCoverageOffsets_,
+               asBytes(bl_aot_CodeCoverageOffsets_start),
+               asBytes(bl_aot_CodeCoverageOffsets_end)) ||
+      !loadVec(icReturnOffsets_,
+               bl_aot_ICReturnOffsets_start,
+               bl_aot_ICReturnOffsets_end) ||
+      !loadVec(runtimePatches,
+               bl_aot_RuntimePatches_start,
+               bl_aot_RuntimePatches_end)) {
     JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT vectors");
     return false;
   }
+
+  // Apply runtime patches.
+  uint32_t dispatchTableOffset = bl_aot_DispatchTableOffset;
   PatchContext patchCtx({cx, code_->raw(), dispatchTableOffset});
-  for (const RuntimePatch& patch: runtimePatches) {
+  for (const RuntimePatch& patch : runtimePatches) {
     patch.apply(patchCtx);
   }
-  JitSpew(JitSpew_BaselineAOT, "Applied %zu patches.\n", runtimePatches.length());
+  JitSpew(JitSpew_BaselineAOT, "Applied %zu patches.", runtimePatches.length());
 
   return true;
 }

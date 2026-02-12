@@ -559,7 +559,7 @@ class BaselineInterpreter {
             const CallVMOffsets& callVMOffsets);
 
 #ifdef ENABLE_AOT_BASELINE
-  [[nodiscard]] bool initFromAOT(JSContext* cx, uint8_t* blob, size_t size, JitCode* code);
+  [[nodiscard]] bool initFromAOT(JSContext* cx, JitCode* code);
 #endif
 
   uint8_t* codeRaw() const { return code_->raw(); }

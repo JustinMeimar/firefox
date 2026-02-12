@@ -666,21 +666,17 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOTCompile_) {
     masm.loadRuntime(scratch);
-  } else
-#endif
-  {
-    masm.movePtr(ImmPtr(runtime), scratch);
-  }
-  masm.passABIArg(scratch);
-  masm.passABIArg(objReg);
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOTCompile_) {
+    masm.passABIArg(scratch);
+    masm.passABIArg(objReg);
     Register fnReg = regs.takeAny();
     emitCppFunctionPatchableMovImm(AOTCppFunctionId::PostWriteBarrier, fnReg);
     masm.callWithABI(fnReg);
   } else
 #endif
   {
+    masm.movePtr(ImmPtr(runtime), scratch);
+    masm.passABIArg(scratch);
+    masm.passABIArg(objReg);
     masm.callWithABI<Fn, PostWriteBarrier>();
   }
 
@@ -947,48 +943,29 @@ template <typename Handler>
 bool BaselineCodeGen<Handler>::emitStackCheck() {
   Label skipCall;
 
+  // Load jitStackLimit into a register.
+  Register stackLimitReg = R1.scratchReg();
 #ifdef ENABLE_AOT_BASELINE
   if (isAOTCompile_) {
-    // For AOT baseline, we can't use absolute addresses. Instead, load the
-    // jitStackLimit dynamically from the runtime via the zone register.
-    Register scratch1 = R2.scratchReg();
-    Register scratch2 = R1.scratchReg();
-    // Load runtime from zone (zone is already in zoneReg_).
-    masm.loadRuntime(scratch1);
-    // Load mainContext from runtime.
-    masm.loadPtr(Address(scratch1, JSRuntime::offsetOfMainContext()), scratch1);
-    // Load jitStackLimit from context.
-    masm.loadPtr(Address(scratch1, offsetof(JSContext, jitStackLimit)),
-                 scratch2);
-
-    // NOTE(Justin): The remaining code is somewhat duplicated with the
-    // prior non-AOT impl of stack check. Could potentially factor this code.
-    if (handler.mustIncludeSlotsInStackCheck()) {
-      // Subtract the size of script->nslots() first.
-      Register scratch0 = R0.scratchReg();
-      masm.moveStackPtrTo(scratch0);
-      subtractScriptSlotsSize(scratch0, scratch1);
-      masm.branchPtr(Assembler::BelowOrEqual, scratch2, scratch0, &skipCall);
-    } else {
-      masm.branchStackPtrRhs(Assembler::BelowOrEqual, scratch2, &skipCall);
-    }
+    Register scratch = R2.scratchReg();
+    masm.loadRuntime(scratch);
+    masm.loadPtr(Address(scratch, JSRuntime::offsetOfMainContext()), scratch);
+    masm.loadPtr(Address(scratch, offsetof(JSContext, jitStackLimit)),
+                 stackLimitReg);
   } else
 #endif
   {
-    // Non-AOT path: use absolute address.
-    if (handler.mustIncludeSlotsInStackCheck()) {
-      // Subtract the size of script->nslots() first.
-      Register scratch = R1.scratchReg();
-      masm.moveStackPtrTo(scratch);
-      subtractScriptSlotsSize(scratch, R2.scratchReg());
-      masm.branchPtr(Assembler::BelowOrEqual,
-                     AbsoluteAddress(runtime->addressOfJitStackLimit()),
-                     scratch, &skipCall);
-    } else {
-      masm.branchStackPtrRhs(Assembler::BelowOrEqual,
-                             AbsoluteAddress(runtime->addressOfJitStackLimit()),
-                             &skipCall);
-    }
+    masm.loadPtr(AbsoluteAddress(runtime->addressOfJitStackLimit()),
+                 stackLimitReg);
+  }
+
+  if (handler.mustIncludeSlotsInStackCheck()) {
+    Register scratch = R0.scratchReg();
+    masm.moveStackPtrTo(scratch);
+    subtractScriptSlotsSize(scratch, R2.scratchReg());
+    masm.branchPtr(Assembler::BelowOrEqual, stackLimitReg, scratch, &skipCall);
+  } else {
+    masm.branchStackPtrRhs(Assembler::BelowOrEqual, stackLimitReg, &skipCall);
   }
 
   prepareVMCall();
@@ -1855,21 +1832,14 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
         Register ptrReg = regs.takeAny();
         emitPatchableMovImm(RuntimePatch::Kind::ProfilerEnabled, ptrReg);
         masm.branch32(Assembler::Equal, Address(ptrReg, 0), Imm32(0), &checkOk);
+        emitPatchableMovImm(RuntimePatch::Kind::JitActivation, ptrReg);
+        masm.loadPtr(Address(ptrReg, 0), scratchReg);
       } else
 #  endif
       {
         AbsoluteAddress addressOfEnabled(
             runtime->geckoProfiler().addressOfEnabled());
         masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
-      }
-#  ifdef ENABLE_AOT_BASELINE
-      if (isAOTCompile_) {
-        Register ptrReg = regs.takeAny();
-        emitPatchableMovImm(RuntimePatch::Kind::JitActivation, ptrReg);
-        masm.loadPtr(Address(ptrReg, 0), scratchReg);
-      } else
-#  endif
-      {
         masm.loadPtr(AbsoluteAddress(runtime->addressOfJitActivation()),
                      scratchReg);
       }
@@ -6763,15 +6733,8 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
 
 #ifdef ENABLE_AOT_BASELINE
   if (isAOTCompile_) {
-    // AOT-safe switchToObjectRealm: extract realm from genObj, then store
-    // to cx->realm_ via a patched address instead of AbsoluteAddress.
-    masm.loadObjShapeUnsafe(genObj, scratch2);
-    masm.loadPtr(Address(scratch2, Shape::offsetOfBaseShape()), scratch2);
-    masm.loadPtr(Address(scratch2, BaseShape::offsetOfRealm()), scratch2);
-    // scratch2 now holds the realm pointer. Store it to &cx->realm_.
     Register realmDst = regs.takeAny();
-    emitPatchableMovImm(RuntimePatch::Kind::ContextRealm, realmDst);
-    masm.storePtr(scratch2, Address(realmDst, 0));
+    emitAOTSwitchToObjectRealm(genObj, scratch2, realmDst);
     regs.add(realmDst);
   } else
 #endif
@@ -6823,20 +6786,11 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   } else {
 #ifdef ENABLE_AOT_BASELINE
     if (isAOTCompile_) {
-      // AOT-safe switchToBaselineFrameRealm: load realm from frame env chain,
-      // then store to cx->realm_ via a patched address.
       Register scratch = R2.scratchReg();
       Address envChain(FramePointer,
                        BaselineFrame::reverseOffsetOfEnvironmentChain());
       masm.loadPtr(envChain, scratch);
-      // switchToObjectRealm inline: obj → shape → baseshape → realm
-      masm.loadObjShapeUnsafe(scratch, scratch);
-      masm.loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
-      masm.loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-      // Store realm to &cx->realm_ via patched address.
-      Register realmDst = R1.scratchReg();
-      emitPatchableMovImm(RuntimePatch::Kind::ContextRealm, realmDst);
-      masm.storePtr(scratch, Address(realmDst, 0));
+      emitAOTSwitchToObjectRealm(scratch, scratch, R1.scratchReg());
     } else
 #endif
     {
@@ -7547,7 +7501,6 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   masm.passABIArg(pcReg);
 #ifdef ENABLE_AOT_BASELINE
   if (isAOTCompile_) {
-    // R0 (rcx) and R2 (rax) are both used as args, use R1 (rbx).
     // R0 (rcx) and R2 (rax) are both used as ABI args; use R1 (rbx).
     Register fnReg = R1.scratchReg();
     emitCppFunctionPatchableMovImm(AOTCppFunctionId::HandleCodeCoverageAtPC,
@@ -7697,15 +7650,10 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
 #ifdef ENABLE_AOT_BASELINE
 bool BaselineInterpreterGenerator::loadAOTBaseline(
     JSContext* cx, BaselineInterpreter& interpreter) {
-  uint8_t* aotBlob = GetAOTBaselineBlob();
-  size_t blobSize = GetAOTBaselineSize();
-  MOZ_ASSERT(blobSize != 0, "AOT blob size is 0!");
+  size_t codeSize = GetAOTBaselineCodeSize();
+  MOZ_ASSERT(codeSize != 0, "AOT code size is 0!");
 
-  auto* footer = reinterpret_cast<BaselineAOTFooter*>(
-      aotBlob + blobSize - sizeof(BaselineAOTFooter));
-  MOZ_ASSERT(footer->magic == AOT_FOOTER_MAGIC);
-
-  uint32_t codeSize = footer->manifestOffset;
+  uint32_t headerSize = bl_aot_HeaderSize;
 
   mozilla::Maybe<AutoAllocInAtomsZone> az;
   if (!cx->zone() || !cx->zone()->isAtomsZone()) {
@@ -7715,12 +7663,7 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
   JitZone* jitZone = cx->zone()->getJitZone(cx);
   MOZ_ASSERT(jitZone && "Could not attain the JitZone.");
 
-  auto* manifest =
-      reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
-  uint32_t headerSize = manifest->metadata[uint32_t(BaselineManifestField::HeaderSize)];
-
   // Allocate enough for the JitCodeHeader + machine code, pointer-aligned.
-  MOZ_ASSERT(codeSize <= blobSize);
   size_t bytesNeeded = js::AlignBytes(codeSize + headerSize, sizeof(void*));
   ExecutablePool* pool;
   uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
@@ -7753,7 +7696,7 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
       js::ReportOutOfMemory(cx);
       return false;
     }
-    memcpy(codeStart, aotBlob, codeSize);
+    memcpy(codeStart, GetAOTBaselineCode(), codeSize);
     JitCodeHeader::FromExecutable(codeStart)->init(code);
     code->setInstructionsSize(codeSize);
 
@@ -7761,10 +7704,10 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
     MOZ_ASSERT(code->instructionsSize() == codeSize);
     MOZ_ASSERT(code->raw() == codeStart);
 
-    // Initialize interpreter from self-describing binary (includes patching)
-    if (!interpreter.initFromAOT(cx, aotBlob, blobSize, code)) {
+    // Initialize interpreter from named symbols (includes patching)
+    if (!interpreter.initFromAOT(cx, code)) {
       JitSpew(JitSpew_BaselineAOT,
-              "ERROR: Failed to initialize from AOT manifest");
+              "ERROR: Failed to initialize from AOT symbols");
       return false;
     }
   }
