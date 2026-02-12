@@ -26,21 +26,6 @@ enum class AOTCppFunctionId : uint32_t {
   Count
 };
 
-// Variabes corresponding to global symbols in the=
-// generated `.s` file.
-extern "C" {
-  extern const uint8_t baseline_blob_start[];
-  extern const uint8_t baseline_blob_end[];
-}
-
-inline uint8_t* GetAOTBaselineBlob() {
-  return const_cast<uint8_t*>(baseline_blob_start);
-}
-
-inline std::size_t GetAOTBaselineSize() {
-  return baseline_blob_end - baseline_blob_start;
-}
-
 // All metadata fields stored in the BaselineManifest.
 #define BASELINE_MANIFEST_FIELDS(V) \
   V(InterpretOp)                    \
@@ -60,6 +45,38 @@ inline std::size_t GetAOTBaselineSize() {
   V(CodeCoverageCount)              \
   V(ICReturnCount)                  \
   V(RuntimePatchCount)
+
+// Symbols emitted by GenerateAOTBaselineInterpreter.py into the .S file.
+extern "C" {
+  // Machine code (no metadata).
+  extern const uint8_t bl_aot_code_start[];
+  extern const uint8_t bl_aot_code_end[];
+
+// One uint32_t per BASELINE_MANIFEST_FIELDS entry.
+#define DECLARE_MANIFEST_EXTERN(name) extern const uint32_t bl_aot_##name;
+  BASELINE_MANIFEST_FIELDS(DECLARE_MANIFEST_EXTERN)
+#undef DECLARE_MANIFEST_EXTERN
+
+  // Vector start/end pairs.
+  extern const uint32_t bl_aot_DebugInstrumentationOffsets_start[];
+  extern const uint32_t bl_aot_DebugInstrumentationOffsets_end[];
+  extern const uint32_t bl_aot_DebugTrapOffsets_start[];
+  extern const uint32_t bl_aot_DebugTrapOffsets_end[];
+  extern const uint32_t bl_aot_CodeCoverageOffsets_start[];
+  extern const uint32_t bl_aot_CodeCoverageOffsets_end[];
+  extern const uint8_t bl_aot_ICReturnOffsets_start[];
+  extern const uint8_t bl_aot_ICReturnOffsets_end[];
+  extern const uint8_t bl_aot_RuntimePatches_start[];
+  extern const uint8_t bl_aot_RuntimePatches_end[];
+}
+
+inline const uint8_t* GetAOTBaselineCode() {
+  return bl_aot_code_start;
+}
+
+inline size_t GetAOTBaselineCodeSize() {
+  return bl_aot_code_end - bl_aot_code_start;
+}
 
 enum class BaselineManifestField : uint32_t {
 #define EMIT_ENUM(name) name,
@@ -172,6 +189,10 @@ static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) ==
               static_cast<uint32_t>(BaselineManifestField::Count) * 4,
               "Manifest size must match metadata count");
+static_assert(sizeof(RuntimePatch) == 12,
+              "RuntimePatch size must match Python VECTORS element size");
+static_assert(uint32_t(BaselineManifestField::Count) == 17,
+              "Manifest field count must match Python MANIFEST_FIELD_NAMES");
 
 }  // namespace js::jit
 

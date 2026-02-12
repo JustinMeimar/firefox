@@ -4836,10 +4836,6 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
 #if !defined(ENABLE_JS_AOT_ICS) && !defined(ENABLE_AOT_BASELINE)
   MOZ_ASSERT(!isAOTFill);
 #endif
-  // AOT compilation (ICs or Baseline) must not have access to runtime information.
-  // Note: AOT Baseline needs maybeRuntime for some operations during compilation,
-  // so we only assert maybeRealm is null for position-independent code generation.
-  // MOZ_ASSERT_IF(isAOTFill, maybeRuntime == nullptr);
   MOZ_ASSERT_IF(isAOTFill, maybeRealm == nullptr);
 #ifdef ENABLE_AOT_BASELINE
   if (isAOTFill) {
