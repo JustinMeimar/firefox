@@ -66,8 +66,7 @@ enum class BaselineMetadataID : uint32_t {
   Count
 };
 
-// In order to perform the patch, the AOT loader must provide the
-// code base address and the dispatch table offset.
+// Load time context required to apply patches. 
 struct PatchContext {
     JSContext* cx; 
     uint8_t* codeBase;
@@ -149,11 +148,6 @@ class RuntimePatch {
     uintptr_t _getValueToPatch(const PatchContext& pc) const;
 };
 
-// Sentinel value used as the placeholder immediate in movWithPatch calls.
-// At dump time, every movabs containing this value must have a corresponding
-// RuntimePatch entry.  The actual value is arbitrary (it just needs to be a
-// recognisable non-zero, canonical-user-space pointer so the relocation
-// tracker picks it up).
 static constexpr uintptr_t AOT_PATCH_SENTINEL = 0x0000A070DEADBEEF;
 
 static const uint32_t AOT_FOOTER_MAGIC = 0x424C494E;
@@ -163,8 +157,7 @@ struct alignas(4) BaselineAOTFooter {
   uint32_t manifestOffset = 0; // Absolute offset from blob start
 };
 
-// Baseline manifest structure
-// Contains metadata about the AOT-compiled baseline interpreter
+// Metadata about the AOT-compiled baseline interpreter
 struct alignas(4) BaselineManifest {
   // Offset fields
   uint32_t InterpretOp;
@@ -191,19 +184,13 @@ struct alignas(4) BaselineManifest {
   // uint32_t debugInstrumentation[DebugInstrumentationCount]
   // uint32_t debugTraps[DebugTrapCount]
   // uint32_t codeCoverage[CodeCoverageCount]
-  // ICReturnOffsetEntry icReturns[ICReturnCount]
+  // ICReturnOffset icReturns[ICReturnCount]  (defined in BaselineJIT.h)
   // RuntimePatch patches[RuntimePatchCount]
-};
-
-struct alignas(4) ICReturnOffsetEntry {
-  uint32_t offset;
-  uint32_t opcode;
 };
 
 static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>(BaselineMetadataID::Count) * 4,
               "Manifest size must match metadata count");
-static_assert(sizeof(ICReturnOffsetEntry) == 8, "ICReturnOffsetEntry must be 8 bytes");
 
 }  // namespace js::jit
 
