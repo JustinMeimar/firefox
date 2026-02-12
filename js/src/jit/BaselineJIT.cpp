@@ -1326,24 +1326,23 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   MOZ_ASSERT(footer->magic == 0x424C494E);
   MOZ_ASSERT(footer->version == 1);
    
-  // Load metadata from the binary manifest (typed struct with named fields).
   auto* manifest = reinterpret_cast<BaselineManifest*>(blob + footer->manifestOffset);
 
-  // Initialize all the necessary members of the `BaselineInterpreter` class.
+  using F = BaselineManifestField;
+  auto getMeta = [&](F id) { return manifest->metadata[uint32_t(id)]; };
+
   code_ = code;
+  interpretOpOffset_ = getMeta(F::InterpretOp);
+  interpretOpNoDebugTrapOffset_ = getMeta(F::InterpretOpNoDebugTrap);
+  bailoutPrologueOffset_ = getMeta(F::BailoutPrologue);
+  profilerEnterToggleOffset_ = getMeta(F::ProfilerEnterToggle);
+  profilerExitToggleOffset_ = getMeta(F::ProfilerExitToggle);
+  debugTrapHandlerOffset_ = getMeta(F::DebugTrapHandler);
+  callVMOffsets_.debugPrologueOffset = getMeta(F::CallVMDebugPrologue);
+  callVMOffsets_.debugEpilogueOffset = getMeta(F::CallVMDebugEpilogue);
+  callVMOffsets_.debugAfterYieldOffset = getMeta(F::CallVMDebugAfterYield);
 
-  // Load offset fields using type-safe named field access.
-  interpretOpOffset_ = manifest->InterpretOp;
-  interpretOpNoDebugTrapOffset_ = manifest->InterpretOpNoDebugTrap;
-  bailoutPrologueOffset_ = manifest->BailoutPrologue;
-  profilerEnterToggleOffset_ = manifest->ProfilerEnterToggle;
-  profilerExitToggleOffset_ = manifest->ProfilerExitToggle;
-  debugTrapHandlerOffset_ = manifest->DebugTrapHandler;
-  callVMOffsets_.debugPrologueOffset = manifest->CallVMDebugPrologue;
-  callVMOffsets_.debugEpilogueOffset = manifest->CallVMDebugEpilogue;
-  callVMOffsets_.debugAfterYieldOffset = manifest->CallVMDebugAfterYield;
-
-  uint32_t dispatchTableOffset = manifest->DispatchTableOffset;
+  uint32_t dispatchTableOffset = getMeta(F::DispatchTableOffset);
   uint8_t* payloadPtr = reinterpret_cast<uint8_t*>(manifest) + sizeof(*manifest);
   
   // Baseline metadata which is serialized into arrays must be deserialized into
@@ -1373,11 +1372,11 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, uint8_t* blob, size_t size,
   };
 
   // Load each vector in order and initialize the respective class member.
-  if (!loadVec(debugInstrumentationOffsets_, manifest->DebugInstrumentationCount) ||
-      !loadVec(debugTrapOffsets_, manifest->DebugTrapCount) ||
-      !loadVec(codeCoverageOffsets_, manifest->CodeCoverageCount) ||
-      !loadVec(icReturnOffsets_, manifest->ICReturnCount) ||
-      !loadVec(runtimePatches, manifest->RuntimePatchCount)
+  if (!loadVec(debugInstrumentationOffsets_, getMeta(F::DebugInstrumentationCount)) ||
+      !loadVec(debugTrapOffsets_, getMeta(F::DebugTrapCount)) ||
+      !loadVec(codeCoverageOffsets_, getMeta(F::CodeCoverageCount)) ||
+      !loadVec(icReturnOffsets_, getMeta(F::ICReturnCount)) ||
+      !loadVec(runtimePatches, getMeta(F::RuntimePatchCount))
   ) {
     JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT vectors");
     return false;

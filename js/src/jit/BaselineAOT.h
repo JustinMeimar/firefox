@@ -26,6 +26,8 @@ enum class AOTCppFunctionId : uint32_t {
   Count
 };
 
+// Variabes corresponding to global symbols in the=
+// generated `.s` file.
 extern "C" {
   extern const uint8_t baseline_blob_start[];
   extern const uint8_t baseline_blob_end[];
@@ -39,30 +41,30 @@ inline std::size_t GetAOTBaselineSize() {
   return baseline_blob_end - baseline_blob_start;
 }
 
-// Baseline AOT metadata IDs which correspond to fields
-// in the BaselineManifest struct.
-enum class BaselineMetadataID : uint32_t {
-  // Offset fields
-  InterpretOp,
-  InterpretOpNoDebugTrap,
-  BailoutPrologue,
-  ProfilerEnterToggle,
-  ProfilerExitToggle,
-  DebugTrapHandler,
-  DispatchTableOffset,
-  CallVMDebugPrologue,
-  CallVMDebugEpilogue,
-  CallVMDebugAfterYield,
-  HeaderSize,
-  PrologueEndOffset,
+// All metadata fields stored in the BaselineManifest.
+#define BASELINE_MANIFEST_FIELDS(V) \
+  V(InterpretOp)                    \
+  V(InterpretOpNoDebugTrap)         \
+  V(BailoutPrologue)                \
+  V(ProfilerEnterToggle)            \
+  V(ProfilerExitToggle)             \
+  V(DebugTrapHandler)               \
+  V(DispatchTableOffset)            \
+  V(CallVMDebugPrologue)            \
+  V(CallVMDebugEpilogue)            \
+  V(CallVMDebugAfterYield)          \
+  V(HeaderSize)                     \
+  V(PrologueEndOffset)              \
+  V(DebugInstrumentationCount)      \
+  V(DebugTrapCount)                 \
+  V(CodeCoverageCount)              \
+  V(ICReturnCount)                  \
+  V(RuntimePatchCount)
 
-  // Count fields
-  DebugInstrumentationCount,
-  DebugTrapCount,
-  CodeCoverageCount,
-  ICReturnCount,
-  RuntimePatchCount,
-
+enum class BaselineManifestField : uint32_t {
+#define EMIT_ENUM(name) name,
+  BASELINE_MANIFEST_FIELDS(EMIT_ENUM)
+#undef EMIT_ENUM
   Count
 };
 
@@ -74,26 +76,31 @@ struct PatchContext {
 };
 
 
+#define RUNTIME_PATCH_KINDS(V) \
+  V(WellKnownSymbols)         \
+  V(JitRuntime)                \
+  V(ContextRealm)              \
+  V(JSContextPtr)              \
+  V(DispatchTable)             \
+  V(VMWrapper)                 \
+  V(InterruptBits)             \
+  V(JitActivation)             \
+  V(RealmPtr)                  \
+  V(LastBufferedCell)          \
+  V(ProfilerEnabled)           \
+  V(DebugTrapHandler)          \
+  V(ProfilerExitFrameTail)     \
+  V(CppFunction)
+
 // Each patch has a kind tag, telling us which kind of patch to apply, and a
 // targetOffset, representing at which byte in the AOT blob we should apply
-// the patch. 
+// the patch.
 class RuntimePatch {
   public:
     enum class Kind : uint16_t {
-      WellKnownSymbols,
-      JitRuntime,
-      ContextRealm,
-      JSContextPtr,
-      DispatchTable,
-      VMWrapper,
-      InterruptBits,
-      JitActivation,
-      RealmPtr,
-      LastBufferedCell,
-      ProfilerEnabled,
-      DebugTrapHandler,
-      ProfilerExitFrameTail,
-      CppFunction
+#define EMIT_KIND(name) name,
+      RUNTIME_PATCH_KINDS(EMIT_KIND)
+#undef EMIT_KIND
     };
 
     Kind kind;
@@ -157,39 +164,13 @@ struct alignas(4) BaselineAOTFooter {
   uint32_t manifestOffset = 0; // Absolute offset from blob start
 };
 
-// Metadata about the AOT-compiled baseline interpreter
 struct alignas(4) BaselineManifest {
-  // Offset fields
-  uint32_t InterpretOp;
-  uint32_t InterpretOpNoDebugTrap;
-  uint32_t BailoutPrologue;
-  uint32_t ProfilerEnterToggle;
-  uint32_t ProfilerExitToggle;
-  uint32_t DebugTrapHandler;
-  uint32_t DispatchTableOffset;
-  uint32_t CallVMDebugPrologue;
-  uint32_t CallVMDebugEpilogue;
-  uint32_t CallVMDebugAfterYield;
-  uint32_t HeaderSize;
-  uint32_t PrologueEndOffset;
-
-  // Count fields
-  uint32_t DebugInstrumentationCount;
-  uint32_t DebugTrapCount;
-  uint32_t CodeCoverageCount;
-  uint32_t ICReturnCount;
-  uint32_t RuntimePatchCount;
-
-  // Followed by variable-length arrays:
-  // uint32_t debugInstrumentation[DebugInstrumentationCount]
-  // uint32_t debugTraps[DebugTrapCount]
-  // uint32_t codeCoverage[CodeCoverageCount]
-  // ICReturnOffset icReturns[ICReturnCount]  (defined in BaselineJIT.h)
-  // RuntimePatch patches[RuntimePatchCount]
+  uint32_t metadata[uint32_t(BaselineManifestField::Count)];
 };
 
 static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
-static_assert(sizeof(BaselineManifest) == static_cast<uint32_t>(BaselineMetadataID::Count) * 4,
+static_assert(sizeof(BaselineManifest) ==
+              static_cast<uint32_t>(BaselineManifestField::Count) * 4,
               "Manifest size must match metadata count");
 
 }  // namespace js::jit
