@@ -7678,14 +7678,10 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   binFile.write(reinterpret_cast<const char*>(codeCov.begin()),
                 codeCov.length() * sizeof(uint32_t));
 
-  // IC return offsets (need to convert to ICReturnOffsetEntry format)
+  // IC return offsets
   const auto& icReturns = handler.icReturnOffsets();
-  for (const auto& ic : icReturns) {
-    ICReturnOffsetEntry entry;
-    entry.offset = ic.offset;
-    entry.opcode = uint32_t(ic.op);
-    binFile.write(reinterpret_cast<const char*>(&entry), sizeof(entry));
-  }
+  binFile.write(reinterpret_cast<const char*>(icReturns.begin()),
+                icReturns.length() * sizeof(BaselineInterpreter::ICReturnOffset));
 
   // Runtime patches (includes dispatch table patches)
   MOZ_ASSERT(aotAccumulator_.runtimePatches.length() > 0);
