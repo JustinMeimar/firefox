@@ -9,6 +9,7 @@
 #include "BaselineAOT.h"
 #include "JitOptions.h"
 #include "mozilla/Casting.h"
+#include "util/Memory.h"
 
 #include "gc/GC.h"
 #include "jit/AutoWritableJitCode.h"
@@ -7563,6 +7564,49 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 }
 
 #ifdef ENABLE_AOT_BASELINE
+static void verifyAOTRelocations(
+    const uint8_t* codeStart,
+    const Vector<uint32_t, 64, SystemAllocPolicy>& imm64Offsets,
+    const Vector<RuntimePatch, 0, SystemAllocPolicy>& patches) {
+  
+  auto hasMatchingPatch = [&](uint32_t offset) -> bool {
+    for (const auto& p : patches) {
+      if (p.targetOffset == offset) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  auto isKnownSafeConstant = [](uint64_t v) -> bool {
+    return v == 0x7ffffff00000;
+  };
+
+  uint32_t leakCount = 0;
+  for (uint32_t offset : imm64Offsets) {
+    if (!hasMatchingPatch(offset)) {
+      uint64_t staleValue = 0;
+      memcpy(&staleValue, codeStart + offset, sizeof(uint64_t));
+      if (isKnownSafeConstant(staleValue)) {
+        continue;
+      }
+      JitSpew(JitSpew_BaselineAOT,
+              "UNPATCHED pointer-like movabs at offset 0x%x, "
+              "stale value = 0x%" PRIx64,
+              offset, staleValue);
+      leakCount++;
+    }
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "Relocation check: %zu tracked, %zu patched, %u unpatched",
+          imm64Offsets.length(), patches.length(), leakCount);
+
+  if (leakCount > 0) {
+    MOZ_CRASH("AOT blob has unpatched pointer-like immediates");
+  }
+}
+
 bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   std::ofstream binFile("./baseline_interpreter.bin",
                         std::ios::binary | std::ios::trunc);
@@ -7575,51 +7619,8 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
 
-  // Safety net: verify every pointer-like movabs has a RuntimePatch.
-  {
-    const auto& imm64Offsets = masm.aotImm64Offsets();
-    const auto& patches = aotAccumulator_.runtimePatches;
-
-    auto hasMatchingPatch = [&](uint32_t offset) -> bool {
-      for (const auto& p : patches) {
-        if (p.targetOffset == offset) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    // Compile-time constants that pass the pointer heuristic but are not
-    // actual runtime pointers.  These are stable across builds/ASLR.
-    auto isKnownSafeConstant = [](uint64_t v) -> bool {
-      // NaN-boxing payload extraction mask used in write barriers.
-      return v == 0x7ffffff00000;
-    };
-
-    uint32_t leakCount = 0;
-    for (uint32_t offset : imm64Offsets) {
-      if (!hasMatchingPatch(offset)) {
-        uint64_t staleValue = 0;
-        memcpy(&staleValue, codeStart + offset, sizeof(uint64_t));
-        if (isKnownSafeConstant(staleValue)) {
-          continue;
-        }
-        JitSpew(JitSpew_BaselineAOT,
-                "UNPATCHED pointer-like movabs at offset 0x%x, "
-                "stale value = 0x%" PRIx64,
-                offset, staleValue);
-        leakCount++;
-      }
-    }
-
-    JitSpew(JitSpew_BaselineAOT,
-            "Relocation check: %zu tracked, %zu patched, %u unpatched",
-            imm64Offsets.length(), patches.length(), leakCount);
-
-    if (leakCount > 0) {
-      MOZ_CRASH("AOT blob has unpatched pointer-like immediates");
-    }
-  }
+  verifyAOTRelocations(codeStart, masm.aotImm64Offsets(),
+                       aotAccumulator_.runtimePatches);
 
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
   MOZ_ASSERT(binFile && "Failed to write machine code.");
@@ -7628,66 +7629,41 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   size_t manifestOffset = binFile.tellp();
 
   // 4. Populate manifest fields
-  aotAccumulator_.manifest.InterpretOp = interpretOpOffset_;
-  aotAccumulator_.manifest.InterpretOpNoDebugTrap =
-      interpretOpNoDebugTrapOffset_;
-  aotAccumulator_.manifest.BailoutPrologue = bailoutPrologueOffset_.offset();
-  aotAccumulator_.manifest.ProfilerEnterToggle =
-      profilerEnterFrameToggleOffset_.offset();
-  aotAccumulator_.manifest.ProfilerExitToggle =
-      profilerExitFrameToggleOffset_.offset();
-  aotAccumulator_.manifest.DebugTrapHandler = debugTrapHandlerOffset_;
-  aotAccumulator_.manifest.DispatchTableOffset = tableOffset_;
-  aotAccumulator_.manifest.CallVMDebugPrologue =
-      handler.callVMOffsets().debugPrologueOffset;
-  aotAccumulator_.manifest.CallVMDebugEpilogue =
-      handler.callVMOffsets().debugEpilogueOffset;
-  aotAccumulator_.manifest.CallVMDebugAfterYield =
-      handler.callVMOffsets().debugAfterYieldOffset;
-  aotAccumulator_.manifest.HeaderSize = code->headerSize();
-  aotAccumulator_.manifest.PrologueEndOffset =
-      warmUpCheckPrologueOffset_.offset();
-  aotAccumulator_.manifest.DebugInstrumentationCount =
-      handler.debugInstrumentationOffsets().length();
-  aotAccumulator_.manifest.DebugTrapCount = aotAccumulator_.debugTraps.length();
-  aotAccumulator_.manifest.CodeCoverageCount =
-      handler.codeCoverageOffsets().length();
-  aotAccumulator_.manifest.ICReturnCount = handler.icReturnOffsets().length();
-  aotAccumulator_.manifest.RuntimePatchCount =
-      aotAccumulator_.runtimePatches.length();
+  using F = BaselineManifestField;
+  auto& m = aotAccumulator_.manifest.metadata;
+  m[uint32_t(F::InterpretOp)] = interpretOpOffset_;
+  m[uint32_t(F::InterpretOpNoDebugTrap)] = interpretOpNoDebugTrapOffset_;
+  m[uint32_t(F::BailoutPrologue)] = bailoutPrologueOffset_.offset();
+  m[uint32_t(F::ProfilerEnterToggle)] = profilerEnterFrameToggleOffset_.offset();
+  m[uint32_t(F::ProfilerExitToggle)] = profilerExitFrameToggleOffset_.offset();
+  m[uint32_t(F::DebugTrapHandler)] = debugTrapHandlerOffset_;
+  m[uint32_t(F::DispatchTableOffset)] = tableOffset_;
+  m[uint32_t(F::CallVMDebugPrologue)] = handler.callVMOffsets().debugPrologueOffset;
+  m[uint32_t(F::CallVMDebugEpilogue)] = handler.callVMOffsets().debugEpilogueOffset;
+  m[uint32_t(F::CallVMDebugAfterYield)] = handler.callVMOffsets().debugAfterYieldOffset;
+  m[uint32_t(F::HeaderSize)] = code->headerSize();
+  m[uint32_t(F::PrologueEndOffset)] = warmUpCheckPrologueOffset_.offset();
+  m[uint32_t(F::DebugInstrumentationCount)] = handler.debugInstrumentationOffsets().length();
+  m[uint32_t(F::DebugTrapCount)] = aotAccumulator_.debugTraps.length();
+  m[uint32_t(F::CodeCoverageCount)] = handler.codeCoverageOffsets().length();
+  m[uint32_t(F::ICReturnCount)] = handler.icReturnOffsets().length();
+  m[uint32_t(F::RuntimePatchCount)] = aotAccumulator_.runtimePatches.length();
 
-  // Write manifest (typed struct with named fields)
+  // Write manifest
   binFile.write(reinterpret_cast<const char*>(&aotAccumulator_.manifest),
                 sizeof(aotAccumulator_.manifest));
 
-  // Write vector payloads sequentially debug instrumentation offsets
-  const auto& debugInstr = handler.debugInstrumentationOffsets();
-  MOZ_ASSERT(debugInstr.length() > 0);
-  binFile.write(reinterpret_cast<const char*>(debugInstr.begin()),
-                debugInstr.length() * sizeof(uint32_t));
-
-  // Debug trap offsets
-  MOZ_ASSERT(aotAccumulator_.debugTraps.length() > 0);
-  binFile.write(
-      reinterpret_cast<const char*>(aotAccumulator_.debugTraps.begin()),
-      aotAccumulator_.debugTraps.length() * sizeof(uint32_t));
-
-  // Code coverage offsets
-  const auto& codeCov = handler.codeCoverageOffsets();
-  MOZ_ASSERT(codeCov.length() > 0);
-  binFile.write(reinterpret_cast<const char*>(codeCov.begin()),
-                codeCov.length() * sizeof(uint32_t));
-
-  // IC return offsets
-  const auto& icReturns = handler.icReturnOffsets();
-  binFile.write(reinterpret_cast<const char*>(icReturns.begin()),
-                icReturns.length() * sizeof(BaselineInterpreter::ICReturnOffset));
-
-  // Runtime patches (includes dispatch table patches)
-  MOZ_ASSERT(aotAccumulator_.runtimePatches.length() > 0);
-  binFile.write(
-      reinterpret_cast<const char*>(aotAccumulator_.runtimePatches.begin()),
-      aotAccumulator_.runtimePatches.length() * sizeof(RuntimePatch));
+  // Write variable-length vector payloads
+  auto writeVec = [&](const auto& vec) {
+    using T = typename std::remove_reference_t<decltype(vec)>::ElementType;
+    binFile.write(reinterpret_cast<const char*>(vec.begin()),
+                  vec.length() * sizeof(T));
+  };
+  writeVec(handler.debugInstrumentationOffsets());
+  writeVec(aotAccumulator_.debugTraps);
+  writeVec(handler.codeCoverageOffsets());
+  writeVec(handler.icReturnOffsets());
+  writeVec(aotAccumulator_.runtimePatches);
 
   // 7. Write footer
   BaselineAOTFooter footer;
@@ -7703,14 +7679,16 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
       "Code size=%zu:\n\tprologue=[0,%u)\n\thandlers=[%u,%u)\n\ttable=[%u,%zu)",
       codeSize, prologueEnd, prologueEnd, tableOffset_, tableOffset_, codeSize);
 
-  auto& m = aotAccumulator_.manifest;
   size_t metaOff = codeSize;
   JitSpew(JitSpew_BaselineAOT,
           "Metadata @%zu:\n\tmanifest=%zu\n\tdbgInstr=%u\n\tdbgTrap=%u\
        \n\tcoverage=%u\n\ticRet=%u\n\truntime_patches=%u",
-          metaOff, sizeof(BaselineManifest), m.DebugInstrumentationCount,
-          m.DebugTrapCount, m.CodeCoverageCount, m.ICReturnCount,
-          m.RuntimePatchCount);
+          metaOff, sizeof(BaselineManifest),
+          m[uint32_t(F::DebugInstrumentationCount)],
+          m[uint32_t(F::DebugTrapCount)],
+          m[uint32_t(F::CodeCoverageCount)],
+          m[uint32_t(F::ICReturnCount)],
+          m[uint32_t(F::RuntimePatchCount)]);
 
   return true;
 }
@@ -7739,11 +7717,11 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
 
   auto* manifest =
       reinterpret_cast<BaselineManifest*>(aotBlob + footer->manifestOffset);
-  uint32_t headerSize = manifest->HeaderSize;
+  uint32_t headerSize = manifest->metadata[uint32_t(BaselineManifestField::HeaderSize)];
 
+  // Allocate enough for the JitCodeHeader + machine code, pointer-aligned.
   MOZ_ASSERT(codeSize <= blobSize);
-  size_t bytesNeeded = (codeSize + headerSize + (sizeof(void*) - 1)) &
-                        ~(sizeof(void*) - 1);
+  size_t bytesNeeded = js::AlignBytes(codeSize + headerSize, sizeof(void*));
   ExecutablePool* pool;
   uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
                                                          CodeKind::Other);
