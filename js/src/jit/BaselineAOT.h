@@ -16,16 +16,6 @@ namespace js::jit {
 // Forward declarations
 enum class DebugTrapHandlerKind;
 
-// IDs for C++ functions called via callWithABI from the baseline interpreter.
-// These are used to identify which function pointer to patch at AOT load time.
-enum class AOTCppFunctionId : uint32_t {
-  PostWriteBarrier,
-  FrameIsDebuggeeCheck,
-  HandleCodeCoverageAtPrologue,
-  HandleCodeCoverageAtPC,
-  Count
-};
-
 // All metadata fields stored in the BaselineManifest.
 #define BASELINE_MANIFEST_FIELDS(V) \
   V(InterpretOp)                    \
@@ -85,6 +75,10 @@ enum class BaselineManifestField : uint32_t {
   Count
 };
 
+struct alignas(4) BaselineManifest {
+  uint32_t metadata[uint32_t(BaselineManifestField::Count)];
+};
+
 // Load time context required to apply patches. 
 struct PatchContext {
     JSContext* cx; 
@@ -92,6 +86,15 @@ struct PatchContext {
     uint32_t dispatchTableOffset;    
 };
 
+// IDs for C++ functions called via callWithABI from the baseline interpreter.
+// These are used to identify which function pointer to patch at AOT load time.
+enum class AOTCppFunctionId : uint32_t {
+  PostWriteBarrier,
+  FrameIsDebuggeeCheck,
+  HandleCodeCoverageAtPrologue,
+  HandleCodeCoverageAtPC,
+  Count
+};
 
 #define RUNTIME_PATCH_KINDS(V) \
   V(WellKnownSymbols)         \
@@ -109,17 +112,15 @@ struct PatchContext {
   V(ProfilerExitFrameTail)     \
   V(CppFunction)
 
-// Each patch has a kind tag, telling us which kind of patch to apply, and a
-// targetOffset, representing at which byte in the AOT blob we should apply
-// the patch.
 class RuntimePatch {
-  public:
+  public:   
+    // Each patch has a kind tag, telling us which kind of patch to apply, and a
+    // targetOffset, representing at which byte we should apply the patch.
     enum class Kind : uint16_t {
 #define EMIT_KIND(name) name,
       RUNTIME_PATCH_KINDS(EMIT_KIND)
 #undef EMIT_KIND
     };
-
     Kind kind;
     uint32_t targetOffset;
 
@@ -181,9 +182,7 @@ struct alignas(4) BaselineAOTFooter {
   uint32_t manifestOffset = 0; // Absolute offset from blob start
 };
 
-struct alignas(4) BaselineManifest {
-  uint32_t metadata[uint32_t(BaselineManifestField::Count)];
-};
+
 
 static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) ==

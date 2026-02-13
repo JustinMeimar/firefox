@@ -258,38 +258,28 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
     ]
 
 
-### Baseline AOT binary embedding
-# The baseline_interpreter.bin now contains a self-describing manifest
-# with all metadata embedded directly in the binary using the
-# "Manifest + Footer" pattern. No separate YAML or header generation needed.
+if CONFIG["ENABLE_AOT_BASELINE"]:
+    # Generate assembly wrapper for the AOT Baseline interpreter binary.
+    GeneratedFile(
+        "AOTBaselineInterpreter.S",
+        script="GenerateAOTBaselineInterpreter.py",
+        inputs=["../../../baseline_interpreter.bin"],
+    )
+    # Build the generated .s into the project.
+    SOURCES += [
+        "!AOTBaselineInterpreter.S"
+    ]
 
-# Generate assembly wrapper for the AOT Baseline interpreter binary.
-GeneratedFile(
-    "AOTBaselineInterpreter.S",
-    script="GenerateAOTBaselineInterpreter.py",
-    inputs=["../../../baseline_interpreter.bin"],
-)
-
-# Build the generated .s into the project.
-SOURCES += [
-    "!AOTBaselineInterpreter.S"
-]
-
-### Trampoline AOT binary embedding
-# The trampolines.bin contains a self-describing manifest with all metadata
-# embedded directly in the binary using the "Manifest + Footer" pattern.
-
-# Generate assembly wrapper for the AOT Trampolines binary.
-GeneratedFile(
-    "AOTTrampolines.S",
-    script="GenerateAOTTrampolines.py",
-    inputs=["../../../trampolines.bin"],
-)
-
-# Build the generated .S into the project.
-SOURCES += [
-    "!AOTTrampolines.S"
-]
+if CONFIG["ENABLE_AOT_TRAMPOLINES"]:
+    # WIP: Generate assembly wrapper for the AOT Trampolines binary.
+    GeneratedFile(
+        "AOTTrampolines.S",
+        script="GenerateAOTTrampolines.py",
+        inputs=["../../../trampolines.bin"],
+    )
+    SOURCES += [
+        "!AOTTrampolines.S"
+    ]
 
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(

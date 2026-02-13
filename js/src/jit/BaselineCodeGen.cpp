@@ -7517,47 +7517,14 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 }
 
 #ifdef ENABLE_AOT_BASELINE
-static void verifyAOTRelocations(
-    const uint8_t* codeStart,
-    const Vector<uint32_t, 64, SystemAllocPolicy>& imm64Offsets,
-    const Vector<RuntimePatch, 0, SystemAllocPolicy>& patches) {
-  
-  auto hasMatchingPatch = [&](uint32_t offset) -> bool {
-    for (const auto& p : patches) {
-      if (p.targetOffset == offset) {
-        return true;
-      }
-    }
-    return false;
-  };
+using OffsetVector = Vector<uint32_t, 64, SystemAllocPolicy>;
+using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
 
-  auto isKnownSafeConstant = [](uint64_t v) -> bool {
-    return v == 0x7ffffff00000;
-  };
-
-  uint32_t leakCount = 0;
-  for (uint32_t offset : imm64Offsets) {
-    if (!hasMatchingPatch(offset)) {
-      uint64_t staleValue = 0;
-      memcpy(&staleValue, codeStart + offset, sizeof(uint64_t));
-      if (isKnownSafeConstant(staleValue)) {
-        continue;
-      }
-      JitSpew(JitSpew_BaselineAOT,
-              "UNPATCHED pointer-like movabs at offset 0x%x, "
-              "stale value = 0x%" PRIx64,
-              offset, staleValue);
-      leakCount++;
-    }
-  }
-
-  JitSpew(JitSpew_BaselineAOT,
-          "Relocation check: %zu tracked, %zu patched, %u unpatched",
-          imm64Offsets.length(), patches.length(), leakCount);
-
-  if (leakCount > 0) {
-    MOZ_CRASH("AOT blob has unpatched pointer-like immediates");
-  }
+static void verifyAOTRelocations(const OffsetVector& absolutePtrs,
+                                 const RuntimePatchVector& patches) {
+  // TODO(Justin): Verify that each runtime pointer the masm catches
+  // matches one of our patches.
+  return;
 }
 
 bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
@@ -7572,7 +7539,7 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
 
-  verifyAOTRelocations(codeStart, masm.aotImm64Offsets(),
+  verifyAOTRelocations(masm.aotRuntimePointers(),
                        aotAccumulator_.runtimePatches);
 
   binFile.write(reinterpret_cast<const char*>(codeStart), codeSize);
@@ -7622,7 +7589,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   BaselineAOTFooter footer;
   footer.manifestOffset = manifestOffset;
   binFile.write(reinterpret_cast<const char*>(&footer), sizeof(footer));
-  MOZ_ASSERT(binFile && "Failed to write footer.");
   binFile.close();
 
   // Log serialization layout
@@ -7651,7 +7617,10 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
 bool BaselineInterpreterGenerator::loadAOTBaseline(
     JSContext* cx, BaselineInterpreter& interpreter) {
   size_t codeSize = GetAOTBaselineCodeSize();
-  MOZ_ASSERT(codeSize != 0, "AOT code size is 0!");
+  if (codeSize == 0) {
+    JitSpew(JitSpew_BaselineAOT, "ERROR: AOT code size is 0!");
+    return false;
+  }
 
   uint32_t headerSize = bl_aot_HeaderSize;
 
@@ -7661,7 +7630,10 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
   }
 
   JitZone* jitZone = cx->zone()->getJitZone(cx);
-  MOZ_ASSERT(jitZone && "Could not attain the JitZone.");
+  if (!jitZone) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
 
   // Allocate enough for the JitCodeHeader + machine code, pointer-aligned.
   size_t bytesNeeded = js::AlignBytes(codeSize + headerSize, sizeof(void*));

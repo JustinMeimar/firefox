@@ -1336,6 +1336,9 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code) {
   // Load vectors from start/end symbol pairs.
   auto loadVec = [](auto& destVec, const uint8_t* start, const uint8_t* end) -> bool {
     using T = typename std::remove_reference_t<decltype(destVec)>::ElementType;
+    MOZ_ASSERT(end >= start, "AOT vector end < start — stale or corrupt blob?");
+    MOZ_ASSERT((end - start) % sizeof(T) == 0,
+               "AOT vector size not a multiple of element size");
     size_t count = (end - start) / sizeof(T);
     if (count == 0) return true;
     return destVec.append(reinterpret_cast<const T*>(start), count);

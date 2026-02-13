@@ -76,24 +76,24 @@ class BaselineCodeGen {
 #endif
 
 #ifdef ENABLE_AOT_BASELINE
+  
+  using OffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
+  using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
+  using ICReturnOffsetVector =
+      Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy>;
+  
   struct BaselineAOTAccumulator {
     BaselineManifest manifest = {};
-    Vector<uint32_t, 0, SystemAllocPolicy> debugInstr;
-    Vector<uint32_t, 0, SystemAllocPolicy> debugTraps;
-    Vector<uint32_t, 0, SystemAllocPolicy> codeCoverage;
-    Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy> icReturns;
-    
-    Vector<RuntimePatch, 0, SystemAllocPolicy> runtimePatches;
+    OffsetVector debugInstr;
+    OffsetVector debugTraps;
+    OffsetVector codeCoverage;
+    ICReturnOffsetVector icReturns;
+    RuntimePatchVector runtimePatches;
 
     void registerPatch(RuntimePatch&& patch) {
       MOZ_ALWAYS_TRUE(runtimePatches.append(std::move(patch)));
     }
   } aotAccumulator_;
-
-  // Emit a movabs with a patchable immediate and register it for runtime
-  // fixup.  This is the canonical way to emit a RuntimePatch site; all
-  // call-sites should go through one of these overloads rather than calling
-  // movWithPatch + registerPatch manually.
 
   // Simple kind patch (no auxiliary data).
   void emitPatchableMovImm(RuntimePatch::Kind kind, Register dest) {
@@ -125,6 +125,7 @@ class BaselineCodeGen {
         RuntimePatch::DebugTrapPatch(immOff, dbgKind));
   }
 
+  // TODO(Justin): move to .cpp
   // AOT-safe realm switch: load realm from obj, store via patched address.
   void emitAOTSwitchToObjectRealm(Register obj, Register scratch,
                                   Register realmDst) {

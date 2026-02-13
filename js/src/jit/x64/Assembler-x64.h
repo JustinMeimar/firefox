@@ -334,10 +334,11 @@ class Assembler : public AssemblerX86Shared {
   uint32_t extendedJumpTable_;
 
 #ifdef ENABLE_AOT_BASELINE
+  // TODO(Justin):  
   // When true, every movabs of a pointer-like 64-bit immediate is recorded
   // so we can assert at dump time that all such sites have a RuntimePatch.
   bool aotRecordRelocations_ = false;
-  Vector<uint32_t, 64, SystemAllocPolicy> aotImm64Offsets_;
+  Vector<uint32_t, 64, SystemAllocPolicy> aotRuntimePointers_;
 #endif
 
   static JitCode* CodeFromJump(JitCode* code, uint8_t* jump);
@@ -347,8 +348,8 @@ class Assembler : public AssemblerX86Shared {
 
  public:
 #ifdef ENABLE_AOT_BASELINE
-  void setAOTRecordRelocations() { aotRecordRelocations_ = true; }
-  const auto& aotImm64Offsets() const { return aotImm64Offsets_; }
+  void toggleAOTRecordPointers(bool cond) { aotRecordRelocations_ = cond; }
+  const auto& aotRuntimePointers() const { return aotRuntimePointers_; }
 #endif
 
   using AssemblerX86Shared::j;
@@ -458,13 +459,15 @@ class Assembler : public AssemblerX86Shared {
       // Otherwise use movabs.
       masm.movq_i64r(word.value, dest.encoding());
 #ifdef ENABLE_AOT_BASELINE
+      // TODO(Justin): Is this true?
+
       // Track pointer-like 64-bit immediates during AOT codegen.
       // Canonical user-space pointers have bits [63:47] == 0 and are
       // non-zero; this excludes NaN-box tags (high bits set) and zero.
       if (aotRecordRelocations_ && word.value != 0 &&
           (word.value >> 47) == 0) {
         uint32_t immOffset = masm.currentOffset() - sizeof(uint64_t);
-        MOZ_ALWAYS_TRUE(aotImm64Offsets_.append(immOffset));
+        MOZ_ALWAYS_TRUE(aotRuntimePointers_.append(immOffset));
       }
 #endif
     }
