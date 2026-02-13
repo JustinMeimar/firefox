@@ -270,16 +270,6 @@ if CONFIG["ENABLE_AOT_BASELINE"]:
         "!AOTBaselineInterpreter.S"
     ]
 
-if CONFIG["ENABLE_AOT_TRAMPOLINES"]:
-    # WIP: Generate assembly wrapper for the AOT Trampolines binary.
-    GeneratedFile(
-        "AOTTrampolines.S",
-        script="GenerateAOTTrampolines.py",
-        inputs=["../../../trampolines.bin"],
-    )
-    SOURCES += [
-        "!AOTTrampolines.S"
-    ]
 
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(

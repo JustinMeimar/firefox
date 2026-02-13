@@ -75,8 +75,6 @@ struct DefaultJitOptions {
 #endif
   bool dumpBaselineInterpreter;
   bool useAOTBaseline;
-  bool dumpTrampolines;
-  bool useAOTTrampolines;
   bool baselineInterpreter;
   bool baselineJit;
   bool baselineBatching;

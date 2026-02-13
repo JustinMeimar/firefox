@@ -459,15 +459,10 @@ class Assembler : public AssemblerX86Shared {
       // Otherwise use movabs.
       masm.movq_i64r(word.value, dest.encoding());
 #ifdef ENABLE_AOT_BASELINE
-      // TODO(Justin): Is this true?
-      // Track pointer-like 64-bit immediates during AOT codegen.
-      // Canonical user-space pointers have bits [63:47] == 0 and are
-      // non-zero; this excludes NaN-box tags (high bits set) and zero.
-      if (aotRecordRelocations_ && word.value != 0 &&
-          (word.value >> 47) == 0) {
-        uint32_t immOffset = masm.currentOffset() - sizeof(uint64_t);
-        MOZ_ALWAYS_TRUE(aotRuntimePointers_.append(immOffset));
-      }
+      // TODO(Justin): Is this the right chokepoint to observe 
+      // potential runtime pointers flowing through masm? At first
+      // pass, some non-pointers flow through here, such as boxed
+      // values which get compressed. 
 #endif
     }
   }

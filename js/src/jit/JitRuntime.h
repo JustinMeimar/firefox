@@ -181,14 +181,6 @@ class JitRuntime {
   // Code for trampolines and VMFunction wrappers.
   WriteOnceData<JitCode*> trampolineCode_{nullptr};
 
-#ifdef ENABLE_AOT_TRAMPOLINES
-  WriteOnceData<uint8_t*> aotTrampolineCode_{nullptr};
-  WriteOnceData<uint32_t> aotTrampolineSize_{0};
-
-  // Offset to helper stub that returns TlsContext.get() for PIC trampolines
-  WriteOnceData<uint32_t> getTlsContextStubOffset_{0};
-#endif
-
   // Thunk that calls into the C++ interpreter from the interpreter
   // entry trampoline that is generated with --emit-interpreter-entry
   WriteOnceData<uint32_t> vmInterpreterEntryOffset_{0};
@@ -249,11 +241,6 @@ class JitRuntime {
   bool generateTrampolines(JSContext* cx);
   bool generateBaselineICFallbackCode(JSContext* cx);
 
-#ifdef ENABLE_AOT_TRAMPOLINES
-  bool serializeTrampolineManifest(JitCode* code);
-  bool loadAOTTrampolines(JSContext* cx);
-#endif
-
   void generateLazyLinkStub(MacroAssembler& masm);
   void generateInterpreterStub(MacroAssembler& masm);
   void generateDoubleToInt32ValueStub(MacroAssembler& masm);
@@ -300,16 +287,8 @@ class JitRuntime {
 
   TrampolinePtr trampolineCode(uint32_t offset) const {
     MOZ_ASSERT(offset > 0);
-#ifdef ENABLE_AOT_TRAMPOLINES
-    if (JitOptions.useAOTTrampolines) {
-      MOZ_ASSERT(offset < aotTrampolineSize_);
-      return TrampolinePtr(aotTrampolineCode_ + offset);
-    } else
-#endif
-    {
-      MOZ_ASSERT(offset < trampolineCode_->instructionsSize());
-      return TrampolinePtr(trampolineCode_->raw() + offset);
-    } 
+    MOZ_ASSERT(offset < trampolineCode_->instructionsSize());
+    return TrampolinePtr(trampolineCode_->raw() + offset);
   }
 
   void generateBaselineInterpreterEntryTrampoline(MacroAssembler& masm);
@@ -326,9 +305,6 @@ class JitRuntime {
 
   void bindLabelToOffset(Label* label, uint32_t offset) {
     MOZ_ASSERT(!trampolineCode_);
-#ifdef ENABLE_AOT_TRAMPOLINES
-    MOZ_ASSERT(!aotTrampolineCode_);
-#endif
     label->bind(offset);
   }
 
@@ -370,14 +346,7 @@ class JitRuntime {
   void freeIonOsrTempData();
 
   TrampolinePtr getVMWrapper(VMFunctionId funId) const {
-#ifdef ENABLE_AOT_TRAMPOLINES
-    if (JitOptions.useAOTTrampolines) {
-      MOZ_ASSERT(aotTrampolineCode_);
-    } else
-#endif
-    {
-      MOZ_ASSERT(trampolineCode_);
-    }
+    MOZ_ASSERT(trampolineCode_);
     return trampolineCode(functionWrapperOffsets_[size_t(funId)]);
   }
 
@@ -475,17 +444,9 @@ class JitRuntime {
 
   void** trampolineNativeJitEntry(TrampolineNative native) {
     void** jitEntry = &trampolineNativeJitEntries_[native];
-#ifdef ENABLE_AOT_TRAMPOLINES
-    if (JitOptions.useAOTTrampolines) {
-      MOZ_ASSERT(*jitEntry >= aotTrampolineCode_);
-      MOZ_ASSERT(*jitEntry < aotTrampolineCode_ + aotTrampolineSize_);
-    } else
-#endif 
-    {
-      MOZ_ASSERT(*jitEntry >= trampolineCode_->raw());
-      MOZ_ASSERT(*jitEntry <
-                 trampolineCode_->raw() + trampolineCode_->instructionsSize());
-    }
+    MOZ_ASSERT(*jitEntry >= trampolineCode_->raw());
+    MOZ_ASSERT(*jitEntry <
+               trampolineCode_->raw() + trampolineCode_->instructionsSize());
     return jitEntry;
   }
   TrampolineNative trampolineNativeForJitEntry(void** entry) {
