@@ -111,7 +111,8 @@ enum class AOTCppFunctionId : uint32_t {
   V(ProfilerEnabled)           \
   V(DebugTrapHandler)          \
   V(ProfilerExitFrameTail)     \
-  V(CppFunction)
+  V(CppFunction)               \
+  V(DoubleToInt32Stub)
 
 class RuntimePatch {
   public:   

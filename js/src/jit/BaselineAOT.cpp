@@ -68,6 +68,10 @@ uintptr_t RuntimePatch::_getValueToPatch(const PatchContext& pc) const {
     }
     case Kind::CppFunction:
       return (uintptr_t)ResolveCppFunction(cppFnId);
+    case Kind::DoubleToInt32Stub: {
+      TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getDoubleToInt32ValueStub();
+      return (uintptr_t)(ptr.value);
+    }
   }
   MOZ_CRASH("Unexpected Patch Type");
 }
@@ -93,6 +97,7 @@ void RuntimePatch::apply(const PatchContext& pc) const {
     case Kind::DebugTrapHandler: kindStr = "DebugTrapHandler"; break;
     case Kind::ProfilerExitFrameTail: kindStr = "ProfilerExitFrameTail"; break;
     case Kind::CppFunction: kindStr = "CppFunction"; break;
+    case Kind::DoubleToInt32Stub: kindStr = "DoubleToInt32Stub"; break;
   }
   JitSpew(JitSpew_BaselineAOT, "Runtime patch [%s] @ offset %u: before=0x%016lx after=0x%016lx",
           kindStr, targetOffset, beforeValue, val);

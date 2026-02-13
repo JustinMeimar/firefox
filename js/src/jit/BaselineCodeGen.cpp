@@ -1015,13 +1015,12 @@ bool BaselineInterpreterCodeGen::emitIsDebuggeeCheck() {
     saveInterpreterPCReg();
 #ifdef ENABLE_AOT_BASELINE
     if (isAOTCompile_) {
-      // using Fn = void (*)(BaselineFrame* frame);
       masm.setupUnalignedABICall(R0.scratchReg());
       masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
       masm.passABIArg(R0.scratchReg());
       Register fnReg = R2.scratchReg();
       emitCppFunctionPatchableMovImm(AOTCppFunctionId::FrameIsDebuggeeCheck,
-                                    fnReg);
+                                     fnReg);
       masm.callWithABI(fnReg);
     } else
 #endif
@@ -1103,8 +1102,12 @@ void BaselineCodeGen<Handler>::loadGlobalLexicalEnvironment(Register dest) {
   if (handler.realmIndependentJitcode()) {
 #ifdef ENABLE_AOT_BASELINE
     if (isAOTCompile_) {
-      // Load &JSContext::realm_ via patchable movabs, then chase pointers
-      // to reach the lexical environment.
+      // NOTE(Justin): Here we reuse the existing patch for `ContextRealm`
+      // and emit extra indirection on that pointer to attain the final 
+      // `GlobalLexicalEnvironmentObject`. But we could have also made a new
+      // patch type specifically for this pointer. This is a design decision:
+      // should we try to limit the number of runtime pointer patch types?
+      // Or should we use as many kinds as necesary, even for a single use. 
       emitPatchableMovImm(RuntimePatch::Kind::ContextRealm, dest);
       masm.loadPtr(Address(dest, 0), dest);
       masm.loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
@@ -1971,8 +1974,9 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
     Register queueReg = scratch;
 #ifdef ENABLE_AOT_BASELINE
     if (isAOTCompile_) {
-      // AOT-safe loadBaselineCompileQueue: load cx->realm_ through a patched
-      // address, then compute the compile queue address from the realm.
+      // First load cx->realm_ through a patched address, then compute the
+      // compile queue address from the realm. Once again, we could have a
+      // specific patch for this address if performance dictates.
       emitPatchableMovImm(RuntimePatch::Kind::ContextRealm, queueReg);
       masm.loadPtr(Address(queueReg, 0), queueReg);
       masm.computeEffectiveAddress(
@@ -5909,27 +5913,8 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
   // Note: this stub may clobber scratch1.
 #if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
   if (isAOTCompile_) {
-    // For AOT code, compute the stub address dynamically through zone->runtime.
-    Register jitRuntimeReg = scratch1;
-    Register stubReg = scratch2;
-    // Load runtime from zone
-    masm.loadRuntime(jitRuntimeReg);
-    // Load jitRuntime pointer: jitRuntimeReg = runtime->jitRuntime_
-    masm.loadPtr(Address(jitRuntimeReg, JSRuntime::offsetOfJitRuntime()),
-                 jitRuntimeReg);
-    // Load the stub offset value into stubReg
-    masm.load32(Address(jitRuntimeReg,
-                        JitRuntime::offsetOfDoubleToInt32ValueStubOffset()),
-                stubReg);
-    // Load trampolineCode pointer into jitRuntimeReg
-    masm.loadPtr(Address(jitRuntimeReg, JitRuntime::offsetOfTrampolineCode()),
-                 jitRuntimeReg);
-    // Load raw code pointer: jitRuntimeReg = trampolineCode->raw()
-    masm.loadPtr(Address(jitRuntimeReg, JitCode::offsetOfCode()),
-                 jitRuntimeReg);
-    // Add the stub offset: stubReg = trampolineCode->raw() + stubOffset
-    masm.addPtr(jitRuntimeReg, stubReg);
-    // Call the stub
+    Register stubReg = scratch1;
+    emitPatchableMovImm(RuntimePatch::Kind::DoubleToInt32Stub, stubReg);
     masm.call(stubReg);
   } else
 #endif
@@ -6642,16 +6627,14 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
 
 #if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
     if (isAOTCompile_) {
-      // NOTE(Justin): This is likely not a critical, so introducing indrection
-      // may be fine. The offest for the profiler is already exposed so this
-      // case is quite simple.
+      // NOTE(Justin): Once again, we can do indirection from the runtime
+      // pointer, or we could create a patch specficially for the gecko
+      // profiles `addressOfEnabled`. Here we do indirection.
       Register runtimeReg = scratch1;
       masm.loadRuntime(runtimeReg);
-      masm.branch32(
-          Assembler::Equal,
-          Address(runtimeReg, JSRuntime::offsetOfGeckoProfiler() +
-                                  GeckoProfilerRuntime::offsetOfEnabled()),
-          Imm32(0), &skip);
+      masm.branch32(Assembler::Equal, Address(runtimeReg,
+            JSRuntime::offsetOfGeckoProfiler() +
+            GeckoProfilerRuntime::offsetOfEnabled()), Imm32(0), &skip);
     } else
 #endif
     {
@@ -7475,8 +7458,8 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOTCompile_) {
     Register fnReg = R2.scratchReg();
-    emitCppFunctionPatchableMovImm(AOTCppFunctionId::HandleCodeCoverageAtPrologue,
-                                   fnReg);
+    emitCppFunctionPatchableMovImm(
+        AOTCppFunctionId::HandleCodeCoverageAtPrologue, fnReg);
     masm.callWithABI(fnReg);
   } else
 #endif
@@ -7555,16 +7538,21 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   m[uint32_t(F::InterpretOp)] = interpretOpOffset_;
   m[uint32_t(F::InterpretOpNoDebugTrap)] = interpretOpNoDebugTrapOffset_;
   m[uint32_t(F::BailoutPrologue)] = bailoutPrologueOffset_.offset();
-  m[uint32_t(F::ProfilerEnterToggle)] = profilerEnterFrameToggleOffset_.offset();
+  m[uint32_t(F::ProfilerEnterToggle)] =
+      profilerEnterFrameToggleOffset_.offset();
   m[uint32_t(F::ProfilerExitToggle)] = profilerExitFrameToggleOffset_.offset();
   m[uint32_t(F::DebugTrapHandler)] = debugTrapHandlerOffset_;
   m[uint32_t(F::DispatchTableOffset)] = tableOffset_;
-  m[uint32_t(F::CallVMDebugPrologue)] = handler.callVMOffsets().debugPrologueOffset;
-  m[uint32_t(F::CallVMDebugEpilogue)] = handler.callVMOffsets().debugEpilogueOffset;
-  m[uint32_t(F::CallVMDebugAfterYield)] = handler.callVMOffsets().debugAfterYieldOffset;
+  m[uint32_t(F::CallVMDebugPrologue)] =
+      handler.callVMOffsets().debugPrologueOffset;
+  m[uint32_t(F::CallVMDebugEpilogue)] =
+      handler.callVMOffsets().debugEpilogueOffset;
+  m[uint32_t(F::CallVMDebugAfterYield)] =
+      handler.callVMOffsets().debugAfterYieldOffset;
   m[uint32_t(F::HeaderSize)] = code->headerSize();
   m[uint32_t(F::PrologueEndOffset)] = warmUpCheckPrologueOffset_.offset();
-  m[uint32_t(F::DebugInstrumentationCount)] = handler.debugInstrumentationOffsets().length();
+  m[uint32_t(F::DebugInstrumentationCount)] =
+      handler.debugInstrumentationOffsets().length();
   m[uint32_t(F::DebugTrapCount)] = aotAccumulator_.debugTraps.length();
   m[uint32_t(F::CodeCoverageCount)] = handler.codeCoverageOffsets().length();
   m[uint32_t(F::ICReturnCount)] = handler.icReturnOffsets().length();
@@ -7605,10 +7593,8 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
        \n\tcoverage=%u\n\ticRet=%u\n\truntime_patches=%u",
           metaOff, sizeof(BaselineManifest),
           m[uint32_t(F::DebugInstrumentationCount)],
-          m[uint32_t(F::DebugTrapCount)],
-          m[uint32_t(F::CodeCoverageCount)],
-          m[uint32_t(F::ICReturnCount)],
-          m[uint32_t(F::RuntimePatchCount)]);
+          m[uint32_t(F::DebugTrapCount)], m[uint32_t(F::CodeCoverageCount)],
+          m[uint32_t(F::ICReturnCount)], m[uint32_t(F::RuntimePatchCount)]);
 
   return true;
 }
@@ -7814,8 +7800,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
     // Serialize the baseline interpreter code and embedded manifest to binary.
     if (JitOptions.dumpBaselineInterpreter) {
       if (!serializeAOTManifest(code)) {
-        JitSpew(JitSpew_BaselineAOT,
-                "ERROR: Failed to serialize AOT manifest");
+        JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT manifest");
         return false;
       }
       JitSpew(JitSpew_BaselineAOT,
