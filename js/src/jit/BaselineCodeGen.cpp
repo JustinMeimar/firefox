@@ -6,13 +6,13 @@
 
 #include "jit/BaselineCodeGen.h"
 
-#include "BaselineAOT.h"
-#include "JitOptions.h"
 #include "mozilla/Casting.h"
-#include "util/Memory.h"
+
+#include <fstream>
 
 #include "gc/GC.h"
 #include "jit/AutoWritableJitCode.h"
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineCompileQueue.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineIC.h"
@@ -25,18 +25,19 @@
 #include "jit/JitCode.h"
 #include "jit/JitcodeMap.h"
 #include "jit/JitFrames.h"
+#include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/Linker.h"
-#include "jit/ProcessExecutableMemory.h"
 #include "jit/PerfSpewer.h"
+#include "jit/ProcessExecutableMemory.h"
 #include "jit/SharedICHelpers.h"
 #include "jit/TemplateObject.h"
 #include "jit/TrialInlining.h"
 #include "jit/VMFunctions.h"
 #include "js/friend/ErrorMessages.h"  // JSMSG_*
 #include "js/UniquePtr.h"
-#include <fstream>
+#include "util/Memory.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/BuiltinObjectKind.h"
@@ -1449,16 +1450,16 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   masm.bind(&done);
   masm.storePtr(scratch1, frame.addressOfInterpreterScript());
 
+#ifdef ENABLE_AOT_BASELINE
   // Initialize zone pointer for AOT baseline interpreter.
   // At this point scratch1 contains the script pointer.
   // We need to extract the zone from the script's arena.
   Register tempZone = nonFunctionEnv;  // Reuse this register temporarily
   masm.movePtr(scratch1, tempZone);
-  // Mask to get arena address
   masm.andPtr(Imm32(int32_t(~js::gc::ArenaMask)), tempZone);
-  // Load zone from arena header
   masm.loadPtr(Address(tempZone, js::gc::ArenaZoneOffset), tempZone);
   masm.storePtr(tempZone, frame.addressOfZone());
+#endif
 
   // Load the ICScript in scratch2..
   Label inlined, haveICScript;

@@ -6,7 +6,6 @@
 
 #include "jit/BaselineJIT.h"
 
-#include "JitOptions.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/MemoryReporting.h"
@@ -28,6 +27,7 @@
 #include "jit/Ion.h"
 #include "jit/IonOptimizationLevels.h"
 #include "jit/JitCommon.h"
+#include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/MacroAssembler.h"

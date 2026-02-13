@@ -460,7 +460,6 @@ class Assembler : public AssemblerX86Shared {
       masm.movq_i64r(word.value, dest.encoding());
 #ifdef ENABLE_AOT_BASELINE
       // TODO(Justin): Is this true?
-
       // Track pointer-like 64-bit immediates during AOT codegen.
       // Canonical user-space pointers have bits [63:47] == 0 and are
       // non-zero; this excludes NaN-box tags (high bits set) and zero.

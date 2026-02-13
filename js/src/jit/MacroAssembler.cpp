@@ -6,7 +6,6 @@
 
 #include "jit/MacroAssembler-inl.h"
 
-#include "js/TracingAPI.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Latin1.h"
 #include "mozilla/MathAlgorithms.h"
@@ -4460,43 +4459,6 @@ void MacroAssembler::loadRuntime(Register reg) {
   // N.B: temp is expected to hold the runtime ptr by the flows below.
   // Do not clobber it!
   loadPtr(runtimeAddr, reg);
-}
-#endif
-
-#ifdef ENABLE_AOT_TRAMPOLINES
-// INCOMPLETE: AOT trampoline runtime-pointer loading.
-//
-// This is a placeholder for loading JSRuntime* inside AOT trampolines.
-// The intended design is RIP-relative addressing into a fixed slot at the
-// start of the trampoline binary (written at load time).  Currently emits a
-// bare nullptr that is never patched, so AOT trampolines that call this
-// will crash.
-//
-// TODO: Implement RIP-relative load from a patchable slot in the AOT
-//       trampoline binary header, analogous to RuntimePatch for the
-//       baseline interpreter.
-void MacroAssembler::loadTrampolineRuntime(Register dest) {
-  MOZ_ASSERT(isAOTTrampoline(),
-             "loadTrampolineRuntime should only be called for AOT trampolines");
-
-#ifdef JS_CODEGEN_X64
-  static_assert(sizeof(JSRuntime*) == 8, "Pointer size mismatch");
-  movePtr(ImmPtr(nullptr), dest);  // Placeholder — NOT patched at load time.
-#else
-  MOZ_CRASH("loadTrampolineRuntime not implemented for this architecture");
-#endif
-}
-
-// Load Zone* from JSRuntime* that's already in a register.
-// Part of the incomplete AOT trampoline infrastructure — see
-// loadTrampolineRuntime above.
-void MacroAssembler::loadZoneFromRuntime(Register runtimeReg, Register dest) {
-
-  // Load mainContext from runtime
-  loadPtr(Address(runtimeReg, JSRuntime::offsetOfMainContext()), dest);
-
-  // Load zone from context
-  loadPtr(Address(dest, JSContext::offsetOfZone()), dest);
 }
 #endif
 

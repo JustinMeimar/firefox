@@ -8,8 +8,9 @@
 #define jit_BaselineAOT_h
 
 #include <cstdint>
-#include "vm/JSContext.h"
+
 #include "jit/VMFunctions.h"
+#include "vm/JSContext.h"
 
 namespace js::jit {
 

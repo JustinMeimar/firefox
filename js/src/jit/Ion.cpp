@@ -59,13 +59,13 @@
 #include "jit/WarpBuilder.h"
 #include "jit/WarpOracle.h"
 #include "jit/WasmBCE.h"
+#include "jit/x64/Assembler-x64.h"
 #include "js/Printf.h"
 #include "js/UniquePtr.h"
 #include "util/Memory.h"
 #include "util/WindowsWrapper.h"
 #include "vm/HelperThreads.h"
 #include "vm/Realm.h"
-#include "x64/Assembler-x64.h"
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
 #endif

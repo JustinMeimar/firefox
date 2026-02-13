@@ -5,11 +5,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jit/BaselineAOT.h"
+
+#include "mozilla/Assertions.h"
+
 #include <cstdint>
+
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/VMFunctions.h"
-#include "mozilla/Assertions.h"
 #include "vm/JSContext.h"
 
 namespace js::jit {

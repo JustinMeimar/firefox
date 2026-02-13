@@ -5,8 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jit/TrampolineAOT.h"
-#include "jit/JitSpewer.h"
+
 #include "mozilla/Assertions.h"
+
+#include "jit/JitSpewer.h"
 
 namespace js::jit {
 
