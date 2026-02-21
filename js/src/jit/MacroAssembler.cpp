@@ -4079,7 +4079,7 @@ void MacroAssembler::computeImplicitThis(Register env, ValueOperand output,
   // Go to the slow path for possible debug environment proxies.
   branchTestClassIsProxy(true, scratch, slowPath);
 
-  if (isAOTFill_) {
+  if (isAOTFill) {
     // In AOT mode we cannot embed the WithEnvironmentObject::class_ pointer.
     // Fall back to the VM call which handles all environment types correctly.
     jump(slowPath);
@@ -4438,17 +4438,15 @@ void MacroAssembler::loadZone() {
 
 #ifdef ENABLE_AOT_BASELINE
 void MacroAssembler::loadBaselineZone() {
-  // A valid register for the zone is required for AOT IC compilation.
-  MOZ_ASSERT(zoneReg_ != InvalidReg);
-  // The zone only needs to be loaded once per stub.
-  MOZ_ASSERT(!isZoneLoaded());
+  // The zone only needs to be loaded once.
+  MOZ_ASSERT(!zoneLoaded_);
 
   // Load the zone pointer from the BaselineFrame.
   // The zone was already initialized in emitInitFrameFields().
   Address zoneAddr(FramePointer, BaselineFrame::reverseOffsetOfZone());
-  loadPtr(zoneAddr, zoneReg_);
+  loadPtr(zoneAddr, ZoneReg);
 
-  setZoneLoaded();
+  zoneLoaded_ = true;
 }
 #endif
 
@@ -4471,7 +4469,7 @@ void MacroAssembler::handleFailure() {
 
 void MacroAssembler::assumeUnreachable(const char* output) {
 #ifdef JS_MASM_VERBOSE
-  if (!IsCompilingWasm() && !isAOTFill_) {
+  if (!IsCompilingWasm() && !isAOTFill) {
     AllocatableRegisterSet regs(RegisterSet::Volatile());
     LiveRegisterSet save(regs.asLiveSet());
     PushRegsInMask(save);
@@ -4493,7 +4491,7 @@ void MacroAssembler::assumeUnreachable(const char* output) {
 
 void MacroAssembler::printf(const char* output) {
 #ifdef JS_MASM_VERBOSE
-  if (!isAOTFill_) {
+  if (!isAOTFill) {
     AllocatableRegisterSet regs(RegisterSet::Volatile());
     LiveRegisterSet save(regs.asLiveSet());
     PushRegsInMask(save);
@@ -4513,7 +4511,7 @@ void MacroAssembler::printf(const char* output) {
 
 void MacroAssembler::printf(const char* output, Register value) {
 #ifdef JS_MASM_VERBOSE
-  if (!isAOTFill_) {
+  if (!isAOTFill) {
     AllocatableRegisterSet regs(RegisterSet::Volatile());
     LiveRegisterSet save(regs.asLiveSet());
     PushRegsInMask(save);
@@ -9133,7 +9131,7 @@ void MacroAssembler::debugAssertObjHasFixedSlots(Register obj,
 void MacroAssembler::debugAssertObjectHasClass(Register obj, Register scratch,
                                                const JSClass* clasp) {
 #ifdef DEBUG
-  if (!isAOTFill_) {
+  if (!isAOTFill) {
     Label done;
     branchTestObjClassNoSpectreMitigations(Assembler::Equal, obj, clasp,
                                            scratch, &done);
@@ -9847,7 +9845,7 @@ static void LoadNativeIterator(MacroAssembler& masm, Register obj,
 
 #ifdef DEBUG
   // Assert we have a PropertyIteratorObject.
-  if (!masm.isAOTFill()) {
+  if (!masm.isAOTFill) {
     Label ok;
     masm.branchTestObjClass(Assembler::Equal, obj,
                             &PropertyIteratorObject::class_, dest, obj, &ok);

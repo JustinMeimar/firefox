@@ -6180,7 +6180,7 @@ bool BaselineCodeGen<Handler>::emit_SuperFun() {
   masm.unboxObject(R0, callee);
 
 #ifdef DEBUG
-  if (!masm.isAOTFill()) {
+  if (!masm.isAOTFill) {
     Label classCheckDone;
     masm.branchTestObjIsFunction(Assembler::Equal, callee, scratch, callee,
                                  &classCheckDone);
@@ -7090,7 +7090,6 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
 
 #ifdef ENABLE_AOT_BASELINE
   if (isAOTCompile_) {
-    masm.setZoneReg(ABINonVolatileReg);
     masm.loadBaselineZone();
   }
 #endif

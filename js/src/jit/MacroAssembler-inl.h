@@ -791,11 +791,11 @@ void MacroAssembler::branchTestNeedsIncrementalBarrierAnyZone(
     // We are compiling the interpreter or another runtime-wide trampoline, so
     // we have to load cx->zone.
 #ifdef ENABLE_AOT_BASELINE
-    if (isAOTFill_) {
+    if (isAOTFill) {
       // For AOT baseline interpreter, use the pinned zone register for PIC.
       // The zone register is loaded and pinned in the interpreter prologue.
-      MOZ_ASSERT(isZoneLoaded() && "Zone register should be pinned in "
-                                   "prologue from BaselineFrame");
+      MOZ_ASSERT(zoneLoaded_ && "Zone register should be pinned in "
+                                "prologue from BaselineFrame");
       mov(zoneReg(), scratch);
     } else 
 #endif

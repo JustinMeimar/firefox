@@ -5956,6 +5956,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void loadZone();
 #endif
 
+#ifdef ENABLE_AOT_BASELINE
+  // Load the zone into zoneReg at runtime from BaselineFrame.
+  // See 'Runtime agnostic code generation'.
+  void loadBaselineZone();
+#endif
+
  public:
   void enableProfilingInstrumentation() {
     emitProfilingInstrumentation_ = true;
