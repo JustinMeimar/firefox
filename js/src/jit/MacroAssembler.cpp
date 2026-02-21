@@ -2897,15 +2897,7 @@ void MacroAssembler::loadJSContext(Register dest) {
     loadPtr(Address(dest, JSRuntime::offsetOfMainContext()),
                             dest);
   }
-  // If dest == ABINonVolatileReg, context is already in the right place
-#else
-  // JIT mode: Load from absolute address (runtime-specific)
-  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
 #endif
-  {
-    // For non-AOT mode, use the compile-time JSContext pointer
-    movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
-  }
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
