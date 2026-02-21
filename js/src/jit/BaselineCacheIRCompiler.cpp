@@ -9,6 +9,7 @@
 #include "mozilla/RandomNum.h"
 
 #include "gc/GC.h"
+#include "jit/AOTContext.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRAOT.h"
 #include "jit/CacheIRCloner.h"
@@ -95,12 +96,12 @@ BaselineCacheIRCompiler::BaselineCacheIRCompiler(JSContext* cx,
                                                  TempAllocator& alloc,
                                                  const CacheIRWriter& writer,
                                                  uint32_t stubDataOffset,
-                                                 bool isAOTFill)
+                                                 AOTContext* aotContext)
     : CacheIRCompiler(cx, alloc, writer, stubDataOffset, Mode::Baseline,
-                      StubFieldPolicy::Address, isAOTFill),
+                      StubFieldPolicy::Address, aotContext),
       makesGCCalls_(false) {
 #ifndef ENABLE_JS_AOT_ICS
-    MOZ_ASSERT(!isAOTFill);
+    MOZ_ASSERT(!aotContext);
 #endif
 }
 
@@ -244,7 +245,7 @@ JitCode* BaselineCacheIRCompiler::compile() {
   perfSpewer_.startRecording();
 
 #ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill_) {
+  if (masm.isAOT()) {
     // Load the zone into the dedicated zone register in case of AOT IC
     // compilation.
     // The dedicated register should have been set up in
@@ -607,7 +608,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedGetterShared(
   AutoScratchRegister code(allocator, masm);
   AutoScratchRegister scratch(allocator, masm);
   Maybe<AutoScratchRegister> scratchForAOT;
-  if (isAOTFill_) {
+  if (masm.isAOT()) {
     scratchForAOT.emplace(allocator, masm);
   }
 
@@ -1561,7 +1562,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedSetterShared(
   AutoScratchRegister code(allocator, masm);
 #endif
   Maybe<AutoScratchRegister> scratchForAOT;
-  if (isAOTFill_) {
+  if (masm.isAOT()) {
     scratchForAOT.emplace(allocator, masm);
   }
 
@@ -2497,7 +2498,7 @@ static_assert(StubDataOffset % sizeof(uint64_t) == 0,
 static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
                                 const CacheIRWriter& writer,
                                 CacheIRStubInfo*& stubInfo, JitCode*& code,
-                                const char* name, bool isAOTFill,
+                                const char* name, AOTContext* aotContext,
                                 JitZone* jitZone) {
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
@@ -2519,7 +2520,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #endif
 
 #ifdef ENABLE_JS_AOT_ICS
-  if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
+  if (JitOptions.enableAOTICEnforce && !stubInfo && !aotContext &&
       !jitZone->isIncompleteAOTICs()) {
     DumpNonAOTICStubAndQuit(kind, writer);
   }
@@ -2530,7 +2531,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     TempAllocator temp(&cx->tempLifoAlloc());
     // We may or may not need to construct a JitContext during this scope.
     JitContext jitCtx(cx);
-    BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset, isAOTFill);
+    BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset, aotContext);
     if (!comp.init(kind)) {
       return false;
     }
@@ -2601,7 +2602,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   // that some platforms may not generate all possible ICs for another
   // platform (e.g. due to limited registers on x86-32) but it is always
   // fine not to have an IC preloaded in the corpus.
-  MOZ_ASSERT_IF(!isAOTFill, stubInfo->stubDataSize() == writer.stubDataSize());
+  MOZ_ASSERT_IF(!aotContext, stubInfo->stubDataSize() == writer.stubDataSize());
 
   return true;
 }
@@ -2636,7 +2637,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
   JitCode* code;
 
   if (!LookupOrCompileStub(cx, kind, writer, stubInfo, code, name,
-                           /* isAOTFill = */ false, cx->zone()->jitZone())) {
+                           /* aotContext = */ nullptr, cx->zone()->jitZone())) {
     return ICAttachResult::OOM;
   }
 
@@ -2766,9 +2767,9 @@ void js::jit::FillAOTICs(JSContext* cx) {
       }
       CacheIRStubInfo* stubInfo;
       JitCode* code;
+      AOTContext aotCtx(TrampolinePtrs(cx->runtime()->jitRuntime()));
       (void)LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
-                                "aot stub",
-                                /* isAOTFill = */ true, jitZone);
+                                "aot stub", &aotCtx, jitZone);
       (void)stubInfo;
       (void)code;
     }
@@ -3328,7 +3329,7 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
   Maybe<AutoScratchRegister> scratchForAOT;
-  if (isAOTFill_) {
+  if (masm.isAOT()) {
     scratchForAOT.emplace(allocator, masm);
   }
 
@@ -3641,7 +3642,7 @@ void BaselineCacheIRCompiler::createThis(Register argcReg, Register calleeReg,
   Address stubAddr(FramePointer, BaselineStubFrameLayout::ICStubOffsetFromFP);
   masm.loadPtr(stubAddr, ICStubReg);
 #ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill_) {
+  if (masm.isAOT()) {
     // Reload the zone as well.
     masm.loadZone();
   }
@@ -3692,7 +3693,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedFunctionShared(
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
   Maybe<AutoScratchRegister> scratchForAOT;
-  if (isAOTFill_) {
+  if (masm.isAOT()) {
     scratchForAOT.emplace(allocator, masm);
   }
 
@@ -3914,7 +3915,7 @@ bool BaselineCacheIRCompiler::emitCallBoundScriptedFunction(
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
   Maybe<AutoScratchRegister> scratchForAOT;
-  if (isAOTFill_) {
+  if (masm.isAOT()) {
     scratchForAOT.emplace(allocator, masm);
   }
 

@@ -37,7 +37,7 @@ inline void EmitBaselineLeaveStubFrame(MacroAssembler& masm) {
       Address(FramePointer, BaselineStubFrameLayout::ICStubOffsetFromFP),
       ICStubReg);
 #ifdef ENABLE_JS_AOT_ICS
-  if (masm.isAOTFill) {
+  if (masm.isAOT()) {
     // Need to reload the zone.
     masm.loadZone();
   }

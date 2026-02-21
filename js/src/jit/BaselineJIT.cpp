@@ -1392,13 +1392,14 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
     TempAllocator temp(&cx->tempLifoAlloc());
+    mozilla::Maybe<AOTContext> aotCtx;
 #ifdef ENABLE_AOT_BASELINE
     // When dumping AOT baseline for offline compilation, enable PIC mode.
-    bool isAOTFill = JitOptions.dumpBaselineInterpreter;
-#else
-    bool isAOTFill = false;
+    if (JitOptions.dumpBaselineInterpreter) {
+      aotCtx.emplace(TrampolinePtrs(cx->runtime()->jitRuntime()));
+    }
 #endif
-    StackMacroAssembler masm(cx, temp, isAOTFill);
+    StackMacroAssembler masm(cx, temp, aotCtx.ptrOr(nullptr));
     BaselineInterpreterGenerator generator(cx, temp, masm);
     return generator.generate(cx, interpreter);
   }

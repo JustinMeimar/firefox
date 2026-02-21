@@ -36,6 +36,7 @@
 #endif
 #include "jit/ABIArgGenerator.h"
 #include "jit/ABIFunctions.h"
+#include "jit/AOTContext.h"
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
@@ -384,29 +385,28 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Furthermore, this is also nullptr for AOT IC compilations.
   CompileRealm* maybeRealm_ = nullptr;
 
-  // Pointers to the trampolines that may be jumped to as needed.
-  // This will be only be set for AOT IC compilations. The others
-  // may utilize the runtime pointer when necessary.
-  mozilla::Maybe<TrampolinePtrs> trampolinePtrs_;
+  // AOT compilation context. Non-null when AOT codegen is active.
+  AOTContext* aotContext_ = nullptr;
 
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
-
-  // Indicator to track whether or not the code for loading the zone into
-  // zoneReg_ has been emitted.
-  bool zoneLoaded_ = false;
 
  protected:
   // Constructor is protected. Use one of the derived classes!
   explicit MacroAssembler(TempAllocator& alloc,
                           CompileRuntime* maybeRuntime = nullptr,
                           CompileRealm* maybeRealm = nullptr,
-                          bool isAOTFill = false,
-                          mozilla::Maybe<TrampolinePtrs> trampolinePtrs = {});
+                          AOTContext* aotContext = nullptr);
 
  public:
-  // Whether or not the IC being compiled is an AOT IC, and thus will be shared across runtimes.
-  bool isAOTFill = false;
+  // Whether or not AOT codegen mode is active.
+  bool isAOT() const { return aotContext_ != nullptr; }
+
+  // Access the AOT context. Only valid when isAOT() is true.
+  AOTContext& aot() const {
+    MOZ_ASSERT(aotContext_);
+    return *aotContext_;
+  }
 
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
@@ -5223,15 +5223,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  private:
   TrampolinePtr preBarrierTrampoline(MIRType type) {
-    if (isAOTFill) {
-        return trampolinePtrs_.ref().preBarrier(type);
+    if (isAOT()) {
+        return aot().trampolines().preBarrier(type);
     }
     return runtime()->jitRuntime()->preBarrier(type);
   }
 
   TrampolinePtr getExceptionTailTrampoline() const {
-    if (isAOTFill) {
-        return trampolinePtrs_.ref().exceptionTail;
+    if (isAOT()) {
+        return aot().trampolines().exceptionTail;
     }
     return runtime()->jitRuntime()->getExceptionTail();
   }
@@ -5261,7 +5261,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   template <typename T>
   void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
-    if (!isAOTFill) {
+    if (!isAOT()) {
         branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
     }
 #ifdef ENABLE_JS_AOT_ICS
@@ -6139,7 +6139,7 @@ class MOZ_RAII StackMacroAssembler : public MacroAssembler {
 
  public:
   StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
-                      bool isAOTFill = false);
+                      AOTContext* aotContext = nullptr);
 };
 
 // WasmMacroAssembler does not contain GC pointers, so it doesn't need the no-GC
