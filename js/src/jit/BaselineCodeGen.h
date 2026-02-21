@@ -21,6 +21,7 @@ class NamedLambdaObject;
 
 namespace jit {
 
+class AOTContext;
 class BaselineSnapshot;
 
 enum class ScriptGCThingType {
@@ -44,6 +45,10 @@ class BaselineCodeGen {
 
   CompileRuntime* runtime;
   MacroAssembler& masm;
+
+  // Non-owning pointer to AOT context, cached from masm for convenience.
+  // Null when not in AOT codegen mode.
+  AOTContext* aot_;
 
   typename Handler::FrameInfoT& frame;
 

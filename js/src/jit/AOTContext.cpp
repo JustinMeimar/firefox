@@ -17,46 +17,41 @@ using namespace js::jit;
 AOTContext::AOTContext(TrampolinePtrs trampolines)
     : trampolines_(trampolines) {}
 
-void AOTContext::emitPatchableMovImm(MacroAssembler& masm,
-                                     RuntimePatch::Kind kind, Register dest) {
+void AOTContext::emitPatchableMovImm(RuntimePatch::Kind kind, Register dest) {
   CodeOffset off =
-      masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
+      masm_->movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
   uint32_t immOff = off.offset() - sizeof(void*);
   accumulator_.registerPatch(RuntimePatch(kind, immOff));
 }
 
-void AOTContext::emitVMWrapperPatchableMovImm(MacroAssembler& masm,
-                                              VMFunctionId id, Register dest) {
+void AOTContext::emitVMWrapperPatchableMovImm(VMFunctionId id, Register dest) {
   CodeOffset off =
-      masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
+      masm_->movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
   uint32_t immOff = off.offset() - sizeof(void*);
   accumulator_.registerPatch(RuntimePatch::VMWrapperPatch(immOff, id));
 }
 
-void AOTContext::emitCppFunctionPatchableMovImm(MacroAssembler& masm,
-                                                AOTCppFunctionId fnId,
+void AOTContext::emitCppFunctionPatchableMovImm(AOTCppFunctionId fnId,
                                                 Register dest) {
   CodeOffset off =
-      masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
+      masm_->movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
   uint32_t immOff = off.offset() - sizeof(void*);
   accumulator_.registerPatch(RuntimePatch::CppFunctionPatch(immOff, fnId));
 }
 
-void AOTContext::emitDebugTrapPatchableMovImm(MacroAssembler& masm,
-                                              DebugTrapHandlerKind dbgKind,
+void AOTContext::emitDebugTrapPatchableMovImm(DebugTrapHandlerKind dbgKind,
                                               Register dest) {
   CodeOffset off =
-      masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
+      masm_->movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
   uint32_t immOff = off.offset() - sizeof(void*);
   accumulator_.registerPatch(RuntimePatch::DebugTrapPatch(immOff, dbgKind));
 }
 
-void AOTContext::emitSwitchToObjectRealm(MacroAssembler& masm, Register obj,
-                                         Register scratch,
+void AOTContext::emitSwitchToObjectRealm(Register obj, Register scratch,
                                          Register realmDst) {
-  masm.loadObjShapeUnsafe(obj, scratch);
-  masm.loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
-  masm.loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  emitPatchableMovImm(masm, RuntimePatch::Kind::ContextRealm, realmDst);
-  masm.storePtr(scratch, Address(realmDst, 0));
+  masm_->loadObjShapeUnsafe(obj, scratch);
+  masm_->loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
+  masm_->loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
+  emitPatchableMovImm(RuntimePatch::Kind::ContextRealm, realmDst);
+  masm_->storePtr(scratch, Address(realmDst, 0));
 }

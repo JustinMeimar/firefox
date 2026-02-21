@@ -4978,6 +4978,9 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
   // AOT IC compilation must not have access to runtime information.
   MOZ_ASSERT_IF(isAOT(), maybeRuntime_ == nullptr);
   MOZ_ASSERT_IF(isAOT(), maybeRealm == nullptr);
+  if (aotContext_) {
+    aotContext_->bindMasm(*this);
+  }
   moveResolver_.setAllocator(alloc);
 }
 

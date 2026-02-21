@@ -42,30 +42,27 @@ class AOTContext {
  public:
   explicit AOTContext(TrampolinePtrs trampolines);
 
-  // --- Trampoline access ---
+  // Bind this context to a MacroAssembler. Called by MacroAssembler's
+  // constructor after it stores the AOTContext pointer.
+  void bindMasm(MacroAssembler& masm) { masm_ = &masm; }
+
   const TrampolinePtrs& trampolines() const { return trampolines_; }
 
-  // --- Zone register tracking ---
   bool zoneLoaded() const { return zoneLoaded_; }
   void setZoneLoaded() { zoneLoaded_ = true; }
 
-  // --- Patch accumulator ---
   BaselineAOTAccumulator& accumulator() { return accumulator_; }
 
-  // --- Emit helpers (call masm.movWithPatch + record patch) ---
-  void emitPatchableMovImm(MacroAssembler& masm, RuntimePatch::Kind kind,
-                           Register dest);
-  void emitVMWrapperPatchableMovImm(MacroAssembler& masm, VMFunctionId id,
+  void emitPatchableMovImm(RuntimePatch::Kind kind, Register dest);
+  void emitVMWrapperPatchableMovImm(VMFunctionId id, Register dest);
+  void emitCppFunctionPatchableMovImm(AOTCppFunctionId fnId, Register dest);
+  void emitDebugTrapPatchableMovImm(DebugTrapHandlerKind dbgKind,
                                     Register dest);
-  void emitCppFunctionPatchableMovImm(MacroAssembler& masm,
-                                      AOTCppFunctionId fnId, Register dest);
-  void emitDebugTrapPatchableMovImm(MacroAssembler& masm,
-                                    DebugTrapHandlerKind dbgKind,
-                                    Register dest);
-  void emitSwitchToObjectRealm(MacroAssembler& masm, Register obj,
-                               Register scratch, Register realmDst);
+  void emitSwitchToObjectRealm(Register obj, Register scratch,
+                               Register realmDst);
 
  private:
+  MacroAssembler* masm_ = nullptr;
   TrampolinePtrs trampolines_;
   bool zoneLoaded_ = false;
   BaselineAOTAccumulator accumulator_;
