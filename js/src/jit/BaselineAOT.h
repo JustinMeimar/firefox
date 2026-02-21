@@ -172,7 +172,7 @@ class RuntimePatch {
 
   private:
     RuntimePatch() = default;
-    uintptr_t _getValueToPatch(const PatchContext& pc) const;
+    uintptr_t getValueToPatch(const PatchContext& pc) const;
 };
 
 static constexpr uintptr_t AOT_PATCH_SENTINEL = 0x0000A070DEADBEEF;

@@ -33,7 +33,7 @@ static void* ResolveCppFunction(AOTCppFunctionId id) {
   MOZ_CRASH("Unknown AOTCppFunctionId");
 }
 
-uintptr_t RuntimePatch::_getValueToPatch(const PatchContext& pc) const {
+uintptr_t RuntimePatch::getValueToPatch(const PatchContext& pc) const {
   switch(kind) {
     case Kind::WellKnownSymbols:
       return (uintptr_t)pc.cx->runtime()->wellKnownSymbols.ref();
@@ -77,7 +77,7 @@ uintptr_t RuntimePatch::_getValueToPatch(const PatchContext& pc) const {
 }
 
 void RuntimePatch::apply(const PatchContext& pc) const {
-  uintptr_t val = _getValueToPatch(pc);
+  uintptr_t val = getValueToPatch(pc);
   uint8_t* target = pc.codeBase + targetOffset;
 #ifdef DEBUG
   uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
