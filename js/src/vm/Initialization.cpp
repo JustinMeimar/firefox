@@ -241,9 +241,13 @@ JS_PUBLIC_API bool JS::InitSelfHostedCode(JSContext* cx, SelfHostedCache cache,
 #ifdef ENABLE_JS_AOT_ICS
     // Fill the Atom JitZone with AOT ICs
     js::AutoAllocInAtomsZone az(cx);
+#ifdef JS_SPASM
+    js::jit::CompileAOTICs(cx);
+#else
     // N.B: This relies on the baseline interpreter and other trampolines
     // being generated already.
     js::jit::FillAOTICs(cx);
+#endif
 #endif
   }
 

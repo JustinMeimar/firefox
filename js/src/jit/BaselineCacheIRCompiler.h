@@ -159,7 +159,12 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
   template <typename Fn, Fn fn>
   void callVM(MacroAssembler& masm);
 
+#ifdef JS_SPASM
+  // SpewAssembler needs a label name for the generated CacheIR assembly file.
+  JitCode* compile(uint64_t stubNum);
+#else
   JitCode* compile();
+#endif
 
   bool makesGCCalls() const;
   bool localTracingSlots() const { return localTracingSlots_; }

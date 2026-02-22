@@ -25,6 +25,7 @@ struct AOTStubFieldData {
 };
 
 struct CacheIRAOTStub {
+  uint64_t stubNum; // Part of the filename generated.
   CacheKind kind;
   uint32_t numOperandIds;
   uint32_t numInputOperands;
@@ -36,14 +37,20 @@ struct CacheIRAOTStub {
   const uint32_t* operandLastUsed;  // length: numOperandIds
   const uint8_t* data;
   size_t dataLength;
+#if !defined(ENABLE_PORTABLE_BASELINE_INTERP) && defined(ENABLE_JS_AOT_ICS) && !defined(JS_SPASM)
+  uint8_t* stubCode; // Pointer to the AOT compiled stub code
+#endif
 };
 
 mozilla::Span<const CacheIRAOTStub> GetAOTStubs();
+#ifdef JS_SPASM
+void CompileAOTICs(JSContext* cx);
+#else
 // Fill AOT compiled ICs.
 // N.B: This function is meant to be called while in the atoms zone.
 // The intention is to keep the AOT ICs within the atoms zone.
 void FillAOTICs(JSContext* cx);
-
+#endif
 }  // namespace jit
 }  // namespace js
 

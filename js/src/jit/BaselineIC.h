@@ -302,6 +302,12 @@ class ICCacheIRStub final : public ICStub {
     MOZ_ASSERT_IF(!IsPortableBaselineInterpreterEnabled(), stubCode);
   }
 
+  ICCacheIRStub(uint8_t* stubCode, const CacheIRStubInfo* stubInfo, CompileZone const* zone = nullptr)
+      : ICStub(stubCode, /* isFallback = */ false, zone),
+        stubInfo_(stubInfo) {
+    MOZ_ASSERT_IF(!IsPortableBaselineInterpreterEnabled(), stubCode);
+  }
+
   ICStub* next() const { return next_; }
   void setNext(ICStub* stub) { next_ = stub; }
 

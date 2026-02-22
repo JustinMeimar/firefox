@@ -200,8 +200,25 @@ void BaselineCacheIRCompiler::callVM(MacroAssembler& masm) {
   callVMInternal(masm, id);
 }
 
+#ifdef JS_SPASM
+JitCode* BaselineCacheIRCompiler::compile(uint64_t stubNum) {
+#else
 JitCode* BaselineCacheIRCompiler::compile() {
+#endif
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compile");
+
+#ifdef JS_SPASM
+  std::string ident = std::to_string(stubNum);
+  masm.setOutFile("IC-" + ident + ".S");
+  // The ULL at the end is a hack to produce the same label as what IC_EXTERN
+  // macro would be trying to look for.
+  // Although ULL was intended to only be used for literals, the CPP is unable
+  // to remove that part and only use the number to look up the symbols.
+  // JS_AOT_IC_DATA may define an IC like: (102909312093ULL, ...)
+  // Then IC_EXTERN will use that first number to look up this symbol.
+  // However, the ULL is persist when generating the extern variable name.
+  masm.label("_cacheIR_IC_" + ident + "ULL");
+#endif
 
 #ifndef JS_USE_LINK_REGISTER
   masm.adjustFrame(sizeof(intptr_t));
@@ -2495,6 +2512,23 @@ static constexpr uint32_t StubDataOffset = sizeof(ICCacheIRStub);
 static_assert(StubDataOffset % sizeof(uint64_t) == 0,
               "Stub fields must be aligned");
 
+static bool LookupAOTStub(JSContext* cx, CacheKind kind,
+                          const CacheIRWriter& writer,
+                          CacheIRStubInfo*& stubInfo, uint8_t*& code,
+                          const char* name) {
+  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
+                                writer.codeStart(), writer.codeLength());
+
+  const JitZone* atomsJitZone =
+      CompileRuntime::get(cx->runtime())->atomsJitZone();
+  // JitZone within atoms zone should exist at this point.
+  MOZ_ASSERT(atomsJitZone);
+  // First perform a lookup within the atoms JitZone for AOT ICs.
+  code = atomsJitZone->getBaselineCacheIRAOTStubCode(lookup, &stubInfo);
+
+  return !!stubInfo;
+}
+
 static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
                                 const CacheIRWriter& writer,
                                 CacheIRStubInfo*& stubInfo, JitCode*& code,
@@ -2503,21 +2537,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
 
-#ifdef ENABLE_JS_AOT_ICS
-  const JitZone* atomsJitZone =
-      CompileRuntime::get(cx->runtime())->atomsJitZone();
-  // JitZone within atoms zone should exist at this point.
-  MOZ_ASSERT(atomsJitZone);
-  // First perform a lookup within the atoms JitZone (for AOT ICs).
-  code = atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
-  // Otherwise, fallback to the looking up in current JitZone
-  // i.e runtime generated ICs.
-  if (!stubInfo) {
-    code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
-  }
-#else
   code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
-#endif
 
 #ifdef ENABLE_JS_AOT_ICS
   if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
@@ -2529,14 +2549,17 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   if (!code && !IsPortableBaselineInterpreterEnabled()) {
     // We have to generate stub code.
     TempAllocator temp(&cx->tempLifoAlloc());
-    // We may or may not need to construct a JitContext during this scope.
     JitContext jitCtx(cx);
     BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset, isAOTFill);
     if (!comp.init(kind)) {
       return false;
     }
 
+#ifdef JS_SPASM
+    MOZ_CRASH("LookupOrCompileStub must not be called with JS_SPASM enabled.");
+#else
     code = comp.compile();
+#endif
     if (!code) {
       return false;
     }
@@ -2634,11 +2657,18 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 
   // Check if we already have JitCode for this stub.
   CacheIRStubInfo* stubInfo;
-  JitCode* code;
+  uint8_t* aotCode;
+  JitCode* jitCode;
+  mozilla::Variant<uint8_t*, JitCode*> code(static_cast<uint8_t*>(nullptr));
 
-  if (!LookupOrCompileStub(cx, kind, writer, stubInfo, code, name,
+  if (!LookupAOTStub(cx, kind, writer, stubInfo, aotCode, name)) {
+    if (!LookupOrCompileStub(cx, kind, writer, stubInfo, jitCode, name,
                            /* isAOTFill = */ false, cx->zone()->jitZone())) {
-    return ICAttachResult::OOM;
+      return ICAttachResult::OOM;
+    }
+    code = mozilla::AsVariant(jitCode);
+  } else {
+    code = mozilla::AsVariant(aotCode);
   }
 
   ICEntry* icEntry = icScript->icEntryForStub(stub);
@@ -2736,7 +2766,9 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
       break;
   }
 
-  auto newStub = new (newStubMem) ICCacheIRStub(code, stubInfo, CompileZone::get(cx->realm()->zone()));
+  auto* newStub = code.match([newStubMem, stubInfo, cx](auto inner) {
+    return new (newStubMem) ICCacheIRStub(inner, stubInfo, CompileZone::get(cx->realm()->zone()));
+  });
   writer.copyStubData(newStub->stubDataStart());
   newStub->setTypeData(writer.typeData());
 
@@ -2755,6 +2787,32 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 
 #ifdef ENABLE_JS_AOT_ICS
 
+#ifdef JS_SPASM
+void js::jit::CompileAOTICs(JSContext* cx) {
+  if (JitOptions.enableAOTICs) {
+    for (auto& stub : GetAOTStubs()) {
+      CacheIRWriter writer(cx, stub);
+      if (writer.failed()) {
+        MOZ_CRASH("Writer failed for AOT IC");
+      }
+
+      // We have to generate stub code.
+      TempAllocator temp(&cx->tempLifoAlloc());
+      // We may or may not need to construct a JitContext during this scope.
+      JitContext jitCtx(cx);
+      BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset, true);
+      if (!comp.init(stub.kind)) {
+        MOZ_CRASH("Compiler initialization failed for AOT IC");
+      }
+
+      JitCode* code = comp.compile(stub.stubNum);
+      (void)code;
+    }
+  }
+}
+
+#else
+
 void js::jit::FillAOTICs(JSContext* cx) {
   MOZ_ASSERT(cx->inAtomsZone());
   JitZone* jitZone = cx->zone()->getJitZone(cx);
@@ -2765,16 +2823,30 @@ void js::jit::FillAOTICs(JSContext* cx) {
         jitZone->setIncompleteAOTICs();
         break;
       }
-      CacheIRStubInfo* stubInfo;
-      JitCode* code;
-      (void)LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
-                                "aot stub",
-                                /* isAOTFill = */ true, jitZone);
-      (void)stubInfo;
-      (void)code;
+
+      CacheIRStubKey::Lookup lookup(stub.kind, ICStubEngine::Baseline,
+                                writer.codeStart(), writer.codeLength());
+
+                                JS::AutoAssertNoGC nogc(cx);
+
+      CacheIRStubInfo* stubInfo =
+        CacheIRStubInfo::New(stub.kind, ICStubEngine::Baseline, true,
+                             StubDataOffset, writer);
+      if (!stubInfo) {
+        jitZone->setIncompleteAOTICs();
+        break;
+      }
+
+      CacheIRStubKey key(stubInfo);
+      if (!jitZone->putBaselineCacheIRAOTStubCode(lookup, key, stub.stubCode)) {
+        jitZone->setIncompleteAOTICs();
+        break;
+      }
     }
   }
 }
+
+#endif
 #endif
 
 uint8_t* ICCacheIRStub::stubDataStart() {

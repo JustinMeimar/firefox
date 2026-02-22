@@ -118,6 +118,10 @@ class JitZone {
                 SystemAllocPolicy, BaselineCacheIRStubCodeMapGCPolicy>;
   BaselineCacheIRStubCodeMap baselineCacheIRStubCodes_;
 
+#ifdef ENABLE_JS_AOT_ICS
+  HashMap<CacheIRStubKey, uint8_t*, CacheIRStubKey, SystemAllocPolicy> baselineCacheIRAOTStubCodes_;
+#endif
+
   // Executable allocator for all code except wasm code.
   MainThreadData<ExecutableAllocator> execAlloc_;
 
@@ -191,12 +195,30 @@ class JitZone {
     *stubInfo = nullptr;
     return nullptr;
   }
+  uint8_t* getBaselineCacheIRAOTStubCode(const CacheIRStubKey::Lookup& key,
+                                      CacheIRStubInfo** stubInfo) const {
+    auto p = baselineCacheIRAOTStubCodes_.lookup(key);
+    if (p) {
+      *stubInfo = p->key().stubInfo.get();
+      return p->value();
+    }
+    *stubInfo = nullptr;
+    return nullptr;
+  }
   [[nodiscard]] bool putBaselineCacheIRStubCode(
       const CacheIRStubKey::Lookup& lookup, CacheIRStubKey& key,
       JitCode* stubCode) {
     auto p = baselineCacheIRStubCodes_.lookupForAdd(lookup);
     MOZ_ASSERT(!p);
     return baselineCacheIRStubCodes_.add(p, std::move(key), stubCode);
+  }
+
+  [[nodiscard]] bool putBaselineCacheIRAOTStubCode(
+      const CacheIRStubKey::Lookup& lookup, CacheIRStubKey& key,
+      uint8_t* stubCode) {
+    auto p = baselineCacheIRAOTStubCodes_.lookupForAdd(lookup);
+    MOZ_ASSERT(!p);
+    return baselineCacheIRAOTStubCodes_.add(p, std::move(key), stubCode);
   }
 
   CacheIRStubInfo* getIonCacheIRStubInfo(const CacheIRStubKey::Lookup& key) {

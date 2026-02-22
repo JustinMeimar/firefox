@@ -71,49 +71,82 @@
 
 // First, generate individual IC bodies.
 
-#  define IC_BODY(idx, _kind, _num_input_operands, _num_operand_ids,        \
+#  define IC_BODY(num, _kind, _num_input_operands, _num_operand_ids,        \
                   _num_instructions, _typedata, _stubdatasize, _stubfields, \
                   _lastused, ops)                                           \
-    static const uint8_t IC##idx[] = {ops};
+    static const uint8_t IC##num[] = {ops};
 
 JS_AOT_IC_DATA(IC_BODY)
 
 // Generate the stubfield lists.
 
-#  define IC_STUBFIELD(idx, _kind, _num_input_operands, _num_operand_ids, \
+#  define IC_STUBFIELD(num, _kind, _num_input_operands, _num_operand_ids, \
                        _num_instructions, _typedata, _stubdatasize,       \
                        stubfields, _lastused, _ops)                       \
-    static const AOTStubFieldData IC##idx##StubFields[] = {stubfields};
+    static const AOTStubFieldData IC##num##StubFields[] = {stubfields};
 
 JS_AOT_IC_DATA(IC_STUBFIELD)
 
 // Generate the operand-last-used lists.
 
-#  define IC_LASTUSED(idx, _kind, _num_input_operands, _num_operand_ids, \
+#  define IC_LASTUSED(num, _kind, _num_input_operands, _num_operand_ids, \
                       _num_instructions, _typedata, _stubdatasize,       \
                       _stubfields, lastused, _ops)                       \
-    static const uint32_t IC##idx##LastUsed[] = {lastused};
+    static const uint32_t IC##num##LastUsed[] = {lastused};
 
 JS_AOT_IC_DATA(IC_LASTUSED)
+
+// Generate the extern declaration for each IC stub in order to link the AOT
+// compiled ICs. (Only for non-PBL AOT IC builds)
+
+#define IC_EXTERN(num, _kind, _num_input_operands, _num_operand_ids, \
+                      _num_instructions, _typedata, _stubdatasize,   \
+                      _stubfields, _lastused, _ops)                  \
+    extern "C" uint8_t _cacheIR_IC_##num[];
+
+#if !defined(ENABLE_PORTABLE_BASELINE_INTERP) && !defined(JS_SPASM)
+JS_AOT_IC_DATA(IC_EXTERN)
+#endif
 
 // Now, generate the toplevel list of AOT structs from which we can
 // reconstitute a CacheIRWriter.
 
-#  define IC_TOP(idx, kind, num_input_operands, num_operand_ids,        \
+#if defined(ENABLE_PORTABLE_BASELINE_INTERP) || defined(JS_SPASM)
+#  define IC_TOP(num, kind, num_input_operands, num_operand_ids,        \
                  num_instructions, typedata, stubdatasize, _stubfields, \
                  _lastused, _ops)                                       \
     CacheIRAOTStub{                                                     \
+        num,                                                            \
         CacheKind::kind,                                                \
         num_operand_ids,                                                \
         num_input_operands,                                             \
         num_instructions,                                               \
         TypeData(typedata),                                             \
         stubdatasize,                                                   \
-        IC##idx##StubFields,                                            \
-        sizeof(IC##idx##StubFields) / sizeof(IC##idx##StubFields[0]),   \
-        IC##idx##LastUsed,                                              \
-        IC##idx,                                                        \
-        sizeof(IC##idx)},
+        IC##num##StubFields,                                            \
+        sizeof(IC##num##StubFields) / sizeof(IC##num##StubFields[0]),   \
+        IC##num##LastUsed,                                              \
+        IC##num,                                                        \
+        sizeof(IC##num)},
+#else
+#  define IC_TOP(num, kind, num_input_operands, num_operand_ids,        \
+                 num_instructions, typedata, stubdatasize, _stubfields, \
+                 _lastused, _ops)                                       \
+    CacheIRAOTStub{                                                     \
+        num,                                                            \
+        CacheKind::kind,                                                \
+        num_operand_ids,                                                \
+        num_input_operands,                                             \
+        num_instructions,                                               \
+        TypeData(typedata),                                             \
+        stubdatasize,                                                   \
+        IC##num##StubFields,                                            \
+        sizeof(IC##num##StubFields) / sizeof(IC##num##StubFields[0]),   \
+        IC##num##LastUsed,                                              \
+        IC##num,                                                        \
+        sizeof(IC##num),                                               \
+        _cacheIR_IC_##num},
+#endif
 
 static const CacheIRAOTStub stubs[] = {JS_AOT_IC_DATA(IC_TOP)};
 
