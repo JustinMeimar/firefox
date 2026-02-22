@@ -1080,7 +1080,7 @@ class AssemblerX86Shared : public AssemblerShared {
   void bind(Label* label, BufferOffset targetOffset) {
     bind(label, JmpDst(targetOffset.getOffset()));
   }
-  uint32_t currentOffset() { return masm.label().offset(); }
+  uint32_t currentOffset() { return masm.label_pure().offset(); }
 
   // Re-routes pending jumps to a new label.
   void retarget(Label* label, Label* target) {

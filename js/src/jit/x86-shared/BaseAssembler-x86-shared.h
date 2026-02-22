@@ -4592,7 +4592,23 @@ class BaseAssembler : public GenericAssembler {
 
   JmpDst label() {
     JmpDst r = JmpDst(m_formatter.size());
-    spew(".set .Llabel%d, .", r.offset());
+    // It's possible that label has been called back to back without additional
+    // instructions added. This will cause the label to have the same offset
+    // back to back.
+    // Although this is harmless, the assembler will reject it so we avoid
+    // spewing the same label for the same position back to back.
+    if (latestLabelOffset != r.offset()) {
+      spew(".set .Llabel%d, .", r.offset());
+      latestLabelOffset = r.offset();
+    }
+    return r;
+  }
+
+  // Obtain a label for the sake of introspection, not to declare a new one.
+  // As such, it does not spew. The goal is to avoid '.set'ing the same label
+  // twice.
+  JmpDst label_pure() {
+    JmpDst r = JmpDst(m_formatter.size());
     return r;
   }
 
@@ -6549,6 +6565,8 @@ class BaseAssembler : public GenericAssembler {
   } m_formatter;
 
   bool useVEX_;
+
+  int32_t latestLabelOffset = -1;
 };
 
 }  // namespace X86Encoding

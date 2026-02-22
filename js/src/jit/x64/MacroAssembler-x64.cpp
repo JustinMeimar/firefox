@@ -466,8 +466,10 @@ void MacroAssemblerX64::vpmuludqSimd128(const SimdConstant& v,
 
 void MacroAssemblerX64::bindOffsets(
     const MacroAssemblerX86Shared::UsesVector& uses) {
+  // The uses will be linked to the current offset.
+  JmpDst dstLabel = masm.label();
   for (JmpSrc src : uses) {
-    JmpDst dst(currentOffset());
+    JmpDst dst(dstLabel.offset());
     // Using linkJump here is safe, as explained in the comment in
     // loadConstantDouble.
     masm.linkJump(src, dst);
