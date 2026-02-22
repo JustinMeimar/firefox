@@ -7,6 +7,9 @@
 #ifndef jit_x64_MacroAssembler_x64_h
 #define jit_x64_MacroAssembler_x64_h
 
+#include <fstream>
+#include <utility>
+
 #include "jit/x86-shared/MacroAssembler-x86-shared.h"
 #include "js/HeapAPI.h"
 #include "wasm/WasmBuiltins.h"
@@ -1203,7 +1206,70 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   void profilerExitFrame();
 };
 
+// SpewAssembler (spasm) is used to emit assembly, instead of executable
+// binary, for the purpose of passing it through an assembler (such as as).
+// It is used by AOT compilation infra to utilize the assembler's ability to add
+// labels to identify sections of the code and then export those labels into
+// the symbol table for linking later.
+// This approach allows principled linking of code sections without runtime
+// patching.
+//
+// N.B (Chase): In the future, spasm could be retrofitted to emit a different
+// IR that could be passed through an optimizer for better AOT codegen.
+class SpewAssemblerX64 : public MacroAssemblerX64 {
+ private:
+  std::vector<std::string> labels_;
+  std::stringstream sstream_;
+  std::string outfile_;
+
+ public:
+  SpewAssemblerX64() = default;
+
+  void setOutFile(std::string outfile) {
+    outfile_ = std::move(outfile);
+    masm.setSpewStream(&sstream_);
+  }
+
+  void label(std::string s) {
+    masm.spew("%s: ", s.c_str());
+    labels_.push_back(std::move(s));
+  }
+
+  void finish() {
+    MacroAssemblerX64::finish();
+    if (!outfile_.empty()) {
+      std::ofstream outstream(outfile_);
+      for (std::string& label : labels_) {
+        outstream << ".globl " << label << '\n';
+      }
+      outstream << sstream_.rdbuf();
+    }
+  }
+
+  // Hacky method to dump the asm so far into the given file. This is useful
+  // for, e.g trampolines if you want to dump only specific trampolines into
+  // separate files. All the trampolines are generated in one singular masm
+  // flow, so finish_hack just "finishes up" partially (i.e one trampoline).
+  void finish_hack() {
+    MOZ_ASSERT(!outfile_.empty());
+    std::ofstream outstream(outfile_);
+    for (std::string& label : labels_) {
+      outstream << ".globl " << label << '\n';
+    }
+    labels_.clear();
+    outstream << sstream_.rdbuf();
+    sstream_.str("");
+    sstream_.clear();
+    outfile_.clear();
+    masm.clearSpewStream();
+  }
+};
+
+#ifdef JS_SPASM
+using MacroAssemblerSpecific = SpewAssemblerX64;
+#else
 using MacroAssemblerSpecific = MacroAssemblerX64;
+#endif
 
 }  // namespace jit
 }  // namespace js

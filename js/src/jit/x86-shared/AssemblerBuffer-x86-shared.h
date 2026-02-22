@@ -221,11 +221,12 @@ class AssemblerBuffer {
 class GenericAssembler {
 #ifdef JS_JITSPEW
   Sprinter* printer;
+  std::stringstream* spewstream;
 #endif
  public:
   GenericAssembler()
 #ifdef JS_JITSPEW
-      : printer(nullptr)
+      : printer(nullptr), spewstream(nullptr)
 #endif
   {
   }
@@ -236,9 +237,21 @@ class GenericAssembler {
 #endif
   }
 
+  void setSpewStream(std::stringstream* ss) {
+#ifdef JS_SPASM
+    spewstream = ss;
+#endif
+  }
+
+  void clearSpewStream() {
+#ifdef JS_SPASM
+    spewstream = nullptr;
+#endif
+  }
+
 #ifdef JS_JITSPEW
   inline void spew(const char* fmt, ...) MOZ_FORMAT_PRINTF(2, 3) {
-    if (MOZ_UNLIKELY(printer || JitSpewEnabled(JitSpew_Codegen))) {
+    if (MOZ_UNLIKELY(printer || spewstream || JitSpewEnabled(JitSpew_Codegen))) {
       va_list va;
       va_start(va, fmt);
       spew(fmt, va);

@@ -52,6 +52,9 @@ void js::jit::GenericAssembler::spew(const char* fmt, va_list va) {
     if (printer) {
       printer->printf("%s\n", buf);
     }
+    if (spewstream) {
+      *spewstream << buf << '\n';
+    }
     js::jit::JitSpew(js::jit::JitSpew_Codegen, "%s", buf);
   }
 }
