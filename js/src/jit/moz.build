@@ -260,15 +260,8 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
 
 
 if CONFIG["ENABLE_AOT_BASELINE"]:
-    # Generate assembly wrapper for the AOT Baseline interpreter binary.
-    GeneratedFile(
-        "AOTBaselineInterpreter.S",
-        script="GenerateAOTBaselineInterpreter.py",
-        inputs=["../../../baseline_interpreter.bin"],
-    )
-    # Build the generated .s into the project.
     SOURCES += [
-        "!AOTBaselineInterpreter.S"
+        "AOTBaselineInterpreter.S"
     ]
 
 

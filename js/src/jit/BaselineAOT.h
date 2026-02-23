@@ -8,16 +8,12 @@
 #define jit_BaselineAOT_h
 
 #include <cstdint>
-
 #include "jit/VMFunctions.h"
 #include "vm/JSContext.h"
 
 namespace js::jit {
-
-// Forward declarations
 enum class DebugTrapHandlerKind;
 
-// All metadata fields stored in the BaselineManifest.
 #define BASELINE_MANIFEST_FIELDS(V) \
   V(InterpretOp)                    \
   V(InterpretOpNoDebugTrap)         \
@@ -37,18 +33,14 @@ enum class DebugTrapHandlerKind;
   V(ICReturnCount)                  \
   V(RuntimePatchCount)
 
-// Symbols emitted by GenerateAOTBaselineInterpreter.py into the .S file.
 extern "C" {
-  // Machine code (no metadata).
   extern const uint8_t bl_aot_code_start[];
   extern const uint8_t bl_aot_code_end[];
 
-// One uint32_t per BASELINE_MANIFEST_FIELDS entry.
 #define DECLARE_MANIFEST_EXTERN(name) extern const uint32_t bl_aot_##name;
   BASELINE_MANIFEST_FIELDS(DECLARE_MANIFEST_EXTERN)
 #undef DECLARE_MANIFEST_EXTERN
-
-  // Vector start/end pairs.
+  
   extern const uint32_t bl_aot_DebugInstrumentationOffsets_start[];
   extern const uint32_t bl_aot_DebugInstrumentationOffsets_end[];
   extern const uint32_t bl_aot_DebugTrapOffsets_start[];
@@ -177,23 +169,11 @@ class RuntimePatch {
 
 static constexpr uintptr_t AOT_PATCH_SENTINEL = 0x0000A070DEADBEEF;
 
-static const uint32_t AOT_FOOTER_MAGIC = 0x424C494E;
-struct alignas(4) BaselineAOTFooter {
-  uint32_t magic = AOT_FOOTER_MAGIC; // 'BLIN'
-  uint32_t version = 1;
-  uint32_t manifestOffset = 0; // Absolute offset from blob start
-};
-
-
-
-static_assert(sizeof(BaselineAOTFooter) == 12, "Footer must be 12 bytes");
 static_assert(sizeof(BaselineManifest) ==
               static_cast<uint32_t>(BaselineManifestField::Count) * 4,
               "Manifest size must match metadata count");
 static_assert(sizeof(RuntimePatch) == 12,
-              "RuntimePatch size must match Python VECTORS element size");
-static_assert(uint32_t(BaselineManifestField::Count) == 17,
-              "Manifest field count must match Python MANIFEST_FIELD_NAMES");
+              "RuntimePatch size must be 12 bytes");
 
 }  // namespace js::jit
 
