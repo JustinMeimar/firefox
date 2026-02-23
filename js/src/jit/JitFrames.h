@@ -220,7 +220,7 @@ static_assert(sizeof(ResumeFromException) % 16 == 0,
               "ResumeFromException should be aligned");
 #endif
 
-void HandleException(ResumeFromException* rfe);
+extern "C" void HandleException(ResumeFromException* rfe);
 
 void EnsureUnwoundJitExitFrame(JitActivation* act, JitFrameLayout* frame);
 

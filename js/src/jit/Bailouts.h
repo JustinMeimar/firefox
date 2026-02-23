@@ -147,10 +147,10 @@ class BailoutFrameInfo {
 struct BaselineBailoutInfo;
 
 // Called from a bailout thunk.
-[[nodiscard]] bool Bailout(BailoutStack* sp, BaselineBailoutInfo** info);
+extern "C" [[nodiscard]] bool Bailout(BailoutStack* sp, BaselineBailoutInfo** info);
 
 // Called from the invalidation thunk.
-[[nodiscard]] bool InvalidationBailout(InvalidationBailoutStack* sp,
+extern "C" [[nodiscard]] bool InvalidationBailout(InvalidationBailoutStack* sp,
                                        BaselineBailoutInfo** info);
 
 class ExceptionBailoutInfo {
@@ -222,7 +222,7 @@ class ExceptionBailoutInfo {
                                            ResumeFromException* rfe,
                                            const ExceptionBailoutInfo& excInfo);
 
-[[nodiscard]] bool FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfoArg);
+extern "C" [[nodiscard]] bool FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfoArg);
 
 #ifdef DEBUG
 [[nodiscard]] bool AssertBailoutStackDepth(JSContext* cx, JSScript* script,

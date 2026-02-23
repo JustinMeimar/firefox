@@ -184,7 +184,7 @@ extern bool ArrayLengthGetter(JSContext* cx, HandleObject obj, HandleId id,
 extern bool ArrayLengthSetter(JSContext* cx, HandleObject obj, HandleId id,
                               HandleValue v, ObjectOpResult& result);
 
-extern ArraySortResult ArraySortFromJit(
+extern "C" ArraySortResult ArraySortFromJit(
     JSContext* cx, jit::TrampolineNativeFrameLayout* frame);
 
 bool IsArrayConstructor(const JSObject* obj);

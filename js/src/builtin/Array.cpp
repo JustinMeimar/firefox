@@ -2440,6 +2440,10 @@ ArraySortResult js::CallComparatorSlow(ArraySortData* d, const Value& x,
   return ArraySortResult::Done;
 }
 
+extern "C" ArraySortResult sortArrayWithComparator(ArraySortData* d) {
+  return ArraySortData::sortArrayWithComparator(d);
+}
+
 // static
 ArraySortResult ArraySortData::sortArrayWithComparator(ArraySortData* d) {
   ArraySortResult result = sortWithComparatorShared<ArraySortKind::Array>(d);

@@ -358,7 +358,7 @@ struct LastArg<HeadType, TailTypes...> {
                                   uint32_t argc, Value* argv,
                                   MutableHandleValue rval);
 
-bool InvokeFromInterpreterStub(JSContext* cx,
+extern "C" bool InvokeFromInterpreterStub(JSContext* cx,
                                InterpreterStubExitFrameLayout* frame);
 void* GetContextSensitiveInterpreterStub();
 
@@ -418,7 +418,7 @@ bool OperatorIn(JSContext* cx, HandleValue key, HandleObject obj, bool* out);
 void PostWriteBarrier(JSRuntime* rt, js::gc::Cell* cell);
 void PostGlobalWriteBarrier(JSRuntime* rt, GlobalObject* obj);
 
-void PostWriteElementBarrier(JSRuntime* rt, JSObject* obj, int32_t index);
+extern "C" void PostWriteElementBarrier(JSRuntime* rt, JSObject* obj, int32_t index);
 
 // If |str| represents an int32, assign it to |result| and return true.
 // Otherwise return false.
@@ -499,7 +499,7 @@ ArrayObject* InitRestParameter(JSContext* cx, uint32_t length, Value* rest,
 [[nodiscard]] bool PushVarEnv(JSContext* cx, BaselineFrame* frame,
                               Handle<Scope*> scope);
 
-[[nodiscard]] bool InitBaselineFrameForOsr(BaselineFrame* frame,
+extern "C" [[nodiscard]] bool InitBaselineFrameForOsr(BaselineFrame* frame,
                                            InterpreterFrame* interpFrame,
                                            uint32_t numStackValues);
 
@@ -512,11 +512,11 @@ void AssertValidStringPtr(JSContext* cx, JSString* str);
 void AssertValidSymbolPtr(JSContext* cx, JS::Symbol* sym);
 void AssertValidValue(JSContext* cx, Value* v);
 
-void JitValuePreWriteBarrier(JSRuntime* rt, Value* vp);
-void JitStringPreWriteBarrier(JSRuntime* rt, JSString** stringp);
-void JitObjectPreWriteBarrier(JSRuntime* rt, JSObject** objp);
-void JitShapePreWriteBarrier(JSRuntime* rt, Shape** shapep);
-void JitWasmAnyRefPreWriteBarrier(JSRuntime* rt, wasm::AnyRef* refp);
+extern "C" void JitValuePreWriteBarrier(JSRuntime* rt, Value* vp);
+extern "C" void JitStringPreWriteBarrier(JSRuntime* rt, JSString** stringp);
+extern "C" void JitObjectPreWriteBarrier(JSRuntime* rt, JSObject** objp);
+extern "C" void JitShapePreWriteBarrier(JSRuntime* rt, Shape** shapep);
+extern "C" void JitWasmAnyRefPreWriteBarrier(JSRuntime* rt, wasm::AnyRef* refp);
 
 bool ObjectIsCallable(JSObject* obj);
 bool ObjectIsConstructor(JSObject* obj);
@@ -606,7 +606,7 @@ bool IsPossiblyWrappedTypedArray(JSContext* cx, JSObject* obj, bool* result);
 void* AllocateDependentString(JSContext* cx);
 void* AllocateFatInlineString(JSContext* cx);
 void* AllocateBigIntNoGC(JSContext* cx, bool requestMinorGC);
-void AllocateAndInitTypedArrayBuffer(JSContext* cx,
+extern "C" void AllocateAndInitTypedArrayBuffer(JSContext* cx,
                                      FixedLengthTypedArrayObject* obj,
                                      int32_t count, size_t inlineCapacity);
 
@@ -614,7 +614,7 @@ void AllocateAndInitTypedArrayBuffer(JSContext* cx,
 void TraceCreateObject(JSObject* obj);
 #endif
 
-bool PreserveWrapper(JSContext* cx, JSObject* obj);
+extern "C" bool PreserveWrapper(JSContext* cx, JSObject* obj);
 
 bool DoStringToInt64(JSContext* cx, HandleString str, uint64_t* res);
 
@@ -703,7 +703,7 @@ float RoundFloat16ToFloat32(double d);
 float Float16ToFloat32(int32_t value);
 int32_t Float32ToFloat16(float value);
 
-void DateFillLocalTimeSlots(DateObject* dateObj);
+extern "C" void DateFillLocalTimeSlots(DateObject* dateObj);
 
 JSAtom* AtomizeStringNoGC(JSContext* cx, JSString* str);
 
@@ -733,7 +733,7 @@ void AssertMapObjectHash(JSContext* cx, MapObject* obj, const Value* value,
 void AssertPropertyLookup(NativeObject* obj, PropertyKey id, uint32_t slot);
 
 // Functions used when JS_MASM_VERBOSE is enabled.
-void AssumeUnreachable(const char* output);
+extern "C" void AssumeUnreachable(const char* output);
 void Printf0(const char* output);
 void Printf1(const char* output, uintptr_t value);
 

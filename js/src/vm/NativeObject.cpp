@@ -427,6 +427,11 @@ bool NativeObject::allocateSlots(Nursery& nursery, uint32_t newCapacity) {
   return true;
 }
 
+extern "C" bool growSlotsPure(JSContext* cx, NativeObject* obj,
+                                 uint32_t newCapacity) {
+  return NativeObject::growSlotsPure(cx, obj, newCapacity);
+}
+
 /* static */
 bool NativeObject::growSlotsPure(JSContext* cx, NativeObject* obj,
                                  uint32_t newCapacity) {
@@ -439,6 +444,10 @@ bool NativeObject::growSlotsPure(JSContext* cx, NativeObject* obj,
   }
 
   return true;
+}
+
+extern "C" bool addDenseElementPure(JSContext* cx, NativeObject* obj) {
+  return NativeObject::addDenseElementPure(cx, obj);
 }
 
 /* static */

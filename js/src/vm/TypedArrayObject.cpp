@@ -7143,6 +7143,10 @@ static void StoreSortedElements(TypedArrayObject* tarray, Value* elements,
   }
 }
 
+extern "C" ArraySortResult sortTypedArrayWithComparator(ArraySortData* d) {
+  return ArraySortData::sortTypedArrayWithComparator(d);
+}
+
 // static
 ArraySortResult ArraySortData::sortTypedArrayWithComparator(ArraySortData* d) {
   ArraySortResult result =

@@ -452,7 +452,7 @@ constexpr bool CanUseBitwiseCopy(Scalar::Type targetType,
   return false;
 }
 
-extern ArraySortResult TypedArraySortFromJit(
+extern "C" ArraySortResult TypedArraySortFromJit(
     JSContext* cx, jit::TrampolineNativeFrameLayout* frame);
 
 }  // namespace js

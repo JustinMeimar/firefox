@@ -72,7 +72,7 @@ LIRGraph* GenerateLIR(MIRGenerator* mir);
 CodeGenerator* CompileBackEnd(MIRGenerator* mir, WarpSnapshot* snapshot);
 
 void LinkIonScript(JSContext* cx, HandleScript calleescript);
-uint8_t* LazyLinkTopActivation(JSContext* cx, LazyLinkExitFrameLayout* frame);
+extern "C" uint8_t* LazyLinkTopActivation(JSContext* cx, LazyLinkExitFrameLayout* frame);
 
 inline bool IsIonInlinableGetterOrSetterOp(JSOp op) {
   // JSOp::GetProp, JSOp::CallProp, JSOp::Length, JSOp::GetElem,
