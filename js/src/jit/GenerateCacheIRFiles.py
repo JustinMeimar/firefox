@@ -616,13 +616,13 @@ def generate_cacheirops_header(c_out, yaml_path):
 
 def read_aot_ics(ic_path):
     ics = ""
-    idx = 0
     for entry in os.scandir(ic_path):
-        if entry.is_file() and os.path.basename(entry.path).startswith("IC-"):
+        entry_name = os.path.basename(entry.path)
+        if entry.is_file() and entry_name.startswith("IC-"):
             with open(entry.path) as f:
                 content = f.read().strip()
-                ics += "  _(%d, %s) \\\n" % (idx, content)
-                idx += 1
+                entry_num = int(entry_name.removeprefix("IC-"))
+                ics += "  _(%uULL, %s) \\\n" % (entry_num, content)
     return ics
 
 
