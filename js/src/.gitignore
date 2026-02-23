@@ -2,3 +2,11 @@ target/
 
 # Do not check in AOT ICs into source control
 ics/IC-*
+
+# Do not check in compiled ICs into source control
+compiled-ics/IC-*
+# Also do not check the moz.build as it should be generated
+compiled-ics/moz.build
+
+# Do not check in compiled trampolines into source control
+jit/compiled-trampolines/Trampolines.S

@@ -565,6 +565,9 @@ DIRS += [
     "xsum",
 ]
 
+if not CONFIG["JS_SPASM"]:
+    DIRS += [ "compiled-ics" ]
+
 if CONFIG["JS_HAS_INTL_API"]:
     DIRS += ["builtin/temporal"]
 

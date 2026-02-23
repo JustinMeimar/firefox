@@ -530,6 +530,21 @@ set_config("JS_JITSPEW", depends_if("--enable-jitspew")(lambda _: True))
 set_define("JS_STRUCTURED_SPEW", depends_if("--enable-jitspew")(lambda _: True))
 set_config("JS_STRUCTURED_SPEW", depends_if("--enable-jitspew")(lambda _: True))
 
+option(
+    "--enable-spasm",
+    default=False,
+    help="{Enable|Disable} the Spew Assembler to precompile JIT code into assembly files",
+)
+
+@depends("--enable-spasm")
+def spasm(value):
+    if value:
+        return True
+
+set_define("JS_SPASM", spasm)
+set_config("JS_SPASM", spasm)
+
+imply_option("--enable-jitspew", spasm)
 
 @depends("--enable-jit", "--enable-jitspew", simulator, target, moz_debug)
 def jit_disasm_arm(jit_enabled, spew, simulator, target, debug):

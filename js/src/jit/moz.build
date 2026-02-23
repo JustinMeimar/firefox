@@ -255,6 +255,11 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
         "wasm32/Trampoline-wasm32.cpp",
     ]
 
+if not CONFIG["JS_SPASM"]:
+    SOURCES += [
+        "compiled-trampolines/Trampolines.S",
+    ]
+
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(
     "ABIFunctionTypeGenerated.h",
