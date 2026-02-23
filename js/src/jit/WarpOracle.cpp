@@ -983,6 +983,11 @@ class ObjectPropertyFuseDependency final : public CompilationDependency {
   }
 };
 
+// TODO(chase): This may be called with an AOT IC. When it tries to load said
+// IC stub code into a JitCode from the address (via JitCode::FromExecutable),
+// it will crash. JitCode::FromExecutable does not work with an AOT compiled
+// code address. This is why there's a separate lookup map for AOT code in
+// JitZone.
 AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
                                                   BytecodeLocation loc) {
   // Do one of the following:
