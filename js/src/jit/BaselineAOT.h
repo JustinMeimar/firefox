@@ -61,8 +61,6 @@ inline size_t GetAOTBaselineCodeSize() {
   return bl_aot_code_end - bl_aot_code_start;
 }
 
-// Named scalar fields for the AOT manifest. The X-macro drives both
-// .S emission (serializeAOTManifest) and loading (initFromAOT).
 struct AOTManifestScalars {
 #define DECLARE_FIELD(name) uint32_t name = 0;
   BASELINE_MANIFEST_FIELDS(DECLARE_FIELD)

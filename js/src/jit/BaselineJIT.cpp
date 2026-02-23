@@ -1322,13 +1322,11 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code) {
 
   code_ = code;
 
-  // Load scalar fields from .S symbols — X-macro is the single source of truth.
   AOTManifestScalars s;
 #define LOAD_SCALAR(name) s.name = bl_aot_##name;
   BASELINE_MANIFEST_FIELDS(LOAD_SCALAR)
 #undef LOAD_SCALAR
 
-  // Unpack into interpreter members.
   interpretOpOffset_ = s.InterpretOp;
   interpretOpNoDebugTrapOffset_ = s.InterpretOpNoDebugTrap;
   bailoutPrologueOffset_ = s.BailoutPrologue;
