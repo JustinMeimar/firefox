@@ -148,9 +148,15 @@ void MacroAssembler::callWithABI(DynFn fun, ABIType result,
 
 template <typename Sig, Sig fun>
 void MacroAssembler::callWithABI(ABIType result, CheckUnsafeCallWithABI check) {
+#ifdef JS_SPASM
+  ABIFunctionSymbol<Sig, fun> abiFunSym;
+  AutoProfilerCallInstrumentation profiler(*this);
+  callWithABINoProfiler(abiFunSym.address(), abiFunSym.name(), result, check);
+#else
   ABIFunction<Sig, fun> abiFun;
   AutoProfilerCallInstrumentation profiler(*this);
   callWithABINoProfiler(abiFun.address(), result, check);
+#endif
 }
 
 void MacroAssembler::callWithABI(Register fun, ABIType result) {

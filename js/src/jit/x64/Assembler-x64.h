@@ -454,6 +454,18 @@ class Assembler : public AssemblerX86Shared {
     masm.movq_i64r(uintptr_t(ptr.value), dest.encoding());
     writeDataRelocation(ptr);
   }
+#if JS_SPASM
+  // Load the thread local storage symbol into given register. (initial-exec)
+  void movq(const char* tlsSym, Register dest) {
+    masm.movq_tls(tlsSym, dest.encoding());
+  }
+  // Load a TLS stored ptr into given register.
+  // Should be used after movq_tls loads a tls symbol offset from TLS base
+  // into a register.
+  void movq_tlsptr(Register src, Register dest) {
+    masm.movq_tlsptr(src.encoding(), dest.encoding());
+  }
+#endif
   void movq(const Operand& src, Register dest) {
     switch (src.kind()) {
       case Operand::REG:
@@ -1155,12 +1167,29 @@ class Assembler : public AssemblerX86Shared {
 
   void jmp(ImmPtr target, RelocationKind reloc = RelocationKind::HARDCODED) {
     MOZ_ASSERT(hasCreator());
-    JmpSrc src = masm.jmp();
+    JmpSrc src = masm.jmp_nospew();
+    // The actual spew should simply use the ptr to jump to, not a label.
+    // TODO(chase): It seems that mozilla's vsprintf machinery does not print
+    // the leading 0x for %p.
+    masm.spew("jmp       0x%p", target.value);
     addPendingJump(src, target, reloc);
   }
+#ifdef JS_SPASM
+  void jmp(ImmPtr target, std::string label) {
+    MOZ_ASSERT(hasCreator());
+    JmpSrc src = masm.jmp_nospew();
+    masm.spew("jmp       %s", label.c_str());
+    addPendingJump(src, target, RelocationKind::HARDCODED);
+  }
+#endif
   void j(Condition cond, ImmPtr target,
          RelocationKind reloc = RelocationKind::HARDCODED) {
-    JmpSrc src = masm.jCC(static_cast<X86Encoding::Condition>(cond));
+    X86Encoding::Condition cond_ = static_cast<X86Encoding::Condition>(cond);
+    JmpSrc src = masm.jCC_nospew(cond_);
+    // The actual spew should simply use the ptr to jump to, not a label.
+    // TODO(chase): It seems that mozilla's vsprintf machinery does not print
+    // the leading 0x for %p.
+    masm.spew("j%s        0x%p", CCName(cond_), target.value);
     addPendingJump(src, target, reloc);
   }
 
@@ -1176,9 +1205,23 @@ class Assembler : public AssemblerX86Shared {
   }
   void call(ImmWord target) { call(ImmPtr((void*)target.value)); }
   void call(ImmPtr target) {
-    JmpSrc src = masm.call();
+    // The actual spew should simply use the ptr to call, not a label.
+    // TODO(chase): It seems that mozilla's vsprintf machinery does not print
+    // the leading 0x for %p.
+    masm.spew("call       0x%p", target.value);
+    JmpSrc src = masm.call_nospew();
     addPendingJump(src, target, RelocationKind::HARDCODED);
   }
+#ifdef JS_SPASM
+  void call(ImmPtr target, std::string label) {
+    // The actual spew should simply use the ptr to call, not a label.
+    // TODO(chase): It seems that mozilla's vsprintf machinery does not print
+    // the leading 0x for %p.
+    masm.spew("call       %s", label.c_str());
+    JmpSrc src = masm.call_nospew();
+    addPendingJump(src, target, RelocationKind::HARDCODED);
+  }
+#endif
 
   // Emit a CALL or CMP (nop) instruction. ToggleCall can be used to patch
   // this instruction.

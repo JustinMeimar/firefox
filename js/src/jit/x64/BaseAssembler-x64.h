@@ -753,6 +753,34 @@ class BaseAssemblerX64 : public BaseAssembler {
     m_formatter.immediate64(imm);
   }
 
+#if JS_SPASM
+  // Load a thread local storage symbol into given register. (initial-exec)
+  void movq_tls(const char* tlsSym, RegisterID dst) {
+#ifdef __linux__
+    spew("movq       %s@GOTTPOFF(%%rip), %s", tlsSym, GPReg64Name(dst));
+    // Dummy OP.
+    m_formatter.oneByteOp64(OP_MOV_EAXIv, dst);
+    m_formatter.immediate64(0);
+#else
+#error "Unsupported platform for JS_SPASM: Unknown Tls access pattern"
+#endif
+  }
+
+  // Load a TLS stored ptr into given register.
+  // Should be used after movq_tls loads a tls symbol offset from TLS base
+  // into a register.
+  void movq_tlsptr(RegisterID src, RegisterID dst) {
+#ifdef __linux__
+    spew("movq       %%fs:(%s), %s", GPReg64Name(src), GPReg64Name(dst));
+    // Dummy OP.
+    m_formatter.oneByteOp64(OP_MOV_EAXIv, dst);
+    m_formatter.immediate64(0);
+#else
+#error "Unsupported platform for JS_SPASM: Unknown Tls access pattern"
+#endif
+  }
+#endif
+
   void movsbq_rr(RegisterID src, RegisterID dst) {
     spew("movsbq     %s, %s", GPReg32Name(src), GPReg64Name(dst));
     m_formatter.twoByteOp64(OP2_MOVSX_GvEb, src, dst);

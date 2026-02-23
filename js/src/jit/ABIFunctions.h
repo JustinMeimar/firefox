@@ -63,6 +63,31 @@ struct ABIFunctionSignature {
                 "ABI function signature is not registered.");
 };
 
+#ifdef JS_SPASM
+// This class is used to obtain the C++ symbol for all known targets of
+// callWithABI. This is needed in order for spasm produced assembly to refer
+// to the C++ functions and allow the linker to figure out the address to call.
+template <typename Sig, Sig fun>
+struct ABIFunctionSymbolData {
+  static const bool registered = false;
+  static const char* const symbol;
+};
+
+// This structure is meant to be used in place of 'ABIFunction' for spasm
+// generated code. Instead of referring to an address, this will refer to a
+// symbol for the assembler + linker to link with.
+template <typename Sig, Sig fun>
+struct ABIFunctionSymbol {
+  void* address() const { return JS_FUNC_TO_DATA_PTR(void*, fun); }
+  const char* name() const { return ABIFunctionSymbolData<Sig, fun>::symbol; }
+
+  // Failure of this assertion indicates a similar condition as in
+  // 'ABIFunction' (see above).
+  static_assert(ABIFunctionSymbolData<Sig, fun>::registered,
+    "ABI function symbol is not registered.");
+};
+#endif
+
 // This is a structure created to ensure that the dynamically computed
 // function pointer is well typed.
 //

@@ -2654,6 +2654,12 @@ class BaseAssembler : public GenericAssembler {
     return r;
   }
 
+  [[nodiscard]] JmpSrc call_nospew() {
+    m_formatter.oneByteOp(OP_CALL_rel32);
+    JmpSrc r = m_formatter.immediateRel32();
+    return r;
+  }
+
   void call_r(RegisterID dst) {
     m_formatter.oneByteOp(OP_GROUP5_Ev, dst, GROUP5_OP_CALLN);
     spew("call       *%s", GPRegName(dst));
@@ -2695,6 +2701,11 @@ class BaseAssembler : public GenericAssembler {
     spew("jmp        .Lfrom%d", r.offset());
     return r;
   }
+  [[nodiscard]] JmpSrc jmp_nospew() {
+    m_formatter.oneByteOp(OP_JMP_rel32);
+    JmpSrc r = m_formatter.immediateRel32();
+    return r;
+  }
 
   void jmp_r(RegisterID dst) {
     spew("jmp        *%s", GPRegName(dst));
@@ -2732,6 +2743,12 @@ class BaseAssembler : public GenericAssembler {
     m_formatter.twoByteOp(jccRel32(cond));
     JmpSrc r = m_formatter.immediateRel32();
     spew("j%s        .Lfrom%d", CCName(cond), r.offset());
+    return r;
+  }
+
+  [[nodiscard]] JmpSrc jCC_nospew(Condition cond) {
+    m_formatter.twoByteOp(jccRel32(cond));
+    JmpSrc r = m_formatter.immediateRel32();
     return r;
   }
 
@@ -5218,7 +5235,10 @@ class BaseAssembler : public GenericAssembler {
     }
 
     if (src0 == invalid_xmm) {
-      spew("%-11s$0x%x, %s, %s", name, imm, XMMRegName(rm), XMMRegName(dst));
+      // The instruction still needs 4 arguments so use the same src for both
+      // src operands.
+      spew("%-11s$0x%x, %s, %s, %s", name, imm, XMMRegName(rm), XMMRegName(rm),
+           XMMRegName(dst));
     } else {
       spew("%-11s$0x%x, %s, %s, %s", name, imm, XMMRegName(rm),
            XMMRegName(src0), XMMRegName(dst));

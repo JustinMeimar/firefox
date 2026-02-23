@@ -384,11 +384,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Furthermore, this is also nullptr for AOT IC compilations.
   CompileRealm* maybeRealm_ = nullptr;
 
-  // Pointers to the trampolines that may be jumped to as needed.
-  // This will be only be set for AOT IC compilations. The others
-  // may utilize the runtime pointer when necessary.
-  mozilla::Maybe<TrampolinePtrs> trampolinePtrs_;
-
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
 
@@ -401,8 +396,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   explicit MacroAssembler(TempAllocator& alloc,
                           CompileRuntime* maybeRuntime = nullptr,
                           CompileRealm* maybeRealm = nullptr,
-                          bool isAOTFill = false,
-                          mozilla::Maybe<TrampolinePtrs> trampolinePtrs = {});
+                          bool isAOTFill = false);
 
  public:
   // Whether or not the IC being compiled is an AOT IC, and thus will be shared across runtimes.
@@ -866,6 +860,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Emits a call to a C/C++ function, resolving all argument moves.
   void callWithABINoProfiler(void* fun, ABIType result,
                              CheckUnsafeCallWithABI check);
+#ifdef JS_SPASM
+  void callWithABINoProfiler(void* fun, const char* funSym, ABIType result,
+                             CheckUnsafeCallWithABI check);
+#endif
   void callWithABINoProfiler(Register fun, ABIType result) PER_ARCH;
   void callWithABINoProfiler(const Address& fun, ABIType result) PER_ARCH;
 
@@ -5221,18 +5219,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   inline void storeCallResultValue(TypedOrValueRegister dest);
 
+ public:
+  std::string preBarrierLabel(MIRType type) const {
+    return "_preBarrier" + std::string(StringFromMIRType(type));
+  }
+  std::string excTailLabel() const {
+    return "_excTail";
+  }
+
  private:
   TrampolinePtr preBarrierTrampoline(MIRType type) {
-    if (isAOTFill) {
-        return trampolinePtrs_.ref().preBarrier(type);
-    }
     return runtime()->jitRuntime()->preBarrier(type);
   }
 
   TrampolinePtr getExceptionTailTrampoline() const {
-    if (isAOTFill) {
-        return trampolinePtrs_.ref().exceptionTail;
-    }
     return runtime()->jitRuntime()->getExceptionTail();
   }
 
@@ -5248,9 +5248,16 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Push(PreBarrierReg);
     computeEffectiveAddress(address, PreBarrierReg);
 
-    TrampolinePtr preBarrier = preBarrierTrampoline(type);
+    if (!isAOTFill) {
+        TrampolinePtr preBarrier = preBarrierTrampoline(type);
+        call(preBarrier);
+    }
+#ifdef JS_SPASM
+    else {
+        Assembler::call(ImmPtr((void*)Printf0), preBarrierLabel(type));
+    }
+#endif
 
-    call(preBarrier);
     Pop(PreBarrierReg);
     // On arm64, SP may be < PSP now (that's OK).
     // eg testcase: tests/auto-regress/bug702915.js

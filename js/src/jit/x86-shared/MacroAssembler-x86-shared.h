@@ -175,6 +175,9 @@ class MacroAssemblerX86Shared : public Assembler {
   void jump(ImmPtr ptr) { jmp(ptr); }
   void jump(Register reg) { jmp(Operand(reg)); }
   void jump(const Address& addr) { jmp(Operand(addr)); }
+#ifdef JS_SPASM
+  void jump(ImmPtr ptr, std::string label) { jmp(ptr, label); }
+#endif
 
   void convertInt32ToDouble(Register src, FloatRegister dest) {
     // vcvtsi2sd and friends write only part of their output register, which

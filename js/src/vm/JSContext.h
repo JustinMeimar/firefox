@@ -140,6 +140,14 @@ class AutoLockScriptData;
 /* Thread Local Storage slot for storing the context for a thread. */
 extern MOZ_THREAD_LOCAL(JSContext*) TlsContext;
 
+#if JS_SPASM
+#ifdef __clang__
+#define TlsContextSym _ZN2js10TlsContextE
+#else
+#error "Unsupported platform for JS_SPASM: Unknown TlsContext symbol"
+#endif
+#endif
+
 #ifdef DEBUG
 JSContext* MaybeGetJSContext();
 #endif

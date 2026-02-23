@@ -582,6 +582,14 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   void load64(const Address& address, Register dest) {
     movq(Operand(address), dest);
   }
+#ifdef JS_SPASM
+  void loadPtr(const char* tlsSym, int32_t disp, Register dest) {
+    ScratchRegisterScope scratch(asMasm());
+    movq(tlsSym, scratch);
+    movq_tlsptr(scratch, dest);
+    loadPtr(Address(dest, disp), dest);
+  }
+#endif
   void loadPtr(const Operand& src, Register dest) { movq(src, dest); }
   FaultingCodeOffset loadPtr(const BaseIndex& src, Register dest) {
     FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
@@ -1223,11 +1231,12 @@ class SpewAssemblerX64 : public MacroAssemblerX64 {
   std::string outfile_;
 
  public:
-  SpewAssemblerX64() = default;
+  SpewAssemblerX64() {
+    masm.setSpewStream(&sstream_);
+  }
 
   void setOutFile(std::string outfile) {
     outfile_ = std::move(outfile);
-    masm.setSpewStream(&sstream_);
   }
 
   void label(std::string s) {
@@ -1244,24 +1253,6 @@ class SpewAssemblerX64 : public MacroAssemblerX64 {
       }
       outstream << sstream_.rdbuf();
     }
-  }
-
-  // Hacky method to dump the asm so far into the given file. This is useful
-  // for, e.g trampolines if you want to dump only specific trampolines into
-  // separate files. All the trampolines are generated in one singular masm
-  // flow, so finish_hack just "finishes up" partially (i.e one trampoline).
-  void finish_hack() {
-    MOZ_ASSERT(!outfile_.empty());
-    std::ofstream outstream(outfile_);
-    for (std::string& label : labels_) {
-      outstream << ".globl " << label << '\n';
-    }
-    labels_.clear();
-    outstream << sstream_.rdbuf();
-    sstream_.str("");
-    sstream_.clear();
-    outfile_.clear();
-    masm.clearSpewStream();
   }
 };
 

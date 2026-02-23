@@ -243,12 +243,6 @@ class GenericAssembler {
 #endif
   }
 
-  void clearSpewStream() {
-#ifdef JS_SPASM
-    spewstream = nullptr;
-#endif
-  }
-
 #ifdef JS_JITSPEW
   inline void spew(const char* fmt, ...) MOZ_FORMAT_PRINTF(2, 3) {
     if (MOZ_UNLIKELY(printer || spewstream || JitSpewEnabled(JitSpew_Codegen))) {

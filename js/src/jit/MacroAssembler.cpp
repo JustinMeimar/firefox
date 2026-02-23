@@ -4407,9 +4407,16 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 void MacroAssembler::loadZone() {
   // This function is only valid in the context of AOT IC compilation.
   MOZ_ASSERT(isAOTFill);
+#ifdef JS_SPASM
+#define STRINGIFY_(x) #x
+#define STRINGIFY(x) STRINGIFY_(x)
+  loadPtr(STRINGIFY(TlsContextSym), JSContext::offsetOfZone(), ZoneReg);
+#undef STRINGIFY
+#else
   // Load the Zone via the ICStub field.
   Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
   loadPtr(zonePtr, ZoneReg);
+#endif
   // Note that the zone loading code has been emitted by now.
   zoneLoaded_ = true;
 }
@@ -4426,8 +4433,15 @@ void MacroAssembler::loadRuntime(Register reg) {
 void MacroAssembler::handleFailure() {
   // Re-entry code is irrelevant because the exception will leave the
   // running function and never come back
-  TrampolinePtr excTail = getExceptionTailTrampoline();
-  jump(excTail);
+  if (!isAOTFill) {
+    TrampolinePtr excTail = getExceptionTailTrampoline();
+    jump(excTail);
+  }
+#ifdef JS_SPASM
+  else {
+    jump(ImmPtr((void*)Printf1), excTailLabel());
+  }
+#endif
 }
 
 void MacroAssembler::assumeUnreachable(const char* output) {
@@ -4925,11 +4939,9 @@ void MacroAssembler::alignJitStackBasedOnNArgs(uint32_t argc,
 
 MacroAssembler::MacroAssembler(TempAllocator& alloc,
                                CompileRuntime* maybeRuntime,
-                               CompileRealm* maybeRealm, bool isAOTFill,
-                               mozilla::Maybe<TrampolinePtrs> trampolinePtrs)
+                               CompileRealm* maybeRealm, bool isAOTFill)
     : maybeRuntime_(maybeRuntime),
       maybeRealm_(maybeRealm),
-      trampolinePtrs_(trampolinePtrs),
       isAOTFill(isAOTFill),
       framePushed_(0),
       abiArgs_(/* This will be overwritten for every ABI call, the initial value
@@ -4946,7 +4958,6 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
   // AOT IC compilation must not have access to runtime information.
   MOZ_ASSERT_IF(isAOTFill, maybeRuntime_ == nullptr);
   MOZ_ASSERT_IF(isAOTFill, maybeRealm == nullptr);
-  MOZ_ASSERT_IF(isAOTFill, trampolinePtrs.isSome());
   moveResolver_.setAllocator(alloc);
 }
 
@@ -4954,10 +4965,7 @@ StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
                                          bool isAOTFill)
     : MacroAssembler(
           alloc, isAOTFill ? nullptr : CompileRuntime::get(cx->runtime()),
-          isAOTFill ? nullptr : CompileRealm::get(cx->realm()), isAOTFill,
-          isAOTFill ?
-            mozilla::Some(TrampolinePtrs(cx->runtime()->jitRuntime()))
-            : mozilla::Nothing()) {}
+          isAOTFill ? nullptr : CompileRealm::get(cx->realm()), isAOTFill) {}
 
 OffThreadMacroAssembler::OffThreadMacroAssembler(TempAllocator& alloc,
                                                  CompileRealm* realm)
@@ -5423,6 +5431,52 @@ void MacroAssembler::callWithABINoProfiler(void* fun, ABIType result,
   }
 #endif
 }
+
+#ifdef JS_SPASM
+void MacroAssembler::callWithABINoProfiler(void* fun, const char* funSym, ABIType result,
+                                           CheckUnsafeCallWithABI check) {
+  appendSignatureType(result);
+#ifdef JS_SIMULATOR
+  fun = Simulator::RedirectNativeFunction(fun, signature());
+#endif
+
+  uint32_t stackAdjust;
+  callWithABIPre(&stackAdjust);
+
+#ifdef JS_CHECK_UNSAFE_CALL_WITH_ABI
+  if (check == CheckUnsafeCallWithABI::Check) {
+    // Set the JSContext::inUnsafeCallWithABI flag.
+    push(ReturnReg);
+    loadJSContext(ReturnReg);
+    Address flagAddr(ReturnReg, JSContext::offsetOfInUnsafeCallWithABI());
+    store32(Imm32(1), flagAddr);
+    pop(ReturnReg);
+    // On arm64, SP may be < PSP now (that's OK).
+    // eg testcase: tests/bug1375074.js
+  }
+#endif
+
+  Assembler::call(ImmPtr(fun), std::string(funSym));
+
+  callWithABIPost(stackAdjust, result);
+
+#ifdef JS_CHECK_UNSAFE_CALL_WITH_ABI
+  if (check == CheckUnsafeCallWithABI::Check) {
+    // Check JSContext::inUnsafeCallWithABI was cleared as expected.
+    Label ok;
+    push(ReturnReg);
+    loadJSContext(ReturnReg);
+    Address flagAddr(ReturnReg, JSContext::offsetOfInUnsafeCallWithABI());
+    branch32(Assembler::Equal, flagAddr, Imm32(0), &ok);
+    assumeUnreachable("callWithABI: callee did not use AutoUnsafeCallWithABI");
+    bind(&ok);
+    pop(ReturnReg);
+    // On arm64, SP may be < PSP now (that's OK).
+    // eg testcase: tests/bug1375074.js
+  }
+#endif
+}
+#endif
 
 CodeOffset MacroAssembler::callWithABI(wasm::BytecodeOffset bytecode,
                                        wasm::SymbolicAddress imm,
