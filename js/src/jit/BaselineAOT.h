@@ -41,12 +41,12 @@ extern "C" {
   BASELINE_MANIFEST_FIELDS(DECLARE_MANIFEST_EXTERN)
 #undef DECLARE_MANIFEST_EXTERN
   
-  extern const uint32_t bl_aot_DebugInstrumentationOffsets_start[];
-  extern const uint32_t bl_aot_DebugInstrumentationOffsets_end[];
-  extern const uint32_t bl_aot_DebugTrapOffsets_start[];
-  extern const uint32_t bl_aot_DebugTrapOffsets_end[];
-  extern const uint32_t bl_aot_CodeCoverageOffsets_start[];
-  extern const uint32_t bl_aot_CodeCoverageOffsets_end[];
+  extern const uint8_t bl_aot_DebugInstrumentationOffsets_start[];
+  extern const uint8_t bl_aot_DebugInstrumentationOffsets_end[];
+  extern const uint8_t bl_aot_DebugTrapOffsets_start[];
+  extern const uint8_t bl_aot_DebugTrapOffsets_end[];
+  extern const uint8_t bl_aot_CodeCoverageOffsets_start[];
+  extern const uint8_t bl_aot_CodeCoverageOffsets_end[];
   extern const uint8_t bl_aot_ICReturnOffsets_start[];
   extern const uint8_t bl_aot_ICReturnOffsets_end[];
   extern const uint8_t bl_aot_RuntimePatches_start[];
@@ -61,15 +61,12 @@ inline size_t GetAOTBaselineCodeSize() {
   return bl_aot_code_end - bl_aot_code_start;
 }
 
-enum class BaselineManifestField : uint32_t {
-#define EMIT_ENUM(name) name,
-  BASELINE_MANIFEST_FIELDS(EMIT_ENUM)
-#undef EMIT_ENUM
-  Count
-};
-
-struct alignas(4) BaselineManifest {
-  uint32_t metadata[uint32_t(BaselineManifestField::Count)];
+// Named scalar fields for the AOT manifest. The X-macro drives both
+// .S emission (serializeAOTManifest) and loading (initFromAOT).
+struct AOTManifestScalars {
+#define DECLARE_FIELD(name) uint32_t name = 0;
+  BASELINE_MANIFEST_FIELDS(DECLARE_FIELD)
+#undef DECLARE_FIELD
 };
 
 // Load time context required to apply patches. 
@@ -169,9 +166,6 @@ class RuntimePatch {
 
 static constexpr uintptr_t AOT_PATCH_SENTINEL = 0x0000A070DEADBEEF;
 
-static_assert(sizeof(BaselineManifest) ==
-              static_cast<uint32_t>(BaselineManifestField::Count) * 4,
-              "Manifest size must match metadata count");
 static_assert(sizeof(RuntimePatch) == 12,
               "RuntimePatch size must be 12 bytes");
 

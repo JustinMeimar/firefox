@@ -1318,20 +1318,26 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
 
 bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code) {
   static_assert(sizeof(ICReturnOffset) == 8,
-                "ICReturnOffset size must match Python VECTORS element size");
+                "ICReturnOffset must be 8 bytes");
 
   code_ = code;
 
-  // Scalar fields — read directly from .S symbols.
-  interpretOpOffset_ = bl_aot_InterpretOp;
-  interpretOpNoDebugTrapOffset_ = bl_aot_InterpretOpNoDebugTrap;
-  bailoutPrologueOffset_ = bl_aot_BailoutPrologue;
-  profilerEnterToggleOffset_ = bl_aot_ProfilerEnterToggle;
-  profilerExitToggleOffset_ = bl_aot_ProfilerExitToggle;
-  debugTrapHandlerOffset_ = bl_aot_DebugTrapHandler;
-  callVMOffsets_.debugPrologueOffset = bl_aot_CallVMDebugPrologue;
-  callVMOffsets_.debugEpilogueOffset = bl_aot_CallVMDebugEpilogue;
-  callVMOffsets_.debugAfterYieldOffset = bl_aot_CallVMDebugAfterYield;
+  // Load scalar fields from .S symbols — X-macro is the single source of truth.
+  AOTManifestScalars s;
+#define LOAD_SCALAR(name) s.name = bl_aot_##name;
+  BASELINE_MANIFEST_FIELDS(LOAD_SCALAR)
+#undef LOAD_SCALAR
+
+  // Unpack into interpreter members.
+  interpretOpOffset_ = s.InterpretOp;
+  interpretOpNoDebugTrapOffset_ = s.InterpretOpNoDebugTrap;
+  bailoutPrologueOffset_ = s.BailoutPrologue;
+  profilerEnterToggleOffset_ = s.ProfilerEnterToggle;
+  profilerExitToggleOffset_ = s.ProfilerExitToggle;
+  debugTrapHandlerOffset_ = s.DebugTrapHandler;
+  callVMOffsets_.debugPrologueOffset = s.CallVMDebugPrologue;
+  callVMOffsets_.debugEpilogueOffset = s.CallVMDebugEpilogue;
+  callVMOffsets_.debugAfterYieldOffset = s.CallVMDebugAfterYield;
 
   // Load vectors from start/end symbol pairs.
   auto loadVec = [](auto& destVec, const uint8_t* start, const uint8_t* end) -> bool {
@@ -1344,19 +1350,15 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code) {
     return destVec.append(reinterpret_cast<const T*>(start), count);
   };
 
-  auto asBytes = [](const uint32_t* p) {
-    return reinterpret_cast<const uint8_t*>(p);
-  };
-
   if (!loadVec(debugInstrumentationOffsets_,
-               asBytes(bl_aot_DebugInstrumentationOffsets_start),
-               asBytes(bl_aot_DebugInstrumentationOffsets_end)) ||
+               bl_aot_DebugInstrumentationOffsets_start,
+               bl_aot_DebugInstrumentationOffsets_end) ||
       !loadVec(debugTrapOffsets_,
-               asBytes(bl_aot_DebugTrapOffsets_start),
-               asBytes(bl_aot_DebugTrapOffsets_end)) ||
+               bl_aot_DebugTrapOffsets_start,
+               bl_aot_DebugTrapOffsets_end) ||
       !loadVec(codeCoverageOffsets_,
-               asBytes(bl_aot_CodeCoverageOffsets_start),
-               asBytes(bl_aot_CodeCoverageOffsets_end)) ||
+               bl_aot_CodeCoverageOffsets_start,
+               bl_aot_CodeCoverageOffsets_end) ||
       !loadVec(icReturnOffsets_,
                bl_aot_ICReturnOffsets_start,
                bl_aot_ICReturnOffsets_end) ||
@@ -1368,7 +1370,7 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code) {
   }
 
   // Apply runtime patches.
-  uint32_t dispatchTableOffset = bl_aot_DispatchTableOffset;
+  uint32_t dispatchTableOffset = s.DispatchTableOffset;
   PatchContext patchCtx({cx, code_->raw(), dispatchTableOffset});
   for (const RuntimePatch& patch : runtimePatches) {
     patch.apply(patchCtx);

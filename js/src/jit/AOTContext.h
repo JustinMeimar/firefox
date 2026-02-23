@@ -23,7 +23,6 @@ struct BaselineAOTAccumulator {
   using ICReturnOffsetVector =
       Vector<BaselineInterpreter::ICReturnOffset, 0, SystemAllocPolicy>;
 
-  BaselineManifest manifest = {};
   OffsetVector debugInstr;
   OffsetVector debugTraps;
   OffsetVector codeCoverage;
