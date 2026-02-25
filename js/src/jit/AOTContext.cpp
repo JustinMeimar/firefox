@@ -14,8 +14,8 @@
 using namespace js;
 using namespace js::jit;
 
-AOTContext::AOTContext(TrampolinePtrs trampolines)
-    : trampolines_(trampolines) {}
+AOTContext::AOTContext(AOTStrategy strategy, TrampolinePtrs trampolines)
+    : strategy_(strategy), trampolines_(trampolines) {}
 
 void AOTContext::emitPatchableMovImm(RuntimePatch::Kind kind, Register dest) {
   CodeOffset off =

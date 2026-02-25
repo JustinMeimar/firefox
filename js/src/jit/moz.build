@@ -43,6 +43,7 @@ UNIFIED_SOURCES += [
     "EdgeCaseAnalysis.cpp",
     "EffectiveAddressAnalysis.cpp",
     "ExecutableAllocator.cpp",
+    "ExternalRef.cpp",
     "FlushICache.cpp",
     "FoldLinearArithConstants.cpp",
     "GraphSpewer.cpp",

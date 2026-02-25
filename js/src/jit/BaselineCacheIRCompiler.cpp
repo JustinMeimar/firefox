@@ -2767,7 +2767,8 @@ void js::jit::FillAOTICs(JSContext* cx) {
       }
       CacheIRStubInfo* stubInfo;
       JitCode* code;
-      AOTContext aotCtx(TrampolinePtrs(cx->runtime()->jitRuntime()));
+      AOTContext aotCtx(AOTStrategy::RegisterIndirect,
+                       TrampolinePtrs(cx->runtime()->jitRuntime()));
       (void)LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
                                 "aot stub", &aotCtx, jitZone);
       (void)stubInfo;

@@ -69,12 +69,10 @@ using JS::GenericNaN;
 
 using mozilla::CheckedInt;
 
-#ifdef ENABLE_JS_AOT_ICS
 Register MacroAssembler::zoneReg() {
   MOZ_ASSERT(aot().zoneLoaded());
   return ZoneReg;
 }
-#endif
 
 template <typename T>
 void MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType,
@@ -274,14 +272,11 @@ void MacroAssembler::checkAllocatorState(Register temp, gc::AllocKind allocKind,
     const uint32_t* ptrZealModeBits = runtime()->addressOfGCZealModeBits();
     branch32(Assembler::NotEqual, AbsoluteAddress(ptrZealModeBits), Imm32(0),
              fail);
-  }
-#  ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     loadRuntime(temp);
     Address gcZealModeBitsAddr(temp, JSRuntime::offsetOfGCZealModeBits());
     branch32(Assembler::NotEqual, gcZealModeBitsAddr, Imm32(0), fail);
   }
-#  endif
 #endif
 
   // If the zone has a realm with an object allocation metadata hook, emit a
@@ -357,12 +352,9 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
     CompileZone* zone = realm()->zone();
     bumpPointerAllocate(result, temp, fail, zone, traceKind,
                         totalSize, allocSite);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     bumpPointerAllocateRuntime(result, temp, fail, traceKind, totalSize, allocSite);
   }
-#endif
 
   if (nDynamicSlots) {
     store32(Imm32(nDynamicSlots),
@@ -398,13 +390,10 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
         CompileZone* zone = realm()->zone();
         gc::FreeSpan** ptrFreeList = zone->addressOfFreeList(allocKind);
         loadPtr(AbsoluteAddress(ptrFreeList), target);
-      }
-#ifdef ENABLE_JS_AOT_ICS
-      else {
+      } else {
         Address freeListAddr(zoneReg(), Zone::offsetOfFreeList(allocKind));
         loadPtr(freeListAddr, target);
       }
-#endif
   };
 
   loadFreeList(temp);
@@ -654,13 +643,11 @@ void MacroAssembler::nurseryAllocateString(Register result, Register temp,
 
   size_t thingSize = gc::Arena::thingSize(allocKind);
   const JS::TraceKind traceKind = JS::TraceKind::String;
-#ifdef ENABLE_JS_AOT_ICS
   if (isAOT()) {
     bumpPointerAllocateRuntime(result, temp, fail, traceKind,
                       thingSize);
     return;
   }
-#endif
 
   CompileZone* zone = realm()->zone();
   bumpPointerAllocate(result, temp, fail, zone, traceKind,
@@ -677,13 +664,11 @@ void MacroAssembler::nurseryAllocateBigInt(Register result, Register temp,
 
   size_t thingSize = gc::Arena::thingSize(gc::AllocKind::BIGINT);
   const JS::TraceKind traceKind = JS::TraceKind::BigInt;
-#ifdef ENABLE_JS_AOT_ICS
   if (isAOT()) {
     bumpPointerAllocateRuntime(result, temp, fail, traceKind,
                       thingSize);
     return;
   }
-#endif
   CompileZone* zone = realm()->zone();
   bumpPointerAllocate(result, temp, fail, zone, traceKind,
                     thingSize);
@@ -702,7 +687,6 @@ static bool IsNurseryAllocEnabled(CompileZone* zone, JS::TraceKind kind) {
   }
 }
 
-#ifdef ENABLE_JS_AOT_ICS
 static inline constexpr int32_t offsetOfNurseryFlag(JS::TraceKind kind) {
   switch (kind) {
     case JS::TraceKind::Object:
@@ -736,7 +720,6 @@ static void makeNurseryCellHeaderValueRuntime(
       Address(masm->zoneReg(), offsetOfAllocSiteFromZone), headerWordResult);
   masm->orPtr(Imm32(int32_t(kind)), headerWordResult);
 }
-#endif
 
 // This function handles nursery allocations for JS. For wasm, see
 // MacroAssembler::wasmBumpPointerAllocate.
@@ -806,7 +789,6 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   }
 }
 
-#ifdef ENABLE_JS_AOT_ICS
 void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
                                          Label* fail, JS::TraceKind traceKind,
                                          uint32_t size, const AllocSiteInput& allocSite) {
@@ -875,7 +857,6 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
     storePtr(site, Address(result, -js::Nursery::nurseryCellHeaderSize()));
   }
 }
-#endif
 
 // Update the allocation site in the same way as Nursery::allocateCell.
 void MacroAssembler::updateAllocSite(Register temp, Register result,
@@ -895,7 +876,6 @@ void MacroAssembler::updateAllocSite(Register temp, Register result,
   bind(&done);
 }
 
-#ifdef ENABLE_JS_AOT_ICS
 void MacroAssembler::updateAllocSiteRuntime(Register temp, Register site) {
   Label done;
 
@@ -919,7 +899,6 @@ void MacroAssembler::updateAllocSiteRuntime(Register temp, Register site) {
 
   bind(&done);
 }
-#endif
 
 // Inlined equivalent of gc::AllocateString, jumping to fail if nursery
 // allocation requested but unsuccessful.
@@ -978,9 +957,7 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
               scratchSuccess, &abiCall);
     loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappers()),
             scratch2);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     loadPtr(Address(zoneReg(), Zone::offsetOfPreservedWrappersCount()), scratchSuccess);
     branchPtr(Assembler::Equal,
               Address(zoneReg(), Zone::offsetOfPreservedWrappersCapacity()),
@@ -988,20 +965,16 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
     loadPtr(Address(zoneReg(), Zone::offsetOfPreservedWrappers()),
             scratch2);
   }
-#endif
 
   storePtr(wrapper, BaseIndex(scratch2, scratchSuccess, ScalePointer));
   addPtr(Imm32(1), scratchSuccess);
   if (!isAOT()) {
     storePtr(scratchSuccess,
             AbsoluteAddress(realm()->zone()->zone()->addressOfPreservedWrappersCount()));
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     storePtr(scratchSuccess,
             Address(zoneReg(), Zone::offsetOfPreservedWrappersCount()));
   }
-#endif
   move32(Imm32(1), scratchSuccess);
 
   jump(&done);
@@ -2888,51 +2861,18 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 void MacroAssembler::loadJSContext(Register dest) {
-  if (!isAOT()) {
-    movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    loadRuntime(dest);
-    loadPtr(Address(dest, JSRuntime::offsetOfMainContext()),
-                            dest);
-  }
-#endif
+  moveExternalRef(ExternalRefKind::JSContextPtr, dest);
 }
 
+// Load the current realm pointer (the value of cx->realm_).
+// Used internally by many functions below.
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
   return (static_cast<const uint8_t*>(rt->mainContextPtr()) +
           JSContext::offsetOfRealm());
 }
 
-#ifdef ENABLE_JS_AOT_ICS
-static void ContextRealmLoadRuntime(MacroAssembler* masm,
-                                    Register scratch) {
-  masm->loadRuntime(scratch);
-  masm->loadPtr(Address(scratch, JSRuntime::offsetOfMainContext()),
-                scratch);
-  Address realmAddr(scratch, JSContext::offsetOfRealm());
-  masm->loadPtr(realmAddr, scratch);
-}
-
-// N.B: The returned address is only valid while scratch maintains its value set within.
-static Address ContextRealmAddressRuntime(MacroAssembler* masm, Register scratch) {
-  masm->loadRuntime(scratch);
-  masm->loadPtr(Address(scratch, JSRuntime::offsetOfMainContext()),
-                scratch);
-  return Address(scratch, JSContext::offsetOfRealm());
-}
-#endif
-
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-  if (!isAOT()) {
-    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    ContextRealmLoadRuntime(this, dest);
-  }
-#endif
+  loadExternalRef(ExternalRefKind::ContextRealm, dest);
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
@@ -2940,25 +2880,15 @@ void MacroAssembler::loadGlobalObjectData(Register dest) {
 void MacroAssembler::switchToRealm(Register realm, Register scratch) {
   if (!isAOT()) {
     storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     MOZ_ASSERT(scratch != InvalidReg);
-    storePtr(realm, ContextRealmAddressRuntime(this, scratch));
+    moveExternalRef(ExternalRefKind::ContextRealm, scratch);
+    storePtr(realm, Address(scratch, 0));
   }
-#endif
 }
 
 void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
-  // Load Realm pointer
-  if (!isAOT()) {
-    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    ContextRealmLoadRuntime(this, dest);
-  }
-#endif
+  loadExternalRef(ExternalRefKind::ContextRealm, dest);
   loadPtr(Address(dest, RealmFuses::offsetOfFuseWordRelativeToRealm(index)),
           dest);
 }
@@ -2967,13 +2897,10 @@ void MacroAssembler::loadRuntimeFuse(RuntimeFuses::FuseIndex index,
                                      Register dest) {
   if (!isAOT()) {
     loadPtr(AbsoluteAddress(runtime()->addressOfRuntimeFuse(index)), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     loadRuntime(dest);
     loadPtr(Address(dest, JSRuntime::offsetOfRuntimeFuse(index)), dest);
   }
-#endif
 }
 
 void MacroAssembler::guardRuntimeFuse(RuntimeFuses::FuseIndex index,
@@ -2981,15 +2908,12 @@ void MacroAssembler::guardRuntimeFuse(RuntimeFuses::FuseIndex index,
   if (!isAOT()) {
     AbsoluteAddress addr(runtime()->addressOfRuntimeFuse(index));
     branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     MOZ_ASSERT(scratch != InvalidReg);
     loadRuntime(scratch);
     Address addr(scratch, JSRuntime::offsetOfRuntimeFuse(index));
     branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
   }
-#endif
 }
 
 void MacroAssembler::switchToRealm(const void* realm, Register scratch) {
@@ -3023,14 +2947,7 @@ void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
 
 template <typename ValueType>
 void MacroAssembler::storeLocalAllocSite(ValueType value, Register scratch) {
-  if (!isAOT()) {
-    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), scratch);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    ContextRealmLoadRuntime(this, scratch);
-  }
-#endif
+  loadExternalRef(ExternalRefKind::ContextRealm, scratch);
   storePtr(value, Address(scratch, JS::Realm::offsetOfLocalAllocSite()));
 }
 
@@ -3068,14 +2985,11 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
   if (!isAOT()) {
     branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr(runtime())),
               output, &isFalse);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     MOZ_ASSERT(scratch != InvalidReg);
-    ContextRealmLoadRuntime(this, scratch);
+    loadExternalRef(ExternalRefKind::ContextRealm, scratch);
     branchPtr(Assembler::Equal, scratch, output, &isFalse);
   }
-#endif
 
   // The object must be a function.
   branchTestObjIsFunction(Assembler::NotEqual, obj, output, obj, &isFalse);
@@ -3102,14 +3016,11 @@ void MacroAssembler::guardObjectHasSameRealm(Register obj, Register scratch,
   if (!isAOT()) {
     branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
               scratch, fail);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     MOZ_ASSERT(scratch2 != InvalidReg);
-    ContextRealmLoadRuntime(this, scratch2);
+    loadExternalRef(ExternalRefKind::ContextRealm, scratch2);
     branchPtr(Assembler::NotEqual, scratch2, scratch, fail);
   }
-#endif
 }
 
 void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
@@ -3146,28 +3057,10 @@ void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
 }
 
 void MacroAssembler::loadMegamorphicCache(Register dest) {
-  if (!isAOT()) {
-    movePtr(ImmPtr(runtime()->addressOfMegamorphicCache()), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    loadRuntime(dest);
-    computeEffectiveAddress(
-        Address(dest, JSRuntime::offsetOfMegamorphicCache()), dest);
-  }
-#endif
+  moveExternalRef(ExternalRefKind::MegamorphicCache, dest);
 }
 void MacroAssembler::loadMegamorphicSetPropCache(Register dest) {
-  if (!isAOT()) {
-    movePtr(ImmPtr(runtime()->addressOfMegamorphicSetPropCache()), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    loadRuntime(dest);
-    loadPtr(Address(dest, JSRuntime::offsetOfMegamorphicSetPropCachePtr()),
-            dest);
-  }
-#endif
+  moveExternalRef(ExternalRefKind::MegamorphicSetPropCache, dest);
 }
 
 void MacroAssembler::tryFastAtomize(Register str, Register scratch,
@@ -3180,20 +3073,7 @@ void MacroAssembler::tryFastAtomize(Register str, Register scratch,
   jump(&done);
   bind(&notAtomRef);
 
-  if (!isAOT()) {
-    uintptr_t cachePtr = uintptr_t(runtime()->addressOfStringToAtomCache());
-    void* offset = (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups());
-    movePtr(ImmPtr(offset), scratch);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    loadRuntime(scratch);
-    Address lastLookupAddr(scratch,
-                           JSRuntime::offsetOfStringToAtomCache() +
-                               StringToAtomCache::offsetOfLastLookups());
-    computeEffectiveAddress(lastLookupAddr, scratch);
-  }
-#endif
+  moveExternalRef(ExternalRefKind::StringToAtomCache, scratch);
 
   static_assert(StringToAtomCache::NumLastLookups == 2);
   size_t stringOffset = StringToAtomCache::LastLookup::offsetOfString();
@@ -3234,7 +3114,6 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
                                              Label* cacheMiss) {
   Label isString, isSymbol, isNull, isUndefined, done, nonAtom, atom;
 
-#ifdef ENABLE_JS_AOT_ICS
   if (isAOT()) {
     // Load the runtime before the branches.
     // Each branch is visited once, outId is clobbered and it jumps to done.
@@ -3243,7 +3122,6 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
     loadPtr(Address(outId, JSRuntime::offsetOfCommonNames()), outId);
     // outId contains the ptr to names.
   }
-#endif
 
   {
     ScratchTagScope tag(*this, value);
@@ -3258,16 +3136,13 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
     const JSAtomState& names = runtime()->names();
     movePropertyKey(NameToId(names.undefined), outId);
     move32(Imm32(names.undefined->hash()), outHash);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     Address undefinedAddr(outId, NAME_OFFSET(undefined));
     loadPtr(undefinedAddr, outId);
     loadAtomHash(outId, outHash, nullptr);
     // NameToId
     orPtr(Imm32(js::PropertyKey::StringTypeTag), outId);
   }
-#endif
   jump(&done);
 
   bind(&isNull);
@@ -3275,16 +3150,13 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
     const JSAtomState& names = runtime()->names();
     movePropertyKey(NameToId(names.null), outId);
     move32(Imm32(names.null->hash()), outHash);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     Address nullAddr(outId, NAME_OFFSET(null));
     loadPtr(nullAddr, outId);
     loadAtomHash(outId, outHash, nullptr);
     // NameToId
     orPtr(Imm32(js::PropertyKey::StringTypeTag), outId);
   }
-#endif
   jump(&done);
 
   bind(&isSymbol);
@@ -4132,14 +4004,7 @@ void MacroAssembler::loadJitActivation(Register dest) {
 }
 
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
-  if (!isAOT()) {
-    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    ContextRealmLoadRuntime(this, dest);
-  }
-#endif
+  loadExternalRef(ExternalRefKind::ContextRealm, dest);
   computeEffectiveAddress(Address(dest, Realm::offsetOfBaselineCompileQueue()),
                           dest);
 }
@@ -4416,7 +4281,6 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 }
 
 
-#ifdef ENABLE_JS_AOT_ICS
 void MacroAssembler::loadZone() {
   // This function is only valid in the context of AOT IC compilation.
   MOZ_ASSERT(isAOT());
@@ -4426,9 +4290,7 @@ void MacroAssembler::loadZone() {
   // Note that the zone loading code has been emitted by now.
   aot().setZoneLoaded();
 }
-#endif
 
-#ifdef ENABLE_AOT_BASELINE
 void MacroAssembler::loadBaselineZone() {
   // The zone only needs to be loaded once.
   MOZ_ASSERT(!aot().zoneLoaded());
@@ -4440,9 +4302,7 @@ void MacroAssembler::loadBaselineZone() {
 
   aot().setZoneLoaded();
 }
-#endif
 
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
 void MacroAssembler::loadRuntime(Register reg) {
   Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
   // Load the runtime ptr stored in the zone.
@@ -4450,7 +4310,255 @@ void MacroAssembler::loadRuntime(Register reg) {
   // Do not clobber it!
   loadPtr(runtimeAddr, reg);
 }
-#endif
+
+// ========================================================================
+// Unified ExternalRef overloads.
+
+// Internal helper: resolve an ExternalRefKind to a compile-time pointer for
+// non-AOT mode. This uses CompileRuntime which is only available in non-AOT.
+static ImmPtr ResolveExternalRefCompileTime(ExternalRefKind kind,
+                                            CompileRuntime* rt) {
+  switch (kind) {
+    case ExternalRefKind::JSContextPtr:
+      return ImmPtr(rt->mainContextPtr());
+    case ExternalRefKind::InterruptBits:
+      return ImmPtr(rt->addressOfInterruptBits());
+    case ExternalRefKind::JitActivation:
+      return ImmPtr(rt->addressOfJitActivation());
+    case ExternalRefKind::RealmPtr:
+      return ImmPtr(rt->addressOfRealm());
+    case ExternalRefKind::ContextRealm:
+      return ImmPtr(static_cast<const uint8_t*>(rt->mainContextPtr()) +
+                    JSContext::offsetOfRealm());
+    case ExternalRefKind::WellKnownSymbols:
+      return ImmPtr(&rt->wellKnownSymbols());
+    case ExternalRefKind::JitRuntime:
+      return ImmPtr(rt->jitRuntime());
+    case ExternalRefKind::LastBufferedCell:
+      return ImmPtr(rt->addressOfLastBufferedWholeCell());
+    case ExternalRefKind::ProfilerEnabled:
+      return ImmPtr(rt->geckoProfiler().addressOfEnabled());
+    case ExternalRefKind::ProfilerExitFrameTail: {
+      TrampolinePtr ptr = rt->jitRuntime()->getProfilerExitFrameTail();
+      return ImmPtr(ptr.value);
+    }
+    case ExternalRefKind::DoubleToInt32Stub: {
+      TrampolinePtr ptr = rt->jitRuntime()->getDoubleToInt32ValueStub();
+      return ImmPtr(ptr.value);
+    }
+    case ExternalRefKind::MegamorphicCache:
+      return ImmPtr(rt->addressOfMegamorphicCache());
+    case ExternalRefKind::MegamorphicSetPropCache:
+      return ImmPtr(rt->addressOfMegamorphicSetPropCache());
+    case ExternalRefKind::StringToAtomCache: {
+      auto cachePtr = uintptr_t(rt->addressOfStringToAtomCache());
+      return ImmPtr(
+          (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups()));
+    }
+    case ExternalRefKind::Count:
+      break;
+  }
+  MOZ_CRASH("Unknown ExternalRefKind");
+}
+
+// Internal helper: emit zone->runtime->field load chain for register-indirect
+// AOT strategy (used by AOT ICs). The zone register must already be loaded.
+// Not all ExternalRefKinds are supported here; some are only used by the
+// patch-based (baseline) strategy.
+void MacroAssembler::emitExternalRefViaZone(ExternalRefKind kind,
+                                            Register dest) {
+  // Load runtime from zone.
+  loadRuntime(dest);
+
+  switch (kind) {
+    case ExternalRefKind::JSContextPtr:
+      loadPtr(Address(dest, JSRuntime::offsetOfMainContext()), dest);
+      return;
+    case ExternalRefKind::ContextRealm:
+      // Load cx, then compute address of cx->realm_.
+      loadPtr(Address(dest, JSRuntime::offsetOfMainContext()), dest);
+      computeEffectiveAddress(Address(dest, JSContext::offsetOfRealm()), dest);
+      return;
+    case ExternalRefKind::JitRuntime:
+      loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
+      return;
+    case ExternalRefKind::ProfilerEnabled:
+      computeEffectiveAddress(
+          Address(dest,
+                  JSRuntime::offsetOfGeckoProfiler() +
+                      GeckoProfilerRuntime::offsetOfEnabled()),
+          dest);
+      return;
+    case ExternalRefKind::MegamorphicCache:
+      computeEffectiveAddress(
+          Address(dest, JSRuntime::offsetOfMegamorphicCache()), dest);
+      return;
+    case ExternalRefKind::MegamorphicSetPropCache:
+      loadPtr(Address(dest, JSRuntime::offsetOfMegamorphicSetPropCachePtr()),
+              dest);
+      return;
+    case ExternalRefKind::StringToAtomCache:
+      computeEffectiveAddress(
+          Address(dest,
+                  JSRuntime::offsetOfStringToAtomCache() +
+                      StringToAtomCache::offsetOfLastLookups()),
+          dest);
+      return;
+    case ExternalRefKind::WellKnownSymbols:
+    case ExternalRefKind::InterruptBits:
+    case ExternalRefKind::JitActivation:
+    case ExternalRefKind::RealmPtr:
+    case ExternalRefKind::LastBufferedCell:
+    case ExternalRefKind::ProfilerExitFrameTail:
+    case ExternalRefKind::DoubleToInt32Stub:
+      // These kinds are only used by the patch-based (baseline) strategy.
+      // They don't have convenient offset accessors for register-indirect use.
+      MOZ_CRASH("ExternalRefKind not supported in register-indirect mode");
+    case ExternalRefKind::Count:
+      break;
+  }
+  MOZ_CRASH("Unknown ExternalRefKind");
+}
+
+void MacroAssembler::moveExternalRef(ExternalRefKind kind, Register dest) {
+  if (!isAOT()) {
+    movePtr(ResolveExternalRefCompileTime(kind, runtime()), dest);
+    return;
+  }
+  switch (aot().strategy()) {
+    case AOTStrategy::PatchBasedBlob:
+      aot().emitPatchableMovImm(ExternalRefKindToPatchKind(kind), dest);
+      return;
+    case AOTStrategy::RegisterIndirect:
+      emitExternalRefViaZone(kind, dest);
+      return;
+  }
+}
+
+void MacroAssembler::loadExternalRef(ExternalRefKind kind, Register dest) {
+  // Load the value *at* the external ref address.
+  moveExternalRef(kind, dest);
+  loadPtr(Address(dest, 0), dest);
+}
+
+void MacroAssembler::branchExternalRef32(Condition cond, ExternalRefKind kind,
+                                         Imm32 rhs, Label* label,
+                                         Register scratch) {
+  if (!isAOT()) {
+    branch32(cond, AbsoluteAddress(ResolveExternalRefCompileTime(kind, runtime()).value),
+             rhs, label);
+    return;
+  }
+  moveExternalRef(kind, scratch);
+  branch32(cond, Address(scratch, 0), rhs, label);
+}
+
+void MacroAssembler::loadZoneFieldPtr(uint32_t zoneOffset,
+                                      const void* compileTimeAddr,
+                                      Register dest) {
+  if (!isAOT()) {
+    loadPtr(AbsoluteAddress(compileTimeAddr), dest);
+    return;
+  }
+  loadPtr(Address(zoneReg(), zoneOffset), dest);
+}
+
+void MacroAssembler::branchZoneField32(Condition cond, uint32_t zoneOffset,
+                                       const void* compileTimeAddr, Imm32 rhs,
+                                       Label* label) {
+  if (!isAOT()) {
+    branch32(cond, AbsoluteAddress(compileTimeAddr), rhs, label);
+    return;
+  }
+  branch32(cond, Address(zoneReg(), zoneOffset), rhs, label);
+}
+
+void MacroAssembler::storeZoneFieldPtr(uint32_t zoneOffset,
+                                       const void* compileTimeAddr,
+                                       Register value) {
+  if (!isAOT()) {
+    storePtr(value, AbsoluteAddress(compileTimeAddr));
+    return;
+  }
+  storePtr(value, Address(zoneReg(), zoneOffset));
+}
+
+void MacroAssembler::leaZoneField(uint32_t zoneOffset,
+                                  const void* compileTimeAddr, Register dest) {
+  if (!isAOT()) {
+    movePtr(ImmPtr(compileTimeAddr), dest);
+    return;
+  }
+  computeEffectiveAddress(Address(zoneReg(), zoneOffset), dest);
+}
+
+void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
+  if (!isAOT()) {
+    TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
+    movePtr(ImmPtr(ptr.value), dest);
+    return;
+  }
+  switch (aot().strategy()) {
+    case AOTStrategy::PatchBasedBlob:
+      aot().emitVMWrapperPatchableMovImm(id, dest);
+      return;
+    case AOTStrategy::RegisterIndirect:
+      MOZ_CRASH("loadVMWrapper not yet supported in register-indirect mode");
+  }
+}
+
+void MacroAssembler::loadCppFunction(AOTCppFunctionId fnId, Register dest) {
+  if (!isAOT()) {
+    // In non-AOT mode, the caller typically uses callWithABI(ImmPtr(fn)).
+    // This method provides the function pointer for the AOT case.
+    void* fn = nullptr;
+    switch (fnId) {
+      case AOTCppFunctionId::PostWriteBarrier:
+        fn = reinterpret_cast<void*>(PostWriteBarrier);
+        break;
+      case AOTCppFunctionId::FrameIsDebuggeeCheck:
+        fn = reinterpret_cast<void*>(FrameIsDebuggeeCheck);
+        break;
+      case AOTCppFunctionId::HandleCodeCoverageAtPrologue:
+        fn = reinterpret_cast<void*>(HandleCodeCoverageAtPrologue);
+        break;
+      case AOTCppFunctionId::HandleCodeCoverageAtPC:
+        fn = reinterpret_cast<void*>(HandleCodeCoverageAtPC);
+        break;
+      case AOTCppFunctionId::Count:
+        MOZ_CRASH("Invalid AOTCppFunctionId");
+    }
+    movePtr(ImmPtr(fn), dest);
+    return;
+  }
+  switch (aot().strategy()) {
+    case AOTStrategy::PatchBasedBlob:
+      aot().emitCppFunctionPatchableMovImm(fnId, dest);
+      return;
+    case AOTStrategy::RegisterIndirect:
+      MOZ_CRASH("loadCppFunction not supported in register-indirect mode");
+  }
+}
+
+void MacroAssembler::loadDebugTrapHandler(DebugTrapHandlerKind dbgKind,
+                                          Register dest) {
+  if (!isAOT()) {
+    JitCode* handlerCode =
+        runtime()->jitRuntime()->debugTrapHandler(dbgKind);
+    movePtr(ImmPtr(handlerCode->raw()), dest);
+    return;
+  }
+  switch (aot().strategy()) {
+    case AOTStrategy::PatchBasedBlob:
+      aot().emitDebugTrapPatchableMovImm(dbgKind, dest);
+      return;
+    case AOTStrategy::RegisterIndirect:
+      MOZ_CRASH("loadDebugTrapHandler not supported in register-indirect mode");
+  }
+}
+
+// End of unified ExternalRef overloads.
+// ========================================================================
 
 void MacroAssembler::handleFailure() {
   // Re-entry code is irrelevant because the exception will leave the

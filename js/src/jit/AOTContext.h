@@ -17,6 +17,17 @@ namespace js::jit {
 class MacroAssembler;
 enum class DebugTrapHandlerKind;
 
+// Strategy for resolving external references in AOT-compiled code.
+enum class AOTStrategy {
+  // Emit a sentinel immediate via movWithPatch and register a RuntimePatch
+  // entry. At load time, the sentinel is replaced with the resolved address.
+  // Used by the AOT baseline interpreter.
+  PatchBasedBlob,
+  // Emit a register-indirect load chain: zone -> runtime -> field.
+  // Used by AOT IC stubs.
+  RegisterIndirect,
+};
+
 struct BaselineAOTAccumulator {
   using OffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
   using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
@@ -39,12 +50,13 @@ struct BaselineAOTAccumulator {
 // indicates that AOT codegen mode is active.
 class AOTContext {
  public:
-  explicit AOTContext(TrampolinePtrs trampolines);
+  AOTContext(AOTStrategy strategy, TrampolinePtrs trampolines);
 
   // Bind this context to a MacroAssembler. Called by MacroAssembler's
   // constructor after it stores the AOTContext pointer.
   void bindMasm(MacroAssembler& masm) { masm_ = &masm; }
 
+  AOTStrategy strategy() const { return strategy_; }
   const TrampolinePtrs& trampolines() const { return trampolines_; }
 
   bool zoneLoaded() const { return zoneLoaded_; }
@@ -62,6 +74,7 @@ class AOTContext {
 
  private:
   MacroAssembler* masm_ = nullptr;
+  AOTStrategy strategy_;
   TrampolinePtrs trampolines_;
   bool zoneLoaded_ = false;
   BaselineAOTAccumulator accumulator_;

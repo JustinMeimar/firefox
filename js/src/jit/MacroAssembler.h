@@ -38,6 +38,7 @@
 #include "jit/ABIFunctions.h"
 #include "jit/AOTContext.h"
 #include "jit/AtomicOp.h"
+#include "jit/ExternalRef.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
 #include "jit/TrampolinePtrs.h"
@@ -408,6 +409,48 @@ class MacroAssembler : public MacroAssemblerSpecific {
     return *aotContext_;
   }
 
+  // Unified ExternalRef methods. These accept an ExternalRefKind and
+  // internally dispatch based on whether AOT codegen is active and which
+  // AOT strategy is in use (patch-based vs register-indirect).
+  //
+  // Note: these use distinct names (moveExternalRef/loadExternalRef) rather
+  // than overloading movePtr/loadPtr to avoid C++ name hiding issues with
+  // the base class methods.
+
+  // Materialize the address of an external reference into dest.
+  void moveExternalRef(ExternalRefKind kind, Register dest);
+
+  // Load the value *at* an external reference address into dest.
+  void loadExternalRef(ExternalRefKind kind, Register dest);
+
+  // Branch on a 32-bit value at an external reference address.
+  // Non-AOT: uses AbsoluteAddress. AOT: uses moveExternalRef + Address.
+  void branchExternalRef32(Condition cond, ExternalRefKind kind, Imm32 rhs,
+                           Label* label, Register scratch);
+
+  // Zone-field helpers: access fields relative to the zone pointer.
+  // Non-AOT: uses AbsoluteAddress(compileTimeAddr).
+  // AOT: uses Address(zoneReg(), zoneOffset).
+  void loadZoneFieldPtr(uint32_t zoneOffset, const void* compileTimeAddr,
+                        Register dest);
+  void branchZoneField32(Condition cond, uint32_t zoneOffset,
+                         const void* compileTimeAddr, Imm32 rhs, Label* label);
+  void storeZoneFieldPtr(uint32_t zoneOffset, const void* compileTimeAddr,
+                         Register value);
+  void leaZoneField(uint32_t zoneOffset, const void* compileTimeAddr,
+                    Register dest);
+
+  // Parametric reference helpers.
+  void loadVMWrapper(VMFunctionId id, Register dest);
+  void loadCppFunction(AOTCppFunctionId fnId, Register dest);
+  void loadDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
+
+ private:
+  // Internal helper: emit the zone->runtime->field load chain for a given
+  // ExternalRefKind. Only used in AOT RegisterIndirect strategy.
+  void emitExternalRefViaZone(ExternalRefKind kind, Register dest);
+
+ public:
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
     // shared between visitors in the CodeGenerator. This assertion
@@ -1938,12 +1981,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void branchTestNeedsIncrementalBarrierAnyZone(Condition cond,
                                                        Label* label,
                                                        Register scratch);
-#ifdef ENABLE_JS_AOT_ICS
   // Version of `branchTestNeedsIncrementalBarrier` that loads the zone at runtime.
-  // See 'Runtime agnostic code generation'.
+  // Used by AOT code where the zone is loaded dynamically.
   inline void branchTestNeedsIncrementalBarrierRuntime(Condition cond,
                                                        Label* label);
-#endif
 
   // Perform a type-test on a tag of a Value (32bits boxing), or the tagged
   // value (64bits boxing).
@@ -5262,13 +5303,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
     if (!isAOT()) {
-        branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
-    }
-#ifdef ENABLE_JS_AOT_ICS
-    else {
+      branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
+    } else {
       branchTestNeedsIncrementalBarrierRuntime(Assembler::Zero, &done);
     }
-#endif
     unguardedCallPreBarrier(address, type);
     bind(&done);
   }
@@ -5628,16 +5666,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            const AllocSiteInput& allocSite = AllocSiteInput());
   void updateAllocSite(Register temp, Register result, CompileZone* zone,
                        Register site);
-#ifdef ENABLE_JS_AOT_ICS
   // Version of `bumpPointerAllocate` that loads the zone at runtime.
-  // See 'Runtime agnostic code generation'.
+  // Used by AOT code where the zone is loaded dynamically.
   void bumpPointerAllocateRuntime(Register result, Register temp, Label* fail,
                                   JS::TraceKind traceKind, uint32_t size,
                            const AllocSiteInput& allocSite = AllocSiteInput());
   // Version of `updateAllocSite` that loads the zone at runtime.
-  // See 'Runtime agnostic code generation'.
   void updateAllocSiteRuntime(Register temp, Register site);
-#endif
 
   void freeListAllocate(Register result, Register temp, gc::AllocKind allocKind,
                         Label* fail);
@@ -5945,22 +5980,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void reserveStack(uint32_t amount);
 #endif
 
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
  public:
-  // Load the runtime ptr from the zone, into given register.
-  // See 'Runtime agnostic code generation'.
+  // Load the runtime ptr from the zone register into the given register.
+  // Only valid when isAOT() is true and the zone register is loaded.
   void loadRuntime(Register reg);
   Register zoneReg();
-  // Load the zone into zoneReg at runtime.
-  // See 'Runtime agnostic code generation'.
+  // Load the zone into zoneReg at runtime (IC: from ICStub, baseline: from frame).
   void loadZone();
-#endif
-
-#ifdef ENABLE_AOT_BASELINE
-  // Load the zone into zoneReg at runtime from BaselineFrame.
-  // See 'Runtime agnostic code generation'.
   void loadBaselineZone();
-#endif
 
  public:
   void enableProfilingInstrumentation() {

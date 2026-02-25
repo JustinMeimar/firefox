@@ -790,25 +790,19 @@ void MacroAssembler::branchTestNeedsIncrementalBarrierAnyZone(
   } else {
     // We are compiling the interpreter or another runtime-wide trampoline, so
     // we have to load cx->zone.
-#ifdef ENABLE_AOT_BASELINE
     if (isAOT()) {
-      // For AOT baseline interpreter, use the pinned zone register for PIC.
-      // The zone register is loaded and pinned in the interpreter prologue.
-      MOZ_ASSERT(aot().zoneLoaded() && "Zone register should be pinned in "
-                                       "prologue from BaselineFrame");
+      // For AOT code, use the pinned zone register.
+      MOZ_ASSERT(aot().zoneLoaded() && "Zone register should be loaded");
       mov(zoneReg(), scratch);
-    } else 
-#endif
-    {
+    } else {
       // Not AOT mode: load zone pointer via absolute address (non-PIC).
       loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
-    } 
+    }
     Address needsBarrierAddr(scratch, Zone::offsetOfNeedsIncrementalBarrier());
     branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
   }
 }
 
-#ifdef ENABLE_JS_AOT_ICS
 void MacroAssembler::branchTestNeedsIncrementalBarrierRuntime(Condition cond,
                                                               Label* label) {
   MOZ_ASSERT(cond == Zero || cond == NonZero);
@@ -816,7 +810,6 @@ void MacroAssembler::branchTestNeedsIncrementalBarrierRuntime(Condition cond,
   Address needsBarrierAddr(zoneReg(), Zone::offsetOfNeedsIncrementalBarrier());
   branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
 }
-#endif
 
 void MacroAssembler::branchTestMagicValue(Condition cond,
                                           const ValueOperand& val,
