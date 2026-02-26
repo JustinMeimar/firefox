@@ -7,7 +7,6 @@
 #include "jit/AOTContext.h"
 
 #include "jit/JitRuntime.h"
-#include "vm/Shape.h"
 
 #include "jit/MacroAssembler-inl.h"
 
@@ -47,11 +46,4 @@ void AOTContext::emitDebugTrapPatchableMovImm(DebugTrapHandlerKind dbgKind,
   accumulator_.registerPatch(RuntimePatch::DebugTrapPatch(immOff, dbgKind));
 }
 
-void AOTContext::emitSwitchToObjectRealm(Register obj, Register scratch,
-                                         Register realmDst) {
-  masm_->loadObjShapeUnsafe(obj, scratch);
-  masm_->loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
-  masm_->loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  emitPatchableMovImm(RuntimePatch::Kind::ContextRealm, realmDst);
-  masm_->storePtr(scratch, Address(realmDst, 0));
-}
+
