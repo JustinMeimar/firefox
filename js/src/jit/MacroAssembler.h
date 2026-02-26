@@ -400,31 +400,17 @@ class MacroAssembler : public MacroAssemblerSpecific {
                           AOTContext* aotContext = nullptr);
 
  public:
-  // Whether or not AOT codegen mode is active.
   bool isAOT() const { return aotContext_ != nullptr; }
 
-  // Access the AOT context. Only valid when isAOT() is true.
   AOTContext& aot() const {
     MOZ_ASSERT(aotContext_);
     return *aotContext_;
   }
 
-  // Unified ExternalRef methods. These accept an ExternalRefKind and
-  // internally dispatch based on whether AOT codegen is active and which
-  // AOT strategy is in use (patch-based vs register-indirect).
-  //
-  // Note: these use distinct names (moveExternalRef/loadExternalRef) rather
-  // than overloading movePtr/loadPtr to avoid C++ name hiding issues with
-  // the base class methods.
-
-  // Materialize the address of an external reference into dest.
+  // Wraps regular codegen in non-aot mode and dispatches to the set
+  // strategy when AOT is on.
   void moveExternalRef(ExternalRefKind kind, Register dest);
-
-  // Load the value *at* an external reference address into dest.
   void loadExternalRef(ExternalRefKind kind, Register dest);
-
-  // Branch on a 32-bit value at an external reference address.
-  // Non-AOT: uses AbsoluteAddress. AOT: uses moveExternalRef + Address.
   void branchExternalRef32(Condition cond, ExternalRefKind kind, Imm32 rhs,
                            Label* label, Register scratch);
 

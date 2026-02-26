@@ -28,6 +28,8 @@ enum class AOTStrategy {
   RegisterIndirect,
 };
 
+// Accumulate the metadata, required for reconstructing the BaselineInterpreter
+// class at load time, and patches, to repair the AOT code at load time.
 struct BaselineAOTAccumulator {
   using OffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
   using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
@@ -69,8 +71,6 @@ class AOTContext {
   void emitCppFunctionPatchableMovImm(AOTCppFunctionId fnId, Register dest);
   void emitDebugTrapPatchableMovImm(DebugTrapHandlerKind dbgKind,
                                     Register dest);
-  void emitSwitchToObjectRealm(Register obj, Register scratch,
-                               Register realmDst);
 
  private:
   MacroAssembler* masm_ = nullptr;

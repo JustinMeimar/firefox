@@ -638,11 +638,9 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
 
   // Check one element cache to avoid VM call.
   Label skipBarrier;
-  {
-    Register ptrReg = R1.scratchReg();
-    masm.loadExternalRef(ExternalRefKind::LastBufferedCell, ptrReg);
-    masm.branchPtr(Assembler::Equal, ptrReg, objReg, &skipBarrier);
-  }
+  Register ptrReg = R1.scratchReg();
+  masm.loadExternalRef(ExternalRefKind::LastBufferedCell, ptrReg);
+  masm.branchPtr(Assembler::Equal, ptrReg, objReg, &skipBarrier);
 
   saveInterpreterPCReg();
 
@@ -1604,11 +1602,9 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
   frame.syncStack(0);
 
   Label done;
-  {
-    Register scratch = R0.scratchReg();
-    masm.branchExternalRef32(Assembler::Equal, ExternalRefKind::InterruptBits,
-                             Imm32(0), &done, scratch);
-  }
+  Register scratch = R0.scratchReg();
+  masm.branchExternalRef32(Assembler::Equal, ExternalRefKind::InterruptBits,
+                           Imm32(0), &done, scratch);
 
   prepareVMCall();
 
@@ -1776,13 +1772,11 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     // the frame currently being OSR-ed
     {
       Label checkOk;
-      {
-        Register ptrReg = regs.takeAny();
-        masm.branchExternalRef32(Assembler::Equal,
-                                 ExternalRefKind::ProfilerEnabled, Imm32(0),
-                                 &checkOk, ptrReg);
-        masm.loadExternalRef(ExternalRefKind::JitActivation, scratchReg);
-      }
+      Register ptrReg = regs.takeAny();
+      masm.branchExternalRef32(Assembler::Equal,
+                               ExternalRefKind::ProfilerEnabled, Imm32(0),
+                               &checkOk, ptrReg);
+      masm.loadExternalRef(ExternalRefKind::JitActivation, scratchReg);
       masm.loadPtr(
           Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
           scratchReg);
@@ -2029,12 +2023,9 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   // jump. Starts off initially disabled.
   Label noInstrument;
   CodeOffset toggleOffset = masm.toggledJump(&noInstrument);
-
-  {
-    Register ptrReg = R1.scratchReg();
-    masm.moveExternalRef(ExternalRefKind::ProfilerExitFrameTail, ptrReg);
-    masm.jump(ptrReg);
-  }
+  Register ptrReg = R1.scratchReg();
+  masm.moveExternalRef(ExternalRefKind::ProfilerExitFrameTail, ptrReg);
+  masm.jump(ptrReg);
 
   masm.bind(&noInstrument);
 
@@ -7267,9 +7258,10 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
     const Label& opLabel = opLabels[i];
     MOZ_ASSERT(opLabel.bound());
-    CodeLabel cl;
+    CodeLabel cl; 
     if (aot_) {
-      // Create a PatchEntry for this code pointer.
+      // NOTE(Justin): Should this patch also be performed beneath the
+      // `masm` interface boundary?
       uint32_t handlerOffset = opLabel.offset();
       uint32_t targetOffset = tableOffset_ + (i * sizeof(uintptr_t));
       RuntimePatch patch =
