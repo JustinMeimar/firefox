@@ -22,7 +22,7 @@ enum class AOTStrategy {
   // Emit a sentinel immediate via movWithPatch and register a RuntimePatch
   // entry. At load time, the sentinel is replaced with the resolved address.
   // Used by the AOT baseline interpreter.
-  PatchBasedBlob,
+  PatchPointers,
   // Emit a register-indirect load chain: zone -> runtime -> field.
   // Used by AOT IC stubs.
   RegisterIndirect,

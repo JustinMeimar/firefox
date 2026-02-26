@@ -15,46 +15,31 @@ struct JSContext;
 
 namespace js::jit {
 
-// Enumerates all non-parametric runtime-dependent references that the JIT
-// codegen may need. Each kind maps to a specific absolute address that varies
+// Enumerates runtime-dependent references that the JIT codegen may need.
+// Each kind maps to a specific absolute address that varies
 // between processes (due to ASLR, different builds, etc.).
 //
-// The unified MacroAssembler overloads (movePtr, loadPtr, branch32, storePtr)
-// accept ExternalRefKind and internally dispatch to the right strategy:
-//   - Non-AOT: resolve to ImmPtr/AbsoluteAddress at compile time
-//   - AOT PatchBasedBlob: emit sentinel via movWithPatch + register patch
-//   - AOT RegisterIndirect: emit zone->runtime->field load chain
+// The wrappers (movePtr, loadPtr, branch32, storePtr) which take runtime
+// pointers accept ExternalRefKind and internally dispatch to the right
+// strategy:
+//   1) Non-AOT: resolve to ImmPtr/AbsoluteAddress at compile time
+//   2) AOT PatchBasedBlob: emit sentinel via movWithPatch + register patch
+//   3) AOT RegisterIndirect: emit zone->runtime->field load chain
+
+// Only in ExternalRefKind (register-indirect strategy, no patching).
+#define EXTERNAL_REF_ONLY_KINDS(V) \
+  V(MegamorphicCache)          \
+  V(MegamorphicSetPropCache)   \
+  V(StringToAtomCache)
+
+#define EXTERNAL_REF_KINDS(V)   \
+  EXTERNAL_REF_SHARED_KINDS(V) \
+  EXTERNAL_REF_ONLY_KINDS(V)
+
 enum class ExternalRefKind : uint16_t {
-  // JSContext pointer (the main context).
-  JSContextPtr,
-  // Address of interrupt bits for interrupt checks.
-  InterruptBits,
-  // Address of JIT activation.
-  JitActivation,
-  // Address of the realm pointer in JSContext.
-  RealmPtr,
-  // Address of context realm (cx + offsetOfRealm).
-  ContextRealm,
-  // Pointer to well-known symbols table.
-  WellKnownSymbols,
-  // Pointer to the JitRuntime.
-  JitRuntime,
-  // Address of the last buffered whole cell for GC.
-  LastBufferedCell,
-  // Address of the profiler enabled flag.
-  ProfilerEnabled,
-  // Address of the profiler exit frame tail trampoline.
-  ProfilerExitFrameTail,
-  // Address of the double-to-int32 conversion stub.
-  DoubleToInt32Stub,
-
-  // Address of the megamorphic cache.
-  MegamorphicCache,
-  // Pointer to the megamorphic set-prop cache.
-  MegamorphicSetPropCache,
-  // Address of the string-to-atom cache (+ lastLookups offset).
-  StringToAtomCache,
-
+#define EMIT_KIND(name) name,
+  EXTERNAL_REF_KINDS(EMIT_KIND)
+#undef EMIT_KIND
   Count
 };
 
@@ -63,10 +48,15 @@ enum class ExternalRefKind : uint16_t {
 // verify patch correctness.
 uintptr_t ResolveExternalRef(ExternalRefKind kind, JSContext* cx);
 
-// Map an ExternalRefKind to the corresponding RuntimePatch::Kind for the
-// patch-based AOT strategy. This allows the unified methods to reuse the
-// existing RuntimePatch infrastructure.
-RuntimePatch::Kind ExternalRefKindToPatchKind(ExternalRefKind kind);
+// Shared kinds are emitted first in both ExternalRefKind and
+// RuntimePatch::Kind (via EXTERNAL_REF_SHARED_KINDS), so a static_cast
+// between them is valid for any shared kind.
+#define CHECK_SHARED_ORDINAL(name) \
+  static_assert(static_cast<uint16_t>(ExternalRefKind::name) == \
+                static_cast<uint16_t>(RuntimePatch::Kind::name), \
+                "ExternalRefKind::" #name " != RuntimePatch::Kind::" #name);
+   EXTERNAL_REF_SHARED_KINDS(CHECK_SHARED_ORDINAL)
+#undef CHECK_SHARED_ORDINAL
 
 }  // namespace js::jit
 

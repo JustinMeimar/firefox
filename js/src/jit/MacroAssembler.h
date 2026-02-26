@@ -428,18 +428,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void branchExternalRef32(Condition cond, ExternalRefKind kind, Imm32 rhs,
                            Label* label, Register scratch);
 
-  // Zone-field helpers: access fields relative to the zone pointer.
-  // Non-AOT: uses AbsoluteAddress(compileTimeAddr).
-  // AOT: uses Address(zoneReg(), zoneOffset).
-  void loadZoneFieldPtr(uint32_t zoneOffset, const void* compileTimeAddr,
-                        Register dest);
-  void branchZoneField32(Condition cond, uint32_t zoneOffset,
-                         const void* compileTimeAddr, Imm32 rhs, Label* label);
-  void storeZoneFieldPtr(uint32_t zoneOffset, const void* compileTimeAddr,
-                         Register value);
-  void leaZoneField(uint32_t zoneOffset, const void* compileTimeAddr,
-                    Register dest);
-
   // Parametric reference helpers.
   void loadVMWrapper(VMFunctionId id, Register dest);
   void loadCppFunction(AOTCppFunctionId fnId, Register dest);

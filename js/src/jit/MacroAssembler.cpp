@@ -4426,8 +4426,8 @@ void MacroAssembler::moveExternalRef(ExternalRefKind kind, Register dest) {
     return;
   }
   switch (aot().strategy()) {
-    case AOTStrategy::PatchBasedBlob:
-      aot().emitPatchableMovImm(ExternalRefKindToPatchKind(kind), dest);
+    case AOTStrategy::PatchPointers:
+      aot().emitPatchableMovImm(static_cast<RuntimePatch::Kind>(kind), dest);
       return;
     case AOTStrategy::RegisterIndirect:
       emitExternalRefViaZone(kind, dest);
@@ -4453,45 +4453,6 @@ void MacroAssembler::branchExternalRef32(Condition cond, ExternalRefKind kind,
   branch32(cond, Address(scratch, 0), rhs, label);
 }
 
-void MacroAssembler::loadZoneFieldPtr(uint32_t zoneOffset,
-                                      const void* compileTimeAddr,
-                                      Register dest) {
-  if (!isAOT()) {
-    loadPtr(AbsoluteAddress(compileTimeAddr), dest);
-    return;
-  }
-  loadPtr(Address(zoneReg(), zoneOffset), dest);
-}
-
-void MacroAssembler::branchZoneField32(Condition cond, uint32_t zoneOffset,
-                                       const void* compileTimeAddr, Imm32 rhs,
-                                       Label* label) {
-  if (!isAOT()) {
-    branch32(cond, AbsoluteAddress(compileTimeAddr), rhs, label);
-    return;
-  }
-  branch32(cond, Address(zoneReg(), zoneOffset), rhs, label);
-}
-
-void MacroAssembler::storeZoneFieldPtr(uint32_t zoneOffset,
-                                       const void* compileTimeAddr,
-                                       Register value) {
-  if (!isAOT()) {
-    storePtr(value, AbsoluteAddress(compileTimeAddr));
-    return;
-  }
-  storePtr(value, Address(zoneReg(), zoneOffset));
-}
-
-void MacroAssembler::leaZoneField(uint32_t zoneOffset,
-                                  const void* compileTimeAddr, Register dest) {
-  if (!isAOT()) {
-    movePtr(ImmPtr(compileTimeAddr), dest);
-    return;
-  }
-  computeEffectiveAddress(Address(zoneReg(), zoneOffset), dest);
-}
-
 void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
   if (!isAOT()) {
     TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
@@ -4499,7 +4460,7 @@ void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
     return;
   }
   switch (aot().strategy()) {
-    case AOTStrategy::PatchBasedBlob:
+    case AOTStrategy::PatchPointers:
       aot().emitVMWrapperPatchableMovImm(id, dest);
       return;
     case AOTStrategy::RegisterIndirect:
@@ -4532,7 +4493,7 @@ void MacroAssembler::loadCppFunction(AOTCppFunctionId fnId, Register dest) {
     return;
   }
   switch (aot().strategy()) {
-    case AOTStrategy::PatchBasedBlob:
+    case AOTStrategy::PatchPointers:
       aot().emitCppFunctionPatchableMovImm(fnId, dest);
       return;
     case AOTStrategy::RegisterIndirect:
@@ -4549,16 +4510,13 @@ void MacroAssembler::loadDebugTrapHandler(DebugTrapHandlerKind dbgKind,
     return;
   }
   switch (aot().strategy()) {
-    case AOTStrategy::PatchBasedBlob:
+    case AOTStrategy::PatchPointers:
       aot().emitDebugTrapPatchableMovImm(dbgKind, dest);
       return;
     case AOTStrategy::RegisterIndirect:
       MOZ_CRASH("loadDebugTrapHandler not supported in register-indirect mode");
   }
 }
-
-// End of unified ExternalRef overloads.
-// ========================================================================
 
 void MacroAssembler::handleFailure() {
   // Re-entry code is irrelevant because the exception will leave the

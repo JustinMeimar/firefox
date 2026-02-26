@@ -7370,13 +7370,6 @@ static void verifySentinelsPatched(const uint8_t* code, size_t codeSize,
           "Sentinel verification passed: all sentinels covered by patches.");
 }
 
-static void verifyAOTRelocations(const OffsetVector& absolutePtrs,
-                                 const RuntimePatchVector& patches) {
-  // TODO(Justin): Verify that each runtime pointer the masm catches
-  // matches one of our patches.
-  return;
-}
-
 // Helpers to emit GAS assembly. All prepend the "bl_aot_" prefix.
 
 static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
@@ -7433,8 +7426,6 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
 
-  verifyAOTRelocations(masm.aotRuntimePointers(),
-                       aot_->accumulator().runtimePatches);
 #ifdef DEBUG
   verifySentinelsPatched(codeStart, codeSize,
                          aot_->accumulator().runtimePatches);

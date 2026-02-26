@@ -59,40 +59,5 @@ uintptr_t ResolveExternalRef(ExternalRefKind kind, JSContext* cx) {
   MOZ_CRASH("Unknown ExternalRefKind");
 }
 
-RuntimePatch::Kind ExternalRefKindToPatchKind(ExternalRefKind kind) {
-  switch (kind) {
-    case ExternalRefKind::JSContextPtr:
-      return RuntimePatch::Kind::JSContextPtr;
-    case ExternalRefKind::InterruptBits:
-      return RuntimePatch::Kind::InterruptBits;
-    case ExternalRefKind::JitActivation:
-      return RuntimePatch::Kind::JitActivation;
-    case ExternalRefKind::RealmPtr:
-      return RuntimePatch::Kind::RealmPtr;
-    case ExternalRefKind::ContextRealm:
-      return RuntimePatch::Kind::ContextRealm;
-    case ExternalRefKind::WellKnownSymbols:
-      return RuntimePatch::Kind::WellKnownSymbols;
-    case ExternalRefKind::JitRuntime:
-      return RuntimePatch::Kind::JitRuntime;
-    case ExternalRefKind::LastBufferedCell:
-      return RuntimePatch::Kind::LastBufferedCell;
-    case ExternalRefKind::ProfilerEnabled:
-      return RuntimePatch::Kind::ProfilerEnabled;
-    case ExternalRefKind::ProfilerExitFrameTail:
-      return RuntimePatch::Kind::ProfilerExitFrameTail;
-    case ExternalRefKind::DoubleToInt32Stub:
-      return RuntimePatch::Kind::DoubleToInt32Stub;
-    case ExternalRefKind::MegamorphicCache:
-    case ExternalRefKind::MegamorphicSetPropCache:
-    case ExternalRefKind::StringToAtomCache:
-      // These are only used by the register-indirect (IC) strategy
-      // and have no corresponding RuntimePatch::Kind.
-      MOZ_CRASH("No patch kind for IC-only ExternalRefKind");
-    case ExternalRefKind::Count:
-      break;
-  }
-  MOZ_CRASH("Unknown ExternalRefKind");
-}
 
 }  // namespace js::jit

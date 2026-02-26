@@ -1396,7 +1396,7 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
 #ifdef ENABLE_AOT_BASELINE
     // When dumping AOT baseline for offline compilation, enable PIC mode.
     if (JitOptions.dumpBaselineInterpreter) {
-      aotCtx.emplace(AOTStrategy::PatchBasedBlob,
+      aotCtx.emplace(AOTStrategy::PatchPointers,
                      TrampolinePtrs(cx->runtime()->jitRuntime()));
     }
 #endif

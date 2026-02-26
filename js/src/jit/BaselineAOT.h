@@ -84,22 +84,32 @@ enum class AOTCppFunctionId : uint32_t {
   Count
 };
 
-#define RUNTIME_PATCH_KINDS(V) \
-  V(WellKnownSymbols)         \
-  V(JitRuntime)                \
-  V(ContextRealm)              \
+// Shared between ExternalRefKind and RuntimePatch::Kind.
+// These must come first in both enums so ordinal values match,
+// enabling static_cast between the two.
+#define EXTERNAL_REF_SHARED_KINDS(V) \
   V(JSContextPtr)              \
-  V(DispatchTable)             \
-  V(VMWrapper)                 \
   V(InterruptBits)             \
   V(JitActivation)             \
   V(RealmPtr)                  \
+  V(ContextRealm)              \
+  V(WellKnownSymbols)          \
+  V(JitRuntime)                \
   V(LastBufferedCell)          \
   V(ProfilerEnabled)           \
-  V(DebugTrapHandler)          \
   V(ProfilerExitFrameTail)     \
-  V(CppFunction)               \
   V(DoubleToInt32Stub)
+
+// Only in RuntimePatch::Kind (parameterized patch types).
+#define RUNTIME_PATCH_ONLY_KINDS(V) \
+  V(DispatchTable)             \
+  V(VMWrapper)                 \
+  V(DebugTrapHandler)          \
+  V(CppFunction)
+
+#define RUNTIME_PATCH_KINDS(V)  \
+  EXTERNAL_REF_SHARED_KINDS(V) \
+  RUNTIME_PATCH_ONLY_KINDS(V)
 
 class RuntimePatch {
   public:   
