@@ -8,6 +8,7 @@
 #define jit_BaselineAOT_h
 
 #include <cstdint>
+#include <cstring>
 #include "jit/VMFunctions.h"
 #include "vm/JSContext.h"
 
@@ -33,32 +34,87 @@ enum class DebugTrapHandlerKind;
   V(ICReturnCount)                  \
   V(RuntimePatchCount)
 
+// --- AOT Container Format ---
+//
+// The AOT container is a flat binary with a header, directory, and blob data.
+// Two extern symbols bracket the entire container.
+
+enum class AOTBlobKind : uint32_t {
+  BaselineInterpreter = 0,
+  SelfHostedFunction = 1,
+};
+
+static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
+static constexpr uint32_t AOT_CONTAINER_VERSION = 1;
+
+struct AOTContainerHeader {
+  uint32_t magic;
+  uint32_t version;
+  uint32_t blobCount;
+  uint32_t padding;
+};
+
+static_assert(sizeof(AOTContainerHeader) == 16,
+              "AOTContainerHeader must be 16 bytes");
+
+struct AOTBlobDirectoryEntry {
+  uint32_t kind;       // AOTBlobKind
+  uint32_t nameHash;   // reserved for future use
+  uint32_t codeOffset;
+  uint32_t codeSize;
+  uint32_t manifestOffset;
+  uint32_t manifestSize;
+  uint32_t patchesOffset;
+  uint32_t patchesCount;
+  uint32_t metadataOffset;
+  uint32_t metadataSize;
+};
+
+static_assert(sizeof(AOTBlobDirectoryEntry) == 40,
+              "AOTBlobDirectoryEntry must be 40 bytes");
+
 extern "C" {
-  extern const uint8_t bl_aot_code_start[];
-  extern const uint8_t bl_aot_code_end[];
-
-#define DECLARE_MANIFEST_EXTERN(name) extern const uint32_t bl_aot_##name;
-  BASELINE_MANIFEST_FIELDS(DECLARE_MANIFEST_EXTERN)
-#undef DECLARE_MANIFEST_EXTERN
-  
-  extern const uint8_t bl_aot_DebugInstrumentationOffsets_start[];
-  extern const uint8_t bl_aot_DebugInstrumentationOffsets_end[];
-  extern const uint8_t bl_aot_DebugTrapOffsets_start[];
-  extern const uint8_t bl_aot_DebugTrapOffsets_end[];
-  extern const uint8_t bl_aot_CodeCoverageOffsets_start[];
-  extern const uint8_t bl_aot_CodeCoverageOffsets_end[];
-  extern const uint8_t bl_aot_ICReturnOffsets_start[];
-  extern const uint8_t bl_aot_ICReturnOffsets_end[];
-  extern const uint8_t bl_aot_RuntimePatches_start[];
-  extern const uint8_t bl_aot_RuntimePatches_end[];
+  extern const uint8_t bl_aot_container_start[];
+  extern const uint8_t bl_aot_container_end[];
 }
 
-inline const uint8_t* GetAOTBaselineCode() {
-  return bl_aot_code_start;
+inline const uint8_t* GetAOTContainer() {
+  return bl_aot_container_start;
 }
 
-inline size_t GetAOTBaselineCodeSize() {
-  return bl_aot_code_end - bl_aot_code_start;
+inline size_t GetAOTContainerSize() {
+  return bl_aot_container_end - bl_aot_container_start;
+}
+
+inline const AOTContainerHeader* GetAOTContainerHeader() {
+  if (GetAOTContainerSize() < sizeof(AOTContainerHeader)) {
+    return nullptr;
+  }
+  const auto* hdr = reinterpret_cast<const AOTContainerHeader*>(GetAOTContainer());
+  if (hdr->magic != AOT_CONTAINER_MAGIC ||
+      hdr->version != AOT_CONTAINER_VERSION) {
+    return nullptr;
+  }
+  return hdr;
+}
+
+inline const AOTBlobDirectoryEntry* GetAOTBlobDirectory() {
+  const auto* hdr = GetAOTContainerHeader();
+  if (!hdr) return nullptr;
+  return reinterpret_cast<const AOTBlobDirectoryEntry*>(
+      GetAOTContainer() + sizeof(AOTContainerHeader));
+}
+
+inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind) {
+  const auto* hdr = GetAOTContainerHeader();
+  if (!hdr) return nullptr;
+  const auto* dir = GetAOTBlobDirectory();
+  for (uint32_t i = 0; i < hdr->blobCount; i++) {
+    if (static_cast<AOTBlobKind>(dir[i].kind) == kind) {
+      return &dir[i];
+    }
+  }
+  return nullptr;
 }
 
 struct AOTManifestScalars {
@@ -67,7 +123,46 @@ struct AOTManifestScalars {
 #undef DECLARE_FIELD
 };
 
-// Load time context required to apply patches. 
+// Per-script manifest for AOT-compiled self-hosted functions.
+struct AOTScriptManifest {
+  uint32_t warmUpCheckPrologueOffset;
+  uint32_t profilerEnterToggleOffset;
+  uint32_t profilerExitToggleOffset;
+  uint32_t retAddrEntryCount;
+  uint32_t osrEntryCount;
+  uint32_t debugTrapEntryCount;
+  uint32_t resumeEntryCount;
+  uint32_t codeSize;
+  uint32_t headerSize;
+  uint32_t runtimePatchCount;
+};
+
+// Simple rolling hash for AOT blob name matching.
+inline uint32_t AOTNameHash(const char* s) {
+  uint32_t h = 0;
+  for (; *s; s++) {
+    h = h * 31 + static_cast<uint8_t>(*s);
+  }
+  return h;
+}
+
+inline uint32_t AOTNameHash(const JS::Latin1Char* chars, size_t len) {
+  uint32_t h = 0;
+  for (size_t i = 0; i < len; i++) {
+    h = h * 31 + chars[i];
+  }
+  return h;
+}
+
+inline uint32_t AOTNameHash(const char16_t* chars, size_t len) {
+  uint32_t h = 0;
+  for (size_t i = 0; i < len; i++) {
+    h = h * 31 + static_cast<uint8_t>(chars[i]);
+  }
+  return h;
+}
+
+// Load time context required to apply patches.
 struct PatchContext {
     JSContext* cx; 
     uint8_t* codeBase;
@@ -176,6 +271,18 @@ static constexpr uintptr_t AOT_PATCH_SENTINEL = 0x0000A070DEADBEEF;
 
 static_assert(sizeof(RuntimePatch) == 12,
               "RuntimePatch size must be 12 bytes");
+
+class JitCode;
+
+// Allocate executable memory, copy code from an AOT blob, and apply runtime
+// patches. Shared by loadAOTBaseline (interpreter) and
+// LoadAOTSelfHostedFunction (scripts).
+// |codeKind| is CodeKind::Other for interpreter, Baseline for scripts.
+// |dispatchTableOffset| is nonzero only for the interpreter blob.
+[[nodiscard]] JitCode* AllocateAndPatchAOTCode(
+    JSContext* cx, const AOTBlobDirectoryEntry* entry,
+    const uint8_t* containerBase, uint32_t headerSize,
+    CodeKind codeKind, uint32_t dispatchTableOffset);
 
 }  // namespace js::jit
 

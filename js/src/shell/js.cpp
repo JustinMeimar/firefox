@@ -105,6 +105,7 @@
 #  include "jit/riscv64/Simulator-riscv64.h"
 #endif
 #include "jit/BaselineCompileQueue.h"
+#include "jit/BaselineJIT.h"
 #include "jit/CacheIRHealth.h"
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
@@ -12345,6 +12346,17 @@ static int Shell(JSContext* cx, OptionParser* op) {
     }
 
     JSAutoRealm ar(cx, glob);
+
+#ifdef ENABLE_AOT_BASELINE
+    // Dump AOT self-hosted function blobs now that a realm exists.
+    // serializeAOTManifest() (called during JitRuntime init) wrote the
+    // interpreter-only .S; this rewrites it with self-hosted blobs.
+    if (jit::JitOptions.dumpBaselineInterpreter) {
+      if (!jit::DumpAOTSelfHostedFunctions(cx)) {
+        return EXIT_FAILURE;
+      }
+    }
+#endif
 
     ShellContext* sc = GetShellContext(cx);
     if (!sc->moduleLoader && !InitModuleLoader(cx, *op)) {

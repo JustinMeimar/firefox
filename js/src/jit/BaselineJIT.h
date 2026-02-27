@@ -382,6 +382,13 @@ class alignas(uintptr_t) BaselineScript final
   void removePendingIonCompileTask(JSRuntime* rt, JSScript* script);
 
   size_t allocBytes() const { return allocBytes_; }
+
+#ifdef ENABLE_AOT_BASELINE
+  // Fill an AOTScriptManifest from this BaselineScript's fields,
+  // and write trailing array data into |metadata|.
+  void fillAOTManifest(struct AOTScriptManifest* sm,
+                       Vector<uint8_t, 0, SystemAllocPolicy>* metadata);
+#endif
 };
 static_assert(
     sizeof(BaselineScript) % sizeof(uintptr_t) == 0,
@@ -473,8 +480,11 @@ using BaselineOptions = EnumFlags<BaselineOption>;
 bool DispatchOffThreadBaselineBatchEager(JSContext* cx);
 bool DispatchOffThreadBaselineBatch(JSContext* cx);
 
+class AOTContext;
+
 MethodStatus BaselineCompile(JSContext* cx, JSScript* script,
-                             BaselineOptions options);
+                             BaselineOptions options,
+                             AOTContext* aotContext = nullptr);
 
 // Class storing the generated Baseline Interpreter code for the runtime.
 class BaselineInterpreter {
@@ -559,7 +569,9 @@ class BaselineInterpreter {
             const CallVMOffsets& callVMOffsets);
 
 #ifdef ENABLE_AOT_BASELINE
-  [[nodiscard]] bool initFromAOT(JSContext* cx, JitCode* code);
+  [[nodiscard]] bool initFromAOT(JSContext* cx, JitCode* code,
+                                  const AOTBlobDirectoryEntry* entry,
+                                  const uint8_t* containerBase);
 #endif
 
   uint8_t* codeRaw() const { return code_->raw(); }
@@ -596,6 +608,19 @@ class BaselineInterpreter {
 
 [[nodiscard]] bool GenerateBaselineInterpreter(
     JSContext* cx, BaselineInterpreter& interpreter);
+
+#ifdef ENABLE_AOT_BASELINE
+// Load a pre-compiled self-hosted function from the AOT container.
+// |name| is the self-hosted function name (used for hash matching).
+// Returns true if successfully loaded, false if no blob found or on error.
+[[nodiscard]] bool LoadAOTSelfHostedFunction(JSContext* cx,
+                                             HandleScript script,
+                                             Handle<JSAtom*> name);
+
+// Compile self-hosted functions with AOT context and rewrite the .S container.
+// Must be called after a realm exists (i.e., after interpreter dump).
+[[nodiscard]] bool DumpAOTSelfHostedFunctions(JSContext* cx);
+#endif
 
 inline bool IsBaselineJitEnabled(JSContext* cx) {
   if (MOZ_UNLIKELY(!IsBaselineInterpreterEnabled())) {

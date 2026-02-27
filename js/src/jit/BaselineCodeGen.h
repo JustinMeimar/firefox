@@ -341,6 +341,7 @@ class BaselineCompilerHandler {
   bool compilingOffThread_ = false;
 
   bool needsEnvAllocSite_ = false;
+  bool isAOT_ = false;
 
  public:
   using FrameInfoT = CompilerFrameInfo;
@@ -433,7 +434,7 @@ class BaselineCompilerHandler {
   }
 
   bool realmIndependentJitcode() const {
-    return JS::Prefs::experimental_self_hosted_cache() &&
+    return (JS::Prefs::experimental_self_hosted_cache() || isAOT_) &&
            script()->selfHosted();
   }
 };
@@ -597,7 +598,7 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   uint32_t compileRuntimePtrOffset_ = 0;
 
 #ifdef ENABLE_AOT_BASELINE
-  [[nodiscard]] bool serializeAOTManifest(JitCode* code);
+  [[nodiscard]] bool serializeAOTManifest(JSContext* cx, JitCode* code);
 #endif
 
   BaselineInterpreterPerfSpewer perfSpewer_;

@@ -32,8 +32,9 @@
 #include "gc/AllocKind.h"         // gc::AllocKind
 #include "gc/Tracer.h"            // TraceNullableRoot
 #include "jit/BaselineCompileTask.h"  // BaselineCompileTask::OffThreadBaselineCompilationAvailable
-#include "jit/BaselineJIT.h"  // jit::BaselineScript, jit::CanBaselineInterpretScript
+#include "jit/BaselineJIT.h"  // jit::BaselineScript, jit::CanBaselineInterpretScript, jit::LoadAOTSelfHostedFunction
 #include "jit/JitContext.h"     // jit::MethodStatus
+#include "jit/JitOptions.h"   // jit::JitOptions
 #include "jit/JitRuntime.h"     // jit::JitRuntime
 #include "jit/JitScript.h"      // AutoKeepJitScripts
 #include "js/CallArgs.h"        // JSNative
@@ -3068,6 +3069,24 @@ bool CompilationStencil::delazifySelfHostedFunction(
   if (!script) {
     return false;
   }
+
+#ifdef ENABLE_AOT_BASELINE
+  // Check AOT container for a pre-compiled self-hosted function blob.
+  if (jit::JitOptions.useAOTBaseline) {
+    if (!cx->zone()->ensureJitZoneExists(cx)) {
+      return false;
+    }
+    jit::AutoKeepJitScripts keepJitScript(cx);
+    if (!script->ensureHasJitScript(cx, keepJitScript)) {
+      return false;
+    }
+    if (jit::LoadAOTSelfHostedFunction(cx, script, name)) {
+      // Phase 6: Update lazy scripts (nothing to do for self-hosted).
+      return true;
+    }
+    // Fall through to normal path if no AOT blob found.
+  }
+#endif
 
   if (JS::Prefs::experimental_self_hosted_cache()) {
     Rooted<JSRuntime::JitCacheKey> jitCacheKey(cx, name, script->isDebuggee());

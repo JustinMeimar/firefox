@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iomanip>
 
+#include "frontend/CompilationStencil.h"
 #include "gc/GC.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineAOT.h"
@@ -47,8 +48,10 @@
 #include "vm/EnvironmentObject.h"
 #include "vm/FunctionFlags.h"  // js::FunctionFlags
 #include "vm/Interpreter.h"
+#include "vm/JSAtomUtils.h"
 #include "vm/JSFunction.h"
 #include "vm/Logging.h"
+#include "vm/Runtime.h"
 #include "vm/Time.h"
 
 #ifdef MOZ_VTUNE
@@ -99,7 +102,8 @@ BaselineCompilerHandler::BaselineCompilerHandler(MacroAssembler& masm,
       icEntryIndex_(0),
       baseWarmUpThreshold_(snapshot->baseWarmUpThreshold()),
       compileDebugInstrumentation_(snapshot->compileDebugInstrumentation()),
-      ionCompileable_(snapshot->isIonCompileable()) {
+      ionCompileable_(snapshot->isIonCompileable()),
+      isAOT_(masm.isAOT()) {
 }
 
 BaselineInterpreterHandler::BaselineInterpreterHandler(MacroAssembler& masm)
@@ -313,7 +317,7 @@ bool BaselineCompiler::compileImpl() {
 bool BaselineCompiler::finishCompile(JSContext* cx) {
   Rooted<JSScript*> script(cx, handler.script());
   bool isRealmIndependentJitCodeShared =
-      JS::Prefs::experimental_self_hosted_cache() && script->selfHosted();
+      handler.realmIndependentJitcode();
 
   UniquePtr<BaselineScript> baselineScript(
       nullptr, JS::DeletePolicy<BaselineScript>(cx->runtime()));
@@ -1334,6 +1338,17 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
       masm.storePtr(scratch, frame.addressOfInterpreterScript());
     }
     masm.storePtr(nonFunctionEnv, frame.addressOfEnvironmentChain());
+  }
+
+  // For AOT mode, initialize the zone pointer in the frame.
+  // At this point scratch contains the script (set by realmIndependentJitcode()
+  // path above). Extract the zone from the script's GC arena.
+  if (masm.isAOT()) {
+    MOZ_ASSERT(handler.realmIndependentJitcode());
+    masm.movePtr(scratch, scratch2);
+    masm.andPtr(Imm32(int32_t(~js::gc::ArenaMask)), scratch2);
+    masm.loadPtr(Address(scratch2, js::gc::ArenaZoneOffset), scratch2);
+    masm.storePtr(scratch2, frame.addressOfZone());
   }
 
   // If the HasInlinedICScript flag is set in the frame descriptor, then load
@@ -7377,42 +7392,290 @@ static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
   }
 }
 
-static void emitAsmLong(std::ostream& out, const char* name, uint32_t val) {
-  // Note: what about different architectures?
-  out << ".global bl_aot_" << name << "\n";
-  out << "bl_aot_" << name << ":    .long 0x"
-      << std::hex << std::setfill('0') << std::setw(8) << val << std::dec
-      << "\n";
-}
 
-static void emitAsmVec(std::ostream& out, const char* name,
-                       const uint8_t* data, size_t len,
-                       unsigned align = 4) {
-  out << ".balign " << align << "\n";
-  out << ".global bl_aot_" << name << "_start\n";
-  out << ".global bl_aot_" << name << "_end\n";
-  out << "bl_aot_" << name << "_start:\n";
-  if (len > 0) {
-    emitAsmBytes(out, data, len);
+static void emitAsmZeroPadding(std::ostream& out, size_t len) {
+  if (len == 0) return;
+  // Emit zero bytes for alignment padding.
+  for (size_t i = 0; i < len; i += 16) {
+    size_t end = std::min(i + 16, len);
+    out << "    .byte ";
+    for (size_t j = i; j < end; j++) {
+      if (j > i) out << ", ";
+      out << "0x00";
+    }
+    out << "\n";
   }
-  out << "bl_aot_" << name << "_end:\n\n";
 }
 
-template <typename Vec>
-static void emitAsmVec(std::ostream& out, const char* name, const Vec& vec,
-                       unsigned align = 4) {
-  using T = typename Vec::ElementType;
-  emitAsmVec(out, name, reinterpret_cast<const uint8_t*>(vec.begin()),
-             vec.length() * sizeof(T), align);
+static uint32_t AlignUp(uint32_t val, uint32_t align) {
+  return (val + align - 1) & ~(align - 1);
 }
 
-bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
-  const char* outPath = "js/src/jit/AOTBaselineInterpreter.S";
-  std::ofstream out(outPath, std::ios::trunc);
-  if (!out.is_open()) {
-    JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.", outPath);
+// Intermediate representation of a serialized AOT blob, held in memory
+// before final emission to the .S file.
+struct AOTBlobData {
+  AOTBlobDirectoryEntry dirEntry;
+  Vector<uint8_t, 0, SystemAllocPolicy> code;
+  Vector<uint8_t, 0, SystemAllocPolicy> manifest;
+  Vector<uint8_t, 0, SystemAllocPolicy> patches;
+  Vector<uint8_t, 0, SystemAllocPolicy> metadata;
+
+  // Append raw bytes from a typed pointer.
+  template <typename T>
+  static bool appendBytes(Vector<uint8_t, 0, SystemAllocPolicy>& vec,
+                          const T* data, size_t count) {
+    const auto* bytes = reinterpret_cast<const uint8_t*>(data);
+    return vec.append(bytes, count * sizeof(T));
+  }
+};
+
+// Compile a self-hosted function with AOT context and collect its blob data.
+// Returns false on failure.
+static bool compileAOTSelfHostedFunction(
+    JSContext* cx, const char* funcName,
+    const TrampolinePtrs& trampolines,
+    AOTBlobData* blobOut) {
+  // Look up the function by name in the self-hosted script map.
+  JSAtom* atom = AtomizeUTF8Chars(cx, funcName, strlen(funcName));
+  if (!atom) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to atomize '%s'", funcName);
     return false;
   }
+
+  Rooted<PropertyName*> name(cx, atom->asPropertyName());
+  auto indexRange = cx->runtime()->getSelfHostedScriptIndexRange(name);
+  if (!indexRange) {
+    JitSpew(JitSpew_BaselineAOT, "Self-hosted function '%s' not found",
+            funcName);
+    return false;
+  }
+
+  // Don't collect metadata for self-hosted functions.
+  AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
+
+  // Instantiate a lazy function for the self-hosted function.
+  RootedFunction fun(
+      cx,
+      cx->runtime()->selfHostStencil().instantiateSelfHostedLazyFunction(
+          cx, cx->runtime()->selfHostStencilInput().atomCache,
+          indexRange->start, name));
+  if (!fun) {
+    JitSpew(JitSpew_BaselineAOT,
+            "Failed to instantiate self-hosted function '%s'", funcName);
+    return false;
+  }
+
+  // Delazify to produce a JSScript.
+  if (!cx->runtime()->delazifySelfHostedFunction(cx, name, fun)) {
+    JitSpew(JitSpew_BaselineAOT,
+            "Failed to delazify self-hosted function '%s'", funcName);
+    return false;
+  }
+
+  Rooted<JSScript*> script(cx, fun->nonLazyScript());
+  MOZ_ASSERT(script);
+
+  // Ensure JitScript exists (creates ICScript).
+  if (!cx->zone()->ensureJitZoneExists(cx)) {
+    return false;
+  }
+  AutoKeepJitScripts keepJitScript(cx);
+  if (!script->ensureHasJitScript(cx, keepJitScript)) {
+    return false;
+  }
+
+  // Create AOT context for this compilation.
+  AOTContext aotCtx(AOTStrategy::PatchPointers, trampolines);
+
+  // Compile with AOT context active. This enables realm-independent codegen
+  // and collects RuntimePatch entries.
+  BaselineOptions options({BaselineOption::ForceMainThreadCompilation});
+  MethodStatus result = BaselineCompile(cx, script, options, &aotCtx);
+  if (result != Method_Compiled) {
+    JitSpew(JitSpew_BaselineAOT,
+            "Failed to baseline-compile self-hosted function '%s' (status=%d)",
+            funcName, (int)result);
+    return false;
+  }
+  MOZ_ASSERT(script->hasBaselineScript());
+
+  // Extract data from the compiled BaselineScript.
+  BaselineScript* bs = script->baselineScript();
+  JitCode* jitCode = bs->method();
+
+#ifdef DEBUG
+  verifySentinelsPatched(jitCode->raw(), jitCode->instructionsSize(),
+                         aotCtx.accumulator().runtimePatches);
+#endif
+
+  // Build manifest and packed metadata from the BaselineScript.
+  AOTScriptManifest sm{};
+  bs->fillAOTManifest(&sm, &blobOut->metadata);
+  sm.codeSize = jitCode->instructionsSize();
+  sm.headerSize = jitCode->headerSize();
+  sm.runtimePatchCount = aotCtx.accumulator().runtimePatches.length();
+
+  // Populate blob header.
+  blobOut->dirEntry.kind =
+      static_cast<uint32_t>(AOTBlobKind::SelfHostedFunction);
+  blobOut->dirEntry.nameHash = AOTNameHash(funcName);
+
+  // Code bytes.
+  if (!AOTBlobData::appendBytes(blobOut->code, jitCode->raw(),
+                                jitCode->instructionsSize())) {
+    return false;
+  }
+
+  // Manifest.
+  if (!AOTBlobData::appendBytes(blobOut->manifest, &sm, 1)) {
+    return false;
+  }
+
+  // Patches.
+  const auto& runtimePatches = aotCtx.accumulator().runtimePatches;
+  if (runtimePatches.length() > 0) {
+    if (!AOTBlobData::appendBytes(blobOut->patches, runtimePatches.begin(),
+                                  runtimePatches.length())) {
+      return false;
+    }
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "Compiled AOT self-hosted function '%s': codeSize=%u patches=%u "
+          "retAddr=%u osr=%u debugTrap=%u resume=%u",
+          funcName, sm.codeSize, sm.runtimePatchCount,
+          sm.retAddrEntryCount, sm.osrEntryCount,
+          sm.debugTrapEntryCount, sm.resumeEntryCount);
+
+  return true;
+}
+
+// Write the multi-blob AOT container .S file.
+static bool writeAOTContainer(
+    std::ostream& out,
+    const AOTBlobData* const* blobs, uint32_t blobCount) {
+
+  // Compute layout: header + directory entries, then each blob's sections.
+  uint32_t dirSize =
+      sizeof(AOTContainerHeader) + blobCount * sizeof(AOTBlobDirectoryEntry);
+  uint32_t dataStart = AlignUp(dirSize, 16);
+
+  // Build directory entries with computed offsets.
+  Vector<AOTBlobDirectoryEntry, 2, SystemAllocPolicy> dirEntries;
+  if (!dirEntries.reserve(blobCount)) {
+    return false;
+  }
+
+  uint32_t cursor = dataStart;
+  for (uint32_t i = 0; i < blobCount; i++) {
+    AOTBlobDirectoryEntry e = blobs[i]->dirEntry;
+    e.codeOffset = cursor;
+    e.codeSize = blobs[i]->code.length();
+    cursor += e.codeSize;
+
+    e.manifestOffset = cursor;
+    e.manifestSize = blobs[i]->manifest.length();
+    cursor += e.manifestSize;
+
+    e.patchesOffset = cursor;
+    e.patchesCount = blobs[i]->patches.length() / sizeof(RuntimePatch);
+    cursor += blobs[i]->patches.length();
+
+    e.metadataOffset = cursor;
+    e.metadataSize = blobs[i]->metadata.length();
+    cursor += e.metadataSize;
+
+    // Align next blob to 16 bytes.
+    cursor = AlignUp(cursor, 16);
+
+    dirEntries.infallibleAppend(e);
+  }
+
+  // Build header.
+  AOTContainerHeader hdr;
+  hdr.magic = AOT_CONTAINER_MAGIC;
+  hdr.version = AOT_CONTAINER_VERSION;
+  hdr.blobCount = blobCount;
+  hdr.padding = 0;
+
+  // Write .S file.
+  out << "// AOT Baseline - generated by --dump-bl\n";
+  out << "// Container format v" << AOT_CONTAINER_VERSION << ", "
+      << blobCount << " blob(s)\n";
+  out << ".section .rodata\n";
+  out << ".balign 16\n";
+  out << ".global bl_aot_container_start\n";
+  out << ".global bl_aot_container_end\n";
+  out << "bl_aot_container_start:\n";
+
+  // Header.
+  out << "// --- Container Header ---\n";
+  emitAsmBytes(out, reinterpret_cast<const uint8_t*>(&hdr), sizeof(hdr));
+
+  // Directory entries.
+  for (uint32_t i = 0; i < blobCount; i++) {
+    out << "// --- Directory Entry " << i << " (kind="
+        << dirEntries[i].kind << ") ---\n";
+    emitAsmBytes(out, reinterpret_cast<const uint8_t*>(&dirEntries[i]),
+                 sizeof(AOTBlobDirectoryEntry));
+  }
+
+  // Alignment padding between directory and first blob.
+  size_t padSize = dataStart - dirSize;
+  if (padSize > 0) {
+    out << "// --- Alignment padding ---\n";
+    emitAsmZeroPadding(out, padSize);
+  }
+
+  // Blob data sections.
+  for (uint32_t i = 0; i < blobCount; i++) {
+    const auto& blob = *blobs[i];
+    out << "// --- Blob " << i << " Code (" << blob.code.length()
+        << " bytes) ---\n";
+    if (blob.code.length() > 0) {
+      emitAsmBytes(out, blob.code.begin(), blob.code.length());
+    }
+
+    out << "// --- Blob " << i << " Manifest (" << blob.manifest.length()
+        << " bytes) ---\n";
+    if (blob.manifest.length() > 0) {
+      emitAsmBytes(out, blob.manifest.begin(), blob.manifest.length());
+    }
+
+    out << "// --- Blob " << i << " Patches ("
+        << (blob.patches.length() / sizeof(RuntimePatch)) << ") ---\n";
+    if (blob.patches.length() > 0) {
+      emitAsmBytes(out, blob.patches.begin(), blob.patches.length());
+    }
+
+    out << "// --- Blob " << i << " Metadata (" << blob.metadata.length()
+        << " bytes) ---\n";
+    if (blob.metadata.length() > 0) {
+      emitAsmBytes(out, blob.metadata.begin(), blob.metadata.length());
+    }
+
+    // Inter-blob alignment padding.
+    if (i + 1 < blobCount) {
+      uint32_t curPos = dirEntries[i].metadataOffset + blob.metadata.length();
+      uint32_t nextAligned = AlignUp(curPos, 16);
+      if (nextAligned > curPos) {
+        out << "// --- Inter-blob padding ---\n";
+        emitAsmZeroPadding(out, nextAligned - curPos);
+      }
+    }
+  }
+
+  out << "bl_aot_container_end:\n";
+  out << ".section .note.GNU-stack,\"\",@progbits\n";
+  return true;
+}
+
+// Saved interpreter blob from serializeAOTManifest(), reused by
+// DumpAOTSelfHostedFunctions() which runs later once a realm exists.
+static Maybe<AOTBlobData> sSavedInterpreterBlob;
+
+bool BaselineInterpreterGenerator::serializeAOTManifest(JSContext* cx,
+                                                        JitCode* code) {
 
   uint8_t* codeStart = code->raw();
   uint8_t* codeEnd = code->rawEnd();
@@ -7423,6 +7686,21 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
                          aot_->accumulator().runtimePatches);
 #endif
 
+  // --- Build interpreter blob and save for DumpAOTSelfHostedFunctions ---
+  sSavedInterpreterBlob.reset();
+  sSavedInterpreterBlob.emplace();
+  AOTBlobData& interpBlob = *sSavedInterpreterBlob;
+
+  interpBlob.dirEntry.kind =
+      static_cast<uint32_t>(AOTBlobKind::BaselineInterpreter);
+  interpBlob.dirEntry.nameHash = 0;
+
+  // Code bytes.
+  if (!AOTBlobData::appendBytes(interpBlob.code, codeStart, codeSize)) {
+    return false;
+  }
+
+  // Build manifest scalars.
   AOTManifestScalars s;
   s.InterpretOp = interpretOpOffset_;
   s.InterpretOpNoDebugTrap = interpretOpNoDebugTrapOffset_;
@@ -7443,25 +7721,69 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
   s.ICReturnCount = handler.icReturnOffsets().length();
   s.RuntimePatchCount = aot_->accumulator().runtimePatches.length();
 
-  out << "// AOT Baseline Interpreter - generated by --dump-bl\n";
-  out << ".section .rodata\n\n";
+  if (!AOTBlobData::appendBytes(interpBlob.manifest, &s, 1)) {
+    return false;
+  }
 
-  emitAsmVec(out, "code", codeStart, codeSize, /*align=*/16);
+  // Patches.
+  const auto& patches = aot_->accumulator().runtimePatches;
+  if (patches.length() > 0) {
+    if (!AOTBlobData::appendBytes(interpBlob.patches, patches.begin(),
+                                  patches.length())) {
+      return false;
+    }
+  }
 
-  out << ".balign 4\n";
-#define EMIT_SCALAR(name) emitAsmLong(out, #name, s.name);
-  BASELINE_MANIFEST_FIELDS(EMIT_SCALAR)
-#undef EMIT_SCALAR
-  out << "\n";
+  // Metadata: debugInstr + debugTraps + coverage + icReturns packed.
+  const auto& debugInstr = handler.debugInstrumentationOffsets();
+  const auto& debugTraps = aot_->accumulator().debugTraps;
+  const auto& coverage = handler.codeCoverageOffsets();
+  const auto& icReturns = handler.icReturnOffsets();
 
-  emitAsmVec(out, "DebugInstrumentationOffsets",
-             handler.debugInstrumentationOffsets());
-  emitAsmVec(out, "DebugTrapOffsets", aot_->accumulator().debugTraps);
-  emitAsmVec(out, "CodeCoverageOffsets", handler.codeCoverageOffsets());
-  emitAsmVec(out, "ICReturnOffsets", handler.icReturnOffsets());
-  emitAsmVec(out, "RuntimePatches", aot_->accumulator().runtimePatches);
+  if (debugInstr.length() > 0) {
+    if (!AOTBlobData::appendBytes(interpBlob.metadata, debugInstr.begin(),
+                                  debugInstr.length())) {
+      return false;
+    }
+  }
+  if (debugTraps.length() > 0) {
+    if (!AOTBlobData::appendBytes(interpBlob.metadata, debugTraps.begin(),
+                                  debugTraps.length())) {
+      return false;
+    }
+  }
+  if (coverage.length() > 0) {
+    if (!AOTBlobData::appendBytes(interpBlob.metadata, coverage.begin(),
+                                  coverage.length())) {
+      return false;
+    }
+  }
+  if (icReturns.length() > 0) {
+    if (!AOTBlobData::appendBytes(interpBlob.metadata, icReturns.begin(),
+                                  icReturns.length())) {
+      return false;
+    }
+  }
 
-  out << ".section .note.GNU-stack,\"\",@progbits\n";
+  JitSpew(JitSpew_BaselineAOT,
+          "Scalars: dbgInstr=%u dbgTrap=%u coverage=%u icRet=%u patches=%u",
+          s.DebugInstrumentationCount, s.DebugTrapCount,
+          s.CodeCoverageCount, s.ICReturnCount, s.RuntimePatchCount);
+
+  // --- Write the .S file (interpreter-only for now;
+  //     DumpAOTSelfHostedFunctions will rewrite with additional blobs) ---
+  const char* outPath = "js/src/jit/AOTBaselineInterpreter.S";
+  std::ofstream out(outPath, std::ios::trunc);
+  if (!out.is_open()) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.", outPath);
+    return false;
+  }
+
+  const AOTBlobData* blobPtrs[] = { &interpBlob };
+  if (!writeAOTContainer(out, blobPtrs, 1)) {
+    return false;
+  }
+
   out.close();
 
   uint32_t prologueEnd = warmUpCheckPrologueOffset_.offset();
@@ -7471,9 +7793,55 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
       codeSize, prologueEnd, prologueEnd, tableOffset_, tableOffset_, codeSize);
 
   JitSpew(JitSpew_BaselineAOT,
-          "Scalars: dbgInstr=%u dbgTrap=%u coverage=%u icRet=%u patches=%u",
-          s.DebugInstrumentationCount, s.DebugTrapCount,
-          s.CodeCoverageCount, s.ICReturnCount, s.RuntimePatchCount);
+          "Wrote AOT container with 1 blob(s) to %s", outPath);
+
+  return true;
+}
+
+bool DumpAOTSelfHostedFunctions(JSContext* cx) {
+  MOZ_ASSERT(JitOptions.dumpBaselineInterpreter);
+
+  if (!sSavedInterpreterBlob) {
+    JitSpew(JitSpew_BaselineAOT,
+            "No saved interpreter blob for self-hosted function dump");
+    return false;
+  }
+
+  const char* outPath = "js/src/jit/AOTBaselineInterpreter.S";
+
+  // Compile the self-hosted function.
+  TrampolinePtrs trampolines(cx->runtime()->jitRuntime());
+  AOTBlobData funcBlob;
+  if (!compileAOTSelfHostedFunction(cx, "ArrayIteratorNext", trampolines,
+                                     &funcBlob)) {
+    JitSpew(JitSpew_BaselineAOT,
+            "WARNING: Failed to compile AOT self-hosted ArrayIteratorNext");
+    // Leave the interpreter-only .S file as-is.
+    return true;
+  }
+
+  // Rewrite the .S file with both the interpreter and function blobs.
+  const AOTBlobData* blobPtrs[] = { &*sSavedInterpreterBlob, &funcBlob };
+  uint32_t blobCount = 2;
+
+  std::ofstream out(outPath, std::ios::trunc);
+  if (!out.is_open()) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.", outPath);
+    return false;
+  }
+
+  if (!writeAOTContainer(out, blobPtrs, blobCount)) {
+    return false;
+  }
+
+  out.close();
+
+  JitSpew(JitSpew_BaselineAOT,
+          "Rewrote AOT container with %u blob(s) to %s",
+          blobCount, outPath);
+
+  // Free the saved blob now that we're done.
+  sSavedInterpreterBlob.reset();
 
   return true;
 }
@@ -7482,13 +7850,26 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JitCode* code) {
 #ifdef ENABLE_AOT_BASELINE
 bool BaselineInterpreterGenerator::loadAOTBaseline(
     JSContext* cx, BaselineInterpreter& interpreter) {
-  size_t codeSize = GetAOTBaselineCodeSize();
-  if (codeSize == 0) {
-    JitSpew(JitSpew_BaselineAOT, "ERROR: AOT code size is 0!");
+  const AOTContainerHeader* hdr = GetAOTContainerHeader();
+  if (!hdr) {
+    JitSpew(JitSpew_BaselineAOT, "ERROR: Invalid or missing AOT container!");
     return false;
   }
 
-  uint32_t headerSize = bl_aot_HeaderSize;
+  const AOTBlobDirectoryEntry* entry =
+      FindAOTBlob(AOTBlobKind::BaselineInterpreter);
+  if (!entry || entry->codeSize == 0) {
+    JitSpew(JitSpew_BaselineAOT, "ERROR: No BaselineInterpreter blob in AOT container!");
+    return false;
+  }
+
+  const uint8_t* containerBase = GetAOTContainer();
+  size_t codeSize = entry->codeSize;
+
+  // Read headerSize from manifest.
+  AOTManifestScalars manifest;
+  memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
+  uint32_t headerSize = manifest.HeaderSize;
 
   mozilla::Maybe<AutoAllocInAtomsZone> az;
   if (!cx->zone() || !cx->zone()->isAtomsZone()) {
@@ -7534,7 +7915,7 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
       js::ReportOutOfMemory(cx);
       return false;
     }
-    memcpy(codeStart, GetAOTBaselineCode(), codeSize);
+    memcpy(codeStart, containerBase + entry->codeOffset, codeSize);
     JitCodeHeader::FromExecutable(codeStart)->init(code);
     code->setInstructionsSize(codeSize);
 
@@ -7542,8 +7923,8 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
     MOZ_ASSERT(code->instructionsSize() == codeSize);
     MOZ_ASSERT(code->raw() == codeStart);
 
-    // Initialize interpreter from named symbols (includes patching)
-    if (!interpreter.initFromAOT(cx, code)) {
+    // Initialize interpreter from container blob (includes patching)
+    if (!interpreter.initFromAOT(cx, code, entry, containerBase)) {
       JitSpew(JitSpew_BaselineAOT,
               "ERROR: Failed to initialize from AOT symbols");
       return false;
@@ -7678,7 +8059,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 #ifdef ENABLE_AOT_BASELINE
     // Serialize the baseline interpreter code and embedded manifest to binary.
     if (JitOptions.dumpBaselineInterpreter) {
-      if (!serializeAOTManifest(code)) {
+      if (!serializeAOTManifest(cx, code)) {
         JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT manifest");
         return false;
       }
