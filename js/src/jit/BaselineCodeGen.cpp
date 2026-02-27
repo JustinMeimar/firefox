@@ -7798,6 +7798,34 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JSContext* cx,
   return true;
 }
 
+// Self-hosted functions to AOT-compile. Each must be realm-independent
+// (self-hosted functions are by default).
+static const char* const kAOTSelfHostedFunctions[] = {
+    // Array iteration
+    "ArrayIteratorNext",
+    "ArrayMap",
+    "ArrayFilter",
+    "ArrayReduce",
+    "ArrayForEach",
+    "ArrayEvery",
+    "ArraySome",
+    "ArrayFind",
+    "ArrayFindIndex",
+    // Iterator protocol
+    "StringIteratorNext",
+    // Map/Set
+    "MapForEach",
+    "MapIteratorNext",
+    "SetForEach",
+    "SetIteratorNext",
+    // Typed arrays
+    "TypedArrayForEach",
+    "TypedArrayMap",
+    "TypedArrayFilter",
+    // Promise
+    "Promise_finally",
+};
+
 bool DumpAOTSelfHostedFunctions(JSContext* cx) {
   MOZ_ASSERT(JitOptions.dumpBaselineInterpreter);
 
@@ -7809,20 +7837,33 @@ bool DumpAOTSelfHostedFunctions(JSContext* cx) {
 
   const char* outPath = "js/src/jit/AOTBaselineInterpreter.S";
 
-  // Compile the self-hosted function.
   TrampolinePtrs trampolines(cx->runtime()->jitRuntime());
-  AOTBlobData funcBlob;
-  if (!compileAOTSelfHostedFunction(cx, "ArrayIteratorNext", trampolines,
-                                     &funcBlob)) {
-    JitSpew(JitSpew_BaselineAOT,
-            "WARNING: Failed to compile AOT self-hosted ArrayIteratorNext");
-    // Leave the interpreter-only .S file as-is.
-    return true;
+
+  // Compile all self-hosted functions, collecting blobs.
+  Vector<AOTBlobData, 0, SystemAllocPolicy> funcBlobs;
+  for (const char* funcName : kAOTSelfHostedFunctions) {
+    AOTBlobData blob;
+    if (!compileAOTSelfHostedFunction(cx, funcName, trampolines, &blob)) {
+      JitSpew(JitSpew_BaselineAOT,
+              "WARNING: Failed to compile AOT self-hosted '%s', skipping",
+              funcName);
+      continue;
+    }
+    if (!funcBlobs.append(std::move(blob))) {
+      return false;
+    }
   }
 
-  // Rewrite the .S file with both the interpreter and function blobs.
-  const AOTBlobData* blobPtrs[] = { &*sSavedInterpreterBlob, &funcBlob };
-  uint32_t blobCount = 2;
+  // Build pointer array: interpreter blob first, then all function blobs.
+  Vector<const AOTBlobData*, 0, SystemAllocPolicy> blobPtrs;
+  if (!blobPtrs.append(&*sSavedInterpreterBlob)) {
+    return false;
+  }
+  for (const auto& blob : funcBlobs) {
+    if (!blobPtrs.append(&blob)) {
+      return false;
+    }
+  }
 
   std::ofstream out(outPath, std::ios::trunc);
   if (!out.is_open()) {
@@ -7830,7 +7871,8 @@ bool DumpAOTSelfHostedFunctions(JSContext* cx) {
     return false;
   }
 
-  if (!writeAOTContainer(out, blobPtrs, blobCount)) {
+  uint32_t blobCount = static_cast<uint32_t>(blobPtrs.length());
+  if (!writeAOTContainer(out, blobPtrs.begin(), blobCount)) {
     return false;
   }
 
