@@ -7435,7 +7435,7 @@ static bool compileAOTSelfHostedFunction(
     JSContext* cx, const char* funcName,
     const TrampolinePtrs& trampolines,
     AOTBlobData* blobOut) {
-  // Look up the function by name in the self-hosted script map.
+  
   JSAtom* atom = AtomizeUTF8Chars(cx, funcName, strlen(funcName));
   if (!atom) {
     JitSpew(JitSpew_BaselineAOT, "Failed to atomize '%s'", funcName);

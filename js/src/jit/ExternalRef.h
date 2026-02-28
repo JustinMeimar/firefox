@@ -53,6 +53,18 @@ enum class ExternalRefKind : uint16_t {
   Count
 };
 
+// Map an ExternalRefKind to its string name. Usable in debug logging.
+inline const char* ExternalRefKindName(ExternalRefKind kind) {
+  switch (kind) {
+#define EMIT_CASE(name) case ExternalRefKind::name: return #name;
+    EXTERNAL_REF_KINDS(EMIT_CASE)
+#undef EMIT_CASE
+    case ExternalRefKind::Count:
+      break;
+  }
+  return "Unknown";
+}
+
 // Resolve an ExternalRefKind to its runtime value. Used by the non-AOT path
 // to get the compile-time ImmPtr value, and by the patch-based AOT path to
 // verify patch correctness.

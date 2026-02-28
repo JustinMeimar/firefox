@@ -66,11 +66,9 @@ class AOTContext {
 
   BaselineAOTAccumulator& accumulator() { return accumulator_; }
 
-  void emitPatchableMovImm(ExternalRefKind kind, Register dest);
-  void emitVMWrapperPatchableMovImm(VMFunctionId id, Register dest);
-  void emitCppFunctionPatchableMovImm(AOTCppFunctionId fnId, Register dest);
-  void emitDebugTrapPatchableMovImm(DebugTrapHandlerKind dbgKind,
-                                    Register dest);
+  // Emit a patchable mov immediate for any patch kind. The caller constructs
+  // the RuntimePatch with targetOffset=0; this method fills in the real offset.
+  void emitPatchableMov(RuntimePatch patch, Register dest);
 
  private:
   MacroAssembler* masm_ = nullptr;

@@ -39,52 +39,22 @@ static void* ResolveCppFunction(AOTCppFunctionId id) {
 }
 
 uintptr_t RuntimePatch::getValueToPatch(const PatchContext& pc) const {
+  // Patch-only kinds require union data that ResolveExternalRef doesn't have.
   switch(kind) {
-    case ExternalRefKind::WellKnownSymbols:
-      return (uintptr_t)pc.cx->runtime()->wellKnownSymbols.ref();
-    case ExternalRefKind::JitRuntime:
-      return (uintptr_t)pc.cx->runtime()->jitRuntime();
-    case ExternalRefKind::ContextRealm:
-      return (uintptr_t)(reinterpret_cast<const uint8_t*>(pc.cx)
-              + JSContext::offsetOfRealm());
-    case ExternalRefKind::JSContextPtr:
-      return (uintptr_t)pc.cx;
     case ExternalRefKind::DispatchTable:
       return (uintptr_t)(pc.codeBase + handlerOffset);
     case ExternalRefKind::VMWrapper: {
       TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getVMWrapper(vmId);
       return (uintptr_t)(ptr.value);
     }
-    case ExternalRefKind::InterruptBits:
-      return (uintptr_t)pc.cx->addressOfInterruptBits();
-    case ExternalRefKind::JitActivation:
-      return (uintptr_t)pc.cx->addressOfJitActivation();
-    case ExternalRefKind::RealmPtr:
-      return (uintptr_t)pc.cx->addressOfRealm();
-    case ExternalRefKind::LastBufferedCell:
-      return (uintptr_t)pc.cx->runtime()->gc.addressOfLastBufferedWholeCell();
-    case ExternalRefKind::ProfilerEnabled:
-      return (uintptr_t)pc.cx->runtime()->geckoProfiler().addressOfEnabled();
     case ExternalRefKind::DebugTrapHandler:
       return (uintptr_t)pc.cx->runtime()->jitRuntime()->debugTrapHandler(dbgKind)->raw();
-    case ExternalRefKind::ProfilerExitFrameTail: {
-      TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getProfilerExitFrameTail();
-      return (uintptr_t)(ptr.value);
-    }
     case ExternalRefKind::CppFunction:
       return (uintptr_t)ResolveCppFunction(cppFnId);
-    case ExternalRefKind::DoubleToInt32Stub: {
-      TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getDoubleToInt32ValueStub();
-      return (uintptr_t)(ptr.value);
-    }
-    case ExternalRefKind::MegamorphicCache:
-    case ExternalRefKind::MegamorphicSetPropCache:
-    case ExternalRefKind::StringToAtomCache:
-      MOZ_CRASH("Register-indirect-only ExternalRefKind cannot be patched");
-    case ExternalRefKind::Count:
-      break;
+    default:
+      // All other kinds resolve identically to ResolveExternalRef.
+      return ResolveExternalRef(kind, pc.cx);
   }
-  MOZ_CRASH("Unexpected Patch Type");
 }
 
 void RuntimePatch::apply(const PatchContext& pc) const {
@@ -92,30 +62,8 @@ void RuntimePatch::apply(const PatchContext& pc) const {
   uint8_t* target = pc.codeBase + targetOffset;
 #ifdef DEBUG
   uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
-  const char* kindStr = "Unknown";
-  switch(kind) {
-    case ExternalRefKind::WellKnownSymbols: kindStr = "WellKnownSymbols"; break;
-    case ExternalRefKind::JitRuntime: kindStr = "JitRuntime"; break;
-    case ExternalRefKind::ContextRealm: kindStr = "ContextRealm"; break;
-    case ExternalRefKind::JSContextPtr: kindStr = "JSContextPtr"; break;
-    case ExternalRefKind::DispatchTable: kindStr = "DispatchTable"; break;
-    case ExternalRefKind::VMWrapper: kindStr = "VMWrapper"; break;
-    case ExternalRefKind::InterruptBits: kindStr = "InterruptBits"; break;
-    case ExternalRefKind::JitActivation: kindStr = "JitActivation"; break;
-    case ExternalRefKind::RealmPtr: kindStr = "RealmPtr"; break;
-    case ExternalRefKind::LastBufferedCell: kindStr = "LastBufferedCell"; break;
-    case ExternalRefKind::ProfilerEnabled: kindStr = "ProfilerEnabled"; break;
-    case ExternalRefKind::DebugTrapHandler: kindStr = "DebugTrapHandler"; break;
-    case ExternalRefKind::ProfilerExitFrameTail: kindStr = "ProfilerExitFrameTail"; break;
-    case ExternalRefKind::CppFunction: kindStr = "CppFunction"; break;
-    case ExternalRefKind::DoubleToInt32Stub: kindStr = "DoubleToInt32Stub"; break;
-    case ExternalRefKind::MegamorphicCache: kindStr = "MegamorphicCache"; break;
-    case ExternalRefKind::MegamorphicSetPropCache: kindStr = "MegamorphicSetPropCache"; break;
-    case ExternalRefKind::StringToAtomCache: kindStr = "StringToAtomCache"; break;
-    case ExternalRefKind::Count: break;
-  }
   JitSpew(JitSpew_BaselineAOT, "Runtime patch [%s] @ offset %u: before=0x%016lx after=0x%016lx",
-          kindStr, targetOffset, beforeValue, val);
+          ExternalRefKindName(kind), targetOffset, beforeValue, val);
 #endif
   *reinterpret_cast<uintptr_t*>(target) = val;
 }

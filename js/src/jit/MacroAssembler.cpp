@@ -4437,7 +4437,7 @@ void MacroAssembler::moveExternalRef(ExternalRefKind kind, Register dest) {
   }
   switch (aot().strategy()) {
     case AOTStrategy::PatchPointers:
-      aot().emitPatchableMovImm(kind, dest);
+      aot().emitPatchableMov(RuntimePatch(kind, 0), dest);
       return;
     case AOTStrategy::RegisterIndirect:
       emitExternalRefViaZone(kind, dest);
@@ -4471,7 +4471,7 @@ void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
   }
   switch (aot().strategy()) {
     case AOTStrategy::PatchPointers:
-      aot().emitVMWrapperPatchableMovImm(id, dest);
+      aot().emitPatchableMov(RuntimePatch::VMWrapperPatch(0, id), dest);
       return;
     case AOTStrategy::RegisterIndirect:
       MOZ_CRASH("loadVMWrapper not yet supported in register-indirect mode");
@@ -4504,7 +4504,7 @@ void MacroAssembler::loadCppFunction(AOTCppFunctionId fnId, Register dest) {
   }
   switch (aot().strategy()) {
     case AOTStrategy::PatchPointers:
-      aot().emitCppFunctionPatchableMovImm(fnId, dest);
+      aot().emitPatchableMov(RuntimePatch::CppFunctionPatch(0, fnId), dest);
       return;
     case AOTStrategy::RegisterIndirect:
       MOZ_CRASH("loadCppFunction not supported in register-indirect mode");
@@ -4521,7 +4521,7 @@ void MacroAssembler::loadDebugTrapHandler(DebugTrapHandlerKind dbgKind,
   }
   switch (aot().strategy()) {
     case AOTStrategy::PatchPointers:
-      aot().emitDebugTrapPatchableMovImm(dbgKind, dest);
+      aot().emitPatchableMov(RuntimePatch::DebugTrapPatch(0, dbgKind), dest);
       return;
     case AOTStrategy::RegisterIndirect:
       MOZ_CRASH("loadDebugTrapHandler not supported in register-indirect mode");

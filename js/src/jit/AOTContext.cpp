@@ -16,34 +16,9 @@ using namespace js::jit;
 AOTContext::AOTContext(AOTStrategy strategy, TrampolinePtrs trampolines)
     : strategy_(strategy), trampolines_(trampolines) {}
 
-void AOTContext::emitPatchableMovImm(ExternalRefKind kind, Register dest) {
+void AOTContext::emitPatchableMov(RuntimePatch patch, Register dest) {
   CodeOffset off =
       masm_->movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
-  uint32_t immOff = off.offset() - sizeof(void*);
-  accumulator_.registerPatch(RuntimePatch(kind, immOff));
+  patch.targetOffset = off.offset() - sizeof(void*);
+  accumulator_.registerPatch(std::move(patch));
 }
-
-void AOTContext::emitVMWrapperPatchableMovImm(VMFunctionId id, Register dest) {
-  CodeOffset off =
-      masm_->movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
-  uint32_t immOff = off.offset() - sizeof(void*);
-  accumulator_.registerPatch(RuntimePatch::VMWrapperPatch(immOff, id));
-}
-
-void AOTContext::emitCppFunctionPatchableMovImm(AOTCppFunctionId fnId,
-                                                Register dest) {
-  CodeOffset off =
-      masm_->movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
-  uint32_t immOff = off.offset() - sizeof(void*);
-  accumulator_.registerPatch(RuntimePatch::CppFunctionPatch(immOff, fnId));
-}
-
-void AOTContext::emitDebugTrapPatchableMovImm(DebugTrapHandlerKind dbgKind,
-                                              Register dest) {
-  CodeOffset off =
-      masm_->movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
-  uint32_t immOff = off.offset() - sizeof(void*);
-  accumulator_.registerPatch(RuntimePatch::DebugTrapPatch(immOff, dbgKind));
-}
-
-
