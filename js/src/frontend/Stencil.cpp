@@ -33,11 +33,11 @@
 #include "gc/Tracer.h"            // TraceNullableRoot
 #include "jit/BaselineCompileTask.h"  // BaselineCompileTask::OffThreadBaselineCompilationAvailable
 #include "jit/BaselineJIT.h"  // jit::BaselineScript, jit::CanBaselineInterpretScript, jit::LoadAOTSelfHostedFunction
-#include "jit/JitContext.h"     // jit::MethodStatus
+#include "jit/JitContext.h"   // jit::MethodStatus
 #include "jit/JitOptions.h"   // jit::JitOptions
-#include "jit/JitRuntime.h"     // jit::JitRuntime
-#include "jit/JitScript.h"      // AutoKeepJitScripts
-#include "js/CallArgs.h"        // JSNative
+#include "jit/JitRuntime.h"   // jit::JitRuntime
+#include "jit/JitScript.h"    // AutoKeepJitScripts
+#include "js/CallArgs.h"      // JSNative
 #include "js/CompileOptions.h"  // JS::DecodeOptions, JS::ReadOnlyDecodeOptions
 #include "js/DOMEventDispatch.h"            // TRACE_FOR_TEST_DOM
 #include "js/experimental/CompileScript.h"  // JS::PrepareForInstantiate
@@ -3072,7 +3072,9 @@ bool CompilationStencil::delazifySelfHostedFunction(
 
 #ifdef ENABLE_AOT_BASELINE
   // Check AOT container for a pre-compiled self-hosted function blob.
-  if (jit::JitOptions.useAOTBaseline) {
+  // Skip scripts that can't be baseline-interpreted (e.g. ForceInterpreter).
+  if (jit::JitOptions.useAOTBaseline &&
+      jit::CanBaselineInterpretScript(script)) {
     if (!cx->zone()->ensureJitZoneExists(cx)) {
       return false;
     }
@@ -3081,10 +3083,8 @@ bool CompilationStencil::delazifySelfHostedFunction(
       return false;
     }
     if (jit::LoadAOTSelfHostedFunction(cx, script, name)) {
-      // Phase 6: Update lazy scripts (nothing to do for self-hosted).
       return true;
     }
-    // Fall through to normal path if no AOT blob found.
   }
 #endif
 
