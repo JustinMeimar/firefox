@@ -12349,10 +12349,10 @@ static int Shell(JSContext* cx, OptionParser* op) {
 
 #ifdef ENABLE_AOT_BASELINE
     // Dump AOT self-hosted function blobs now that a realm exists.
-    // serializeAOTManifest() (called during JitRuntime init) wrote the
-    // interpreter-only .S; this rewrites it with self-hosted blobs.
+    // dumpAOTInterp() (called during JitRuntime init) wrote the
+    // interpreter-only container; this rewrites it with self-hosted blobs.
     if (jit::JitOptions.dumpBaselineInterpreter) {
-      if (!jit::DumpAOTSelfHostedFunctions(cx)) {
+      if (!jit::DumpAOTSelfHosted(cx)) {
         return EXIT_FAILURE;
       }
     }

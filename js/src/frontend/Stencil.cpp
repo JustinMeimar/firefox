@@ -32,7 +32,7 @@
 #include "gc/AllocKind.h"         // gc::AllocKind
 #include "gc/Tracer.h"            // TraceNullableRoot
 #include "jit/BaselineCompileTask.h"  // BaselineCompileTask::OffThreadBaselineCompilationAvailable
-#include "jit/BaselineJIT.h"  // jit::BaselineScript, jit::CanBaselineInterpretScript, jit::LoadAOTSelfHostedFunction
+#include "jit/BaselineJIT.h"  // jit::BaselineScript, jit::CanBaselineInterpretScript, jit::LoadAOTSelfHosted
 #include "jit/JitContext.h"   // jit::MethodStatus
 #include "jit/JitOptions.h"   // jit::JitOptions
 #include "jit/JitRuntime.h"   // jit::JitRuntime
@@ -3082,7 +3082,7 @@ bool CompilationStencil::delazifySelfHostedFunction(
     if (!script->ensureHasJitScript(cx, keepJitScript)) {
       return false;
     }
-    if (jit::LoadAOTSelfHostedFunction(cx, script, name)) {
+    if (jit::LoadAOTSelfHosted(cx, script, name)) {
       return true;
     }
   }

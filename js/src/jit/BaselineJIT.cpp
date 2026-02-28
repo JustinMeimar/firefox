@@ -10,6 +10,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/TimeStamp.h"
 
 #include <algorithm>
 #include <fstream>
@@ -1416,7 +1417,7 @@ void BaselineScript::fillAOTManifest(
   sm->resumeEntryCount = resumeEntryList().size();
 
   // Pack trailing arrays into metadata: RetAddrEntry[], OSREntry[],
-  // DebugTrapEntry[] (same order as LoadAOTSelfHostedFunction unpacks).
+  // DebugTrapEntry[] (same order as LoadAOTSelfHosted unpacks).
   auto appendBytes = [](auto& vec, const auto* data, size_t count) {
     const auto* bytes = reinterpret_cast<const uint8_t*>(data);
     return vec.append(bytes, count * sizeof(*data));
@@ -1435,8 +1436,12 @@ void BaselineScript::fillAOTManifest(
   }
 }
 
-bool jit::LoadAOTSelfHostedFunction(JSContext* cx, HandleScript script,
+bool jit::LoadAOTSelfHosted(JSContext* cx, HandleScript script,
                                      Handle<JSAtom*> name) {
+#ifdef DEBUG
+  mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
+#endif
+
   // Compute name hash for blob matching.
   JS::AutoCheckCannotGC nogc;
   uint32_t nameHash = name->hasLatin1Chars()
@@ -1547,9 +1552,15 @@ bool jit::LoadAOTSelfHostedFunction(JSContext* cx, HandleScript script,
     bs->toggleProfilerInstrumentation(true);
   }
 
-  JitSpew(JitSpew_BaselineAOT,
-          "Loaded AOT self-hosted function: codeSize=%u retAddr=%u osr=%u",
-          codeSize, manifest.retAddrEntryCount, manifest.osrEntryCount);
+#ifdef DEBUG
+  mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
+  fprintf(stderr, "[AOT-timing] AOT self-hosted '%s': total=%lldus (codeSize=%u patches=%u)\n",
+          name->hasLatin1Chars()
+              ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
+              : "<two-byte>",
+          (long long)dTotal.ToMicroseconds(),
+          codeSize, entry->patchesCount);
+#endif
 
   return true;
 }
@@ -1567,6 +1578,9 @@ uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
 bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
+#ifdef DEBUG
+    mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
+#endif
     TempAllocator temp(&cx->tempLifoAlloc());
     mozilla::Maybe<AOTContext> aotCtx;
 #ifdef ENABLE_AOT_BASELINE
@@ -1578,7 +1592,13 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
 #endif
     StackMacroAssembler masm(cx, temp, aotCtx.ptrOr(nullptr));
     BaselineInterpreterGenerator generator(cx, temp, masm);
-    return generator.generate(cx, interpreter);
+    bool ok = generator.generate(cx, interpreter);
+#ifdef DEBUG
+    mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
+    fprintf(stderr, "[AOT-timing] JIT generate interp: total=%lldus\n",
+            (long long)dTotal.ToMicroseconds());
+#endif
+    return ok;
   }
 
   return true;

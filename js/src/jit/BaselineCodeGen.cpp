@@ -7,6 +7,7 @@
 #include "jit/BaselineCodeGen.h"
 
 #include "mozilla/Casting.h"
+#include "mozilla/TimeStamp.h"
 
 #include <algorithm>
 #include <fstream>
@@ -7429,7 +7430,7 @@ struct AOTBlobData {
 
 // Compile a self-hosted function with AOT context and collect its blob data.
 // Returns false on failure.
-static bool compileAOTSelfHostedFunction(
+static bool compileAOTSelfHosted(
     JSContext* cx, const char* funcName,
     const TrampolinePtrs& trampolines,
     AOTBlobData* blobOut) {
@@ -7669,11 +7670,11 @@ static bool writeAOTContainer(
   return true;
 }
 
-// Saved interpreter blob from serializeAOTManifest(), reused by
-// DumpAOTSelfHostedFunctions() which runs later once a realm exists.
+// Saved interpreter blob from dumpAOTInterp(), reused by
+// DumpAOTSelfHosted() which runs later once a realm exists.
 static Maybe<AOTBlobData> sSavedInterpreterBlob;
 
-bool BaselineInterpreterGenerator::serializeAOTManifest(JSContext* cx,
+bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx,
                                                         JitCode* code) {
 
   uint8_t* codeStart = code->raw();
@@ -7685,7 +7686,7 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JSContext* cx,
                          aot_->accumulator().runtimePatches);
 #endif
 
-  // --- Build interpreter blob and save for DumpAOTSelfHostedFunctions ---
+  // --- Build interpreter blob and save for DumpAOTSelfHosted ---
   sSavedInterpreterBlob.reset();
   sSavedInterpreterBlob.emplace();
   AOTBlobData& interpBlob = *sSavedInterpreterBlob;
@@ -7800,7 +7801,7 @@ static const char* const kAOTSelfHostedFunctions[] = {
     "Promise_finally",
 };
 
-bool DumpAOTSelfHostedFunctions(JSContext* cx) {
+bool DumpAOTSelfHosted(JSContext* cx) {
   MOZ_ASSERT(JitOptions.dumpBaselineInterpreter);
 
   if (!sSavedInterpreterBlob) {
@@ -7817,7 +7818,7 @@ bool DumpAOTSelfHostedFunctions(JSContext* cx) {
   Vector<AOTBlobData, 0, SystemAllocPolicy> funcBlobs;
   for (const char* funcName : kAOTSelfHostedFunctions) {
     AOTBlobData blob;
-    if (!compileAOTSelfHostedFunction(cx, funcName, trampolines, &blob)) {
+    if (!compileAOTSelfHosted(cx, funcName, trampolines, &blob)) {
       JitSpew(JitSpew_BaselineAOT,
               "WARNING: Failed to compile AOT self-hosted '%s', skipping",
               funcName);
@@ -7866,8 +7867,12 @@ bool DumpAOTSelfHostedFunctions(JSContext* cx) {
 #endif
 
 #ifdef ENABLE_AOT_BASELINE
-bool BaselineInterpreterGenerator::loadAOTBaseline(
+bool BaselineInterpreterGenerator::loadAOTInterp(
     JSContext* cx, BaselineInterpreter& interpreter) {
+#ifdef DEBUG
+  mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
+#endif
+
   const AOTContainerHeader* hdr = GetAOTContainerHeader();
   if (!hdr) {
     JitSpew(JitSpew_BaselineAOT, "ERROR: Invalid or missing AOT container!");
@@ -7976,7 +7981,13 @@ bool BaselineInterpreterGenerator::loadAOTBaseline(
     interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
   }
 
-  JitSpew(JitSpew_BaselineAOT, "Successfully loaded AOT baseline interpreter.");
+#ifdef DEBUG
+  mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
+  fprintf(stderr, "[AOT-timing] AOT interp load: total=%lldus (codeSize=%zu patches=%u)\n",
+          (long long)dTotal.ToMicroseconds(),
+          codeSize, entry->patchesCount);
+#endif
+
   return true;
 }
 #endif
@@ -7985,7 +7996,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
 #ifdef ENABLE_AOT_BASELINE
   if (JitOptions.useAOTBaseline) {
-    return loadAOTBaseline(cx, interpreter);
+    return loadAOTInterp(cx, interpreter);
   }
 #endif
 
@@ -8077,7 +8088,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 #ifdef ENABLE_AOT_BASELINE
     // Serialize the baseline interpreter code and embedded manifest to binary.
     if (JitOptions.dumpBaselineInterpreter) {
-      if (!serializeAOTManifest(cx, code)) {
+      if (!dumpAOTInterp(cx, code)) {
         JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT manifest");
         return false;
       }

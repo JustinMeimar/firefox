@@ -613,13 +613,13 @@ class BaselineInterpreter {
 // Load a pre-compiled self-hosted function from the AOT container.
 // |name| is the self-hosted function name (used for hash matching).
 // Returns true if successfully loaded, false if no blob found or on error.
-[[nodiscard]] bool LoadAOTSelfHostedFunction(JSContext* cx,
-                                             HandleScript script,
-                                             Handle<JSAtom*> name);
+[[nodiscard]] bool LoadAOTSelfHosted(JSContext* cx,
+                                     HandleScript script,
+                                     Handle<JSAtom*> name);
 
 // Compile self-hosted functions with AOT context and rewrite the .S container.
 // Must be called after a realm exists (i.e., after interpreter dump).
-[[nodiscard]] bool DumpAOTSelfHostedFunctions(JSContext* cx);
+[[nodiscard]] bool DumpAOTSelfHosted(JSContext* cx);
 #endif
 
 inline bool IsBaselineJitEnabled(JSContext* cx) {

@@ -598,7 +598,7 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   uint32_t compileRuntimePtrOffset_ = 0;
 
 #ifdef ENABLE_AOT_BASELINE
-  [[nodiscard]] bool serializeAOTManifest(JSContext* cx, JitCode* code);
+  [[nodiscard]] bool dumpAOTInterp(JSContext* cx, JitCode* code);
 #endif
 
   BaselineInterpreterPerfSpewer perfSpewer_;
@@ -613,8 +613,8 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   [[nodiscard]] bool emitInterpreterLoop();
   [[nodiscard]] bool emitDebugTrap();
 #ifdef ENABLE_AOT_BASELINE
-  [[nodiscard]] bool loadAOTBaseline(JSContext* cx,
-                                     BaselineInterpreter& interpreter);
+  [[nodiscard]] bool loadAOTInterp(JSContext* cx,
+                                   BaselineInterpreter& interpreter);
 #endif
 
   void emitOutOfLineCodeCoverageInstrumentation();
