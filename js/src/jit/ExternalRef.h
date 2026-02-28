@@ -49,8 +49,7 @@ enum class ExternalRefKind : uint16_t {
 uintptr_t ResolveExternalRef(ExternalRefKind kind, JSContext* cx);
 
 // Shared kinds are emitted first in both ExternalRefKind and
-// RuntimePatch::Kind (via EXTERNAL_REF_SHARED_KINDS), so a static_cast
-// between them is valid for any shared kind.
+// RuntimePatch::Kind so a static_cast between them is valid.
 #define CHECK_SHARED_ORDINAL(name) \
   static_assert(static_cast<uint16_t>(ExternalRefKind::name) == \
                 static_cast<uint16_t>(RuntimePatch::Kind::name), \

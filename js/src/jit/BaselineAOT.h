@@ -13,6 +13,9 @@
 #include "vm/JSContext.h"
 
 namespace js::jit {
+
+static constexpr const char* kAOTOutputPath =
+    "js/src/jit/AOTBaselineInterpreter.S";
 enum class DebugTrapHandlerKind;
 
 #define BASELINE_MANIFEST_FIELDS(V) \
@@ -34,18 +37,13 @@ enum class DebugTrapHandlerKind;
   V(ICReturnCount)                  \
   V(RuntimePatchCount)
 
-// --- AOT Container Format ---
-//
-// The AOT container is a flat binary with a header, directory, and blob data.
-// Two extern symbols bracket the entire container.
+static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
+static constexpr uint32_t AOT_CONTAINER_VERSION = 1;
 
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
   SelfHostedFunction = 1,
 };
-
-static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
-static constexpr uint32_t AOT_CONTAINER_VERSION = 1;
 
 struct AOTContainerHeader {
   uint32_t magic;
@@ -137,24 +135,22 @@ struct AOTScriptManifest {
   uint32_t runtimePatchCount;
 };
 
-// Simple rolling hash for AOT blob name matching.
-inline uint32_t AOTNameHash(const char* s) {
-  uint32_t h = 0;
-  for (; *s; s++) {
-    h = h * 31 + static_cast<uint8_t>(*s);
-  }
-  return h;
-}
-
-inline uint32_t AOTNameHash(const JS::Latin1Char* chars, size_t len) {
+inline uint32_t AOTNameHash(const uint8_t* bytes, size_t len) {
   uint32_t h = 0;
   for (size_t i = 0; i < len; i++) {
-    h = h * 31 + chars[i];
+    h = h * 31 + bytes[i];
   }
   return h;
 }
-
+inline uint32_t AOTNameHash(const char* s) {
+  size_t len = strlen(s);
+  return AOTNameHash(reinterpret_cast<const uint8_t*>(s), len);
+}
+inline uint32_t AOTNameHash(const JS::Latin1Char* chars, size_t len) {
+  return AOTNameHash(reinterpret_cast<const uint8_t*>(chars), len);
+}
 inline uint32_t AOTNameHash(const char16_t* chars, size_t len) {
+  // Truncate to low byte for Latin1-compatible hashing.
   uint32_t h = 0;
   for (size_t i = 0; i < len; i++) {
     h = h * 31 + static_cast<uint8_t>(chars[i]);
@@ -169,8 +165,9 @@ struct PatchContext {
     uint32_t dispatchTableOffset;    
 };
 
-// IDs for C++ functions called via callWithABI from the baseline interpreter.
-// These are used to identify which function pointer to patch at AOT load time.
+// While trapolines are generated at runtime we must manually patch the
+// `callWithABI<Fn>` calls, since the absolute address of functions in
+// the text section is non-deterministic.
 enum class AOTCppFunctionId : uint32_t {
   PostWriteBarrier,
   FrameIsDebuggeeCheck,
@@ -179,9 +176,7 @@ enum class AOTCppFunctionId : uint32_t {
   Count
 };
 
-// Shared between ExternalRefKind and RuntimePatch::Kind.
-// These must come first in both enums so ordinal values match,
-// enabling static_cast between the two.
+// TODO: Can we move EXTERNAL_REF_SHARED_KINDS
 #define EXTERNAL_REF_SHARED_KINDS(V) \
   V(JSContextPtr)              \
   V(InterruptBits)             \
@@ -195,7 +190,6 @@ enum class AOTCppFunctionId : uint32_t {
   V(ProfilerExitFrameTail)     \
   V(DoubleToInt32Stub)
 
-// Only in RuntimePatch::Kind (parameterized patch types).
 #define RUNTIME_PATCH_ONLY_KINDS(V) \
   V(DispatchTable)             \
   V(VMWrapper)                 \
@@ -274,11 +268,8 @@ static_assert(sizeof(RuntimePatch) == 12,
 
 class JitCode;
 
-// Allocate executable memory, copy code from an AOT blob, and apply runtime
-// patches. Shared by loadAOTBaseline (interpreter) and
-// LoadAOTSelfHostedFunction (scripts).
-// |codeKind| is CodeKind::Other for interpreter, Baseline for scripts.
-// |dispatchTableOffset| is nonzero only for the interpreter blob.
+// TODO(Justin): This abstraction only has a single use. We should use it in
+// BaselineInterpreter AOT as well?
 [[nodiscard]] JitCode* AllocateAndPatchAOTCode(
     JSContext* cx, const AOTBlobDirectoryEntry* entry,
     const uint8_t* containerBase, uint32_t headerSize,

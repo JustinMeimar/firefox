@@ -7739,40 +7739,24 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JSContext* cx,
   const auto& debugTraps = aot_->accumulator().debugTraps;
   const auto& coverage = handler.codeCoverageOffsets();
   const auto& icReturns = handler.icReturnOffsets();
-
-  if (debugInstr.length() > 0) {
-    if (!AOTBlobData::appendBytes(interpBlob.metadata, debugInstr.begin(),
-                                  debugInstr.length())) {
-      return false;
-    }
-  }
-  if (debugTraps.length() > 0) {
-    if (!AOTBlobData::appendBytes(interpBlob.metadata, debugTraps.begin(),
-                                  debugTraps.length())) {
-      return false;
-    }
-  }
-  if (coverage.length() > 0) {
-    if (!AOTBlobData::appendBytes(interpBlob.metadata, coverage.begin(),
-                                  coverage.length())) {
-      return false;
-    }
-  }
-  if (icReturns.length() > 0) {
-    if (!AOTBlobData::appendBytes(interpBlob.metadata, icReturns.begin(),
-                                  icReturns.length())) {
-      return false;
-    }
+  
+  if (!AOTBlobData::appendBytes(interpBlob.metadata, debugInstr.begin(),
+                                debugInstr.length()) ||
+      !AOTBlobData::appendBytes(interpBlob.metadata, debugTraps.begin(),
+                                debugTraps.length()) ||
+      !AOTBlobData::appendBytes(interpBlob.metadata, coverage.begin(),
+                                coverage.length()) ||
+      !AOTBlobData::appendBytes(interpBlob.metadata, icReturns.begin(),
+                                icReturns.length())) {
+    return false;
   }
 
   JitSpew(JitSpew_BaselineAOT,
           "Scalars: dbgInstr=%u dbgTrap=%u coverage=%u icRet=%u patches=%u",
           s.DebugInstrumentationCount, s.DebugTrapCount,
           s.CodeCoverageCount, s.ICReturnCount, s.RuntimePatchCount);
-
-  // --- Write the .S file (interpreter-only for now;
-  //     DumpAOTSelfHostedFunctions will rewrite with additional blobs) ---
-  const char* outPath = "js/src/jit/AOTBaselineInterpreter.S";
+  
+  const char* outPath = kAOTOutputPath;
   std::ofstream out(outPath, std::ios::trunc);
   if (!out.is_open()) {
     JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.", outPath);
@@ -7798,10 +7782,8 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JSContext* cx,
   return true;
 }
 
-// Self-hosted functions to AOT-compile. Each must be realm-independent
-// (self-hosted functions are by default).
+// TODO(Justin): These should probably be in BaselineAOT.h
 static const char* const kAOTSelfHostedFunctions[] = {
-    // Array iteration
     "ArrayIteratorNext",
     "ArrayMap",
     "ArrayFilter",
@@ -7811,18 +7793,14 @@ static const char* const kAOTSelfHostedFunctions[] = {
     "ArraySome",
     "ArrayFind",
     "ArrayFindIndex",
-    // Iterator protocol
     "StringIteratorNext",
-    // Map/Set
     "MapForEach",
     "MapIteratorNext",
     "SetForEach",
     "SetIteratorNext",
-    // Typed arrays
     "TypedArrayForEach",
     "TypedArrayMap",
     "TypedArrayFilter",
-    // Promise
     "Promise_finally",
 };
 
@@ -7834,8 +7812,8 @@ bool DumpAOTSelfHostedFunctions(JSContext* cx) {
             "No saved interpreter blob for self-hosted function dump");
     return false;
   }
-
-  const char* outPath = "js/src/jit/AOTBaselineInterpreter.S";
+  
+  const char* outPath = kAOTOutputPath;
 
   TrampolinePtrs trampolines(cx->runtime()->jitRuntime());
 
