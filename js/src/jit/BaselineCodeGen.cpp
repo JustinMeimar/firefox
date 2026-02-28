@@ -7373,8 +7373,6 @@ static void verifySentinelsPatched(const uint8_t* code, size_t codeSize,
     }
   }
 
-  JitSpew(JitSpew_BaselineAOT,
-          "Sentinel verification passed: all sentinels covered by patches.");
 }
 
 // Helpers to emit GAS assembly. All prepend the "bl_aot_" prefix.
@@ -7540,12 +7538,13 @@ static bool compileAOTSelfHostedFunction(
     }
   }
 
+  // Pad name+quotes to align columns across self-hosted functions.
+  char padded[32];
+  SprintfLiteral(padded, "'%s'", funcName);
   JitSpew(JitSpew_BaselineAOT,
-          "Compiled AOT self-hosted function '%s': codeSize=%u patches=%u "
-          "retAddr=%u osr=%u debugTrap=%u resume=%u",
-          funcName, sm.codeSize, sm.runtimePatchCount,
-          sm.retAddrEntryCount, sm.osrEntryCount,
-          sm.debugTrapEntryCount, sm.resumeEntryCount);
+          "AOT Compiled %-24s size=%5ub  patches=%3u  callSites=%3u  osr=%u",
+          padded, sm.codeSize, sm.runtimePatchCount,
+          sm.retAddrEntryCount, sm.osrEntryCount);
 
   return true;
 }
@@ -7773,16 +7772,13 @@ bool BaselineInterpreterGenerator::serializeAOTManifest(JSContext* cx,
   uint32_t prologueEnd = warmUpCheckPrologueOffset_.offset();
   JitSpew(
       JitSpew_BaselineAOT,
-      "Code size=%zu:\n\tprologue=[0,%u)\n\thandlers=[%u,%u)\n\ttable=[%u,%zu)",
+      "Code size=%zu: prologue=[0,%u) handlers=[%u,%u) table=[%u,%zu)",
       codeSize, prologueEnd, prologueEnd, tableOffset_, tableOffset_, codeSize);
-
-  JitSpew(JitSpew_BaselineAOT,
-          "Wrote AOT container with 1 blob(s) to %s", outPath);
 
   return true;
 }
 
-// TODO(Justin): These should probably be in BaselineAOT.h
+// TODO(Justin): These should be in BaselineAOT.h (?)
 static const char* const kAOTSelfHostedFunctions[] = {
     "ArrayIteratorNext",
     "ArrayMap",
@@ -7857,8 +7853,10 @@ bool DumpAOTSelfHostedFunctions(JSContext* cx) {
   out.close();
 
   JitSpew(JitSpew_BaselineAOT,
-          "Rewrote AOT container with %u blob(s) to %s",
+          "Wrote AOT container with %u blob(s) to %s",
           blobCount, outPath);
+  JitSpew(JitSpew_BaselineAOT,
+          "Rebuild the engine to use AOT mode.");
 
   // Free the saved blob now that we're done.
   sSavedInterpreterBlob.reset();
@@ -8083,9 +8081,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
         JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT manifest");
         return false;
       }
-      JitSpew(JitSpew_BaselineAOT,
-              "Dumped AOT baseline interpreter to js/src/jit/AOTBaselineInterpreter.S. "
-              "Rebuild the engine to use AOT mode.");
+
     }
 #endif
 
