@@ -66,7 +66,7 @@ class AOTContext {
 
   BaselineAOTAccumulator& accumulator() { return accumulator_; }
 
-  void emitPatchableMovImm(RuntimePatch::Kind kind, Register dest);
+  void emitPatchableMovImm(ExternalRefKind kind, Register dest);
   void emitVMWrapperPatchableMovImm(VMFunctionId id, Register dest);
   void emitCppFunctionPatchableMovImm(AOTCppFunctionId fnId, Register dest);
   void emitDebugTrapPatchableMovImm(DebugTrapHandlerKind dbgKind,

@@ -16,7 +16,7 @@ using namespace js::jit;
 AOTContext::AOTContext(AOTStrategy strategy, TrampolinePtrs trampolines)
     : strategy_(strategy), trampolines_(trampolines) {}
 
-void AOTContext::emitPatchableMovImm(RuntimePatch::Kind kind, Register dest) {
+void AOTContext::emitPatchableMovImm(ExternalRefKind kind, Register dest) {
   CodeOffset off =
       masm_->movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
   uint32_t immOff = off.offset() - sizeof(void*);

@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include "jit/ExternalRef.h"
 #include "jit/VMFunctions.h"
 #include "vm/JSContext.h"
 
@@ -135,27 +136,18 @@ struct AOTScriptManifest {
   uint32_t runtimePatchCount;
 };
 
-inline uint32_t AOTNameHash(const uint8_t* bytes, size_t len) {
-  uint32_t h = 0;
-  for (size_t i = 0; i < len; i++) {
-    h = h * 31 + bytes[i];
-  }
-  return h;
-}
-inline uint32_t AOTNameHash(const char* s) {
-  size_t len = strlen(s);
-  return AOTNameHash(reinterpret_cast<const uint8_t*>(s), len);
-}
-inline uint32_t AOTNameHash(const JS::Latin1Char* chars, size_t len) {
-  return AOTNameHash(reinterpret_cast<const uint8_t*>(chars), len);
-}
-inline uint32_t AOTNameHash(const char16_t* chars, size_t len) {
-  // Truncate to low byte for Latin1-compatible hashing.
+// Hash a name to a uint32_t for AOT blob directory lookup.
+// All char types are hashed by their low byte (Latin1-compatible).
+template <typename CharT>
+inline uint32_t AOTNameHash(const CharT* chars, size_t len) {
   uint32_t h = 0;
   for (size_t i = 0; i < len; i++) {
     h = h * 31 + static_cast<uint8_t>(chars[i]);
   }
   return h;
+}
+inline uint32_t AOTNameHash(const char* s) {
+  return AOTNameHash(s, strlen(s));
 }
 
 // Load time context required to apply patches.
@@ -176,40 +168,11 @@ enum class AOTCppFunctionId : uint32_t {
   Count
 };
 
-// TODO: Can we move EXTERNAL_REF_SHARED_KINDS
-#define EXTERNAL_REF_SHARED_KINDS(V) \
-  V(JSContextPtr)              \
-  V(InterruptBits)             \
-  V(JitActivation)             \
-  V(RealmPtr)                  \
-  V(ContextRealm)              \
-  V(WellKnownSymbols)          \
-  V(JitRuntime)                \
-  V(LastBufferedCell)          \
-  V(ProfilerEnabled)           \
-  V(ProfilerExitFrameTail)     \
-  V(DoubleToInt32Stub)
-
-#define RUNTIME_PATCH_ONLY_KINDS(V) \
-  V(DispatchTable)             \
-  V(VMWrapper)                 \
-  V(DebugTrapHandler)          \
-  V(CppFunction)
-
-#define RUNTIME_PATCH_KINDS(V)  \
-  EXTERNAL_REF_SHARED_KINDS(V) \
-  RUNTIME_PATCH_ONLY_KINDS(V)
-
 class RuntimePatch {
-  public:   
+  public:
     // Each patch has a kind tag, telling us which kind of patch to apply, and a
     // targetOffset, representing at which byte we should apply the patch.
-    enum class Kind : uint16_t {
-#define EMIT_KIND(name) name,
-      RUNTIME_PATCH_KINDS(EMIT_KIND)
-#undef EMIT_KIND
-    };
-    Kind kind;
+    ExternalRefKind kind;
     uint32_t targetOffset;
 
     union {
@@ -221,7 +184,7 @@ class RuntimePatch {
 
     static RuntimePatch DispatchTablePatch(uint32_t targetOffset_, uint32_t handlerOffset_) {
       RuntimePatch p;
-      p.kind = Kind::DispatchTable;
+      p.kind = ExternalRefKind::DispatchTable;
       p.targetOffset = targetOffset_;
       p.handlerOffset = handlerOffset_;
       return p;
@@ -229,7 +192,7 @@ class RuntimePatch {
 
     static RuntimePatch VMWrapperPatch(uint32_t targetOffset_, VMFunctionId vmId_) {
       RuntimePatch p;
-      p.kind = Kind::VMWrapper;
+      p.kind = ExternalRefKind::VMWrapper;
       p.targetOffset = targetOffset_;
       p.vmId = vmId_;
       return p;
@@ -237,7 +200,7 @@ class RuntimePatch {
 
     static RuntimePatch DebugTrapPatch(uint32_t targetOffset_, DebugTrapHandlerKind dbgKind_) {
       RuntimePatch p;
-      p.kind = Kind::DebugTrapHandler;
+      p.kind = ExternalRefKind::DebugTrapHandler;
       p.targetOffset = targetOffset_;
       p.dbgKind = dbgKind_;
       return p;
@@ -245,13 +208,13 @@ class RuntimePatch {
 
     static RuntimePatch CppFunctionPatch(uint32_t targetOffset_, AOTCppFunctionId fnId) {
       RuntimePatch p;
-      p.kind = Kind::CppFunction;
+      p.kind = ExternalRefKind::CppFunction;
       p.targetOffset = targetOffset_;
       p.cppFnId = fnId;
       return p;
     }
 
-    explicit RuntimePatch(Kind kind_, uint32_t targetOffset_) :
+    explicit RuntimePatch(ExternalRefKind kind_, uint32_t targetOffset_) :
       kind(kind_), targetOffset(targetOffset_) {}
 
     void apply(const PatchContext& pc) const;

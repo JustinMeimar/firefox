@@ -53,6 +53,11 @@ uintptr_t ResolveExternalRef(ExternalRefKind kind, JSContext* cx) {
               &cx->runtime()->caches().stringToAtomCache);
       return (uintptr_t)(cache + StringToAtomCache::offsetOfLastLookups());
     }
+    case ExternalRefKind::DispatchTable:
+    case ExternalRefKind::VMWrapper:
+    case ExternalRefKind::DebugTrapHandler:
+    case ExternalRefKind::CppFunction:
+      MOZ_CRASH("Patch-only ExternalRefKind cannot be resolved at runtime");
     case ExternalRefKind::Count:
       break;
   }

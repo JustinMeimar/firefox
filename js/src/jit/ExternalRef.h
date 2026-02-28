@@ -9,9 +9,9 @@
 
 #include <cstdint>
 
-#include "jit/BaselineAOT.h"
+#include "jstypes.h"
 
-struct JSContext;
+struct JS_PUBLIC_API JSContext;
 
 namespace js::jit {
 
@@ -26,15 +26,25 @@ namespace js::jit {
 //   2) AOT PatchBasedBlob: emit sentinel via movWithPatch + register patch
 //   3) AOT RegisterIndirect: emit zone->runtime->field load chain
 
-// Only in ExternalRefKind (register-indirect strategy, no patching).
-#define EXTERNAL_REF_ONLY_KINDS(V) \
-  V(MegamorphicCache)          \
-  V(MegamorphicSetPropCache)   \
-  V(StringToAtomCache)
-
 #define EXTERNAL_REF_KINDS(V)   \
-  EXTERNAL_REF_SHARED_KINDS(V) \
-  EXTERNAL_REF_ONLY_KINDS(V)
+  V(JSContextPtr)               \
+  V(InterruptBits)              \
+  V(JitActivation)              \
+  V(RealmPtr)                   \
+  V(ContextRealm)               \
+  V(WellKnownSymbols)           \
+  V(JitRuntime)                 \
+  V(LastBufferedCell)           \
+  V(ProfilerEnabled)            \
+  V(ProfilerExitFrameTail)      \
+  V(DoubleToInt32Stub)          \
+  V(MegamorphicCache)           \
+  V(MegamorphicSetPropCache)    \
+  V(StringToAtomCache)          \
+  V(DispatchTable)              \
+  V(VMWrapper)                  \
+  V(DebugTrapHandler)           \
+  V(CppFunction)
 
 enum class ExternalRefKind : uint16_t {
 #define EMIT_KIND(name) name,
@@ -47,15 +57,6 @@ enum class ExternalRefKind : uint16_t {
 // to get the compile-time ImmPtr value, and by the patch-based AOT path to
 // verify patch correctness.
 uintptr_t ResolveExternalRef(ExternalRefKind kind, JSContext* cx);
-
-// Shared kinds are emitted first in both ExternalRefKind and
-// RuntimePatch::Kind so a static_cast between them is valid.
-#define CHECK_SHARED_ORDINAL(name) \
-  static_assert(static_cast<uint16_t>(ExternalRefKind::name) == \
-                static_cast<uint16_t>(RuntimePatch::Kind::name), \
-                "ExternalRefKind::" #name " != RuntimePatch::Kind::" #name);
-   EXTERNAL_REF_SHARED_KINDS(CHECK_SHARED_ORDINAL)
-#undef CHECK_SHARED_ORDINAL
 
 }  // namespace js::jit
 

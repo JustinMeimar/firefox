@@ -4355,6 +4355,11 @@ static ImmPtr ResolveExternalRefCompileTime(ExternalRefKind kind,
       return ImmPtr(
           (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups()));
     }
+    case ExternalRefKind::DispatchTable:
+    case ExternalRefKind::VMWrapper:
+    case ExternalRefKind::DebugTrapHandler:
+    case ExternalRefKind::CppFunction:
+      MOZ_CRASH("Patch-only ExternalRefKind not available at compile time");
     case ExternalRefKind::Count:
       break;
   }
@@ -4414,6 +4419,11 @@ void MacroAssembler::emitExternalRefViaZone(ExternalRefKind kind,
       // These kinds are only used by the patch-based (baseline) strategy.
       // They don't have convenient offset accessors for register-indirect use.
       MOZ_CRASH("ExternalRefKind not supported in register-indirect mode");
+    case ExternalRefKind::DispatchTable:
+    case ExternalRefKind::VMWrapper:
+    case ExternalRefKind::DebugTrapHandler:
+    case ExternalRefKind::CppFunction:
+      MOZ_CRASH("Patch-only ExternalRefKind not supported in register-indirect mode");
     case ExternalRefKind::Count:
       break;
   }
@@ -4427,7 +4437,7 @@ void MacroAssembler::moveExternalRef(ExternalRefKind kind, Register dest) {
   }
   switch (aot().strategy()) {
     case AOTStrategy::PatchPointers:
-      aot().emitPatchableMovImm(static_cast<RuntimePatch::Kind>(kind), dest);
+      aot().emitPatchableMovImm(kind, dest);
       return;
     case AOTStrategy::RegisterIndirect:
       emitExternalRefViaZone(kind, dest);

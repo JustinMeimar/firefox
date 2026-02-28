@@ -40,43 +40,49 @@ static void* ResolveCppFunction(AOTCppFunctionId id) {
 
 uintptr_t RuntimePatch::getValueToPatch(const PatchContext& pc) const {
   switch(kind) {
-    case Kind::WellKnownSymbols:
+    case ExternalRefKind::WellKnownSymbols:
       return (uintptr_t)pc.cx->runtime()->wellKnownSymbols.ref();
-    case Kind::JitRuntime:
+    case ExternalRefKind::JitRuntime:
       return (uintptr_t)pc.cx->runtime()->jitRuntime();
-    case Kind::ContextRealm:
+    case ExternalRefKind::ContextRealm:
       return (uintptr_t)(reinterpret_cast<const uint8_t*>(pc.cx)
               + JSContext::offsetOfRealm());
-    case Kind::JSContextPtr:
+    case ExternalRefKind::JSContextPtr:
       return (uintptr_t)pc.cx;
-    case Kind::DispatchTable:
+    case ExternalRefKind::DispatchTable:
       return (uintptr_t)(pc.codeBase + handlerOffset);
-    case Kind::VMWrapper: {
+    case ExternalRefKind::VMWrapper: {
       TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getVMWrapper(vmId);
       return (uintptr_t)(ptr.value);
     }
-    case Kind::InterruptBits:
+    case ExternalRefKind::InterruptBits:
       return (uintptr_t)pc.cx->addressOfInterruptBits();
-    case Kind::JitActivation:
+    case ExternalRefKind::JitActivation:
       return (uintptr_t)pc.cx->addressOfJitActivation();
-    case Kind::RealmPtr:
+    case ExternalRefKind::RealmPtr:
       return (uintptr_t)pc.cx->addressOfRealm();
-    case Kind::LastBufferedCell:
+    case ExternalRefKind::LastBufferedCell:
       return (uintptr_t)pc.cx->runtime()->gc.addressOfLastBufferedWholeCell();
-    case Kind::ProfilerEnabled:
+    case ExternalRefKind::ProfilerEnabled:
       return (uintptr_t)pc.cx->runtime()->geckoProfiler().addressOfEnabled();
-    case Kind::DebugTrapHandler:
+    case ExternalRefKind::DebugTrapHandler:
       return (uintptr_t)pc.cx->runtime()->jitRuntime()->debugTrapHandler(dbgKind)->raw();
-    case Kind::ProfilerExitFrameTail: {
+    case ExternalRefKind::ProfilerExitFrameTail: {
       TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getProfilerExitFrameTail();
       return (uintptr_t)(ptr.value);
     }
-    case Kind::CppFunction:
+    case ExternalRefKind::CppFunction:
       return (uintptr_t)ResolveCppFunction(cppFnId);
-    case Kind::DoubleToInt32Stub: {
+    case ExternalRefKind::DoubleToInt32Stub: {
       TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getDoubleToInt32ValueStub();
       return (uintptr_t)(ptr.value);
     }
+    case ExternalRefKind::MegamorphicCache:
+    case ExternalRefKind::MegamorphicSetPropCache:
+    case ExternalRefKind::StringToAtomCache:
+      MOZ_CRASH("Register-indirect-only ExternalRefKind cannot be patched");
+    case ExternalRefKind::Count:
+      break;
   }
   MOZ_CRASH("Unexpected Patch Type");
 }
@@ -88,21 +94,25 @@ void RuntimePatch::apply(const PatchContext& pc) const {
   uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
   const char* kindStr = "Unknown";
   switch(kind) {
-    case Kind::WellKnownSymbols: kindStr = "WellKnownSymbols"; break;
-    case Kind::JitRuntime: kindStr = "JitRuntime"; break;
-    case Kind::ContextRealm: kindStr = "ContextRealm"; break;
-    case Kind::JSContextPtr: kindStr = "JSContextPtr"; break;
-    case Kind::DispatchTable: kindStr = "DispatchTable"; break;
-    case Kind::VMWrapper: kindStr = "VMWrapper"; break;
-    case Kind::InterruptBits: kindStr = "InterruptBits"; break;
-    case Kind::JitActivation: kindStr = "JitActivation"; break;
-    case Kind::RealmPtr: kindStr = "RealmPtr"; break;
-    case Kind::LastBufferedCell: kindStr = "LastBufferedCell"; break;
-    case Kind::ProfilerEnabled: kindStr = "ProfilerEnabled"; break;
-    case Kind::DebugTrapHandler: kindStr = "DebugTrapHandler"; break;
-    case Kind::ProfilerExitFrameTail: kindStr = "ProfilerExitFrameTail"; break;
-    case Kind::CppFunction: kindStr = "CppFunction"; break;
-    case Kind::DoubleToInt32Stub: kindStr = "DoubleToInt32Stub"; break;
+    case ExternalRefKind::WellKnownSymbols: kindStr = "WellKnownSymbols"; break;
+    case ExternalRefKind::JitRuntime: kindStr = "JitRuntime"; break;
+    case ExternalRefKind::ContextRealm: kindStr = "ContextRealm"; break;
+    case ExternalRefKind::JSContextPtr: kindStr = "JSContextPtr"; break;
+    case ExternalRefKind::DispatchTable: kindStr = "DispatchTable"; break;
+    case ExternalRefKind::VMWrapper: kindStr = "VMWrapper"; break;
+    case ExternalRefKind::InterruptBits: kindStr = "InterruptBits"; break;
+    case ExternalRefKind::JitActivation: kindStr = "JitActivation"; break;
+    case ExternalRefKind::RealmPtr: kindStr = "RealmPtr"; break;
+    case ExternalRefKind::LastBufferedCell: kindStr = "LastBufferedCell"; break;
+    case ExternalRefKind::ProfilerEnabled: kindStr = "ProfilerEnabled"; break;
+    case ExternalRefKind::DebugTrapHandler: kindStr = "DebugTrapHandler"; break;
+    case ExternalRefKind::ProfilerExitFrameTail: kindStr = "ProfilerExitFrameTail"; break;
+    case ExternalRefKind::CppFunction: kindStr = "CppFunction"; break;
+    case ExternalRefKind::DoubleToInt32Stub: kindStr = "DoubleToInt32Stub"; break;
+    case ExternalRefKind::MegamorphicCache: kindStr = "MegamorphicCache"; break;
+    case ExternalRefKind::MegamorphicSetPropCache: kindStr = "MegamorphicSetPropCache"; break;
+    case ExternalRefKind::StringToAtomCache: kindStr = "StringToAtomCache"; break;
+    case ExternalRefKind::Count: break;
   }
   JitSpew(JitSpew_BaselineAOT, "Runtime patch [%s] @ offset %u: before=0x%016lx after=0x%016lx",
           kindStr, targetOffset, beforeValue, val);
