@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jit_ExternalRef_h
-#define jit_ExternalRef_h
+#ifndef jit_AOTReloc_h
+#define jit_AOTReloc_h
 
 #include <cstdint>
 
@@ -20,13 +20,13 @@ namespace js::jit {
 // between processes (due to ASLR, different builds, etc.).
 //
 // The wrappers (movePtr, loadPtr, branch32, storePtr) which take runtime
-// pointers accept ExternalRefKind and internally dispatch to the right
+// pointers accept AOTRelocKind and internally dispatch to the right
 // strategy:
 //   1) Non-AOT: resolve to ImmPtr/AbsoluteAddress at compile time
 //   2) AOT PatchBasedBlob: emit sentinel via movWithPatch + register patch
 //   3) AOT RegisterIndirect: emit zone->runtime->field load chain
 
-#define EXTERNAL_REF_KINDS(V)   \
+#define AOT_RELOC_KINDS(V)   \
   V(JSContextPtr)               \
   V(InterruptBits)              \
   V(JitActivation)              \
@@ -46,30 +46,30 @@ namespace js::jit {
   V(DebugTrapHandler)           \
   V(CppFunction)
 
-enum class ExternalRefKind : uint16_t {
+enum class AOTRelocKind : uint16_t {
 #define EMIT_KIND(name) name,
-  EXTERNAL_REF_KINDS(EMIT_KIND)
+  AOT_RELOC_KINDS(EMIT_KIND)
 #undef EMIT_KIND
   Count
 };
 
-// Map an ExternalRefKind to its string name. Usable in debug logging.
-inline const char* ExternalRefKindName(ExternalRefKind kind) {
+// Map an AOTRelocKind to its string name. Usable in debug logging.
+inline const char* AOTRelocKindName(AOTRelocKind kind) {
   switch (kind) {
-#define EMIT_CASE(name) case ExternalRefKind::name: return #name;
-    EXTERNAL_REF_KINDS(EMIT_CASE)
+#define EMIT_CASE(name) case AOTRelocKind::name: return #name;
+    AOT_RELOC_KINDS(EMIT_CASE)
 #undef EMIT_CASE
-    case ExternalRefKind::Count:
+    case AOTRelocKind::Count:
       break;
   }
   return "Unknown";
 }
 
-// Resolve an ExternalRefKind to its runtime value. Used by the non-AOT path
+// Resolve an AOTRelocKind to its runtime value. Used by the non-AOT path
 // to get the compile-time ImmPtr value, and by the patch-based AOT path to
 // verify patch correctness.
-uintptr_t ResolveExternalRef(ExternalRefKind kind, JSContext* cx);
+uintptr_t ResolveAOTReloc(AOTRelocKind kind, JSContext* cx);
 
 }  // namespace js::jit
 
-#endif  // jit_ExternalRef_h
+#endif  // jit_AOTReloc_h

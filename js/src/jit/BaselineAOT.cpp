@@ -39,21 +39,21 @@ static void* ResolveCppFunction(AOTCppFunctionId id) {
 }
 
 uintptr_t RuntimePatch::getValueToPatch(const PatchContext& pc) const {
-  // Patch-only kinds require union data that ResolveExternalRef doesn't have.
+  // Patch-only kinds require union data that ResolveAOTReloc doesn't have.
   switch(kind) {
-    case ExternalRefKind::DispatchTable:
+    case AOTRelocKind::DispatchTable:
       return (uintptr_t)(pc.codeBase + handlerOffset);
-    case ExternalRefKind::VMWrapper: {
+    case AOTRelocKind::VMWrapper: {
       TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getVMWrapper(vmId);
       return (uintptr_t)(ptr.value);
     }
-    case ExternalRefKind::DebugTrapHandler:
+    case AOTRelocKind::DebugTrapHandler:
       return (uintptr_t)pc.cx->runtime()->jitRuntime()->debugTrapHandler(dbgKind)->raw();
-    case ExternalRefKind::CppFunction:
+    case AOTRelocKind::CppFunction:
       return (uintptr_t)ResolveCppFunction(cppFnId);
     default:
-      // All other kinds resolve identically to ResolveExternalRef.
-      return ResolveExternalRef(kind, pc.cx);
+      // All other kinds resolve identically to ResolveAOTReloc.
+      return ResolveAOTReloc(kind, pc.cx);
   }
 }
 
@@ -63,7 +63,7 @@ void RuntimePatch::apply(const PatchContext& pc) const {
 #ifdef DEBUG
   uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
   JitSpew(JitSpew_BaselineAOT, "Runtime patch [%s] @ offset %u: before=0x%016lx after=0x%016lx",
-          ExternalRefKindName(kind), targetOffset, beforeValue, val);
+          AOTRelocKindName(kind), targetOffset, beforeValue, val);
 #endif
   *reinterpret_cast<uintptr_t*>(target) = val;
 }

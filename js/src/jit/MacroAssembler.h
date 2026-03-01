@@ -38,7 +38,7 @@
 #include "jit/ABIFunctions.h"
 #include "jit/AOTContext.h"
 #include "jit/AtomicOp.h"
-#include "jit/ExternalRef.h"
+#include "jit/AOTReloc.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
 #include "jit/TrampolinePtrs.h"
@@ -409,10 +409,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // Wraps regular codegen in non-aot mode and dispatches to the set
   // strategy when AOT is on.
-  void moveExternalRef(ExternalRefKind kind, Register dest);
-  void loadExternalRef(ExternalRefKind kind, Register dest);
-  void branchExternalRef32(Condition cond, ExternalRefKind kind, Imm32 rhs,
-                           Label* label, Register scratch);
+  void moveAOTReloc(AOTRelocKind kind, Register dest);
+  void loadAOTReloc(AOTRelocKind kind, Register dest);
+  void branchAOTReloc32(Condition cond, AOTRelocKind kind, Imm32 rhs,
+                        Label* label, Register scratch);
 
   // Parametric reference helpers.
   void loadVMWrapper(VMFunctionId id, Register dest);
@@ -421,8 +421,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  private:
   // Internal helper: emit the zone->runtime->field load chain for a given
-  // ExternalRefKind. Only used in AOT RegisterIndirect strategy.
-  void emitExternalRefViaZone(ExternalRefKind kind, Register dest);
+  // AOTRelocKind. Only used in AOT RegisterIndirect strategy.
+  void emitAOTRelocViaZone(AOTRelocKind kind, Register dest);
 
  public:
   MoveResolver& moveResolver() {

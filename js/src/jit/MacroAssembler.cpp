@@ -2861,7 +2861,7 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 void MacroAssembler::loadJSContext(Register dest) {
-  moveExternalRef(ExternalRefKind::JSContextPtr, dest);
+  moveAOTReloc(AOTRelocKind::JSContextPtr, dest);
 }
 
 // Load the current realm pointer (the value of cx->realm_).
@@ -2872,7 +2872,7 @@ static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
 }
 
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-  loadExternalRef(ExternalRefKind::ContextRealm, dest);
+  loadAOTReloc(AOTRelocKind::ContextRealm, dest);
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
@@ -2882,13 +2882,13 @@ void MacroAssembler::switchToRealm(Register realm, Register scratch) {
     storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
   } else {
     MOZ_ASSERT(scratch != InvalidReg);
-    moveExternalRef(ExternalRefKind::ContextRealm, scratch);
+    moveAOTReloc(AOTRelocKind::ContextRealm, scratch);
     storePtr(realm, Address(scratch, 0));
   }
 }
 
 void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
-  loadExternalRef(ExternalRefKind::ContextRealm, dest);
+  loadAOTReloc(AOTRelocKind::ContextRealm, dest);
   loadPtr(Address(dest, RealmFuses::offsetOfFuseWordRelativeToRealm(index)),
           dest);
 }
@@ -2947,7 +2947,7 @@ void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
 
 template <typename ValueType>
 void MacroAssembler::storeLocalAllocSite(ValueType value, Register scratch) {
-  loadExternalRef(ExternalRefKind::ContextRealm, scratch);
+  loadAOTReloc(AOTRelocKind::ContextRealm, scratch);
   storePtr(value, Address(scratch, JS::Realm::offsetOfLocalAllocSite()));
 }
 
@@ -2987,7 +2987,7 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
               output, &isFalse);
   } else {
     MOZ_ASSERT(scratch != InvalidReg);
-    loadExternalRef(ExternalRefKind::ContextRealm, scratch);
+    loadAOTReloc(AOTRelocKind::ContextRealm, scratch);
     branchPtr(Assembler::Equal, scratch, output, &isFalse);
   }
 
@@ -3018,7 +3018,7 @@ void MacroAssembler::guardObjectHasSameRealm(Register obj, Register scratch,
               scratch, fail);
   } else {
     MOZ_ASSERT(scratch2 != InvalidReg);
-    loadExternalRef(ExternalRefKind::ContextRealm, scratch2);
+    loadAOTReloc(AOTRelocKind::ContextRealm, scratch2);
     branchPtr(Assembler::NotEqual, scratch2, scratch, fail);
   }
 }
@@ -3057,10 +3057,10 @@ void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
 }
 
 void MacroAssembler::loadMegamorphicCache(Register dest) {
-  moveExternalRef(ExternalRefKind::MegamorphicCache, dest);
+  moveAOTReloc(AOTRelocKind::MegamorphicCache, dest);
 }
 void MacroAssembler::loadMegamorphicSetPropCache(Register dest) {
-  moveExternalRef(ExternalRefKind::MegamorphicSetPropCache, dest);
+  moveAOTReloc(AOTRelocKind::MegamorphicSetPropCache, dest);
 }
 
 void MacroAssembler::tryFastAtomize(Register str, Register scratch,
@@ -3073,7 +3073,7 @@ void MacroAssembler::tryFastAtomize(Register str, Register scratch,
   jump(&done);
   bind(&notAtomRef);
 
-  moveExternalRef(ExternalRefKind::StringToAtomCache, scratch);
+  moveAOTReloc(AOTRelocKind::StringToAtomCache, scratch);
 
   static_assert(StringToAtomCache::NumLastLookups == 2);
   size_t stringOffset = StringToAtomCache::LastLookup::offsetOfString();
@@ -4004,7 +4004,7 @@ void MacroAssembler::loadJitActivation(Register dest) {
 }
 
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
-  loadExternalRef(ExternalRefKind::ContextRealm, dest);
+  loadAOTReloc(AOTRelocKind::ContextRealm, dest);
   computeEffectiveAddress(Address(dest, Realm::offsetOfBaselineCompileQueue()),
                           dest);
 }
@@ -4312,127 +4312,127 @@ void MacroAssembler::loadRuntime(Register reg) {
 }
 
 // ========================================================================
-// Unified ExternalRef overloads.
+// Unified AOTReloc overloads.
 
-// Internal helper: resolve an ExternalRefKind to a compile-time pointer for
+// Internal helper: resolve an AOTRelocKind to a compile-time pointer for
 // non-AOT mode. This uses CompileRuntime which is only available in non-AOT.
-static ImmPtr ResolveExternalRefCompileTime(ExternalRefKind kind,
+static ImmPtr ResolveAOTRelocCompileTime(AOTRelocKind kind,
                                             CompileRuntime* rt) {
   switch (kind) {
-    case ExternalRefKind::JSContextPtr:
+    case AOTRelocKind::JSContextPtr:
       return ImmPtr(rt->mainContextPtr());
-    case ExternalRefKind::InterruptBits:
+    case AOTRelocKind::InterruptBits:
       return ImmPtr(rt->addressOfInterruptBits());
-    case ExternalRefKind::JitActivation:
+    case AOTRelocKind::JitActivation:
       return ImmPtr(rt->addressOfJitActivation());
-    case ExternalRefKind::RealmPtr:
+    case AOTRelocKind::RealmPtr:
       return ImmPtr(rt->addressOfRealm());
-    case ExternalRefKind::ContextRealm:
+    case AOTRelocKind::ContextRealm:
       return ImmPtr(static_cast<const uint8_t*>(rt->mainContextPtr()) +
                     JSContext::offsetOfRealm());
-    case ExternalRefKind::WellKnownSymbols:
+    case AOTRelocKind::WellKnownSymbols:
       return ImmPtr(&rt->wellKnownSymbols());
-    case ExternalRefKind::JitRuntime:
+    case AOTRelocKind::JitRuntime:
       return ImmPtr(rt->jitRuntime());
-    case ExternalRefKind::LastBufferedCell:
+    case AOTRelocKind::LastBufferedCell:
       return ImmPtr(rt->addressOfLastBufferedWholeCell());
-    case ExternalRefKind::ProfilerEnabled:
+    case AOTRelocKind::ProfilerEnabled:
       return ImmPtr(rt->geckoProfiler().addressOfEnabled());
-    case ExternalRefKind::ProfilerExitFrameTail: {
+    case AOTRelocKind::ProfilerExitFrameTail: {
       TrampolinePtr ptr = rt->jitRuntime()->getProfilerExitFrameTail();
       return ImmPtr(ptr.value);
     }
-    case ExternalRefKind::DoubleToInt32Stub: {
+    case AOTRelocKind::DoubleToInt32Stub: {
       TrampolinePtr ptr = rt->jitRuntime()->getDoubleToInt32ValueStub();
       return ImmPtr(ptr.value);
     }
-    case ExternalRefKind::MegamorphicCache:
+    case AOTRelocKind::MegamorphicCache:
       return ImmPtr(rt->addressOfMegamorphicCache());
-    case ExternalRefKind::MegamorphicSetPropCache:
+    case AOTRelocKind::MegamorphicSetPropCache:
       return ImmPtr(rt->addressOfMegamorphicSetPropCache());
-    case ExternalRefKind::StringToAtomCache: {
+    case AOTRelocKind::StringToAtomCache: {
       auto cachePtr = uintptr_t(rt->addressOfStringToAtomCache());
       return ImmPtr(
           (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups()));
     }
-    case ExternalRefKind::DispatchTable:
-    case ExternalRefKind::VMWrapper:
-    case ExternalRefKind::DebugTrapHandler:
-    case ExternalRefKind::CppFunction:
-      MOZ_CRASH("Patch-only ExternalRefKind not available at compile time");
-    case ExternalRefKind::Count:
+    case AOTRelocKind::DispatchTable:
+    case AOTRelocKind::VMWrapper:
+    case AOTRelocKind::DebugTrapHandler:
+    case AOTRelocKind::CppFunction:
+      MOZ_CRASH("Patch-only AOTRelocKind not available at compile time");
+    case AOTRelocKind::Count:
       break;
   }
-  MOZ_CRASH("Unknown ExternalRefKind");
+  MOZ_CRASH("Unknown AOTRelocKind");
 }
 
 // Internal helper: emit zone->runtime->field load chain for register-indirect
 // AOT strategy (used by AOT ICs). The zone register must already be loaded.
-// Not all ExternalRefKinds are supported here; some are only used by the
+// Not all AOTRelocKinds are supported here; some are only used by the
 // patch-based (baseline) strategy.
-void MacroAssembler::emitExternalRefViaZone(ExternalRefKind kind,
+void MacroAssembler::emitAOTRelocViaZone(AOTRelocKind kind,
                                             Register dest) {
   // Load runtime from zone.
   loadRuntime(dest);
 
   switch (kind) {
-    case ExternalRefKind::JSContextPtr:
+    case AOTRelocKind::JSContextPtr:
       loadPtr(Address(dest, JSRuntime::offsetOfMainContext()), dest);
       return;
-    case ExternalRefKind::ContextRealm:
+    case AOTRelocKind::ContextRealm:
       // Load cx, then compute address of cx->realm_.
       loadPtr(Address(dest, JSRuntime::offsetOfMainContext()), dest);
       computeEffectiveAddress(Address(dest, JSContext::offsetOfRealm()), dest);
       return;
-    case ExternalRefKind::JitRuntime:
+    case AOTRelocKind::JitRuntime:
       loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
       return;
-    case ExternalRefKind::ProfilerEnabled:
+    case AOTRelocKind::ProfilerEnabled:
       computeEffectiveAddress(
           Address(dest,
                   JSRuntime::offsetOfGeckoProfiler() +
                       GeckoProfilerRuntime::offsetOfEnabled()),
           dest);
       return;
-    case ExternalRefKind::MegamorphicCache:
+    case AOTRelocKind::MegamorphicCache:
       computeEffectiveAddress(
           Address(dest, JSRuntime::offsetOfMegamorphicCache()), dest);
       return;
-    case ExternalRefKind::MegamorphicSetPropCache:
+    case AOTRelocKind::MegamorphicSetPropCache:
       loadPtr(Address(dest, JSRuntime::offsetOfMegamorphicSetPropCachePtr()),
               dest);
       return;
-    case ExternalRefKind::StringToAtomCache:
+    case AOTRelocKind::StringToAtomCache:
       computeEffectiveAddress(
           Address(dest,
                   JSRuntime::offsetOfStringToAtomCache() +
                       StringToAtomCache::offsetOfLastLookups()),
           dest);
       return;
-    case ExternalRefKind::WellKnownSymbols:
-    case ExternalRefKind::InterruptBits:
-    case ExternalRefKind::JitActivation:
-    case ExternalRefKind::RealmPtr:
-    case ExternalRefKind::LastBufferedCell:
-    case ExternalRefKind::ProfilerExitFrameTail:
-    case ExternalRefKind::DoubleToInt32Stub:
+    case AOTRelocKind::WellKnownSymbols:
+    case AOTRelocKind::InterruptBits:
+    case AOTRelocKind::JitActivation:
+    case AOTRelocKind::RealmPtr:
+    case AOTRelocKind::LastBufferedCell:
+    case AOTRelocKind::ProfilerExitFrameTail:
+    case AOTRelocKind::DoubleToInt32Stub:
       // These kinds are only used by the patch-based (baseline) strategy.
       // They don't have convenient offset accessors for register-indirect use.
-      MOZ_CRASH("ExternalRefKind not supported in register-indirect mode");
-    case ExternalRefKind::DispatchTable:
-    case ExternalRefKind::VMWrapper:
-    case ExternalRefKind::DebugTrapHandler:
-    case ExternalRefKind::CppFunction:
-      MOZ_CRASH("Patch-only ExternalRefKind not supported in register-indirect mode");
-    case ExternalRefKind::Count:
+      MOZ_CRASH("AOTRelocKind not supported in register-indirect mode");
+    case AOTRelocKind::DispatchTable:
+    case AOTRelocKind::VMWrapper:
+    case AOTRelocKind::DebugTrapHandler:
+    case AOTRelocKind::CppFunction:
+      MOZ_CRASH("Patch-only AOTRelocKind not supported in register-indirect mode");
+    case AOTRelocKind::Count:
       break;
   }
-  MOZ_CRASH("Unknown ExternalRefKind");
+  MOZ_CRASH("Unknown AOTRelocKind");
 }
 
-void MacroAssembler::moveExternalRef(ExternalRefKind kind, Register dest) {
+void MacroAssembler::moveAOTReloc(AOTRelocKind kind, Register dest) {
   if (!isAOT()) {
-    movePtr(ResolveExternalRefCompileTime(kind, runtime()), dest);
+    movePtr(ResolveAOTRelocCompileTime(kind, runtime()), dest);
     return;
   }
   switch (aot().strategy()) {
@@ -4440,26 +4440,26 @@ void MacroAssembler::moveExternalRef(ExternalRefKind kind, Register dest) {
       aot().emitPatchableMov(RuntimePatch(kind, 0), dest);
       return;
     case AOTStrategy::RegisterIndirect:
-      emitExternalRefViaZone(kind, dest);
+      emitAOTRelocViaZone(kind, dest);
       return;
   }
 }
 
-void MacroAssembler::loadExternalRef(ExternalRefKind kind, Register dest) {
+void MacroAssembler::loadAOTReloc(AOTRelocKind kind, Register dest) {
   // Load the value *at* the external ref address.
-  moveExternalRef(kind, dest);
+  moveAOTReloc(kind, dest);
   loadPtr(Address(dest, 0), dest);
 }
 
-void MacroAssembler::branchExternalRef32(Condition cond, ExternalRefKind kind,
+void MacroAssembler::branchAOTReloc32(Condition cond, AOTRelocKind kind,
                                          Imm32 rhs, Label* label,
                                          Register scratch) {
   if (!isAOT()) {
-    branch32(cond, AbsoluteAddress(ResolveExternalRefCompileTime(kind, runtime()).value),
+    branch32(cond, AbsoluteAddress(ResolveAOTRelocCompileTime(kind, runtime()).value),
              rhs, label);
     return;
   }
-  moveExternalRef(kind, scratch);
+  moveAOTReloc(kind, scratch);
   branch32(cond, Address(scratch, 0), rhs, label);
 }
 

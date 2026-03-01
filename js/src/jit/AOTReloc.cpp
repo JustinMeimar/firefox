@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/ExternalRef.h"
+#include "jit/AOTReloc.h"
 
 #include "jit/JitRuntime.h"
 #include "vm/Caches.h"
@@ -12,56 +12,56 @@
 
 namespace js::jit {
 
-uintptr_t ResolveExternalRef(ExternalRefKind kind, JSContext* cx) {
+uintptr_t ResolveAOTReloc(AOTRelocKind kind, JSContext* cx) {
   switch (kind) {
-    case ExternalRefKind::JSContextPtr:
+    case AOTRelocKind::JSContextPtr:
       return (uintptr_t)cx;
-    case ExternalRefKind::InterruptBits:
+    case AOTRelocKind::InterruptBits:
       return (uintptr_t)cx->addressOfInterruptBits();
-    case ExternalRefKind::JitActivation:
+    case AOTRelocKind::JitActivation:
       return (uintptr_t)cx->addressOfJitActivation();
-    case ExternalRefKind::RealmPtr:
+    case AOTRelocKind::RealmPtr:
       return (uintptr_t)cx->addressOfRealm();
-    case ExternalRefKind::ContextRealm:
+    case AOTRelocKind::ContextRealm:
       return (uintptr_t)(reinterpret_cast<const uint8_t*>(cx) +
                          JSContext::offsetOfRealm());
-    case ExternalRefKind::WellKnownSymbols:
+    case AOTRelocKind::WellKnownSymbols:
       return (uintptr_t)cx->runtime()->wellKnownSymbols.ref();
-    case ExternalRefKind::JitRuntime:
+    case AOTRelocKind::JitRuntime:
       return (uintptr_t)cx->runtime()->jitRuntime();
-    case ExternalRefKind::LastBufferedCell:
+    case AOTRelocKind::LastBufferedCell:
       return (uintptr_t)cx->runtime()->gc.addressOfLastBufferedWholeCell();
-    case ExternalRefKind::ProfilerEnabled:
+    case AOTRelocKind::ProfilerEnabled:
       return (uintptr_t)cx->runtime()->geckoProfiler().addressOfEnabled();
-    case ExternalRefKind::ProfilerExitFrameTail: {
+    case AOTRelocKind::ProfilerExitFrameTail: {
       TrampolinePtr ptr =
           cx->runtime()->jitRuntime()->getProfilerExitFrameTail();
       return (uintptr_t)(ptr.value);
     }
-    case ExternalRefKind::DoubleToInt32Stub: {
+    case AOTRelocKind::DoubleToInt32Stub: {
       TrampolinePtr ptr =
           cx->runtime()->jitRuntime()->getDoubleToInt32ValueStub();
       return (uintptr_t)(ptr.value);
     }
-    case ExternalRefKind::MegamorphicCache:
+    case AOTRelocKind::MegamorphicCache:
       return (uintptr_t)&cx->runtime()->caches().megamorphicCache;
-    case ExternalRefKind::MegamorphicSetPropCache:
+    case AOTRelocKind::MegamorphicSetPropCache:
       return (uintptr_t)cx->runtime()->caches().megamorphicSetPropCache.get();
-    case ExternalRefKind::StringToAtomCache: {
+    case AOTRelocKind::StringToAtomCache: {
       auto* cache =
           reinterpret_cast<const uint8_t*>(
               &cx->runtime()->caches().stringToAtomCache);
       return (uintptr_t)(cache + StringToAtomCache::offsetOfLastLookups());
     }
-    case ExternalRefKind::DispatchTable:
-    case ExternalRefKind::VMWrapper:
-    case ExternalRefKind::DebugTrapHandler:
-    case ExternalRefKind::CppFunction:
-      MOZ_CRASH("Patch-only ExternalRefKind cannot be resolved at runtime");
-    case ExternalRefKind::Count:
+    case AOTRelocKind::DispatchTable:
+    case AOTRelocKind::VMWrapper:
+    case AOTRelocKind::DebugTrapHandler:
+    case AOTRelocKind::CppFunction:
+      MOZ_CRASH("Patch-only AOTRelocKind cannot be resolved at runtime");
+    case AOTRelocKind::Count:
       break;
   }
-  MOZ_CRASH("Unknown ExternalRefKind");
+  MOZ_CRASH("Unknown AOTRelocKind");
 }
 
 

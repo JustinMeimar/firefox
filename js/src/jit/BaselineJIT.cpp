@@ -1554,7 +1554,8 @@ bool jit::LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
 #ifdef DEBUG
   mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
-  fprintf(stderr, "[AOT-timing] AOT self-hosted '%s': total=%lldus (codeSize=%u patches=%u)\n",
+  fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u patches=%u)\n",
+          name->hasLatin1Chars() ? (int)name->length() : 10,
           name->hasLatin1Chars()
               ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
               : "<two-byte>",
@@ -1594,9 +1595,11 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     BaselineInterpreterGenerator generator(cx, temp, masm);
     bool ok = generator.generate(cx, interpreter);
 #ifdef DEBUG
-    mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
-    fprintf(stderr, "[AOT-timing] JIT generate interp: total=%lldus\n",
-            (long long)dTotal.ToMicroseconds());
+    if (!JitOptions.useAOTBaseline) {
+      mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
+      fprintf(stderr, "[JIT-timing] JIT generate interp: total=%lldus\n",
+              (long long)dTotal.ToMicroseconds());
+    }
 #endif
     return ok;
   }

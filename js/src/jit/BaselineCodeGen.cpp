@@ -137,8 +137,7 @@ BaselineInterpreterGenerator::BaselineInterpreterGenerator(JSContext* cx,
                                                            TempAllocator& alloc,
                                                            MacroAssembler& masm)
     : BaselineCodeGen(alloc, masm, CompileRuntime::get(cx->runtime())
-                      /* no handlerArgs */) {
-}
+                      /* no handlerArgs */) {}
 
 bool BaselineCompilerHandler::init() {
   if (!analysis_.init(alloc_)) {
@@ -317,8 +316,7 @@ bool BaselineCompiler::compileImpl() {
 
 bool BaselineCompiler::finishCompile(JSContext* cx) {
   Rooted<JSScript*> script(cx, handler.script());
-  bool isRealmIndependentJitCodeShared =
-      handler.realmIndependentJitcode();
+  bool isRealmIndependentJitCodeShared = handler.realmIndependentJitcode();
 
   UniquePtr<BaselineScript> baselineScript(
       nullptr, JS::DeletePolicy<BaselineScript>(cx->runtime()));
@@ -644,7 +642,7 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   // Check one element cache to avoid VM call.
   Label skipBarrier;
   Register ptrReg = R1.scratchReg();
-  masm.loadExternalRef(ExternalRefKind::LastBufferedCell, ptrReg);
+  masm.loadAOTReloc(AOTRelocKind::LastBufferedCell, ptrReg);
   masm.branchPtr(Assembler::Equal, ptrReg, objReg, &skipBarrier);
 
   saveInterpreterPCReg();
@@ -1075,8 +1073,8 @@ template <typename Handler>
 void BaselineCodeGen<Handler>::loadGlobalLexicalEnvironment(Register dest) {
   if (handler.realmIndependentJitcode()) {
     masm.loadGlobalObjectData(dest);
-    masm.loadPtr(
-        Address(dest, GlobalObjectData::offsetOfLexicalEnvironment()), dest);
+    masm.loadPtr(Address(dest, GlobalObjectData::offsetOfLexicalEnvironment()),
+                 dest);
   } else {
     MOZ_ASSERT(!handler.maybeScript()->hasNonSyntacticScope());
     masm.movePtr(ImmGCPtr(handler.maybeGlobalLexicalEnvironment()), dest);
@@ -1619,7 +1617,7 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
 
   Label done;
   Register scratch = R0.scratchReg();
-  masm.branchExternalRef32(Assembler::Equal, ExternalRefKind::InterruptBits,
+  masm.branchAOTReloc32(Assembler::Equal, AOTRelocKind::InterruptBits,
                            Imm32(0), &done, scratch);
 
   prepareVMCall();
@@ -1789,10 +1787,10 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     {
       Label checkOk;
       Register ptrReg = regs.takeAny();
-      masm.branchExternalRef32(Assembler::Equal,
-                               ExternalRefKind::ProfilerEnabled, Imm32(0),
+      masm.branchAOTReloc32(Assembler::Equal,
+                               AOTRelocKind::ProfilerEnabled, Imm32(0),
                                &checkOk, ptrReg);
-      masm.loadExternalRef(ExternalRefKind::JitActivation, scratchReg);
+      masm.loadAOTReloc(AOTRelocKind::JitActivation, scratchReg);
       masm.loadPtr(
           Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
           scratchReg);
@@ -2040,7 +2038,7 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   Label noInstrument;
   CodeOffset toggleOffset = masm.toggledJump(&noInstrument);
   Register ptrReg = R1.scratchReg();
-  masm.moveExternalRef(ExternalRefKind::ProfilerExitFrameTail, ptrReg);
+  masm.moveAOTReloc(AOTRelocKind::ProfilerExitFrameTail, ptrReg);
   masm.jump(ptrReg);
 
   masm.bind(&noInstrument);
@@ -2849,7 +2847,7 @@ bool BaselineCodeGen<Handler>::emit_String() {
 
 template <>
 bool BaselineCompilerCodeGen::emit_Symbol() {
-  unsigned which = GET_UINT8(handler.pc());
+  unsigned which = GET_UINT8(handler.pc()) ;
   JS::Symbol* sym = runtime->wellKnownSymbols().get(which);
   frame.push(SymbolValue(sym));
   return true;
@@ -2861,7 +2859,7 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   Register scratch2 = R1.scratchReg();
   LoadUint8Operand(masm, scratch1);
 
-  masm.moveExternalRef(ExternalRefKind::WellKnownSymbols, scratch2);
+  masm.moveAOTReloc(AOTRelocKind::WellKnownSymbols, scratch2);
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
   frame.push(R0);
@@ -5828,7 +5826,7 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
   // Note: this stub may clobber scratch1.
   {
     Register stubReg = scratch1;
-    masm.moveExternalRef(ExternalRefKind::DoubleToInt32Stub, stubReg);
+    masm.moveAOTReloc(AOTRelocKind::DoubleToInt32Stub, stubReg);
     masm.call(stubReg);
   }
 
@@ -6294,7 +6292,7 @@ bool BaselineInterpreterCodeGen::emitAfterYieldDebugInstrumentation(
   if (!handler.addDebugInstrumentationOffset(toggleOffset)) {
     return false;
   }
-  masm.loadExternalRef(ExternalRefKind::RealmPtr, scratch);
+  masm.loadAOTReloc(AOTRelocKind::RealmPtr, scratch);
   masm.branchTest32(Assembler::Zero,
                     Address(scratch, Realm::offsetOfDebugModeBits()),
                     Imm32(Realm::debugModeIsDebuggeeBit()), &done);
@@ -6526,10 +6524,9 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     Register scratchReg = scratch2;
     Label skip;
 
-    masm.branchExternalRef32(Assembler::Equal,
-                             ExternalRefKind::ProfilerEnabled, Imm32(0),
-                             &skip, scratch1);
-    masm.moveExternalRef(ExternalRefKind::JSContextPtr, scratchReg);
+    masm.branchAOTReloc32(Assembler::Equal, AOTRelocKind::ProfilerEnabled,
+                             Imm32(0), &skip, scratch1);
+    masm.moveAOTReloc(AOTRelocKind::JSContextPtr, scratchReg);
     masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
                  scratchReg);
     masm.storePtr(
@@ -7274,7 +7271,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
     const Label& opLabel = opLabels[i];
     MOZ_ASSERT(opLabel.bound());
-    CodeLabel cl; 
+    CodeLabel cl;
     if (aot_) {
       // NOTE(Justin): Should this patch also be performed beneath the
       // `masm` interface boundary?
@@ -7373,7 +7370,6 @@ static void verifySentinelsPatched(const uint8_t* code, size_t codeSize,
       }
     }
   }
-
 }
 
 // Helpers to emit GAS assembly. All prepend the "bl_aot_" prefix.
@@ -7390,7 +7386,6 @@ static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
     out << std::dec << "\n";
   }
 }
-
 
 static void emitAsmZeroPadding(std::ostream& out, size_t len) {
   if (len == 0) return;
@@ -7430,11 +7425,9 @@ struct AOTBlobData {
 
 // Compile a self-hosted function with AOT context and collect its blob data.
 // Returns false on failure.
-static bool compileAOTSelfHosted(
-    JSContext* cx, const char* funcName,
-    const TrampolinePtrs& trampolines,
-    AOTBlobData* blobOut) {
-  
+static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
+                                 const TrampolinePtrs& trampolines,
+                                 AOTBlobData* blobOut) {
   JSAtom* atom = AtomizeUTF8Chars(cx, funcName, strlen(funcName));
   if (!atom) {
     JitSpew(JitSpew_BaselineAOT, "Failed to atomize '%s'", funcName);
@@ -7454,10 +7447,9 @@ static bool compileAOTSelfHosted(
 
   // Instantiate a lazy function for the self-hosted function.
   RootedFunction fun(
-      cx,
-      cx->runtime()->selfHostStencil().instantiateSelfHostedLazyFunction(
-          cx, cx->runtime()->selfHostStencilInput().atomCache,
-          indexRange->start, name));
+      cx, cx->runtime()->selfHostStencil().instantiateSelfHostedLazyFunction(
+              cx, cx->runtime()->selfHostStencilInput().atomCache,
+              indexRange->start, name));
   if (!fun) {
     JitSpew(JitSpew_BaselineAOT,
             "Failed to instantiate self-hosted function '%s'", funcName);
@@ -7466,8 +7458,8 @@ static bool compileAOTSelfHosted(
 
   // Delazify to produce a JSScript.
   if (!cx->runtime()->delazifySelfHostedFunction(cx, name, fun)) {
-    JitSpew(JitSpew_BaselineAOT,
-            "Failed to delazify self-hosted function '%s'", funcName);
+    JitSpew(JitSpew_BaselineAOT, "Failed to delazify self-hosted function '%s'",
+            funcName);
     return false;
   }
 
@@ -7502,10 +7494,10 @@ static bool compileAOTSelfHosted(
   BaselineScript* bs = script->baselineScript();
   JitCode* jitCode = bs->method();
 
-#ifdef DEBUG
+#  ifdef DEBUG
   verifySentinelsPatched(jitCode->raw(), jitCode->instructionsSize(),
                          aotCtx.accumulator().runtimePatches);
-#endif
+#  endif
 
   // Build manifest and packed metadata from the BaselineScript.
   AOTScriptManifest sm{};
@@ -7544,17 +7536,16 @@ static bool compileAOTSelfHosted(
   SprintfLiteral(padded, "'%s'", funcName);
   JitSpew(JitSpew_BaselineAOT,
           "AOT Compiled %-24s size=%5ub  patches=%3u  callSites=%3u  osr=%u",
-          padded, sm.codeSize, sm.runtimePatchCount,
-          sm.retAddrEntryCount, sm.osrEntryCount);
+          padded, sm.codeSize, sm.runtimePatchCount, sm.retAddrEntryCount,
+          sm.osrEntryCount);
 
   return true;
 }
 
 // Write the multi-blob AOT container .S file.
-static bool writeAOTContainer(
-    std::ostream& out,
-    const AOTBlobData* const* blobs, uint32_t blobCount) {
-
+static bool writeAOTContainer(std::ostream& out,
+                              const AOTBlobData* const* blobs,
+                              uint32_t blobCount) {
   // Compute layout: header + directory entries, then each blob's sections.
   uint32_t dirSize =
       sizeof(AOTContainerHeader) + blobCount * sizeof(AOTBlobDirectoryEntry);
@@ -7600,8 +7591,8 @@ static bool writeAOTContainer(
 
   // Write .S file.
   out << "// AOT Baseline - generated by --dump-bl\n";
-  out << "// Container format v" << AOT_CONTAINER_VERSION << ", "
-      << blobCount << " blob(s)\n";
+  out << "// Container format v" << AOT_CONTAINER_VERSION << ", " << blobCount
+      << " blob(s)\n";
   out << ".section .rodata\n";
   out << ".balign 16\n";
   out << ".global bl_aot_container_start\n";
@@ -7614,8 +7605,8 @@ static bool writeAOTContainer(
 
   // Directory entries.
   for (uint32_t i = 0; i < blobCount; i++) {
-    out << "// --- Directory Entry " << i << " (kind="
-        << dirEntries[i].kind << ") ---\n";
+    out << "// --- Directory Entry " << i << " (kind=" << dirEntries[i].kind
+        << ") ---\n";
     emitAsmBytes(out, reinterpret_cast<const uint8_t*>(&dirEntries[i]),
                  sizeof(AOTBlobDirectoryEntry));
   }
@@ -7674,17 +7665,15 @@ static bool writeAOTContainer(
 // DumpAOTSelfHosted() which runs later once a realm exists.
 static Maybe<AOTBlobData> sSavedInterpreterBlob;
 
-bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx,
-                                                        JitCode* code) {
-
+bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
   uint8_t* codeStart = code->raw();
   uint8_t* codeEnd = code->rawEnd();
   size_t codeSize = codeEnd - codeStart;
 
-#ifdef DEBUG
+#  ifdef DEBUG
   verifySentinelsPatched(codeStart, codeSize,
                          aot_->accumulator().runtimePatches);
-#endif
+#  endif
 
   // --- Build interpreter blob and save for DumpAOTSelfHosted ---
   sSavedInterpreterBlob.reset();
@@ -7714,8 +7703,7 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx,
   s.CallVMDebugAfterYield = handler.callVMOffsets().debugAfterYieldOffset;
   s.HeaderSize = code->headerSize();
   s.PrologueEndOffset = warmUpCheckPrologueOffset_.offset();
-  s.DebugInstrumentationCount =
-      handler.debugInstrumentationOffsets().length();
+  s.DebugInstrumentationCount = handler.debugInstrumentationOffsets().length();
   s.DebugTrapCount = aot_->accumulator().debugTraps.length();
   s.CodeCoverageCount = handler.codeCoverageOffsets().length();
   s.ICReturnCount = handler.icReturnOffsets().length();
@@ -7739,7 +7727,7 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx,
   const auto& debugTraps = aot_->accumulator().debugTraps;
   const auto& coverage = handler.codeCoverageOffsets();
   const auto& icReturns = handler.icReturnOffsets();
-  
+
   if (!AOTBlobData::appendBytes(interpBlob.metadata, debugInstr.begin(),
                                 debugInstr.length()) ||
       !AOTBlobData::appendBytes(interpBlob.metadata, debugTraps.begin(),
@@ -7753,9 +7741,9 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx,
 
   JitSpew(JitSpew_BaselineAOT,
           "Scalars: dbgInstr=%u dbgTrap=%u coverage=%u icRet=%u patches=%u",
-          s.DebugInstrumentationCount, s.DebugTrapCount,
-          s.CodeCoverageCount, s.ICReturnCount, s.RuntimePatchCount);
-  
+          s.DebugInstrumentationCount, s.DebugTrapCount, s.CodeCoverageCount,
+          s.ICReturnCount, s.RuntimePatchCount);
+
   const char* outPath = kAOTOutputPath;
   std::ofstream out(outPath, std::ios::trunc);
   if (!out.is_open()) {
@@ -7763,7 +7751,7 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx,
     return false;
   }
 
-  const AOTBlobData* blobPtrs[] = { &interpBlob };
+  const AOTBlobData* blobPtrs[] = {&interpBlob};
   if (!writeAOTContainer(out, blobPtrs, 1)) {
     return false;
   }
@@ -7771,34 +7759,22 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx,
   out.close();
 
   uint32_t prologueEnd = warmUpCheckPrologueOffset_.offset();
-  JitSpew(
-      JitSpew_BaselineAOT,
-      "Code size=%zu: prologue=[0,%u) handlers=[%u,%u) table=[%u,%zu)",
-      codeSize, prologueEnd, prologueEnd, tableOffset_, tableOffset_, codeSize);
+  JitSpew(JitSpew_BaselineAOT,
+          "Code size=%zu: prologue=[0,%u) handlers=[%u,%u) table=[%u,%zu)",
+          codeSize, prologueEnd, prologueEnd, tableOffset_, tableOffset_,
+          codeSize);
 
   return true;
 }
 
 // TODO(Justin): These should be in BaselineAOT.h (?)
 static const char* const kAOTSelfHostedFunctions[] = {
-    "ArrayIteratorNext",
-    "ArrayMap",
-    "ArrayFilter",
-    "ArrayReduce",
-    "ArrayForEach",
-    "ArrayEvery",
-    "ArraySome",
-    "ArrayFind",
-    "ArrayFindIndex",
-    "StringIteratorNext",
-    "MapForEach",
-    "MapIteratorNext",
-    "SetForEach",
-    "SetIteratorNext",
-    "TypedArrayForEach",
-    "TypedArrayMap",
-    "TypedArrayFilter",
-    "Promise_finally",
+    "ArrayIteratorNext",  "ArrayMap",         "ArrayFilter",
+    "ArrayReduce",        "ArrayForEach",     "ArrayEvery",
+    "ArraySome",          "ArrayFind",        "ArrayFindIndex",
+    "StringIteratorNext", "MapForEach",       "MapIteratorNext",
+    "SetForEach",         "SetIteratorNext",  "TypedArrayForEach",
+    "TypedArrayMap",      "TypedArrayFilter", "Promise_finally",
 };
 
 bool DumpAOTSelfHosted(JSContext* cx) {
@@ -7809,7 +7785,7 @@ bool DumpAOTSelfHosted(JSContext* cx) {
             "No saved interpreter blob for self-hosted function dump");
     return false;
   }
-  
+
   const char* outPath = kAOTOutputPath;
 
   TrampolinePtrs trampolines(cx->runtime()->jitRuntime());
@@ -7853,11 +7829,9 @@ bool DumpAOTSelfHosted(JSContext* cx) {
 
   out.close();
 
-  JitSpew(JitSpew_BaselineAOT,
-          "Wrote AOT container with %u blob(s) to %s",
+  JitSpew(JitSpew_BaselineAOT, "Wrote AOT container with %u blob(s) to %s",
           blobCount, outPath);
-  JitSpew(JitSpew_BaselineAOT,
-          "Rebuild the engine to use AOT mode.");
+  JitSpew(JitSpew_BaselineAOT, "Rebuild the engine to use AOT mode.");
 
   // Free the saved blob now that we're done.
   sSavedInterpreterBlob.reset();
@@ -7869,9 +7843,9 @@ bool DumpAOTSelfHosted(JSContext* cx) {
 #ifdef ENABLE_AOT_BASELINE
 bool BaselineInterpreterGenerator::loadAOTInterp(
     JSContext* cx, BaselineInterpreter& interpreter) {
-#ifdef DEBUG
+#  ifdef DEBUG
   mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
-#endif
+#  endif
 
   const AOTContainerHeader* hdr = GetAOTContainerHeader();
   if (!hdr) {
@@ -7882,7 +7856,8 @@ bool BaselineInterpreterGenerator::loadAOTInterp(
   const AOTBlobDirectoryEntry* entry =
       FindAOTBlob(AOTBlobKind::BaselineInterpreter);
   if (!entry || entry->codeSize == 0) {
-    JitSpew(JitSpew_BaselineAOT, "ERROR: No BaselineInterpreter blob in AOT container!");
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: No BaselineInterpreter blob in AOT container!");
     return false;
   }
 
@@ -7981,12 +7956,13 @@ bool BaselineInterpreterGenerator::loadAOTInterp(
     interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
   }
 
-#ifdef DEBUG
+#  ifdef DEBUG
   mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
-  fprintf(stderr, "[AOT-timing] AOT interp load: total=%lldus (codeSize=%zu patches=%u)\n",
-          (long long)dTotal.ToMicroseconds(),
-          codeSize, entry->patchesCount);
-#endif
+  fprintf(
+      stderr,
+      "[JIT-timing] AOT interp load: total=%lldus (codeSize=%zu patches=%u)\n",
+      (long long)dTotal.ToMicroseconds(), codeSize, entry->patchesCount);
+#  endif
 
   return true;
 }
@@ -8092,7 +8068,6 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
         JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT manifest");
         return false;
       }
-
     }
 #endif
 

@@ -9,7 +9,7 @@
 
 #include <cstdint>
 #include <cstring>
-#include "jit/ExternalRef.h"
+#include "jit/AOTReloc.h"
 #include "jit/VMFunctions.h"
 #include "vm/JSContext.h"
 
@@ -172,7 +172,7 @@ class RuntimePatch {
   public:
     // Each patch has a kind tag, telling us which kind of patch to apply, and a
     // targetOffset, representing at which byte we should apply the patch.
-    ExternalRefKind kind;
+    AOTRelocKind kind;
     uint32_t targetOffset;
 
     union {
@@ -184,7 +184,7 @@ class RuntimePatch {
 
     static RuntimePatch DispatchTablePatch(uint32_t targetOffset_, uint32_t handlerOffset_) {
       RuntimePatch p;
-      p.kind = ExternalRefKind::DispatchTable;
+      p.kind = AOTRelocKind::DispatchTable;
       p.targetOffset = targetOffset_;
       p.handlerOffset = handlerOffset_;
       return p;
@@ -192,7 +192,7 @@ class RuntimePatch {
 
     static RuntimePatch VMWrapperPatch(uint32_t targetOffset_, VMFunctionId vmId_) {
       RuntimePatch p;
-      p.kind = ExternalRefKind::VMWrapper;
+      p.kind = AOTRelocKind::VMWrapper;
       p.targetOffset = targetOffset_;
       p.vmId = vmId_;
       return p;
@@ -200,7 +200,7 @@ class RuntimePatch {
 
     static RuntimePatch DebugTrapPatch(uint32_t targetOffset_, DebugTrapHandlerKind dbgKind_) {
       RuntimePatch p;
-      p.kind = ExternalRefKind::DebugTrapHandler;
+      p.kind = AOTRelocKind::DebugTrapHandler;
       p.targetOffset = targetOffset_;
       p.dbgKind = dbgKind_;
       return p;
@@ -208,13 +208,13 @@ class RuntimePatch {
 
     static RuntimePatch CppFunctionPatch(uint32_t targetOffset_, AOTCppFunctionId fnId) {
       RuntimePatch p;
-      p.kind = ExternalRefKind::CppFunction;
+      p.kind = AOTRelocKind::CppFunction;
       p.targetOffset = targetOffset_;
       p.cppFnId = fnId;
       return p;
     }
 
-    explicit RuntimePatch(ExternalRefKind kind_, uint32_t targetOffset_) :
+    explicit RuntimePatch(AOTRelocKind kind_, uint32_t targetOffset_) :
       kind(kind_), targetOffset(targetOffset_) {}
 
     void apply(const PatchContext& pc) const;
