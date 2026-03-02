@@ -37,8 +37,8 @@
 #include "jit/ABIArgGenerator.h"
 #include "jit/ABIFunctions.h"
 #include "jit/AOTContext.h"
-#include "jit/AtomicOp.h"
 #include "jit/AOTReloc.h"
+#include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
 #include "jit/TrampolinePtrs.h"
@@ -5955,8 +5955,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #endif
 
  public:
-  // Load the runtime ptr from the zone register into the given register.
-  // Only valid when isAOT() is true and the zone register is loaded.
+  // Load the JSRuntime pointer into the given register.
+  // Works in both AOT and non-AOT modes.
   void loadRuntime(Register reg);
   Register zoneReg();
   // Load the zone into zoneReg at runtime (IC: from ICStub, baseline: from frame).

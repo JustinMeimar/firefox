@@ -27,6 +27,7 @@ namespace js::jit {
 //   3) AOT RegisterIndirect: emit zone->runtime->field load chain
 
 #define AOT_RELOC_KINDS(V)   \
+  V(JSRuntimePtr)               \
   V(JSContextPtr)               \
   V(InterruptBits)              \
   V(JitActivation)              \

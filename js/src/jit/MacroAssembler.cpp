@@ -4304,11 +4304,20 @@ void MacroAssembler::loadBaselineZone() {
 }
 
 void MacroAssembler::loadRuntime(Register reg) {
-  Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
-  // Load the runtime ptr stored in the zone.
-  // N.B: temp is expected to hold the runtime ptr by the flows below.
-  // Do not clobber it!
-  loadPtr(runtimeAddr, reg);
+  if (!isAOT()) {
+    movePtr(ResolveAOTRelocCompileTime(AOTRelocKind::JSRuntimePtr, runtime()),
+            reg);
+    return;
+  }
+  switch (aot().strategy()) {
+    case AOTStrategy::PatchPointers:
+      aot().emitPatchableMov(RuntimePatch(AOTRelocKind::JSRuntimePtr, 0), reg);
+      return;
+    case AOTStrategy::RegisterIndirect:
+      // Load runtime from zone register.
+      loadPtr(Address(zoneReg(), Zone::offsetOfRuntime()), reg);
+      return;
+  }
 }
 
 // ========================================================================
@@ -4319,6 +4328,8 @@ void MacroAssembler::loadRuntime(Register reg) {
 static ImmPtr ResolveAOTRelocCompileTime(AOTRelocKind kind,
                                             CompileRuntime* rt) {
   switch (kind) {
+    case AOTRelocKind::JSRuntimePtr:
+      return ImmPtr(rt);
     case AOTRelocKind::JSContextPtr:
       return ImmPtr(rt->mainContextPtr());
     case AOTRelocKind::InterruptBits:
@@ -4376,6 +4387,9 @@ void MacroAssembler::emitAOTRelocViaZone(AOTRelocKind kind,
   loadRuntime(dest);
 
   switch (kind) {
+    case AOTRelocKind::JSRuntimePtr:
+      // dest already holds the runtime pointer from loadRuntime above.
+      return;
     case AOTRelocKind::JSContextPtr:
       loadPtr(Address(dest, JSRuntime::offsetOfMainContext()), dest);
       return;

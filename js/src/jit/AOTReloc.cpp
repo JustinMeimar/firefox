@@ -14,6 +14,8 @@ namespace js::jit {
 
 uintptr_t ResolveAOTReloc(AOTRelocKind kind, JSContext* cx) {
   switch (kind) {
+    case AOTRelocKind::JSRuntimePtr:
+      return (uintptr_t)cx->runtime();
     case AOTRelocKind::JSContextPtr:
       return (uintptr_t)cx;
     case AOTRelocKind::InterruptBits:

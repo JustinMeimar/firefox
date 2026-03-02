@@ -656,11 +656,7 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   masm.pushValue(R0);
 
   masm.setupUnalignedABICall(scratch);
-  if (masm.isAOT()) {
-    masm.loadRuntime(scratch);
-  } else {
-    masm.movePtr(ImmPtr(runtime), scratch);
-  }
+  masm.loadRuntime(scratch);
   masm.passABIArg(scratch);
   masm.passABIArg(objReg);
   {
@@ -927,14 +923,10 @@ bool BaselineCodeGen<Handler>::emitStackCheck() {
 
   // Load jitStackLimit into a register.
   Register stackLimitReg = R1.scratchReg();
-  if (masm.isAOT()) {
+  {
     Register scratch = R2.scratchReg();
-    masm.loadRuntime(scratch);
-    masm.loadPtr(Address(scratch, JSRuntime::offsetOfMainContext()), scratch);
+    masm.loadJSContext(scratch);
     masm.loadPtr(Address(scratch, offsetof(JSContext, jitStackLimit)),
-                 stackLimitReg);
-  } else {
-    masm.loadPtr(AbsoluteAddress(runtime->addressOfJitStackLimit()),
                  stackLimitReg);
   }
 
@@ -1342,6 +1334,7 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   // For AOT mode, initialize the zone pointer in the frame.
   // At this point scratch contains the script (set by realmIndependentJitcode()
   // path above). Extract the zone from the script's GC arena.
+  // NOTE(Justin): See other note about duplication. 
   if (masm.isAOT()) {
     MOZ_ASSERT(handler.realmIndependentJitcode());
     masm.movePtr(scratch, scratch2);
@@ -1417,6 +1410,9 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   masm.bind(&done);
   masm.storePtr(scratch1, frame.addressOfInterpreterScript());
 
+  // NOTE(Justin): This is identical register pinning as in the other case for
+  // baseline compilation, we should consider if this routine could be
+  // outlined to a method, where the masm.isAOT is called internally.
   if (masm.isAOT()) {
     // Initialize zone pointer for AOT baseline interpreter.
     // At this point scratch1 contains the script pointer.
@@ -1617,8 +1613,8 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
 
   Label done;
   Register scratch = R0.scratchReg();
-  masm.branchAOTReloc32(Assembler::Equal, AOTRelocKind::InterruptBits,
-                           Imm32(0), &done, scratch);
+  masm.branchAOTReloc32(Assembler::Equal, AOTRelocKind::InterruptBits, Imm32(0),
+                        &done, scratch);
 
   prepareVMCall();
 
@@ -1787,9 +1783,8 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     {
       Label checkOk;
       Register ptrReg = regs.takeAny();
-      masm.branchAOTReloc32(Assembler::Equal,
-                               AOTRelocKind::ProfilerEnabled, Imm32(0),
-                               &checkOk, ptrReg);
+      masm.branchAOTReloc32(Assembler::Equal, AOTRelocKind::ProfilerEnabled,
+                            Imm32(0), &checkOk, ptrReg);
       masm.loadAOTReloc(AOTRelocKind::JitActivation, scratchReg);
       masm.loadPtr(
           Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
@@ -2847,7 +2842,7 @@ bool BaselineCodeGen<Handler>::emit_String() {
 
 template <>
 bool BaselineCompilerCodeGen::emit_Symbol() {
-  unsigned which = GET_UINT8(handler.pc()) ;
+  unsigned which = GET_UINT8(handler.pc());
   JS::Symbol* sym = runtime->wellKnownSymbols().get(which);
   frame.push(SymbolValue(sym));
   return true;
@@ -6525,7 +6520,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     Label skip;
 
     masm.branchAOTReloc32(Assembler::Equal, AOTRelocKind::ProfilerEnabled,
-                             Imm32(0), &skip, scratch1);
+                          Imm32(0), &skip, scratch1);
     masm.moveAOTReloc(AOTRelocKind::JSContextPtr, scratchReg);
     masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
                  scratchReg);
@@ -7273,8 +7268,6 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     MOZ_ASSERT(opLabel.bound());
     CodeLabel cl;
     if (aot_) {
-      // NOTE(Justin): Should this patch also be performed beneath the
-      // `masm` interface boundary?
       uint32_t handlerOffset = opLabel.offset();
       uint32_t targetOffset = tableOffset_ + (i * sizeof(uintptr_t));
       RuntimePatch patch =

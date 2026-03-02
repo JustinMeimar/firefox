@@ -11,6 +11,7 @@
 
 #include <cstdint>
 
+#include "gc/Zone.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/JitCode.h"
 #include "jit/JitRuntime.h"
