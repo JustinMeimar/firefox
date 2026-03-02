@@ -14,6 +14,7 @@
 #include "mozilla/RefPtr.h"                 // RefPtr
 #include "mozilla/ScopeExit.h"              // mozilla::ScopeExit
 #include "mozilla/Sprintf.h"                // SprintfLiteral
+#include "mozilla/TimeStamp.h"              // mozilla::TimeStamp, mozilla::TimeDuration
 
 #include <algorithm>  // std::fill
 #include <string.h>   // strlen
@@ -3146,10 +3147,21 @@ bool CompilationStencil::delazifySelfHostedFunction(
 
       jit::BaselineOptions options(
           {jit::BaselineOption::ForceMainThreadCompilation});
+      mozilla::TimeStamp tSelfHostStart = mozilla::TimeStamp::Now();
       jit::MethodStatus result =
           jit::BaselineCompile(cx, script.get(), options);
       if (result != jit::Method_Compiled) {
         return false;
+      }
+      {
+        mozilla::TimeDuration dSelfHost = mozilla::TimeStamp::Now() - tSelfHostStart;
+        JS::AutoCheckCannotGC nogc;
+        fprintf(stderr, "[JIT-timing] JIT generate self-hosted '%.*s': total=%lldus\n",
+                name->hasLatin1Chars() ? (int)name->length() : 10,
+                name->hasLatin1Chars()
+                    ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
+                    : "<two-byte>",
+                (long long)dSelfHost.ToMicroseconds());
       }
       MOZ_ASSERT(script->hasBaselineScript());
 

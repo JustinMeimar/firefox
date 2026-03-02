@@ -1579,20 +1579,20 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     TempAllocator temp(&cx->tempLifoAlloc());
     mozilla::Maybe<AOTContext> aotCtx;
 #ifdef ENABLE_AOT_BASELINE
-    // When dumping AOT baseline for offline compilation, enable PIC mode.
+    // AOT baseline interp only supports patching for now.
     if (JitOptions.dumpBaselineInterpreter) {
       aotCtx.emplace(AOTStrategy::PatchPointers,
                      TrampolinePtrs(cx->runtime()->jitRuntime()));
     }
 #endif
+    // TODO(Justin): determine how best to pass aotCtx to smasm.  
     StackMacroAssembler masm(cx, temp, aotCtx.ptrOr(nullptr));
     BaselineInterpreterGenerator generator(cx, temp, masm);
     bool ok = generator.generate(cx, interpreter);
-    if (!JitOptions.useAOTBaseline) {
-      mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
-      fprintf(stderr, "[JIT-timing] JIT generate interp: total=%lldus\n",
-              (long long)dTotal.ToMicroseconds());
-    }
+    mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
+    fprintf(stderr, "[JIT-timing] %s interp: total=%lldus\n",
+            JitOptions.useAOTBaseline ? "AOT load" : "JIT generate",
+            (long long)dTotal.ToMicroseconds());
     return ok;
   }
 

@@ -7,7 +7,6 @@
 #include "jit/BaselineCodeGen.h"
 
 #include "mozilla/Casting.h"
-#include "mozilla/TimeStamp.h"
 
 #include <algorithm>
 #include <fstream>
@@ -7821,8 +7820,6 @@ bool DumpAOTSelfHosted(JSContext* cx) {
 #ifdef ENABLE_AOT_BASELINE
 bool BaselineInterpreterGenerator::loadAOTInterp(
     JSContext* cx, BaselineInterpreter& interpreter) {
-  mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
-
   const AOTContainerHeader* hdr = GetAOTContainerHeader();
   if (!hdr) {
     JitSpew(JitSpew_BaselineAOT, "ERROR: Invalid or missing AOT container!");
@@ -7931,12 +7928,6 @@ bool BaselineInterpreterGenerator::loadAOTInterp(
   if (coverage::IsLCovEnabled()) {
     interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
   }
-
-  mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
-  fprintf(
-      stderr,
-      "[JIT-timing] AOT interp load: total=%lldus (codeSize=%zu patches=%u)\n",
-      (long long)dTotal.ToMicroseconds(), codeSize, entry->patchesCount);
 
   return true;
 }
