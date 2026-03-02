@@ -7315,6 +7315,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 using OffsetVector = Vector<uint32_t, 64, SystemAllocPolicy>;
 using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
 
+#ifdef DEBUG
 static void verifySentinelsPatched(const uint8_t* code, size_t codeSize,
                                    const RuntimePatchVector& patches) {
   // Scan the code blob for any AOT_PATCH_SENTINEL values and verify each
@@ -7347,6 +7348,7 @@ static void verifySentinelsPatched(const uint8_t* code, size_t codeSize,
     }
   }
 }
+#endif
 
 // Helpers to emit GAS assembly. All prepend the "bl_aot_" prefix.
 
@@ -7819,9 +7821,7 @@ bool DumpAOTSelfHosted(JSContext* cx) {
 #ifdef ENABLE_AOT_BASELINE
 bool BaselineInterpreterGenerator::loadAOTInterp(
     JSContext* cx, BaselineInterpreter& interpreter) {
-#  ifdef DEBUG
   mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
-#  endif
 
   const AOTContainerHeader* hdr = GetAOTContainerHeader();
   if (!hdr) {
@@ -7932,13 +7932,11 @@ bool BaselineInterpreterGenerator::loadAOTInterp(
     interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
   }
 
-#  ifdef DEBUG
   mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
   fprintf(
       stderr,
       "[JIT-timing] AOT interp load: total=%lldus (codeSize=%zu patches=%u)\n",
       (long long)dTotal.ToMicroseconds(), codeSize, entry->patchesCount);
-#  endif
 
   return true;
 }

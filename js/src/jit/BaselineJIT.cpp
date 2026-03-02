@@ -1438,9 +1438,7 @@ void BaselineScript::fillAOTManifest(
 
 bool jit::LoadAOTSelfHosted(JSContext* cx, HandleScript script,
                                      Handle<JSAtom*> name) {
-#ifdef DEBUG
   mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
-#endif
 
   // Compute name hash for blob matching.
   JS::AutoCheckCannotGC nogc;
@@ -1552,7 +1550,6 @@ bool jit::LoadAOTSelfHosted(JSContext* cx, HandleScript script,
     bs->toggleProfilerInstrumentation(true);
   }
 
-#ifdef DEBUG
   mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
   fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u patches=%u)\n",
           name->hasLatin1Chars() ? (int)name->length() : 10,
@@ -1561,7 +1558,6 @@ bool jit::LoadAOTSelfHosted(JSContext* cx, HandleScript script,
               : "<two-byte>",
           (long long)dTotal.ToMicroseconds(),
           codeSize, entry->patchesCount);
-#endif
 
   return true;
 }
@@ -1579,9 +1575,7 @@ uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
 bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
-#ifdef DEBUG
     mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
-#endif
     TempAllocator temp(&cx->tempLifoAlloc());
     mozilla::Maybe<AOTContext> aotCtx;
 #ifdef ENABLE_AOT_BASELINE
@@ -1594,13 +1588,11 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     StackMacroAssembler masm(cx, temp, aotCtx.ptrOr(nullptr));
     BaselineInterpreterGenerator generator(cx, temp, masm);
     bool ok = generator.generate(cx, interpreter);
-#ifdef DEBUG
     if (!JitOptions.useAOTBaseline) {
       mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
       fprintf(stderr, "[JIT-timing] JIT generate interp: total=%lldus\n",
               (long long)dTotal.ToMicroseconds());
     }
-#endif
     return ok;
   }
 
