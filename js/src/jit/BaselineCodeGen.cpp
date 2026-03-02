@@ -1334,14 +1334,7 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   // For AOT mode, initialize the zone pointer in the frame.
   // At this point scratch contains the script (set by realmIndependentJitcode()
   // path above). Extract the zone from the script's GC arena.
-  // NOTE(Justin): See other note about duplication. 
-  if (masm.isAOT()) {
-    MOZ_ASSERT(handler.realmIndependentJitcode());
-    masm.movePtr(scratch, scratch2);
-    masm.andPtr(Imm32(int32_t(~js::gc::ArenaMask)), scratch2);
-    masm.loadPtr(Address(scratch2, js::gc::ArenaZoneOffset), scratch2);
-    masm.storePtr(scratch2, frame.addressOfZone());
-  }
+  masm.initBaselineFrameZone(scratch, scratch2);
 
   // If the HasInlinedICScript flag is set in the frame descriptor, then load
   // the inlined ICScript from our caller's frame and store it in our own frame.
@@ -1410,19 +1403,9 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   masm.bind(&done);
   masm.storePtr(scratch1, frame.addressOfInterpreterScript());
 
-  // NOTE(Justin): This is identical register pinning as in the other case for
-  // baseline compilation, we should consider if this routine could be
-  // outlined to a method, where the masm.isAOT is called internally.
-  if (masm.isAOT()) {
-    // Initialize zone pointer for AOT baseline interpreter.
-    // At this point scratch1 contains the script pointer.
-    // We need to extract the zone from the script's arena.
-    Register tempZone = nonFunctionEnv;  // Reuse this register temporarily
-    masm.movePtr(scratch1, tempZone);
-    masm.andPtr(Imm32(int32_t(~js::gc::ArenaMask)), tempZone);
-    masm.loadPtr(Address(tempZone, js::gc::ArenaZoneOffset), tempZone);
-    masm.storePtr(tempZone, frame.addressOfZone());
-  }
+  // Initialize zone pointer for AOT baseline interpreter.
+  // At this point scratch1 contains the script pointer.
+  masm.initBaselineFrameZone(scratch1, nonFunctionEnv);
 
   // Load the ICScript in scratch2..
   Label inlined, haveICScript;

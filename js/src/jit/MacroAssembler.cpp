@@ -33,6 +33,7 @@
 #include "js/Conversions.h"
 #include "js/friend/DOMProxy.h"  // JS::ExpandoAndGeneration
 #include "js/GCAPI.h"            // JS::AutoCheckCannotGC
+#include "js/HeapAPI.h"          // js::gc::ArenaMask, js::gc::ArenaZoneOffset
 #include "js/ScalarType.h"       // js::Scalar::Type
 #include "util/Unicode.h"
 #include "vm/ArgumentsObject.h"
@@ -4303,10 +4304,21 @@ void MacroAssembler::loadBaselineZone() {
   aot().setZoneLoaded();
 }
 
+void MacroAssembler::initBaselineFrameZone(Register script, Register temp) {
+  if (!isAOT()) {
+    return;
+  }
+  // Extract the zone from the script's GC arena header and store it
+  // into the baseline frame's zone slot for later use by loadBaselineZone().
+  movePtr(script, temp);
+  andPtr(Imm32(int32_t(~js::gc::ArenaMask)), temp);
+  loadPtr(Address(temp, js::gc::ArenaZoneOffset), temp);
+  storePtr(temp, Address(FramePointer, BaselineFrame::reverseOffsetOfZone()));
+}
+
 void MacroAssembler::loadRuntime(Register reg) {
   if (!isAOT()) {
-    movePtr(ResolveAOTRelocCompileTime(AOTRelocKind::JSRuntimePtr, runtime()),
-            reg);
+    movePtr(ImmPtr(runtime()), reg);
     return;
   }
   switch (aot().strategy()) {

@@ -5963,6 +5963,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void loadZone();
   void loadBaselineZone();
 
+  // In AOT mode, extract the zone from a GC thing's arena header and store it
+  // into the baseline frame's zone slot. No-op in non-AOT mode.
+  // |script| must hold a GC thing pointer (typically the script).
+  // |temp| is clobbered.
+  void initBaselineFrameZone(Register script, Register temp);
+
  public:
   void enableProfilingInstrumentation() {
     emitProfilingInstrumentation_ = true;
