@@ -152,9 +152,9 @@ inline uint32_t AOTNameHash(const char* s) {
 
 // Load time context required to apply patches.
 struct PatchContext {
-    JSContext* cx; 
+    JSContext* cx;
     uint8_t* codeBase;
-    uint32_t dispatchTableOffset;    
+    uint32_t dispatchTableOffset;
 };
 
 // While trapolines are generated at runtime we must manually patch the
@@ -255,10 +255,9 @@ static constexpr uintptr_t AOT_PATCH_SENTINEL = 0x0000A070DEADBEEF;
 static_assert(sizeof(RuntimePatch) == 12,
               "RuntimePatch size must be 12 bytes");
 
+class BaselineInterpreter;
 class JitCode;
 
-// TODO(Justin): This abstraction only has a single use. We should use it in
-// BaselineInterpreter AOT as well?
 void* ResolveCppFunction(AOTCppFunctionId id);
 
 [[nodiscard]] JitCode* AllocateAndPatchAOTCode(
@@ -266,8 +265,35 @@ void* ResolveCppFunction(AOTCppFunctionId id);
     const uint8_t* containerBase, uint32_t headerSize,
     CodeKind codeKind, uint32_t dispatchTableOffset);
 
+using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
+
+// Build and save the interpreter AOT blob to the saved-blob slot.
+// Called from BaselineInterpreterGenerator::dumpAOTInterp with all
+// the data extracted from the generator.  The metadata byte vectors
+// are pre-packed by the caller (debugInstr, debugTraps, coverage,
+// icReturns concatenated).
+[[nodiscard]] bool BuildAndSaveInterpBlob(
+    JitCode* code, const AOTManifestScalars& scalars,
+    const RuntimePatchVector& patches,
+    const uint8_t* metadataBytes, size_t metadataSize);
+
+// Load the AOT interpreter blob from the embedded container and
+// initialize the BaselineInterpreter.
+[[nodiscard]] bool LoadAOTInterpFromContainer(
+    JSContext* cx, BaselineInterpreter& interpreter);
+
+// Load a pre-compiled self-hosted function from the AOT container.
+// |name| is the self-hosted function name (used for hash matching).
+// Returns true if successfully loaded, false if no blob found or on error.
+[[nodiscard]] bool LoadAOTSelfHosted(JSContext* cx,
+                                     HandleScript script,
+                                     Handle<JSAtom*> name);
+
+// Write the final AOT .S container (interpreter blob + self-hosted blobs).
+// Must be called after a realm exists. Respects dumpBaselineInterp and
+// dumpBaselineSelfHosted flags to control which blobs are included.
+[[nodiscard]] bool DumpAOTContainer(JSContext* cx);
 
 }  // namespace js::jit
 
 #endif  // jit_BaselineAOT_h
-

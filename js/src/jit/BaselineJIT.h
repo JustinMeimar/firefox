@@ -609,19 +609,8 @@ class BaselineInterpreter {
 [[nodiscard]] bool GenerateBaselineInterpreter(
     JSContext* cx, BaselineInterpreter& interpreter);
 
-#ifdef ENABLE_AOT_BASELINE
-// Load a pre-compiled self-hosted function from the AOT container.
-// |name| is the self-hosted function name (used for hash matching).
-// Returns true if successfully loaded, false if no blob found or on error.
-[[nodiscard]] bool LoadAOTSelfHosted(JSContext* cx,
-                                     HandleScript script,
-                                     Handle<JSAtom*> name);
-
-// Write the final AOT .S container (interpreter blob + self-hosted blobs).
-// Must be called after a realm exists. Respects dumpBaselineInterp and
-// dumpBaselineSelfHosted flags to control which blobs are included.
-[[nodiscard]] bool DumpAOTContainer(JSContext* cx);
-#endif
+// LoadAOTSelfHosted, DumpAOTContainer, and LoadAOTInterpFromContainer
+// are declared in jit/BaselineAOT.h.
 
 inline bool IsBaselineJitEnabled(JSContext* cx) {
   if (MOZ_UNLIKELY(!IsBaselineInterpreterEnabled())) {

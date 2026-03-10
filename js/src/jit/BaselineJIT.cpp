@@ -13,7 +13,6 @@
 #include "mozilla/TimeStamp.h"
 
 #include <algorithm>
-#include <fstream>
 
 #include "debugger/DebugAPI.h"
 #include "gc/GCContext.h"
@@ -1439,131 +1438,6 @@ void BaselineScript::fillAOTManifest(
   }
 }
 
-bool jit::LoadAOTSelfHosted(JSContext* cx, HandleScript script,
-                                     Handle<JSAtom*> name) {
-  mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
-
-  // Compute name hash for blob matching.
-  JS::AutoCheckCannotGC nogc;
-  uint32_t nameHash = name->hasLatin1Chars()
-      ? AOTNameHash(name->latin1Chars(nogc), name->length())
-      : AOTNameHash(name->twoByteChars(nogc), name->length());
-
-  // Find a matching SelfHostedFunction blob by nameHash.
-  // For now, there's only one such blob; scan all directory entries.
-  const AOTContainerHeader* hdr = GetAOTContainerHeader();
-  if (!hdr || hdr->blobCount == 0) {
-    return false;
-  }
-  const uint8_t* containerBase = GetAOTContainer();
-  const auto* dir = reinterpret_cast<const AOTBlobDirectoryEntry*>(
-      containerBase + sizeof(AOTContainerHeader));
-
-  const AOTBlobDirectoryEntry* entry = nullptr;
-  for (uint32_t i = 0; i < hdr->blobCount; i++) {
-    if (dir[i].kind == static_cast<uint32_t>(AOTBlobKind::SelfHostedFunction) &&
-        dir[i].nameHash == nameHash && dir[i].codeSize > 0) {
-      entry = &dir[i];
-      break;
-    }
-  }
-  if (!entry) {
-    return false;
-  }
-
-  JitSpew(JitSpew_BaselineAOT,
-          "Loading AOT self-hosted function (nameHash=%u, codeSize=%u)",
-          nameHash, entry->codeSize);
-
-  // Read manifest.
-  AOTScriptManifest manifest;
-  memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
-
-  uint32_t codeSize = manifest.codeSize;
-
-  // Allocate JitCode, copy code bytes, and apply runtime patches.
-  JitCode* code = AllocateAndPatchAOTCode(cx, entry, containerBase,
-                                          manifest.headerSize,
-                                          CodeKind::Baseline, 0);
-  if (!code) {
-    return false;
-  }
-
-  // Create BaselineScript with the proper trailing array sizes.
-  BaselineScript* bs = BaselineScript::New(
-      cx, manifest.warmUpCheckPrologueOffset,
-      manifest.profilerEnterToggleOffset,
-      manifest.profilerExitToggleOffset,
-      manifest.retAddrEntryCount, manifest.osrEntryCount,
-      manifest.debugTrapEntryCount, manifest.resumeEntryCount);
-  if (!bs) {
-    return false;
-  }
-  bs->setMethod(code);
-
-  // Copy metadata arrays from the container.
-  const uint8_t* meta = containerBase + entry->metadataOffset;
-  if (manifest.retAddrEntryCount > 0) {
-    bs->copyRetAddrEntries(
-        reinterpret_cast<const RetAddrEntry*>(meta));
-    meta += manifest.retAddrEntryCount * sizeof(RetAddrEntry);
-  }
-  if (manifest.osrEntryCount > 0) {
-    bs->copyOSREntries(
-        reinterpret_cast<const BaselineScript::OSREntry*>(meta));
-    meta += manifest.osrEntryCount * sizeof(BaselineScript::OSREntry);
-  }
-  if (manifest.debugTrapEntryCount > 0) {
-    bs->copyDebugTrapEntries(
-        reinterpret_cast<const BaselineScript::DebugTrapEntry*>(meta));
-  }
-
-  // Resume offsets: for ToBoolean this should be 0, but call anyway.
-  bs->computeResumeNativeOffsets(script, ResumeOffsetEntryVector());
-
-  // Register with profiler's JitCode table.
-  {
-    UniqueChars str =
-        GeckoProfilerRuntime::allocProfileString(cx, script);
-    if (!str) {
-      return false;
-    }
-
-    auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
-        cx, code, code->raw(), code->rawEnd(), std::move(str));
-    if (!profEntry) {
-      return false;
-    }
-
-    JitcodeGlobalTable* globalTable =
-        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
-    if (!globalTable->addEntry(std::move(profEntry))) {
-      ReportOutOfMemory(cx);
-      return false;
-    }
-    code->setHasBytecodeMap();
-  }
-
-  // Attach to script.
-  script->jitScript()->setBaselineScript(script, bs);
-
-  // Toggle profiler instrumentation if needed.
-  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
-          cx->runtime())) {
-    bs->toggleProfilerInstrumentation(true);
-  }
-
-  mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
-  fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u patches=%u)\n",
-          name->hasLatin1Chars() ? (int)name->length() : 10,
-          name->hasLatin1Chars()
-              ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
-              : "<two-byte>",
-          (long long)dTotal.ToMicroseconds(),
-          codeSize, entry->patchesCount);
-
-  return true;
-}
 #endif
 
 uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {

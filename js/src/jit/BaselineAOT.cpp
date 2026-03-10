@@ -8,21 +8,42 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/TimeStamp.h"
 
 #include <cstdint>
+#include <fstream>
+#include <iomanip>
 
+#include "frontend/CompilationStencil.h"
 #include "gc/Zone.h"
+#include "jit/AOTContext.h"
 #include "jit/AutoWritableJitCode.h"
+#include "jit/BaselineJIT.h"
 #include "jit/IonTypes.h"
 #include "jit/JitCode.h"
+#include "jit/JitcodeMap.h"
+#include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/JitZone.h"
 #include "jit/ProcessExecutableMemory.h"
 #include "jit/VMFunctions.h"
+#include "vm/JSAtomUtils.h"
 #include "vm/JSContext.h"
+#include "vm/JSFunction.h"
+#include "vm/JSScript.h"
+#include "vm/Runtime.h"
+
+#include "jit/JitScript-inl.h"
+#include "vm/GeckoProfiler-inl.h"
+#include "vm/JSObject-inl.h"
+#include "vm/JSScript-inl.h"
 
 namespace js::jit {
+
+// ---------------------------------------------------------------------------
+// RuntimePatch resolution
+// ---------------------------------------------------------------------------
 
 void* ResolveCppFunction(AOTCppFunctionId id) {
   switch (id) {
@@ -86,6 +107,10 @@ void RuntimePatch::apply(const PatchContext& pc) const {
   *reinterpret_cast<uintptr_t*>(target) = val;
 }
 
+// ---------------------------------------------------------------------------
+// JitCode allocation + patching helper
+// ---------------------------------------------------------------------------
+
 JitCode* AllocateAndPatchAOTCode(JSContext* cx,
                                  const AOTBlobDirectoryEntry* entry,
                                  const uint8_t* containerBase,
@@ -145,5 +170,680 @@ JitCode* AllocateAndPatchAOTCode(JSContext* cx,
 
   return code;
 }
+
+// ---------------------------------------------------------------------------
+// AOT container serialization (dump mode)
+// ---------------------------------------------------------------------------
+
+#ifdef ENABLE_AOT_BASELINE
+
+using OffsetVector = Vector<uint32_t, 64, SystemAllocPolicy>;
+
+#ifdef DEBUG
+static void verifySentinelsPatched(const uint8_t* code, size_t codeSize,
+                                   const RuntimePatchVector& patches) {
+  constexpr size_t sentinelSize = sizeof(uintptr_t);
+  if (codeSize < sentinelSize) {
+    return;
+  }
+
+  uint8_t sentinelBytes[sentinelSize];
+  memcpy(sentinelBytes, &AOT_PATCH_SENTINEL, sentinelSize);
+
+  for (size_t i = 0; i <= codeSize - sentinelSize; i++) {
+    if (memcmp(code + i, sentinelBytes, sentinelSize) == 0) {
+      uint32_t offset = static_cast<uint32_t>(i);
+      bool found = false;
+      for (const auto& patch : patches) {
+        if (patch.targetOffset == offset) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        JitSpew(JitSpew_BaselineAOT,
+                "WARNING: Unpatched sentinel at code offset %u", offset);
+        MOZ_CRASH_UNSAFE_PRINTF(
+            "AOT sentinel at offset %u not covered by any RuntimePatch",
+            offset);
+      }
+    }
+  }
+}
+#endif
+
+static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
+  for (size_t i = 0; i < len; i += 16) {
+    size_t end = std::min(i + 16, len);
+    out << "    .byte ";
+    for (size_t j = i; j < end; j++) {
+      if (j > i) out << ", ";
+      out << "0x" << std::hex << std::setfill('0') << std::setw(2)
+          << (unsigned)data[j];
+    }
+    out << std::dec << "\n";
+  }
+}
+
+static void emitAsmZeroPadding(std::ostream& out, size_t len) {
+  if (len == 0) return;
+  for (size_t i = 0; i < len; i += 16) {
+    size_t end = std::min(i + 16, len);
+    out << "    .byte ";
+    for (size_t j = i; j < end; j++) {
+      if (j > i) out << ", ";
+      out << "0x00";
+    }
+    out << "\n";
+  }
+}
+
+// NOTE: look for a mozilla function that already does this,
+// reimplmeneting this looks bad in a patch.
+static uint32_t AlignUp(uint32_t val, uint32_t align) {
+  return (val + align - 1) & ~(align - 1);
+}
+
+struct AOTBlobData {
+  AOTBlobDirectoryEntry dirEntry;
+  Vector<uint8_t, 0, SystemAllocPolicy> code;
+  Vector<uint8_t, 0, SystemAllocPolicy> manifest;
+  Vector<uint8_t, 0, SystemAllocPolicy> patches;
+  Vector<uint8_t, 0, SystemAllocPolicy> metadata;
+
+  template <typename T>
+  static bool appendBytes(Vector<uint8_t, 0, SystemAllocPolicy>& vec,
+                          const T* data, size_t count) {
+    const auto* bytes = reinterpret_cast<const uint8_t*>(data);
+    return vec.append(bytes, count * sizeof(T));
+  }
+};
+
+// Write the multi-blob AOT container .S file.
+static bool writeAOTContainer(std::ostream& out,
+                              const AOTBlobData* const* blobs,
+                              uint32_t blobCount) {
+  uint32_t dirSize =
+      sizeof(AOTContainerHeader) + blobCount * sizeof(AOTBlobDirectoryEntry);
+  uint32_t dataStart = AlignUp(dirSize, 16);
+
+  Vector<AOTBlobDirectoryEntry, 2, SystemAllocPolicy> dirEntries;
+  if (!dirEntries.reserve(blobCount)) {
+    return false;
+  }
+
+  uint32_t cursor = dataStart;
+  for (uint32_t i = 0; i < blobCount; i++) {
+    AOTBlobDirectoryEntry e = blobs[i]->dirEntry;
+    e.codeOffset = cursor;
+    e.codeSize = blobs[i]->code.length();
+    cursor += e.codeSize;
+
+    e.manifestOffset = cursor;
+    e.manifestSize = blobs[i]->manifest.length();
+    cursor += e.manifestSize;
+
+    e.patchesOffset = cursor;
+    e.patchesCount = blobs[i]->patches.length() / sizeof(RuntimePatch);
+    cursor += blobs[i]->patches.length();
+
+    e.metadataOffset = cursor;
+    e.metadataSize = blobs[i]->metadata.length();
+    cursor += e.metadataSize;
+
+    cursor = AlignUp(cursor, 16);
+
+    dirEntries.infallibleAppend(e);
+  }
+
+  AOTContainerHeader hdr;
+  hdr.magic = AOT_CONTAINER_MAGIC;
+  hdr.version = AOT_CONTAINER_VERSION;
+  hdr.blobCount = blobCount;
+  hdr.padding = 0;
+
+  out << "// AOT Baseline - generated by --dump-bl\n";
+  out << "// Container format v" << AOT_CONTAINER_VERSION << ", " << blobCount
+      << " blob(s)\n";
+  out << ".section .rodata\n";
+  out << ".balign 16\n";
+  out << ".global bl_aot_container_start\n";
+  out << ".global bl_aot_container_end\n";
+  out << "bl_aot_container_start:\n";
+
+  out << "// --- Container Header ---\n";
+  emitAsmBytes(out, reinterpret_cast<const uint8_t*>(&hdr), sizeof(hdr));
+
+  for (uint32_t i = 0; i < blobCount; i++) {
+    out << "// --- Directory Entry " << i << " (kind=" << dirEntries[i].kind
+        << ") ---\n";
+    emitAsmBytes(out, reinterpret_cast<const uint8_t*>(&dirEntries[i]),
+                 sizeof(AOTBlobDirectoryEntry));
+  }
+
+  size_t padSize = dataStart - dirSize;
+  if (padSize > 0) {
+    out << "// --- Alignment padding ---\n";
+    emitAsmZeroPadding(out, padSize);
+  }
+
+  for (uint32_t i = 0; i < blobCount; i++) {
+    const auto& blob = *blobs[i];
+    out << "// --- Blob " << i << " Code (" << blob.code.length()
+        << " bytes) ---\n";
+    if (blob.code.length() > 0) {
+      emitAsmBytes(out, blob.code.begin(), blob.code.length());
+    }
+
+    out << "// --- Blob " << i << " Manifest (" << blob.manifest.length()
+        << " bytes) ---\n";
+    if (blob.manifest.length() > 0) {
+      emitAsmBytes(out, blob.manifest.begin(), blob.manifest.length());
+    }
+
+    out << "// --- Blob " << i << " Patches ("
+        << (blob.patches.length() / sizeof(RuntimePatch)) << ") ---\n";
+    if (blob.patches.length() > 0) {
+      emitAsmBytes(out, blob.patches.begin(), blob.patches.length());
+    }
+
+    out << "// --- Blob " << i << " Metadata (" << blob.metadata.length()
+        << " bytes) ---\n";
+    if (blob.metadata.length() > 0) {
+      emitAsmBytes(out, blob.metadata.begin(), blob.metadata.length());
+    }
+
+    if (i + 1 < blobCount) {
+      uint32_t curPos = dirEntries[i].metadataOffset + blob.metadata.length();
+      uint32_t nextAligned = AlignUp(curPos, 16);
+      if (nextAligned > curPos) {
+        out << "// --- Inter-blob padding ---\n";
+        emitAsmZeroPadding(out, nextAligned - curPos);
+      }
+    }
+  }
+
+  out << "bl_aot_container_end:\n";
+  out << ".section .note.GNU-stack,\"\",@progbits\n";
+  return true;
+}
+
+// Saved interpreter blob from BuildAndSaveInterpBlob(), reused by
+// DumpAOTContainer() which runs later once a realm exists.
+static mozilla::Maybe<AOTBlobData> sSavedInterpreterBlob;
+
+bool BuildAndSaveInterpBlob(JitCode* code, const AOTManifestScalars& scalars,
+                            const RuntimePatchVector& patches,
+                            const uint8_t* metadataBytes,
+                            size_t metadataSize) {
+  uint8_t* codeStart = code->raw();
+  size_t codeSize = code->rawEnd() - codeStart;
+
+#ifdef DEBUG
+  verifySentinelsPatched(codeStart, codeSize, patches);
+#endif
+
+  sSavedInterpreterBlob.reset();
+  sSavedInterpreterBlob.emplace();
+  AOTBlobData& interpBlob = *sSavedInterpreterBlob;
+
+  interpBlob.dirEntry.kind =
+      static_cast<uint32_t>(AOTBlobKind::BaselineInterpreter);
+  interpBlob.dirEntry.nameHash = 0;
+
+  if (!AOTBlobData::appendBytes(interpBlob.code, codeStart, codeSize)) {
+    return false;
+  }
+
+  if (!AOTBlobData::appendBytes(interpBlob.manifest, &scalars, 1)) {
+    return false;
+  }
+
+  if (patches.length() > 0) {
+    if (!AOTBlobData::appendBytes(interpBlob.patches, patches.begin(),
+                                  patches.length())) {
+      return false;
+    }
+  }
+
+  if (metadataSize > 0) {
+    if (!interpBlob.metadata.append(metadataBytes, metadataSize)) {
+      return false;
+    }
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "Scalars: dbgInstr=%u dbgTrap=%u coverage=%u icRet=%u patches=%u",
+          scalars.DebugInstrumentationCount, scalars.DebugTrapCount,
+          scalars.CodeCoverageCount, scalars.ICReturnCount,
+          scalars.RuntimePatchCount);
+
+  // Write the single-blob container (interp only) immediately.
+  const char* outPath = kAOTOutputPath;
+  std::ofstream out(outPath, std::ios::trunc);
+  if (!out.is_open()) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.", outPath);
+    return false;
+  }
+
+  const AOTBlobData* blobPtrs[] = {&interpBlob};
+  if (!writeAOTContainer(out, blobPtrs, 1)) {
+    return false;
+  }
+
+  out.close();
+
+  JitSpew(JitSpew_BaselineAOT,
+          "Code size=%zu: prologue=[0,%u) table=[%u,...)",
+          codeSize, scalars.PrologueEndOffset,
+          scalars.DispatchTableOffset);
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Self-hosted function AOT compilation
+// ---------------------------------------------------------------------------
+
+static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
+                                 AOTBlobData* blobOut) {
+  JSAtom* atom = AtomizeUTF8Chars(cx, funcName, strlen(funcName));
+  if (!atom) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to atomize '%s'", funcName);
+    return false;
+  }
+
+  Rooted<PropertyName*> name(cx, atom->asPropertyName());
+  auto indexRange = cx->runtime()->getSelfHostedScriptIndexRange(name);
+  if (!indexRange) {
+    JitSpew(JitSpew_BaselineAOT, "Self-hosted function '%s' not found",
+            funcName);
+    return false;
+  }
+  AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
+
+  RootedFunction fun(
+      cx, cx->runtime()->selfHostStencil().instantiateSelfHostedLazyFunction(
+              cx, cx->runtime()->selfHostStencilInput().atomCache,
+              indexRange->start, name));
+  if (!fun) {
+    JitSpew(JitSpew_BaselineAOT,
+            "Failed to instantiate self-hosted function '%s'", funcName);
+    return false;
+  }
+  if (!cx->runtime()->delazifySelfHostedFunction(cx, name, fun)) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to delazify self-hosted function '%s'",
+            funcName);
+    return false;
+  }
+
+  Rooted<JSScript*> script(cx, fun->nonLazyScript());
+  MOZ_ASSERT(script);
+
+  if (!cx->zone()->ensureJitZoneExists(cx)) {
+    return false;
+  }
+  AutoKeepJitScripts keepJitScript(cx);
+  if (!script->ensureHasJitScript(cx, keepJitScript)) {
+    return false;
+  }
+
+  AOTContext aotCtx;
+
+  BaselineOptions options({BaselineOption::ForceMainThreadCompilation});
+  MethodStatus result = BaselineCompile(cx, script, options, &aotCtx);
+  if (result != Method_Compiled) {
+    JitSpew(JitSpew_BaselineAOT,
+            "Failed to baseline-compile self-hosted function '%s' (status=%d)",
+            funcName, (int)result);
+    return false;
+  }
+  MOZ_ASSERT(script->hasBaselineScript());
+
+  BaselineScript* bs = script->baselineScript();
+  JitCode* jitCode = bs->method();
+#ifdef DEBUG
+  verifySentinelsPatched(jitCode->raw(), jitCode->instructionsSize(),
+                         aotCtx.accumulator().runtimePatches);
+#endif
+  AOTScriptManifest sm{};
+  bs->fillAOTManifest(&sm, &blobOut->metadata);
+  sm.codeSize = jitCode->instructionsSize();
+  sm.headerSize = jitCode->headerSize();
+  sm.runtimePatchCount = aotCtx.accumulator().runtimePatches.length();
+  blobOut->dirEntry.kind =
+      static_cast<uint32_t>(AOTBlobKind::SelfHostedFunction);
+  blobOut->dirEntry.nameHash = AOTNameHash(funcName);
+
+  if (!AOTBlobData::appendBytes(blobOut->code, jitCode->raw(),
+                                jitCode->instructionsSize())) {
+    return false;
+  }
+  if (!AOTBlobData::appendBytes(blobOut->manifest, &sm, 1)) {
+    return false;
+  }
+  const auto& runtimePatches = aotCtx.accumulator().runtimePatches;
+  if (runtimePatches.length() > 0) {
+    if (!AOTBlobData::appendBytes(blobOut->patches, runtimePatches.begin(),
+                                  runtimePatches.length())) {
+      return false;
+    }
+  }
+
+  char padded[32];
+  SprintfLiteral(padded, "'%s'", funcName);
+  JitSpew(JitSpew_BaselineAOT,
+          "AOT Compiled %-24s size=%5ub  patches=%3u  callSites=%3u  osr=%u",
+          padded, sm.codeSize, sm.runtimePatchCount, sm.retAddrEntryCount,
+          sm.osrEntryCount);
+
+  return true;
+}
+
+static const char* const kAOTSelfHostedFunctions[] = {
+    "ArrayIteratorNext",  "ArrayMap",         "ArrayFilter",
+    "ArrayReduce",        "ArrayForEach",     "ArrayEvery",
+    "ArraySome",          "ArrayFind",        "ArrayFindIndex",
+    "StringIteratorNext", "MapForEach",       "MapIteratorNext",
+    "SetForEach",         "SetIteratorNext",  "TypedArrayForEach",
+    "TypedArrayMap",      "TypedArrayFilter", "Promise_finally",
+};
+
+bool DumpAOTContainer(JSContext* cx) {
+  MOZ_ASSERT(JitOptions.dumpBaselineInterp ||
+             JitOptions.dumpBaselineSelfHosted);
+
+  const char* outPath = kAOTOutputPath;
+
+  Vector<AOTBlobData, 0, SystemAllocPolicy> funcBlobs;
+  Vector<const AOTBlobData*, 0, SystemAllocPolicy> blobPtrs;
+
+  if (sSavedInterpreterBlob) {
+    if (!blobPtrs.append(&*sSavedInterpreterBlob)) {
+      return false;
+    }
+  }
+
+  if (JitOptions.dumpBaselineSelfHosted) {
+    for (const char* funcName : kAOTSelfHostedFunctions) {
+      AOTBlobData blob;
+      if (!compileAOTSelfHosted(cx, funcName, &blob)) {
+        JitSpew(JitSpew_BaselineAOT,
+                "WARNING: Failed to compile AOT self-hosted '%s', skipping",
+                funcName);
+        continue;
+      }
+      if (!funcBlobs.append(std::move(blob))) {
+        return false;
+      }
+    }
+    for (const auto& blob : funcBlobs) {
+      if (!blobPtrs.append(&blob)) {
+        return false;
+      }
+    }
+  }
+
+  if (blobPtrs.empty()) {
+    JitSpew(JitSpew_BaselineAOT, "No blobs to write, skipping container.");
+    return true;
+  }
+
+  std::ofstream out(outPath, std::ios::trunc);
+  if (!out.is_open()) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.", outPath);
+    return false;
+  }
+
+  uint32_t blobCount = static_cast<uint32_t>(blobPtrs.length());
+  if (!writeAOTContainer(out, blobPtrs.begin(), blobCount)) {
+    return false;
+  }
+
+  out.close();
+
+  JitSpew(JitSpew_BaselineAOT, "Wrote AOT container with %u blob(s) to %s",
+          blobCount, outPath);
+  JitSpew(JitSpew_BaselineAOT, "Rebuild the engine to use AOT mode.");
+
+  sSavedInterpreterBlob.reset();
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// AOT interpreter loading (runtime)
+// ---------------------------------------------------------------------------
+
+bool LoadAOTInterpFromContainer(JSContext* cx,
+                                BaselineInterpreter& interpreter) {
+  const AOTContainerHeader* hdr = GetAOTContainerHeader();
+  if (!hdr) {
+    JitSpew(JitSpew_BaselineAOT, "ERROR: Invalid or missing AOT container!");
+    return false;
+  }
+
+  const AOTBlobDirectoryEntry* entry =
+      FindAOTBlob(AOTBlobKind::BaselineInterpreter);
+  if (!entry || entry->codeSize == 0) {
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: No BaselineInterpreter blob in AOT container!");
+    return false;
+  }
+
+  const uint8_t* containerBase = GetAOTContainer();
+  size_t codeSize = entry->codeSize;
+
+  AOTManifestScalars manifest;
+  memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
+  uint32_t headerSize = manifest.HeaderSize;
+
+  mozilla::Maybe<AutoAllocInAtomsZone> az;
+  if (!cx->zone() || !cx->zone()->isAtomsZone()) {
+    az.emplace(cx);
+  }
+
+  JitZone* jitZone = cx->zone()->getJitZone(cx);
+  if (!jitZone) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+
+  size_t bytesNeeded = js::AlignBytes(codeSize + headerSize, sizeof(void*));
+  ExecutablePool* pool;
+  uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
+                                                         CodeKind::Other);
+  if (!result) {
+    js::ReportOutOfMemory(cx);
+    return false;
+  }
+
+  uint8_t* codeStart = result + headerSize;
+  JitCode* code = JitCode::New<NoGC>(cx, codeStart, bytesNeeded, headerSize,
+                                     pool, CodeKind::Other);
+  if (!code) {
+    js::ReportOutOfMemory(cx);
+    return false;
+  }
+
+  // Ensure debug trap handlers are created before the writable scope
+  // so we don't nest writable regions.
+  if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
+          cx, DebugTrapHandlerKind::Interpreter)) {
+    return false;
+  }
+  if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
+          cx, DebugTrapHandlerKind::Compiler)) {
+    return false;
+  }
+
+  {
+    AutoWritableJitCodeFallible writable(code);
+    if (!writable.makeWritable()) {
+      js::ReportOutOfMemory(cx);
+      return false;
+    }
+    memcpy(codeStart, containerBase + entry->codeOffset, codeSize);
+    JitCodeHeader::FromExecutable(codeStart)->init(code);
+    code->setInstructionsSize(codeSize);
+
+    MOZ_ASSERT(code->instructionsSize() == codeSize);
+    MOZ_ASSERT(code->raw() == codeStart);
+
+    if (!interpreter.initFromAOT(cx, code, entry, containerBase)) {
+      JitSpew(JitSpew_BaselineAOT,
+              "ERROR: Failed to initialize from AOT symbols");
+      return false;
+    }
+  }
+
+  {
+    auto entry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
+        cx, code, code->raw(), code->rawEnd());
+    if (!entry) {
+      return false;
+    }
+
+    JitcodeGlobalTable* globalTable =
+        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+    if (!globalTable->addEntry(std::move(entry))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+
+    code->setHasBytecodeMap();
+  }
+
+  if (cx->runtime()->geckoProfiler().enabled()) {
+    interpreter.toggleProfilerInstrumentation(true);
+  }
+
+  if (coverage::IsLCovEnabled()) {
+    interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Self-hosted function loading (runtime)
+// ---------------------------------------------------------------------------
+
+bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
+                       Handle<JSAtom*> name) {
+  mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
+
+  JS::AutoCheckCannotGC nogc;
+  uint32_t nameHash = name->hasLatin1Chars()
+      ? AOTNameHash(name->latin1Chars(nogc), name->length())
+      : AOTNameHash(name->twoByteChars(nogc), name->length());
+
+  const AOTContainerHeader* hdr = GetAOTContainerHeader();
+  if (!hdr || hdr->blobCount == 0) {
+    return false;
+  }
+  const uint8_t* containerBase = GetAOTContainer();
+  const auto* dir = reinterpret_cast<const AOTBlobDirectoryEntry*>(
+      containerBase + sizeof(AOTContainerHeader));
+
+  const AOTBlobDirectoryEntry* entry = nullptr;
+  for (uint32_t i = 0; i < hdr->blobCount; i++) {
+    if (dir[i].kind == static_cast<uint32_t>(AOTBlobKind::SelfHostedFunction) &&
+        dir[i].nameHash == nameHash && dir[i].codeSize > 0) {
+      entry = &dir[i];
+      break;
+    }
+  }
+  if (!entry) {
+    return false;
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "Loading AOT self-hosted function (nameHash=%u, codeSize=%u)",
+          nameHash, entry->codeSize);
+
+  AOTScriptManifest manifest;
+  memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
+
+  uint32_t codeSize = manifest.codeSize;
+
+  JitCode* code = AllocateAndPatchAOTCode(cx, entry, containerBase,
+                                          manifest.headerSize,
+                                          CodeKind::Baseline, 0);
+  if (!code) {
+    return false;
+  }
+
+  BaselineScript* bs = BaselineScript::New(
+      cx, manifest.warmUpCheckPrologueOffset,
+      manifest.profilerEnterToggleOffset,
+      manifest.profilerExitToggleOffset,
+      manifest.retAddrEntryCount, manifest.osrEntryCount,
+      manifest.debugTrapEntryCount, manifest.resumeEntryCount);
+  if (!bs) {
+    return false;
+  }
+  bs->setMethod(code);
+
+  const uint8_t* meta = containerBase + entry->metadataOffset;
+  if (manifest.retAddrEntryCount > 0) {
+    bs->copyRetAddrEntries(
+        reinterpret_cast<const RetAddrEntry*>(meta));
+    meta += manifest.retAddrEntryCount * sizeof(RetAddrEntry);
+  }
+  if (manifest.osrEntryCount > 0) {
+    bs->copyOSREntries(
+        reinterpret_cast<const BaselineScript::OSREntry*>(meta));
+    meta += manifest.osrEntryCount * sizeof(BaselineScript::OSREntry);
+  }
+  if (manifest.debugTrapEntryCount > 0) {
+    bs->copyDebugTrapEntries(
+        reinterpret_cast<const BaselineScript::DebugTrapEntry*>(meta));
+  }
+
+  bs->computeResumeNativeOffsets(script, ResumeOffsetEntryVector());
+
+  {
+    UniqueChars str =
+        GeckoProfilerRuntime::allocProfileString(cx, script);
+    if (!str) {
+      return false;
+    }
+
+    auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
+        cx, code, code->raw(), code->rawEnd(), std::move(str));
+    if (!profEntry) {
+      return false;
+    }
+
+    JitcodeGlobalTable* globalTable =
+        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+    if (!globalTable->addEntry(std::move(profEntry))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+    code->setHasBytecodeMap();
+  }
+
+  script->jitScript()->setBaselineScript(script, bs);
+
+  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
+          cx->runtime())) {
+    bs->toggleProfilerInstrumentation(true);
+  }
+
+  mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
+  fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u patches=%u)\n",
+          name->hasLatin1Chars() ? (int)name->length() : 10,
+          name->hasLatin1Chars()
+              ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
+              : "<two-byte>",
+          (long long)dTotal.ToMicroseconds(),
+          codeSize, entry->patchesCount);
+
+  return true;
+}
+
+#endif  // ENABLE_AOT_BASELINE
 
 }  // namespace js::jit
