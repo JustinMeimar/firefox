@@ -1362,17 +1362,6 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code,
   callVMOffsets_.debugEpilogueOffset = s.CallVMDebugEpilogue;
   callVMOffsets_.debugAfterYieldOffset = s.CallVMDebugAfterYield;
 
-  // Load patches from the container.
-  runtimePatches.clear();
-  if (entry->patchesCount > 0) {
-    auto* patchData = reinterpret_cast<const RuntimePatch*>(
-        containerBase + entry->patchesOffset);
-    if (!runtimePatches.append(patchData, entry->patchesCount)) {
-      JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT patches");
-      return false;
-    }
-  }
-
   // Load metadata vectors from packed section.
   // Order: debugInstr, debugTraps, coverage, icReturns
   auto loadVec = [](auto& destVec, const uint8_t*& cursor, uint32_t count) -> bool {
@@ -1392,16 +1381,6 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code,
       !loadVec(icReturnOffsets_, meta, s.ICReturnCount)) {
     JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT metadata vectors");
     return false;
-  }
-
-  // Apply runtime patches to the memcpy'd code.
-  if (entry->patchesCount > 0) {
-    PatchContext patchCtx({cx, code_->raw(), s.DispatchTableOffset});
-    for (const RuntimePatch& patch : runtimePatches) {
-      patch.apply(patchCtx);
-    }
-    JitSpew(JitSpew_BaselineAOT, "Applied %u runtime patches.",
-            uint32_t(runtimePatches.length()));
   }
 
   return true;

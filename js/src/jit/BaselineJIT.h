@@ -480,8 +480,6 @@ using BaselineOptions = EnumFlags<BaselineOption>;
 bool DispatchOffThreadBaselineBatchEager(JSContext* cx);
 bool DispatchOffThreadBaselineBatch(JSContext* cx);
 
-class AOTContext;
-
 MethodStatus BaselineCompile(JSContext* cx, JSScript* script,
                              BaselineOptions options,
                              AOTContext* aotContext = nullptr);
@@ -540,11 +538,6 @@ class BaselineInterpreter {
 
   // Offsets of some callVMs for BaselineDebugModeOSR.
   CallVMOffsets callVMOffsets_;
-
-#if defined(ENABLE_JS_AOT_ICS) || defined(ENABLE_AOT_BASELINE)
-  // Patch entries for runtime pointer relocation (AOT only).
-  Vector<RuntimePatch, 0, SystemAllocPolicy> runtimePatches;
-#endif
 
   uint8_t* codeAtOffset(uint32_t offset) const {
     MOZ_ASSERT(offset > 0);

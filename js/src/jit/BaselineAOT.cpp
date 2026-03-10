@@ -16,7 +16,7 @@
 
 #include "frontend/CompilationStencil.h"
 #include "gc/Zone.h"
-#include "jit/AOTContext.h"
+#include "jit/AOT.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineJIT.h"
 #include "jit/IonTypes.h"
@@ -42,142 +42,10 @@
 namespace js::jit {
 
 // ---------------------------------------------------------------------------
-// RuntimePatch resolution
-// ---------------------------------------------------------------------------
-
-void* ResolveCppFunction(AOTCppFunctionId id) {
-  switch (id) {
-    case AOTCppFunctionId::PostWriteBarrier:
-      return reinterpret_cast<void*>(PostWriteBarrier);
-    case AOTCppFunctionId::FrameIsDebuggeeCheck:
-      return reinterpret_cast<void*>(FrameIsDebuggeeCheck);
-    case AOTCppFunctionId::HandleCodeCoverageAtPrologue:
-      return reinterpret_cast<void*>(HandleCodeCoverageAtPrologue);
-    case AOTCppFunctionId::HandleCodeCoverageAtPC:
-      return reinterpret_cast<void*>(HandleCodeCoverageAtPC);
-    case AOTCppFunctionId::Count:
-      break;
-  }
-  MOZ_CRASH("Unknown AOTCppFunctionId");
-}
-
-uintptr_t RuntimePatch::getValueToPatch(const PatchContext& pc) const {
-  // Patch-only kinds require union data that ResolveAOTReloc doesn't have.
-  switch(kind) {
-    case AOTRelocKind::DispatchTable:
-      return (uintptr_t)(pc.codeBase + auxData);
-    case AOTRelocKind::VMWrapper: {
-      TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getVMWrapper(
-          VMFunctionId(auxData));
-      return (uintptr_t)(ptr.value);
-    }
-    case AOTRelocKind::DebugTrapHandler:
-      return (uintptr_t)pc.cx->runtime()->jitRuntime()->debugTrapHandler(
-          DebugTrapHandlerKind(auxData))->raw();
-    case AOTRelocKind::CppFunction:
-      return (uintptr_t)ResolveCppFunction(AOTCppFunctionId(auxData));
-    case AOTRelocKind::PreBarrier: {
-      MIRType type;
-      switch (AOTPreBarrierIndex(auxData)) {
-        case AOTPreBarrierIndex::Value: type = MIRType::Value; break;
-        case AOTPreBarrierIndex::String: type = MIRType::String; break;
-        case AOTPreBarrierIndex::Object: type = MIRType::Object; break;
-        case AOTPreBarrierIndex::Shape: type = MIRType::Shape; break;
-        case AOTPreBarrierIndex::WasmAnyRef: type = MIRType::WasmAnyRef; break;
-        default: MOZ_CRASH("Bad AOTPreBarrierIndex");
-      }
-      return (uintptr_t)pc.cx->runtime()->jitRuntime()->preBarrier(type).value;
-    }
-    case AOTRelocKind::ExceptionTail:
-      return (uintptr_t)pc.cx->runtime()->jitRuntime()->getExceptionTail().value;
-    default:
-      // All other kinds resolve identically to ResolveAOTReloc.
-      return ResolveAOTReloc(kind, pc.cx);
-  }
-}
-
-void RuntimePatch::apply(const PatchContext& pc) const {
-  uintptr_t val = getValueToPatch(pc);
-  uint8_t* target = pc.codeBase + targetOffset;
-#ifdef DEBUG
-  uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
-  JitSpew(JitSpew_BaselineAOT, "Runtime patch [%s] @ offset %u: before=0x%016lx after=0x%016lx",
-          AOTRelocKindName(kind), targetOffset, beforeValue, val);
-#endif
-  *reinterpret_cast<uintptr_t*>(target) = val;
-}
-
-// ---------------------------------------------------------------------------
-// JitCode allocation + patching helper
-// ---------------------------------------------------------------------------
-
-JitCode* AllocateAndPatchAOTCode(JSContext* cx,
-                                 const AOTBlobDirectoryEntry* entry,
-                                 const uint8_t* containerBase,
-                                 uint32_t headerSize, CodeKind codeKind,
-                                 uint32_t dispatchTableOffset) {
-  uint32_t codeSize = entry->codeSize;
-
-  mozilla::Maybe<AutoAllocInAtomsZone> az;
-  if (!cx->zone() || !cx->zone()->isAtomsZone()) {
-    az.emplace(cx);
-  }
-
-  JitZone* jitZone = cx->zone()->getJitZone(cx);
-  if (!jitZone) {
-    ReportOutOfMemory(cx);
-    return nullptr;
-  }
-
-  size_t bytesNeeded = js::AlignBytes(codeSize + headerSize, sizeof(void*));
-  ExecutablePool* pool;
-  auto* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
-                                                       codeKind);
-  if (!result) {
-    ReportOutOfMemory(cx);
-    return nullptr;
-  }
-
-  uint8_t* codeStart = result + headerSize;
-  JitCode* code =
-      JitCode::New<NoGC>(cx, codeStart, bytesNeeded, headerSize, pool,
-                          codeKind);
-  if (!code) {
-    ReportOutOfMemory(cx);
-    return nullptr;
-  }
-
-  {
-    AutoWritableJitCodeFallible writable(code);
-    if (!writable.makeWritable()) {
-      ReportOutOfMemory(cx);
-      return nullptr;
-    }
-    memcpy(codeStart, containerBase + entry->codeOffset, codeSize);
-    JitCodeHeader::FromExecutable(codeStart)->init(code);
-    code->setInstructionsSize(codeSize);
-
-    if (entry->patchesCount > 0) {
-      PatchContext patchCtx({cx, codeStart, dispatchTableOffset});
-      const auto* patches = reinterpret_cast<const RuntimePatch*>(
-          containerBase + entry->patchesOffset);
-      for (uint32_t i = 0; i < entry->patchesCount; i++) {
-        patches[i].apply(patchCtx);
-      }
-      JitSpew(JitSpew_BaselineAOT, "Applied %u patches.", entry->patchesCount);
-    }
-  }
-
-  return code;
-}
-
-// ---------------------------------------------------------------------------
 // AOT container serialization (dump mode)
 // ---------------------------------------------------------------------------
 
 #ifdef ENABLE_AOT_BASELINE
-
-using OffsetVector = Vector<uint32_t, 64, SystemAllocPolicy>;
 
 #ifdef DEBUG
 static void verifySentinelsPatched(const uint8_t* code, size_t codeSize,
@@ -226,23 +94,11 @@ static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
 }
 
 static void emitAsmZeroPadding(std::ostream& out, size_t len) {
-  if (len == 0) return;
-  for (size_t i = 0; i < len; i += 16) {
-    size_t end = std::min(i + 16, len);
-    out << "    .byte ";
-    for (size_t j = i; j < end; j++) {
-      if (j > i) out << ", ";
-      out << "0x00";
-    }
-    out << "\n";
+  if (len > 0) {
+    out << "    .zero " << len << "\n";
   }
 }
 
-// NOTE: look for a mozilla function that already does this,
-// reimplmeneting this looks bad in a patch.
-static uint32_t AlignUp(uint32_t val, uint32_t align) {
-  return (val + align - 1) & ~(align - 1);
-}
 
 struct AOTBlobData {
   AOTBlobDirectoryEntry dirEntry;
@@ -265,7 +121,7 @@ static bool writeAOTContainer(std::ostream& out,
                               uint32_t blobCount) {
   uint32_t dirSize =
       sizeof(AOTContainerHeader) + blobCount * sizeof(AOTBlobDirectoryEntry);
-  uint32_t dataStart = AlignUp(dirSize, 16);
+  uint32_t dataStart = js::AlignBytes(dirSize, 16u);
 
   Vector<AOTBlobDirectoryEntry, 2, SystemAllocPolicy> dirEntries;
   if (!dirEntries.reserve(blobCount)) {
@@ -291,7 +147,7 @@ static bool writeAOTContainer(std::ostream& out,
     e.metadataSize = blobs[i]->metadata.length();
     cursor += e.metadataSize;
 
-    cursor = AlignUp(cursor, 16);
+    cursor = js::AlignBytes(cursor, 16u);
 
     dirEntries.infallibleAppend(e);
   }
@@ -355,7 +211,7 @@ static bool writeAOTContainer(std::ostream& out,
 
     if (i + 1 < blobCount) {
       uint32_t curPos = dirEntries[i].metadataOffset + blob.metadata.length();
-      uint32_t nextAligned = AlignUp(curPos, 16);
+      uint32_t nextAligned = js::AlignBytes(curPos, 16u);
       if (nextAligned > curPos) {
         out << "// --- Inter-blob padding ---\n";
         emitAsmZeroPadding(out, nextAligned - curPos);
@@ -617,57 +473,20 @@ bool DumpAOTContainer(JSContext* cx) {
 
 bool LoadAOTInterpFromContainer(JSContext* cx,
                                 BaselineInterpreter& interpreter) {
-  const AOTContainerHeader* hdr = GetAOTContainerHeader();
-  if (!hdr) {
-    JitSpew(JitSpew_BaselineAOT, "ERROR: Invalid or missing AOT container!");
-    return false;
-  }
-
   const AOTBlobDirectoryEntry* entry =
       FindAOTBlob(AOTBlobKind::BaselineInterpreter);
-  if (!entry || entry->codeSize == 0) {
+  if (!entry) {
     JitSpew(JitSpew_BaselineAOT,
             "ERROR: No BaselineInterpreter blob in AOT container!");
     return false;
   }
 
   const uint8_t* containerBase = GetAOTContainer();
-  size_t codeSize = entry->codeSize;
 
   AOTManifestScalars manifest;
   memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
-  uint32_t headerSize = manifest.HeaderSize;
 
-  mozilla::Maybe<AutoAllocInAtomsZone> az;
-  if (!cx->zone() || !cx->zone()->isAtomsZone()) {
-    az.emplace(cx);
-  }
-
-  JitZone* jitZone = cx->zone()->getJitZone(cx);
-  if (!jitZone) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  size_t bytesNeeded = js::AlignBytes(codeSize + headerSize, sizeof(void*));
-  ExecutablePool* pool;
-  uint8_t* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
-                                                         CodeKind::Other);
-  if (!result) {
-    js::ReportOutOfMemory(cx);
-    return false;
-  }
-
-  uint8_t* codeStart = result + headerSize;
-  JitCode* code = JitCode::New<NoGC>(cx, codeStart, bytesNeeded, headerSize,
-                                     pool, CodeKind::Other);
-  if (!code) {
-    js::ReportOutOfMemory(cx);
-    return false;
-  }
-
-  // Ensure debug trap handlers are created before the writable scope
-  // so we don't nest writable regions.
+  // Ensure debug trap handlers exist before allocating writable code.
   if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
           cx, DebugTrapHandlerKind::Interpreter)) {
     return false;
@@ -677,36 +496,29 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
     return false;
   }
 
-  {
-    AutoWritableJitCodeFallible writable(code);
-    if (!writable.makeWritable()) {
-      js::ReportOutOfMemory(cx);
-      return false;
-    }
-    memcpy(codeStart, containerBase + entry->codeOffset, codeSize);
-    JitCodeHeader::FromExecutable(codeStart)->init(code);
-    code->setInstructionsSize(codeSize);
+  JitCode* code = AllocateAndPatchAOTCode(
+      cx, entry, containerBase, manifest.HeaderSize,
+      CodeKind::Other, manifest.DispatchTableOffset);
+  if (!code) {
+    return false;
+  }
 
-    MOZ_ASSERT(code->instructionsSize() == codeSize);
-    MOZ_ASSERT(code->raw() == codeStart);
-
-    if (!interpreter.initFromAOT(cx, code, entry, containerBase)) {
-      JitSpew(JitSpew_BaselineAOT,
-              "ERROR: Failed to initialize from AOT symbols");
-      return false;
-    }
+  if (!interpreter.initFromAOT(cx, code, entry, containerBase)) {
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: Failed to initialize from AOT symbols");
+    return false;
   }
 
   {
-    auto entry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
+    auto profEntry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
         cx, code, code->raw(), code->rawEnd());
-    if (!entry) {
+    if (!profEntry) {
       return false;
     }
 
     JitcodeGlobalTable* globalTable =
         cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
-    if (!globalTable->addEntry(std::move(entry))) {
+    if (!globalTable->addEntry(std::move(profEntry))) {
       ReportOutOfMemory(cx);
       return false;
     }
@@ -738,25 +550,12 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
       ? AOTNameHash(name->latin1Chars(nogc), name->length())
       : AOTNameHash(name->twoByteChars(nogc), name->length());
 
-  const AOTContainerHeader* hdr = GetAOTContainerHeader();
-  if (!hdr || hdr->blobCount == 0) {
-    return false;
-  }
-  const uint8_t* containerBase = GetAOTContainer();
-  const auto* dir = reinterpret_cast<const AOTBlobDirectoryEntry*>(
-      containerBase + sizeof(AOTContainerHeader));
-
-  const AOTBlobDirectoryEntry* entry = nullptr;
-  for (uint32_t i = 0; i < hdr->blobCount; i++) {
-    if (dir[i].kind == static_cast<uint32_t>(AOTBlobKind::SelfHostedFunction) &&
-        dir[i].nameHash == nameHash && dir[i].codeSize > 0) {
-      entry = &dir[i];
-      break;
-    }
-  }
+  const AOTBlobDirectoryEntry* entry =
+      FindAOTBlob(AOTBlobKind::SelfHostedFunction, nameHash);
   if (!entry) {
     return false;
   }
+  const uint8_t* containerBase = GetAOTContainer();
 
   JitSpew(JitSpew_BaselineAOT,
           "Loading AOT self-hosted function (nameHash=%u, codeSize=%u)",

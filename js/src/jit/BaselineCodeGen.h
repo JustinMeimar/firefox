@@ -7,6 +7,7 @@
 #ifndef jit_BaselineCodeGen_h
 #define jit_BaselineCodeGen_h
 
+#include "jit/AOT.h"
 #include "jit/BaselineAOT.h"
 #include "jit/BaselineFrameInfo.h"
 #include "jit/BytecodeAnalysis.h"
@@ -21,7 +22,6 @@ class NamedLambdaObject;
 
 namespace jit {
 
-class AOTContext;
 class BaselineSnapshot;
 
 enum class ScriptGCThingType {
@@ -599,6 +599,10 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   uint32_t compileRuntimePtrOffset_ = 0;
 
 #ifdef ENABLE_AOT_BASELINE
+  // Debug trap offsets for AOT serialization (duplicates debugTrapOffsets_
+  // but consumed separately by the AOT dump path).
+  Vector<uint32_t, 0, SystemAllocPolicy> aotDebugTraps_;
+
   [[nodiscard]] bool dumpAOTInterp(JSContext* cx, JitCode* code);
 #endif
 

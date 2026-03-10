@@ -15,10 +15,10 @@
 #include <limits>
 #include <utility>
 
+#include "jit/AOT.h"
 #include "jit/AtomicOp.h"
 #include "jit/AtomicOperations.h"
 #include "jit/Bailouts.h"
-#include "jit/BaselineAOT.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineJIT.h"
 #include "jit/JitFrames.h"

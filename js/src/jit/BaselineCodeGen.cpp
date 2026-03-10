@@ -12,6 +12,7 @@
 
 #include "frontend/CompilationStencil.h"
 #include "gc/GC.h"
+#include "jit/AOT.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineAOT.h"
 #include "jit/BaselineCompileQueue.h"
@@ -7081,11 +7082,13 @@ bool BaselineInterpreterGenerator::emitDebugTrap() {
   if (!debugTrapOffsets_.append(offset.offset())) {
     return false;
   }
+#ifdef ENABLE_AOT_BASELINE
   if (aot_) {
-    if (!aot_->accumulator().debugTraps.append(offset.offset())) {
+    if (!aotDebugTraps_.append(offset.offset())) {
       return false;
     }
   }
+#endif
 
   return true;
 }
@@ -7316,7 +7319,7 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
   s.HeaderSize = code->headerSize();
   s.PrologueEndOffset = warmUpCheckPrologueOffset_.offset();
   s.DebugInstrumentationCount = handler.debugInstrumentationOffsets().length();
-  s.DebugTrapCount = aot_->accumulator().debugTraps.length();
+  s.DebugTrapCount = aotDebugTraps_.length();
   s.CodeCoverageCount = handler.codeCoverageOffsets().length();
   s.ICReturnCount = handler.icReturnOffsets().length();
   s.RuntimePatchCount = aot_->accumulator().runtimePatches.length();
@@ -7328,7 +7331,7 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
     return metadata.append(bytes, count * sizeof(*data));
   };
   const auto& debugInstr = handler.debugInstrumentationOffsets();
-  const auto& debugTraps = aot_->accumulator().debugTraps;
+  const auto& debugTraps = aotDebugTraps_;
   const auto& coverage = handler.codeCoverageOffsets();
   const auto& icReturns = handler.icReturnOffsets();
 

@@ -15,8 +15,7 @@ include("../js-cxxflags.mozbuild")
 UNIFIED_SOURCES += [
     "AliasAnalysis.cpp",
     "AlignmentMaskAnalysis.cpp",
-    "AOTContext.cpp",
-    "AOTReloc.cpp",
+    "AOT.cpp",
     "BacktrackingAllocator.cpp",
     "Bailouts.cpp",
     "BaselineAOT.cpp",

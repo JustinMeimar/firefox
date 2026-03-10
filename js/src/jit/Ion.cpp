@@ -19,7 +19,6 @@
 #include "jit/AlignmentMaskAnalysis.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BacktrackingAllocator.h"
-#include "jit/BaselineAOT.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BranchHinting.h"

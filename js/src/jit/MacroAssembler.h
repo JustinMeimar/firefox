@@ -36,8 +36,7 @@
 #endif
 #include "jit/ABIArgGenerator.h"
 #include "jit/ABIFunctions.h"
-#include "jit/AOTContext.h"
-#include "jit/AOTReloc.h"
+#include "jit/AOT.h"
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
