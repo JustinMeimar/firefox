@@ -10,13 +10,16 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/TimeStamp.h"
 
 #include <algorithm>
+#include <fstream>
 
 #include "debugger/DebugAPI.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #include "jit/AutoWritableJitCode.h"
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineCodeGen.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineDebugModeOSR.h"
@@ -24,7 +27,10 @@
 #include "jit/CalleeToken.h"
 #include "jit/Ion.h"
 #include "jit/IonOptimizationLevels.h"
+#include "jit/JitCode.h"
+#include "jit/JitcodeMap.h"
 #include "jit/JitCommon.h"
+#include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/MacroAssembler.h"
@@ -376,11 +382,14 @@ bool jit::DispatchOffThreadBaselineBatch(JSContext* cx) {
 }
 
 MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
-                                  BaselineOptions options) {
-  cx->check(script);
+                                  BaselineOptions options,
+                                  AOTContext* aotContext) {
+  if (!aotContext) {
+    cx->check(script);
+  }
   MOZ_ASSERT(!script->hasBaselineScript());
   MOZ_ASSERT(script->canBaselineCompile());
-  MOZ_ASSERT(IsBaselineJitEnabled(cx));
+  MOZ_ASSERT(aotContext || IsBaselineJitEnabled(cx));
   AutoGeckoProfilerEntry pseudoFrame(
       cx, "Baseline script compilation",
       JS::ProfilingCategoryPair::JS_BaselineCompilation);
@@ -398,17 +407,35 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   gc::AutoSuppressGC suppressGC(cx);
 
   Rooted<JSScript*> rooted(cx, script);
-  if (!BaselineCompiler::PrepareToCompile(cx, rooted,
-                                          compileDebugInstrumentation)) {
-    return Method_Error;
+  if (!aotContext) {
+    if (!BaselineCompiler::PrepareToCompile(cx, rooted,
+                                            compileDebugInstrumentation)) {
+      return Method_Error;
+    }
+  } else {
+    // AOT mode: minimal preparation. JitScript must already exist.
+    MOZ_ASSERT(rooted->hasJitScript());
+    if (!rooted->jitScript()->ensureHasCachedBaselineJitData(cx, rooted)) {
+      return Method_Error;
+    }
   }
 
-  GlobalLexicalEnvironmentObject* globalLexical =
-      &cx->global()->lexicalEnvironment();
-  JSObject* globalThis = globalLexical->thisObject();
-  uint32_t baseWarmUpThreshold =
-      OptimizationInfo::baseWarmUpThresholdForScript(cx, script);
-  bool isIonCompileable = IsIonEnabled(cx) && CanIonCompileScript(cx, script);
+  // When compiling AOT self-hosted functions, there may be no realm.
+  // Realm-independent codegen doesn't use global values.
+  GlobalLexicalEnvironmentObject* globalLexical = nullptr;
+  JSObject* globalThis = nullptr;
+  uint32_t baseWarmUpThreshold;
+  bool isIonCompileable;
+  if (aotContext && script->selfHosted()) {
+    baseWarmUpThreshold = JitOptions.normalIonWarmUpThreshold;
+    isIonCompileable = false;
+  } else {
+    globalLexical = &cx->global()->lexicalEnvironment();
+    globalThis = globalLexical->thisObject();
+    baseWarmUpThreshold =
+        OptimizationInfo::baseWarmUpThresholdForScript(cx, script);
+    isIonCompileable = IsIonEnabled(cx) && CanIonCompileScript(cx, script);
+  }
 
   BaselineSnapshot snapshot(script, globalLexical, globalThis,
                             baseWarmUpThreshold, isIonCompileable,
@@ -426,11 +453,12 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   TempAllocator temp(&cx->tempLifoAlloc());
 
   mozilla::Maybe<JSAutoNullableRealm> ar;
-  if (JS::Prefs::experimental_self_hosted_cache() && script->selfHosted()) {
+  if ((JS::Prefs::experimental_self_hosted_cache() || aotContext) &&
+      script->selfHosted()) {
     // realm-independent scripts should not have a realm set
     ar.emplace(cx, nullptr);
   }
-  StackMacroAssembler masm(cx, temp);
+  StackMacroAssembler masm(cx, temp, aotContext);
 
   BaselineCompiler compiler(temp, CompileRuntime::get(cx->runtime()), masm,
                             &snapshot);
@@ -1311,6 +1339,233 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
   callVMOffsets_ = callVMOffsets;
 }
 
+#ifdef ENABLE_AOT_BASELINE
+
+bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code,
+                                      const AOTBlobDirectoryEntry* entry,
+                                      const uint8_t* containerBase) {
+  static_assert(sizeof(ICReturnOffset) == 8,
+                "ICReturnOffset must be 8 bytes");
+
+  code_ = code;
+
+  // Load manifest scalars from the container.
+  AOTManifestScalars s;
+  memcpy(&s, containerBase + entry->manifestOffset, sizeof(s));
+
+  interpretOpOffset_ = s.InterpretOp;
+  interpretOpNoDebugTrapOffset_ = s.InterpretOpNoDebugTrap;
+  bailoutPrologueOffset_ = s.BailoutPrologue;
+  profilerEnterToggleOffset_ = s.ProfilerEnterToggle;
+  profilerExitToggleOffset_ = s.ProfilerExitToggle;
+  debugTrapHandlerOffset_ = s.DebugTrapHandler;
+  callVMOffsets_.debugPrologueOffset = s.CallVMDebugPrologue;
+  callVMOffsets_.debugEpilogueOffset = s.CallVMDebugEpilogue;
+  callVMOffsets_.debugAfterYieldOffset = s.CallVMDebugAfterYield;
+
+  // Load patches from the container.
+  runtimePatches.clear();
+  if (entry->patchesCount > 0) {
+    auto* patchData = reinterpret_cast<const RuntimePatch*>(
+        containerBase + entry->patchesOffset);
+    if (!runtimePatches.append(patchData, entry->patchesCount)) {
+      JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT patches");
+      return false;
+    }
+  }
+
+  // Load metadata vectors from packed section.
+  // Order: debugInstr, debugTraps, coverage, icReturns
+  auto loadVec = [](auto& destVec, const uint8_t*& cursor, uint32_t count) -> bool {
+    using T = typename std::remove_reference_t<decltype(destVec)>::ElementType;
+    if (count == 0) return true;
+    if (!destVec.append(reinterpret_cast<const T*>(cursor), count)) {
+      return false;
+    }
+    cursor += count * sizeof(T);
+    return true;
+  };
+
+  const uint8_t* meta = containerBase + entry->metadataOffset;
+  if (!loadVec(debugInstrumentationOffsets_, meta, s.DebugInstrumentationCount) ||
+      !loadVec(debugTrapOffsets_, meta, s.DebugTrapCount) ||
+      !loadVec(codeCoverageOffsets_, meta, s.CodeCoverageCount) ||
+      !loadVec(icReturnOffsets_, meta, s.ICReturnCount)) {
+    JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT metadata vectors");
+    return false;
+  }
+
+  // Apply runtime patches to the memcpy'd code.
+  if (entry->patchesCount > 0) {
+    PatchContext patchCtx({cx, code_->raw(), s.DispatchTableOffset});
+    for (const RuntimePatch& patch : runtimePatches) {
+      patch.apply(patchCtx);
+    }
+    JitSpew(JitSpew_BaselineAOT, "Applied %u runtime patches.",
+            uint32_t(runtimePatches.length()));
+  }
+
+  return true;
+}
+
+void BaselineScript::fillAOTManifest(
+    AOTScriptManifest* sm,
+    Vector<uint8_t, 0, SystemAllocPolicy>* metadata) {
+  sm->warmUpCheckPrologueOffset = warmUpCheckPrologueOffset_;
+  sm->profilerEnterToggleOffset = profilerEnterToggleOffset_;
+  sm->profilerExitToggleOffset = profilerExitToggleOffset_;
+  sm->retAddrEntryCount = retAddrEntries().size();
+  sm->osrEntryCount = osrEntries().size();
+  sm->debugTrapEntryCount = debugTrapEntries().size();
+  sm->resumeEntryCount = resumeEntryList().size();
+
+  // Pack trailing arrays into metadata: RetAddrEntry[], OSREntry[],
+  // DebugTrapEntry[] (same order as LoadAOTSelfHosted unpacks).
+  auto appendBytes = [](auto& vec, const auto* data, size_t count) {
+    const auto* bytes = reinterpret_cast<const uint8_t*>(data);
+    return vec.append(bytes, count * sizeof(*data));
+  };
+  auto ra = retAddrEntries();
+  if (ra.size() > 0) {
+    MOZ_ALWAYS_TRUE(appendBytes(*metadata, ra.data(), ra.size()));
+  }
+  auto osr = osrEntries();
+  if (osr.size() > 0) {
+    MOZ_ALWAYS_TRUE(appendBytes(*metadata, osr.data(), osr.size()));
+  }
+  auto dt = debugTrapEntries();
+  if (dt.size() > 0) {
+    MOZ_ALWAYS_TRUE(appendBytes(*metadata, dt.data(), dt.size()));
+  }
+}
+
+bool jit::LoadAOTSelfHosted(JSContext* cx, HandleScript script,
+                                     Handle<JSAtom*> name) {
+  mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
+
+  // Compute name hash for blob matching.
+  JS::AutoCheckCannotGC nogc;
+  uint32_t nameHash = name->hasLatin1Chars()
+      ? AOTNameHash(name->latin1Chars(nogc), name->length())
+      : AOTNameHash(name->twoByteChars(nogc), name->length());
+
+  // Find a matching SelfHostedFunction blob by nameHash.
+  // For now, there's only one such blob; scan all directory entries.
+  const AOTContainerHeader* hdr = GetAOTContainerHeader();
+  if (!hdr || hdr->blobCount == 0) {
+    return false;
+  }
+  const uint8_t* containerBase = GetAOTContainer();
+  const auto* dir = reinterpret_cast<const AOTBlobDirectoryEntry*>(
+      containerBase + sizeof(AOTContainerHeader));
+
+  const AOTBlobDirectoryEntry* entry = nullptr;
+  for (uint32_t i = 0; i < hdr->blobCount; i++) {
+    if (dir[i].kind == static_cast<uint32_t>(AOTBlobKind::SelfHostedFunction) &&
+        dir[i].nameHash == nameHash && dir[i].codeSize > 0) {
+      entry = &dir[i];
+      break;
+    }
+  }
+  if (!entry) {
+    return false;
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "Loading AOT self-hosted function (nameHash=%u, codeSize=%u)",
+          nameHash, entry->codeSize);
+
+  // Read manifest.
+  AOTScriptManifest manifest;
+  memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
+
+  uint32_t codeSize = manifest.codeSize;
+
+  // Allocate JitCode, copy code bytes, and apply runtime patches.
+  JitCode* code = AllocateAndPatchAOTCode(cx, entry, containerBase,
+                                          manifest.headerSize,
+                                          CodeKind::Baseline, 0);
+  if (!code) {
+    return false;
+  }
+
+  // Create BaselineScript with the proper trailing array sizes.
+  BaselineScript* bs = BaselineScript::New(
+      cx, manifest.warmUpCheckPrologueOffset,
+      manifest.profilerEnterToggleOffset,
+      manifest.profilerExitToggleOffset,
+      manifest.retAddrEntryCount, manifest.osrEntryCount,
+      manifest.debugTrapEntryCount, manifest.resumeEntryCount);
+  if (!bs) {
+    return false;
+  }
+  bs->setMethod(code);
+
+  // Copy metadata arrays from the container.
+  const uint8_t* meta = containerBase + entry->metadataOffset;
+  if (manifest.retAddrEntryCount > 0) {
+    bs->copyRetAddrEntries(
+        reinterpret_cast<const RetAddrEntry*>(meta));
+    meta += manifest.retAddrEntryCount * sizeof(RetAddrEntry);
+  }
+  if (manifest.osrEntryCount > 0) {
+    bs->copyOSREntries(
+        reinterpret_cast<const BaselineScript::OSREntry*>(meta));
+    meta += manifest.osrEntryCount * sizeof(BaselineScript::OSREntry);
+  }
+  if (manifest.debugTrapEntryCount > 0) {
+    bs->copyDebugTrapEntries(
+        reinterpret_cast<const BaselineScript::DebugTrapEntry*>(meta));
+  }
+
+  // Resume offsets: for ToBoolean this should be 0, but call anyway.
+  bs->computeResumeNativeOffsets(script, ResumeOffsetEntryVector());
+
+  // Register with profiler's JitCode table.
+  {
+    UniqueChars str =
+        GeckoProfilerRuntime::allocProfileString(cx, script);
+    if (!str) {
+      return false;
+    }
+
+    auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
+        cx, code, code->raw(), code->rawEnd(), std::move(str));
+    if (!profEntry) {
+      return false;
+    }
+
+    JitcodeGlobalTable* globalTable =
+        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+    if (!globalTable->addEntry(std::move(profEntry))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+    code->setHasBytecodeMap();
+  }
+
+  // Attach to script.
+  script->jitScript()->setBaselineScript(script, bs);
+
+  // Toggle profiler instrumentation if needed.
+  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
+          cx->runtime())) {
+    bs->toggleProfilerInstrumentation(true);
+  }
+
+  mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
+  fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u patches=%u)\n",
+          name->hasLatin1Chars() ? (int)name->length() : 10,
+          name->hasLatin1Chars()
+              ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
+              : "<two-byte>",
+          (long long)dTotal.ToMicroseconds(),
+          codeSize, entry->patchesCount);
+
+  return true;
+}
+#endif
+
 uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
   for (const ICReturnOffset& entry : icReturnOffsets_) {
     if (entry.op == op) {
@@ -1323,10 +1578,23 @@ uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
 bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
+    mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
     TempAllocator temp(&cx->tempLifoAlloc());
-    StackMacroAssembler masm(cx, temp);
+    mozilla::Maybe<AOTContext> aotCtx;
+#ifdef ENABLE_AOT_BASELINE
+    if (JitOptions.dumpBaselineInterp) {
+      aotCtx.emplace();
+    }
+#endif
+    // TODO(Justin): determine how best to pass aotCtx to smasm.  
+    StackMacroAssembler masm(cx, temp, aotCtx.ptrOr(nullptr));
     BaselineInterpreterGenerator generator(cx, temp, masm);
-    return generator.generate(cx, interpreter);
+    bool ok = generator.generate(cx, interpreter);
+    mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
+    fprintf(stderr, "[JIT-timing] %s interp: total=%lldus\n",
+            JitOptions.useAOTBaseline ? "AOT load" : "JIT generate",
+            (long long)dTotal.ToMicroseconds());
+    return ok;
   }
 
   return true;

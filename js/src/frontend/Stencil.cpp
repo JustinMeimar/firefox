@@ -14,6 +14,7 @@
 #include "mozilla/RefPtr.h"                 // RefPtr
 #include "mozilla/ScopeExit.h"              // mozilla::ScopeExit
 #include "mozilla/Sprintf.h"                // SprintfLiteral
+#include "mozilla/TimeStamp.h"              // mozilla::TimeStamp, mozilla::TimeDuration
 
 #include <algorithm>  // std::fill
 #include <string.h>   // strlen
@@ -32,11 +33,12 @@
 #include "gc/AllocKind.h"         // gc::AllocKind
 #include "gc/Tracer.h"            // TraceNullableRoot
 #include "jit/BaselineCompileTask.h"  // BaselineCompileTask::OffThreadBaselineCompilationAvailable
-#include "jit/BaselineJIT.h"  // jit::BaselineScript, jit::CanBaselineInterpretScript
-#include "jit/JitContext.h"     // jit::MethodStatus
-#include "jit/JitRuntime.h"     // jit::JitRuntime
-#include "jit/JitScript.h"      // AutoKeepJitScripts
-#include "js/CallArgs.h"        // JSNative
+#include "jit/BaselineJIT.h"  // jit::BaselineScript, jit::CanBaselineInterpretScript, jit::LoadAOTSelfHosted
+#include "jit/JitContext.h"   // jit::MethodStatus
+#include "jit/JitOptions.h"   // jit::JitOptions
+#include "jit/JitRuntime.h"   // jit::JitRuntime
+#include "jit/JitScript.h"    // AutoKeepJitScripts
+#include "js/CallArgs.h"      // JSNative
 #include "js/CompileOptions.h"  // JS::DecodeOptions, JS::ReadOnlyDecodeOptions
 #include "js/DOMEventDispatch.h"            // TRACE_FOR_TEST_DOM
 #include "js/experimental/CompileScript.h"  // JS::PrepareForInstantiate
@@ -3069,6 +3071,25 @@ bool CompilationStencil::delazifySelfHostedFunction(
     return false;
   }
 
+#ifdef ENABLE_AOT_BASELINE
+  // Check AOT container for a pre-compiled self-hosted function blob.
+  // Skip scripts that can't be baseline-interpreted (e.g. ForceInterpreter).
+  if (jit::JitOptions.useAOTBaseline &&
+      jit::IsBaselineInterpreterEnabled() &&
+      jit::CanBaselineInterpretScript(script)) {
+    if (!cx->zone()->ensureJitZoneExists(cx)) {
+      return false;
+    }
+    jit::AutoKeepJitScripts keepJitScript(cx);
+    if (!script->ensureHasJitScript(cx, keepJitScript)) {
+      return false;
+    }
+    if (jit::LoadAOTSelfHosted(cx, script, name)) {
+      return true;
+    }
+  }
+#endif
+
   if (JS::Prefs::experimental_self_hosted_cache()) {
     Rooted<JSRuntime::JitCacheKey> jitCacheKey(cx, name, script->isDebuggee());
 
@@ -3127,10 +3148,21 @@ bool CompilationStencil::delazifySelfHostedFunction(
 
       jit::BaselineOptions options(
           {jit::BaselineOption::ForceMainThreadCompilation});
+      mozilla::TimeStamp tSelfHostStart = mozilla::TimeStamp::Now();
       jit::MethodStatus result =
           jit::BaselineCompile(cx, script.get(), options);
       if (result != jit::Method_Compiled) {
         return false;
+      }
+      {
+        mozilla::TimeDuration dSelfHost = mozilla::TimeStamp::Now() - tSelfHostStart;
+        JS::AutoCheckCannotGC nogc;
+        fprintf(stderr, "[JIT-timing] JIT generate self-hosted '%.*s': total=%lldus\n",
+                name->hasLatin1Chars() ? (int)name->length() : 10,
+                name->hasLatin1Chars()
+                    ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
+                    : "<two-byte>",
+                (long long)dSelfHost.ToMicroseconds());
       }
       MOZ_ASSERT(script->hasBaselineScript());
 

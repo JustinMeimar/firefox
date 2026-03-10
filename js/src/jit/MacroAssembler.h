@@ -36,6 +36,8 @@
 #endif
 #include "jit/ABIArgGenerator.h"
 #include "jit/ABIFunctions.h"
+#include "jit/AOTContext.h"
+#include "jit/AOTReloc.h"
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
@@ -303,6 +305,25 @@ struct BranchWasmRefIsSubtypeRegisters {
   bool needScratch2;
 };
 
+//
+// Runtime agnostic code generation
+// ----------------------------
+// In order to support a pre-generated baseline interpreter and ahead-of-time
+// (AOT) compiled IC stubs, the MacroAssembler must be runtime agnostic when
+// generating code for the AOT IC stubs. That is, it may not bake in any
+// addresses/ptrs that rely on the runtime, since the runtime would not be
+// available at the time of compilation.
+//
+// The existing _anyZone methods will not suffice either as they load the zone
+// via the runtime.
+//
+// Instead, the address of the runtime is stored in an ICStub field. Later on,
+// this field can be loaded via an ICStubReg offset, which can then be used to
+// load the zone. Once the zone is available, other required properties may be
+// accessed using an offset from the zone itself. The _Runtime version of existing
+// methods work this way.
+
+
 // [SMDOC] Code generation invariants (incomplete)
 //
 // ## 64-bit GPRs carrying 32-bit values
@@ -353,15 +374,19 @@ struct BranchWasmRefIsSubtypeRegisters {
 // lifoAlloc use if one will be destroyed before the other.
 class MacroAssembler : public MacroAssemblerSpecific {
  private:
-  // Information about the current JSRuntime. This is nullptr only for Wasm
-  // compilations.
+  // Information about the current JSRuntime. This is nullptr for Wasm
+  // compilations as well as AOT IC compilation.
   CompileRuntime* maybeRuntime_ = nullptr;
 
   // Information about the current Realm. This is nullptr for Wasm compilations
   // and when compiling runtime-wide jitcode that will live in the Atom zone:
   // for example, trampolines, the baseline interpreter, and (if
   // self_hosted_cache is enabled) self-hosted baseline code.
+  // Furthermore, this is also nullptr for AOT IC compilations.
   CompileRealm* maybeRealm_ = nullptr;
+
+  // AOT compilation context. Non-null when AOT codegen is active.
+  AOTContext* aotContext_ = nullptr;
 
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
@@ -370,9 +395,32 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Constructor is protected. Use one of the derived classes!
   explicit MacroAssembler(TempAllocator& alloc,
                           CompileRuntime* maybeRuntime = nullptr,
-                          CompileRealm* maybeRealm = nullptr);
+                          CompileRealm* maybeRealm = nullptr,
+                          AOTContext* aotContext = nullptr);
 
  public:
+  bool isAOT() const { return aotContext_ != nullptr; }
+
+  AOTContext& aot() const {
+    MOZ_ASSERT(aotContext_);
+    return *aotContext_;
+  }
+
+  // Wraps regular codegen in non-aot mode and dispatches to the set
+  // strategy when AOT is on.
+  void moveAOTReloc(AOTRelocKind kind, Register dest);
+  void loadAOTReloc(AOTRelocKind kind, Register dest);
+  void branchAOTReloc32(Condition cond, AOTRelocKind kind, Imm32 rhs,
+                        Label* label, Register scratch);
+
+  // Parametric reference helpers.
+  void loadVMWrapper(VMFunctionId id, Register dest);
+  void loadCppFunction(AOTCppFunctionId fnId, Register dest);
+  void loadDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
+
+  // In AOT mode, call the pre-barrier trampoline via a patched movabs.
+  void callPreBarrierAOT(MIRType type, Register scratch);
+
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
     // shared between visitors in the CodeGenerator. This assertion
@@ -1901,6 +1949,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   inline void branchTestNeedsIncrementalBarrier(Condition cond, Label* label);
   inline void branchTestNeedsIncrementalBarrierAnyZone(Condition cond,
+                                                       Label* label,
+                                                       Register scratch);
+  inline void branchTestNeedsIncrementalBarrierRuntime(Condition cond,
                                                        Label* label,
                                                        Register scratch);
 
@@ -5063,16 +5114,18 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void loadRuntimeFuse(RuntimeFuses::FuseIndex index, Register dest);
 
-  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail);
+  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail,
+                        Register scratch = InvalidReg);
 
-  void switchToRealm(Register realm);
+  void switchToRealm(Register realm, Register scratch = InvalidReg);
   void switchToRealm(const void* realm, Register scratch);
-  void switchToObjectRealm(Register obj, Register scratch);
-  void switchToBaselineFrameRealm(Register scratch);
+  void switchToObjectRealm(Register obj, Register scratch, Register scratchForAOT = InvalidReg);
+  void switchToBaselineFrameRealm(Register scratch, Register scratchForAOT = InvalidReg);
   void switchToWasmInstanceRealm(Register scratch1, Register scratch2);
   void debugAssertContextRealm(const void* realm, Register scratch);
 
-  void guardObjectHasSameRealm(Register obj, Register scratch, Label* fail);
+  void guardObjectHasSameRealm(Register obj, Register scratch, Label* fail,
+                               Register scratch2 = InvalidReg);
 
   template <typename ValueType>
   void storeLocalAllocSite(ValueType value, Register scratch);
@@ -5180,6 +5233,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  private:
   TrampolinePtr preBarrierTrampoline(MIRType type);
+  TrampolinePtr getExceptionTailTrampoline() const;
 
   template <typename T>
   void unguardedCallPreBarrier(const T& address, MIRType type) {
@@ -5193,9 +5247,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Push(PreBarrierReg);
     computeEffectiveAddress(address, PreBarrierReg);
 
-    TrampolinePtr preBarrier = preBarrierTrampoline(type);
-
-    call(preBarrier);
+    if (isAOT()) {
+      callPreBarrierAOT(type, ScratchReg);
+    } else {
+      TrampolinePtr preBarrier = preBarrierTrampoline(type);
+      call(preBarrier);
+    }
     Pop(PreBarrierReg);
     // On arm64, SP may be < PSP now (that's OK).
     // eg testcase: tests/auto-regress/bug702915.js
@@ -5206,7 +5263,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
   template <typename T>
   void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
-    branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
+    if (!isAOT()) {
+      branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
+    } else {
+      branchTestNeedsIncrementalBarrierRuntime(Assembler::Zero, &done,
+                                               ScratchReg);
+    }
     unguardedCallPreBarrier(address, type);
     bind(&done);
   }
@@ -5675,7 +5737,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
     isCallableOrConstructor(false, obj, output, isProxy);
   }
 
-  void setIsCrossRealmArrayConstructor(Register obj, Register output);
+  void setIsCrossRealmArrayConstructor(Register obj, Register output,
+                                       Register scratch = InvalidReg);
 
   void setIsDefinitelyTypedArrayConstructor(Register obj, Register output);
 
@@ -5873,6 +5936,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #endif
 
  public:
+  // Load the JSRuntime pointer into the given register.
+  // Works in both AOT and non-AOT modes.
+  void loadRuntime(Register reg);
+
+ public:
   void enableProfilingInstrumentation() {
     emitProfilingInstrumentation_ = true;
   }
@@ -6048,7 +6116,8 @@ class MOZ_RAII StackMacroAssembler : public MacroAssembler {
   JS::AutoCheckCannotGC nogc;
 
  public:
-  StackMacroAssembler(JSContext* cx, TempAllocator& alloc);
+  StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
+                      AOTContext* aotContext = nullptr);
 };
 
 // WasmMacroAssembler does not contain GC pointers, so it doesn't need the no-GC

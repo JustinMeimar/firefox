@@ -15,8 +15,11 @@ include("../js-cxxflags.mozbuild")
 UNIFIED_SOURCES += [
     "AliasAnalysis.cpp",
     "AlignmentMaskAnalysis.cpp",
+    "AOTContext.cpp",
+    "AOTReloc.cpp",
     "BacktrackingAllocator.cpp",
     "Bailouts.cpp",
+    "BaselineAOT.cpp",
     "BaselineBailouts.cpp",
     "BaselineCacheIRCompiler.cpp",
     "BaselineCodeGen.cpp",
@@ -93,6 +96,7 @@ UNIFIED_SOURCES += [
     "Sink.cpp",
     "Snapshots.cpp",
     "Trampoline.cpp",
+    "TrampolineAOT.cpp",
     "TrampolineNatives.cpp",
     "TrialInlining.cpp",
     "TypePolicy.cpp",
@@ -254,6 +258,13 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
         "wasm32/MacroAssembler-wasm32.cpp",
         "wasm32/Trampoline-wasm32.cpp",
     ]
+
+
+if CONFIG["ENABLE_AOT_BASELINE"]:
+    SOURCES += [
+        "AOTBaselineInterpreter.S"
+    ]
+
 
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(

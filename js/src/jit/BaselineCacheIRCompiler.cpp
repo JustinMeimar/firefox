@@ -2719,7 +2719,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 // The AOT loading of ICs doesn't work (yet) in modes with a native
 // JIT enabled because compilation tries to access state that doesn't
 // exist yet (trampolines?) when we create the JitZone.
-#    error AOT ICs are only supported (for now) in PBL builds.
+// #    error AOT ICs are only supported (for now) in PBL builds.
 #  endif
 
 void js::jit::FillAOTICs(JSContext* cx, JitZone* zone) {

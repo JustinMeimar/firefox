@@ -1146,6 +1146,12 @@ struct JSRuntime {
       shadowRealmGlobalCreationCallback;
 
   js::MainThreadData<js::RuntimeFuses> runtimeFuses;
+
+  static size_t offsetOfRuntimeFuse(js::RuntimeFuses::FuseIndex index) {
+    return offsetof(JSRuntime, runtimeFuses) +
+           decltype(runtimeFuses)::offsetOfValue() +
+           js::RuntimeFuses::offsetOfFuseByIndex(index);
+  }
 };
 
 namespace js {

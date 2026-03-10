@@ -7,6 +7,7 @@
 #ifndef jit_BaselineCodeGen_h
 #define jit_BaselineCodeGen_h
 
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineFrameInfo.h"
 #include "jit/BytecodeAnalysis.h"
 #include "jit/CompileWrappers.h"
@@ -20,6 +21,7 @@ class NamedLambdaObject;
 
 namespace jit {
 
+class AOTContext;
 class BaselineSnapshot;
 
 enum class ScriptGCThingType {
@@ -43,6 +45,10 @@ class BaselineCodeGen {
 
   CompileRuntime* runtime;
   MacroAssembler& masm;
+
+  // Non-owning pointer to AOT context, cached from masm for convenience.
+  // Null when not in AOT codegen mode.
+  AOTContext* aot_;
 
   typename Handler::FrameInfoT& frame;
 
@@ -69,6 +75,7 @@ class BaselineCodeGen {
 #ifdef DEBUG
   bool inCall_ = false;
 #endif
+
 
   template <typename... HandlerArgs>
   explicit BaselineCodeGen(TempAllocator& alloc, MacroAssembler& masmArg,
@@ -334,6 +341,7 @@ class BaselineCompilerHandler {
   bool compilingOffThread_ = false;
 
   bool needsEnvAllocSite_ = false;
+  bool isAOT_ = false;
 
  public:
   using FrameInfoT = CompilerFrameInfo;
@@ -426,7 +434,8 @@ class BaselineCompilerHandler {
   }
 
   bool realmIndependentJitcode() const {
-    return JS::Prefs::experimental_self_hosted_cache() &&
+    // NOTE: We probably shouldn't pollute this condition with AOT state.
+    return (JS::Prefs::experimental_self_hosted_cache() || isAOT_) &&
            script()->selfHosted();
   }
 };
@@ -566,6 +575,7 @@ class BaselineInterpreterHandler {
 using BaselineInterpreterCodeGen = BaselineCodeGen<BaselineInterpreterHandler>;
 
 class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
+  friend class BaselineCodeGen<BaselineInterpreterHandler>;
   // Offsets of patchable call instructions for debugger breakpoints/stepping.
   Vector<uint32_t, 0, SystemAllocPolicy> debugTrapOffsets_;
 
@@ -585,6 +595,13 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   // When the debugger is enabled, NOPs are patched to calls to this location.
   uint32_t debugTrapHandlerOffset_ = 0;
 
+  // Offset of the runtime pointer slot.
+  uint32_t compileRuntimePtrOffset_ = 0;
+
+#ifdef ENABLE_AOT_BASELINE
+  [[nodiscard]] bool dumpAOTInterp(JSContext* cx, JitCode* code);
+#endif
+
   BaselineInterpreterPerfSpewer perfSpewer_;
 
  public:
@@ -596,6 +613,10 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
  private:
   [[nodiscard]] bool emitInterpreterLoop();
   [[nodiscard]] bool emitDebugTrap();
+#ifdef ENABLE_AOT_BASELINE
+  [[nodiscard]] bool loadAOTInterp(JSContext* cx,
+                                   BaselineInterpreter& interpreter);
+#endif
 
   void emitOutOfLineCodeCoverageInstrumentation();
 };

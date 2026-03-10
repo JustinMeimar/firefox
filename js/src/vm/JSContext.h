@@ -382,6 +382,7 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   const JSRuntime* runtime() const { return runtime_; }
 
   static size_t offsetOfRealm() { return offsetof(JSContext, realm_); }
+  static size_t offsetOfRuntime() { return offsetof(JSContext, runtime_); }
 
   friend class JS::AutoSaveExceptionState;
   friend class js::jit::DebugModeOSRVolatileJitFrameIter;
@@ -920,6 +921,9 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
 
  public:
   void* addressOfInterruptBits() { return &interruptBits_; }
+  static size_t offsetOfInterruptBits() {
+    return offsetof(JSContext, interruptBits_);
+  }
   void* addressOfJitStackLimit() { return &jitStackLimit; }
   void* addressOfJitStackLimitNoInterrupt() {
     return &jitStackLimitNoInterrupt;

@@ -105,6 +105,7 @@
 #  include "jit/riscv64/Simulator-riscv64.h"
 #endif
 #include "jit/BaselineCompileQueue.h"
+#include "jit/BaselineJIT.h"
 #include "jit/CacheIRHealth.h"
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
@@ -12346,6 +12347,18 @@ static int Shell(JSContext* cx, OptionParser* op) {
 
     JSAutoRealm ar(cx, glob);
 
+#ifdef ENABLE_AOT_BASELINE
+    // Write the final AOT container now that a realm exists.
+    // dumpAOTInterp() (called during JitRuntime init) saved the interpreter
+    // blob; this combines it with any self-hosted blobs and writes the .S.
+    if (jit::JitOptions.dumpBaselineInterp ||
+        jit::JitOptions.dumpBaselineSelfHosted) {
+      if (!jit::DumpAOTContainer(cx)) {
+        return EXIT_FAILURE;
+      }
+    }
+#endif
+
     ShellContext* sc = GetShellContext(cx);
     if (!sc->moduleLoader && !InitModuleLoader(cx, *op)) {
       return EXIT_FAILURE;
@@ -13020,6 +13033,11 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption(
           '\0', "enforce-aot-ics",
           "Enable enforcing only use of ahead-of-time-known ICs") ||
+#endif
+#ifdef ENABLE_AOT_BASELINE
+      !op.addBoolOption('\0', "dump-bl-interp", "Dump baseline interpreter binary for AOT patching.") ||
+      !op.addBoolOption('\0', "dump-bl-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
+      !op.addBoolOption('\0', "aot-bl", "Use AOT compiled Baseline Interpreter.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14043,7 +14061,17 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("no-baseline")) {
     jit::JitOptions.baselineJit = false;
   }
-
+#ifdef ENABLE_AOT_BASELINE
+  if (op.getBoolOption("dump-bl-interp")) {
+    jit::JitOptions.dumpBaselineInterp = true;
+  }
+  if (op.getBoolOption("dump-bl-self-hosted")) {
+    jit::JitOptions.dumpBaselineSelfHosted = true;
+  }
+  if (op.getBoolOption("aot-bl")) {
+    jit::JitOptions.useAOTBaseline = true;
+  }
+#endif
   if (op.getBoolOption("no-ion")) {
     jit::JitOptions.ion = false;
   }

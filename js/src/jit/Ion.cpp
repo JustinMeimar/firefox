@@ -11,12 +11,15 @@
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/MemoryReporting.h"
 
+#include <fstream>
+
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #include "jit/AliasAnalysis.h"
 #include "jit/AlignmentMaskAnalysis.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BacktrackingAllocator.h"
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BranchHinting.h"
@@ -56,6 +59,7 @@
 #include "jit/WarpBuilder.h"
 #include "jit/WarpOracle.h"
 #include "jit/WasmBCE.h"
+#include "jit/x64/Assembler-x64.h"
 #include "js/Printf.h"
 #include "js/UniquePtr.h"
 #include "util/Memory.h"
@@ -85,6 +89,7 @@ using mozilla::DebugOnly;
 
 using namespace js;
 using namespace js::jit;
+
 
 JitRuntime::~JitRuntime() {
   MOZ_ASSERT(numFinishedOffThreadTasks_ == 0);
@@ -119,7 +124,7 @@ bool JitRuntime::initialize(JSContext* cx) {
 
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
-
+  
   if (!generateTrampolines(cx)) {
     return false;
   }
@@ -146,7 +151,7 @@ bool JitRuntime::initialize(JSContext* cx) {
       return false;
     }
   }
-
+ 
   if (!GenerateBaselineInterpreter(cx, baselineInterpreter_)) {
     return false;
   }
@@ -162,6 +167,7 @@ bool JitRuntime::initialize(JSContext* cx) {
 bool JitRuntime::generateTrampolines(JSContext* cx) {
   TempAllocator temp(&cx->tempLifoAlloc());
   StackMacroAssembler masm(cx, temp);
+  AutoCreatedBy acb(masm, "JitRuntime::generateTrampolines");
   PerfSpewerRangeRecorder rangeRecorder(masm);
 
   Label bailoutTail;

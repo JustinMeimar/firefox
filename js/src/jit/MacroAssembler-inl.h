@@ -788,12 +788,32 @@ void MacroAssembler::branchTestNeedsIncrementalBarrierAnyZone(
   if (maybeRealm_) {
     branchTestNeedsIncrementalBarrier(cond, label);
   } else {
-    // We are compiling the interpreter or another runtime-wide trampoline, so
-    // we have to load cx->zone.
-    loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+    if (isAOT()) {
+      // Load cx from GOT, then cx->zone().
+      moveAOTReloc(AOTRelocKind::JSContextPtr, scratch);
+      loadPtr(Address(scratch, JSContext::offsetOfZone()), scratch);
+    } else {
+      loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+    }
     Address needsBarrierAddr(scratch, Zone::offsetOfNeedsIncrementalBarrier());
     branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
   }
+}
+
+void MacroAssembler::branchTestNeedsIncrementalBarrierRuntime(Condition cond,
+                                                              Label* label,
+                                                              Register scratch) {
+  MOZ_ASSERT(cond == Zero || cond == NonZero);
+
+  if (isAOT()) {
+    // Load cx from GOT, then cx->zone().
+    moveAOTReloc(AOTRelocKind::JSContextPtr, scratch);
+    loadPtr(Address(scratch, JSContext::offsetOfZone()), scratch);
+  } else {
+    loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+  }
+  Address needsBarrierAddr(scratch, Zone::offsetOfNeedsIncrementalBarrier());
+  branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
 }
 
 void MacroAssembler::branchTestMagicValue(Condition cond,

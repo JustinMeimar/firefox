@@ -73,6 +73,9 @@ struct DefaultJitOptions {
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   bool portableBaselineInterpreter;
 #endif
+  bool dumpBaselineInterp;
+  bool dumpBaselineSelfHosted;
+  bool useAOTBaseline;
   bool baselineInterpreter;
   bool baselineJit;
   bool baselineBatching;
@@ -129,6 +132,7 @@ struct DefaultJitOptions {
 #ifdef ENABLE_JS_AOT_ICS
   bool enableAOTICs;
   bool enableAOTICEnforce;
+
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

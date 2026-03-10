@@ -18,6 +18,7 @@
 #include "jit/AtomicOp.h"
 #include "jit/AtomicOperations.h"
 #include "jit/Bailouts.h"
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineJIT.h"
 #include "jit/JitFrames.h"
@@ -70,8 +71,14 @@ using JS::GenericNaN;
 using mozilla::CheckedInt;
 
 TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
+  MOZ_ASSERT(!isAOT());
   const JitRuntime* rt = runtime()->jitRuntime();
   return rt->preBarrier(type);
+}
+
+TrampolinePtr MacroAssembler::getExceptionTailTrampoline() const {
+  MOZ_ASSERT(!isAOT());
+  return runtime()->jitRuntime()->getExceptionTail();
 }
 
 template <typename T>
@@ -330,7 +337,6 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
-  CompileZone* zone = realm()->zone();
   size_t thingSize = gc::Arena::thingSize(allocKind);
   size_t totalSize = thingSize;
   if (nDynamicSlots) {
@@ -339,6 +345,7 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
   MOZ_ASSERT(totalSize < INT32_MAX);
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
+  CompileZone* zone = realm()->zone();
   bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::Object,
                       totalSize, allocSite);
 
@@ -359,7 +366,6 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 // Inlined version of FreeSpan::allocate. This does not fill in slots_.
 void MacroAssembler::freeListAllocate(Register result, Register temp,
                                       gc::AllocKind allocKind, Label* fail) {
-  CompileZone* zone = realm()->zone();
   int thingSize = int(gc::Arena::thingSize(allocKind));
 
   Label fallback;
@@ -367,6 +373,8 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
 
   // Load the first and last offsets of |zone|'s free list for |allocKind|.
   // If there is no room remaining in the span, fall back to get the next one.
+
+  CompileZone* zone = realm()->zone();
   gc::FreeSpan** ptrFreeList = zone->addressOfFreeList(allocKind);
   loadPtr(AbsoluteAddress(ptrFreeList), temp);
   load16ZeroExtend(Address(temp, js::gc::FreeSpan::offsetOfFirst()), result);
@@ -2679,61 +2687,81 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 void MacroAssembler::loadJSContext(Register dest) {
-  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
+  moveAOTReloc(AOTRelocKind::JSContextPtr, dest);
 }
 
+// Load the current realm pointer (the value of cx->realm_).
+// Used internally by many functions below.
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
   return (static_cast<const uint8_t*>(rt->mainContextPtr()) +
           JSContext::offsetOfRealm());
 }
 
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  loadAOTReloc(AOTRelocKind::ContextRealm, dest);
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
 
-void MacroAssembler::switchToRealm(Register realm) {
-  storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
+void MacroAssembler::switchToRealm(Register realm, Register scratch) {
+  if (!isAOT()) {
+    storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
+  } else {
+    MOZ_ASSERT(scratch != InvalidReg);
+    moveAOTReloc(AOTRelocKind::ContextRealm, scratch);
+    storePtr(realm, Address(scratch, 0));
+  }
 }
 
 void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
-  // Load Realm pointer
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  loadAOTReloc(AOTRelocKind::ContextRealm, dest);
   loadPtr(Address(dest, RealmFuses::offsetOfFuseWordRelativeToRealm(index)),
           dest);
 }
 
 void MacroAssembler::loadRuntimeFuse(RuntimeFuses::FuseIndex index,
                                      Register dest) {
-  loadPtr(AbsoluteAddress(runtime()->addressOfRuntimeFuse(index)), dest);
+  if (!isAOT()) {
+    loadPtr(AbsoluteAddress(runtime()->addressOfRuntimeFuse(index)), dest);
+  } else {
+    loadRuntime(dest);
+    loadPtr(Address(dest, JSRuntime::offsetOfRuntimeFuse(index)), dest);
+  }
 }
 
 void MacroAssembler::guardRuntimeFuse(RuntimeFuses::FuseIndex index,
-                                      Label* fail) {
-  AbsoluteAddress addr(runtime()->addressOfRuntimeFuse(index));
-  branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
+                                      Label* fail, Register scratch) {
+  if (!isAOT()) {
+    AbsoluteAddress addr(runtime()->addressOfRuntimeFuse(index));
+    branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
+  } else {
+    MOZ_ASSERT(scratch != InvalidReg);
+    loadRuntime(scratch);
+    Address addr(scratch, JSRuntime::offsetOfRuntimeFuse(index));
+    branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
+  }
 }
 
 void MacroAssembler::switchToRealm(const void* realm, Register scratch) {
   MOZ_ASSERT(realm);
+  MOZ_ASSERT(!isAOT());
 
   movePtr(ImmPtr(realm), scratch);
   switchToRealm(scratch);
 }
 
-void MacroAssembler::switchToObjectRealm(Register obj, Register scratch) {
+void MacroAssembler::switchToObjectRealm(Register obj, Register scratch, Register scratchForAOT) {
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  switchToRealm(scratch);
+  switchToRealm(scratch, scratchForAOT);
 }
 
-void MacroAssembler::switchToBaselineFrameRealm(Register scratch) {
+void MacroAssembler::switchToBaselineFrameRealm(Register scratch, Register scratchForAOT) {
   Address envChain(FramePointer,
                    BaselineFrame::reverseOffsetOfEnvironmentChain());
   loadPtr(envChain, scratch);
-  switchToObjectRealm(scratch, scratch);
+  switchToObjectRealm(scratch, scratch, scratchForAOT);
 }
 
 void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
@@ -2745,7 +2773,7 @@ void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
 
 template <typename ValueType>
 void MacroAssembler::storeLocalAllocSite(ValueType value, Register scratch) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), scratch);
+  loadAOTReloc(AOTRelocKind::ContextRealm, scratch);
   storePtr(value, Address(scratch, JS::Realm::offsetOfLocalAllocSite()));
 }
 
@@ -2766,7 +2794,8 @@ void MacroAssembler::debugAssertContextRealm(const void* realm,
 }
 
 void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
-                                                     Register output) {
+                                                     Register output,
+                                                     Register scratch) {
 #ifdef DEBUG
   Label notProxy;
   branchTestObjectIsProxy(false, obj, output, &notProxy);
@@ -2779,8 +2808,14 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
   loadPtr(Address(obj, JSObject::offsetOfShape()), output);
   loadPtr(Address(output, Shape::offsetOfBaseShape()), output);
   loadPtr(Address(output, BaseShape::offsetOfRealm()), output);
-  branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr(runtime())),
-            output, &isFalse);
+  if (!isAOT()) {
+    branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr(runtime())),
+              output, &isFalse);
+  } else {
+    MOZ_ASSERT(scratch != InvalidReg);
+    loadAOTReloc(AOTRelocKind::ContextRealm, scratch);
+    branchPtr(Assembler::Equal, scratch, output, &isFalse);
+  }
 
   // The object must be a function.
   branchTestObjIsFunction(Assembler::NotEqual, obj, output, obj, &isFalse);
@@ -2800,12 +2835,18 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
 }
 
 void MacroAssembler::guardObjectHasSameRealm(Register obj, Register scratch,
-                                             Label* fail) {
+                                             Label* fail, Register scratch2) {
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
-            scratch, fail);
+  if (!isAOT()) {
+    branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
+              scratch, fail);
+  } else {
+    MOZ_ASSERT(scratch2 != InvalidReg);
+    loadAOTReloc(AOTRelocKind::ContextRealm, scratch2);
+    branchPtr(Assembler::NotEqual, scratch2, scratch, fail);
+  }
 }
 
 void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
@@ -2842,10 +2883,10 @@ void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
 }
 
 void MacroAssembler::loadMegamorphicCache(Register dest) {
-  movePtr(ImmPtr(runtime()->addressOfMegamorphicCache()), dest);
+  moveAOTReloc(AOTRelocKind::MegamorphicCache, dest);
 }
 void MacroAssembler::loadMegamorphicSetPropCache(Register dest) {
-  movePtr(ImmPtr(runtime()->addressOfMegamorphicSetPropCache()), dest);
+  moveAOTReloc(AOTRelocKind::MegamorphicSetPropCache, dest);
 }
 
 void MacroAssembler::tryFastAtomize(Register str, Register scratch,
@@ -2858,9 +2899,7 @@ void MacroAssembler::tryFastAtomize(Register str, Register scratch,
   jump(&done);
   bind(&notAtomRef);
 
-  uintptr_t cachePtr = uintptr_t(runtime()->addressOfStringToAtomCache());
-  void* offset = (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups());
-  movePtr(ImmPtr(offset), scratch);
+  moveAOTReloc(AOTRelocKind::StringToAtomCache, scratch);
 
   static_assert(StringToAtomCache::NumLastLookups == 2);
   size_t stringOffset = StringToAtomCache::LastLookup::offsetOfString();
@@ -3704,6 +3743,13 @@ void MacroAssembler::computeImplicitThis(Register env, ValueOperand output,
   // Go to the slow path for possible debug environment proxies.
   branchTestClassIsProxy(true, scratch, slowPath);
 
+  if (isAOT()) {
+    // In AOT mode we cannot embed the WithEnvironmentObject::class_ pointer.
+    // Fall back to the VM call which handles all environment types correctly.
+    jump(slowPath);
+    return;
+  }
+
   // WithEnvironmentObjects have an actual implicit |this|.
   Label nonWithEnv, done;
   branchPtr(Assembler::NotEqual, scratch,
@@ -3758,7 +3804,7 @@ void MacroAssembler::loadJitActivation(Register dest) {
 }
 
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  loadAOTReloc(AOTRelocKind::ContextRealm, dest);
   computeEffectiveAddress(Address(dest, Realm::offsetOfBaselineCompileQueue()),
                           dest);
 }
@@ -4034,16 +4080,172 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
   subPtr(Imm32(BaselineFrame::Size()), dest);
 }
 
+
+void MacroAssembler::loadRuntime(Register reg) {
+  if (!isAOT()) {
+    movePtr(ImmPtr(runtime()), reg);
+    return;
+  }
+  moveAOTReloc(AOTRelocKind::JSRuntimePtr, reg);
+}
+
+// ========================================================================
+// Unified AOTReloc overloads.
+
+// Internal helper: resolve an AOTRelocKind to a compile-time pointer for
+// non-AOT mode. This uses CompileRuntime which is only available in non-AOT.
+static ImmPtr ResolveAOTRelocCompileTime(AOTRelocKind kind,
+                                            CompileRuntime* rt) {
+  switch (kind) {
+    case AOTRelocKind::JSRuntimePtr:
+      return ImmPtr(rt);
+    case AOTRelocKind::JSContextPtr:
+      return ImmPtr(rt->mainContextPtr());
+    case AOTRelocKind::InterruptBits:
+      return ImmPtr(rt->addressOfInterruptBits());
+    case AOTRelocKind::JitActivation:
+      return ImmPtr(rt->addressOfJitActivation());
+    case AOTRelocKind::RealmPtr:
+      return ImmPtr(rt->addressOfRealm());
+    case AOTRelocKind::ContextRealm:
+      return ImmPtr(static_cast<const uint8_t*>(rt->mainContextPtr()) +
+                    JSContext::offsetOfRealm());
+    case AOTRelocKind::WellKnownSymbols:
+      return ImmPtr(&rt->wellKnownSymbols());
+    case AOTRelocKind::JitRuntime:
+      return ImmPtr(rt->jitRuntime());
+    case AOTRelocKind::LastBufferedCell:
+      return ImmPtr(rt->addressOfLastBufferedWholeCell());
+    case AOTRelocKind::ProfilerEnabled:
+      return ImmPtr(rt->geckoProfiler().addressOfEnabled());
+    case AOTRelocKind::ProfilerExitFrameTail: {
+      TrampolinePtr ptr = rt->jitRuntime()->getProfilerExitFrameTail();
+      return ImmPtr(ptr.value);
+    }
+    case AOTRelocKind::DoubleToInt32Stub: {
+      TrampolinePtr ptr = rt->jitRuntime()->getDoubleToInt32ValueStub();
+      return ImmPtr(ptr.value);
+    }
+    case AOTRelocKind::MegamorphicCache:
+      return ImmPtr(rt->addressOfMegamorphicCache());
+    case AOTRelocKind::MegamorphicSetPropCache:
+      return ImmPtr(rt->addressOfMegamorphicSetPropCache());
+    case AOTRelocKind::StringToAtomCache: {
+      auto cachePtr = uintptr_t(rt->addressOfStringToAtomCache());
+      return ImmPtr(
+          (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups()));
+    }
+    case AOTRelocKind::DispatchTable:
+    case AOTRelocKind::VMWrapper:
+    case AOTRelocKind::DebugTrapHandler:
+    case AOTRelocKind::CppFunction:
+    case AOTRelocKind::PreBarrier:
+    case AOTRelocKind::ExceptionTail:
+      MOZ_CRASH("Patch-only AOTRelocKind not available at compile time");
+    case AOTRelocKind::Count:
+      break;
+  }
+  MOZ_CRASH("Unknown AOTRelocKind");
+}
+
+static void EmitAOTPatch(MacroAssembler& masm, RuntimePatch&& patch,
+                         Register dest) {
+  CodeOffset off = masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
+  patch.targetOffset = off.offset() - sizeof(void*);
+  masm.aot().accumulator().registerPatch(std::move(patch));
+}
+
+void MacroAssembler::moveAOTReloc(AOTRelocKind kind, Register dest) {
+  if (!isAOT()) {
+    movePtr(ResolveAOTRelocCompileTime(kind, runtime()), dest);
+    return;
+  }
+  EmitAOTPatch(*this, RuntimePatch(kind, 0), dest);
+}
+
+void MacroAssembler::loadAOTReloc(AOTRelocKind kind, Register dest) {
+  moveAOTReloc(kind, dest);
+  loadPtr(Address(dest, 0), dest);
+}
+
+void MacroAssembler::branchAOTReloc32(Condition cond, AOTRelocKind kind,
+                                         Imm32 rhs, Label* label,
+                                         Register scratch) {
+  if (!isAOT()) {
+    branch32(cond, AbsoluteAddress(ResolveAOTRelocCompileTime(kind, runtime()).value),
+             rhs, label);
+    return;
+  }
+  moveAOTReloc(kind, scratch);
+  branch32(cond, Address(scratch, 0), rhs, label);
+}
+
+void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
+  if (!isAOT()) {
+    TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
+    movePtr(ImmPtr(ptr.value), dest);
+    return;
+  }
+  EmitAOTPatch(*this, RuntimePatch::VMWrapperPatch(0, id), dest);
+}
+
+void MacroAssembler::loadCppFunction(AOTCppFunctionId fnId, Register dest) {
+  if (!isAOT()) {
+    movePtr(ImmPtr(ResolveCppFunction(fnId)), dest);
+    return;
+  }
+  EmitAOTPatch(*this, RuntimePatch::CppFunctionPatch(0, fnId), dest);
+}
+
+void MacroAssembler::loadDebugTrapHandler(DebugTrapHandlerKind dbgKind,
+                                          Register dest) {
+  if (!isAOT()) {
+    JitCode* handlerCode =
+        runtime()->jitRuntime()->debugTrapHandler(dbgKind);
+    movePtr(ImmPtr(handlerCode->raw()), dest);
+    return;
+  }
+  EmitAOTPatch(*this, RuntimePatch::DebugTrapPatch(0, dbgKind), dest);
+}
+
+static AOTPreBarrierIndex PreBarrierIndexForMIRType(MIRType type) {
+  switch (type) {
+    case MIRType::Value:
+      return AOTPreBarrierIndex::Value;
+    case MIRType::String:
+      return AOTPreBarrierIndex::String;
+    case MIRType::Object:
+      return AOTPreBarrierIndex::Object;
+    case MIRType::Shape:
+      return AOTPreBarrierIndex::Shape;
+    case MIRType::WasmAnyRef:
+      return AOTPreBarrierIndex::WasmAnyRef;
+    default:
+      MOZ_CRASH("Unexpected MIRType for pre-barrier");
+  }
+}
+
+void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
+  MOZ_ASSERT(isAOT());
+  MOZ_ASSERT(scratch != PreBarrierReg);
+  AOTPreBarrierIndex idx = PreBarrierIndexForMIRType(type);
+  EmitAOTPatch(*this, RuntimePatch::PreBarrierPatch(0, idx), scratch);
+  call(scratch);
+}
+
 void MacroAssembler::handleFailure() {
-  // Re-entry code is irrelevant because the exception will leave the
-  // running function and never come back
-  TrampolinePtr excTail = runtime()->jitRuntime()->getExceptionTail();
-  jump(excTail);
+  if (isAOT()) {
+    EmitAOTPatch(*this, RuntimePatch::ExceptionTailPatch(0), ScratchReg);
+    jump(ScratchReg);
+  } else {
+    TrampolinePtr excTail = getExceptionTailTrampoline();
+    jump(excTail);
+  }
 }
 
 void MacroAssembler::assumeUnreachable(const char* output) {
 #ifdef JS_MASM_VERBOSE
-  if (!IsCompilingWasm()) {
+  if (!IsCompilingWasm() && !isAOT()) {
     AllocatableRegisterSet regs(RegisterSet::Volatile());
     LiveRegisterSet save(regs.asLiveSet());
     PushRegsInMask(save);
@@ -4065,40 +4267,44 @@ void MacroAssembler::assumeUnreachable(const char* output) {
 
 void MacroAssembler::printf(const char* output) {
 #ifdef JS_MASM_VERBOSE
-  AllocatableRegisterSet regs(RegisterSet::Volatile());
-  LiveRegisterSet save(regs.asLiveSet());
-  PushRegsInMask(save);
+  if (!isAOT()) {
+    AllocatableRegisterSet regs(RegisterSet::Volatile());
+    LiveRegisterSet save(regs.asLiveSet());
+    PushRegsInMask(save);
 
-  Register temp = regs.takeAnyGeneral();
+    Register temp = regs.takeAnyGeneral();
 
-  using Fn = void (*)(const char* output);
-  setupUnalignedABICall(temp);
-  movePtr(ImmPtr(output), temp);
-  passABIArg(temp);
-  callWithABI<Fn, Printf0>();
+    using Fn = void (*)(const char* output);
+    setupUnalignedABICall(temp);
+    movePtr(ImmPtr(output), temp);
+    passABIArg(temp);
+    callWithABI<Fn, Printf0>();
 
-  PopRegsInMask(save);
+    PopRegsInMask(save);
+  }
 #endif
 }
 
 void MacroAssembler::printf(const char* output, Register value) {
 #ifdef JS_MASM_VERBOSE
-  AllocatableRegisterSet regs(RegisterSet::Volatile());
-  LiveRegisterSet save(regs.asLiveSet());
-  PushRegsInMask(save);
+  if (!isAOT()) {
+    AllocatableRegisterSet regs(RegisterSet::Volatile());
+    LiveRegisterSet save(regs.asLiveSet());
+    PushRegsInMask(save);
 
-  regs.takeUnchecked(value);
+    regs.takeUnchecked(value);
 
-  Register temp = regs.takeAnyGeneral();
+    Register temp = regs.takeAnyGeneral();
 
-  using Fn = void (*)(const char* output, uintptr_t value);
-  setupUnalignedABICall(temp);
-  movePtr(ImmPtr(output), temp);
-  passABIArg(temp);
-  passABIArg(value);
-  callWithABI<Fn, Printf1>();
+    using Fn = void (*)(const char* output, uintptr_t value);
+    setupUnalignedABICall(temp);
+    movePtr(ImmPtr(output), temp);
+    passABIArg(temp);
+    passABIArg(value);
+    callWithABI<Fn, Printf1>();
 
-  PopRegsInMask(save);
+    PopRegsInMask(save);
+  }
 #endif
 }
 
@@ -4536,9 +4742,11 @@ void MacroAssembler::alignJitStackBasedOnNArgs(uint32_t argc,
 
 MacroAssembler::MacroAssembler(TempAllocator& alloc,
                                CompileRuntime* maybeRuntime,
-                               CompileRealm* maybeRealm)
+                               CompileRealm* maybeRealm,
+                               AOTContext* aotContext)
     : maybeRuntime_(maybeRuntime),
       maybeRealm_(maybeRealm),
+      aotContext_(aotContext),
       framePushed_(0),
       abiArgs_(/* This will be overwritten for every ABI call, the initial value
                   doesn't matter */
@@ -4548,12 +4756,24 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
 #endif
       dynamicAlignment_(false),
       emitProfilingInstrumentation_(false) {
+#if !defined(ENABLE_AOT_BASELINE)
+  MOZ_ASSERT(!isAOT());
+#endif
+  // AOT compilation must not have access to runtime information.
+  MOZ_ASSERT_IF(isAOT(), maybeRuntime_ == nullptr);
+  MOZ_ASSERT_IF(isAOT(), maybeRealm == nullptr);
+  if (aotContext_) {
+    aotContext_->bindMasm(*this);
+  }
   moveResolver_.setAllocator(alloc);
 }
 
-StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc)
-    : MacroAssembler(alloc, CompileRuntime::get(cx->runtime()),
-                     CompileRealm::get(cx->realm())) {}
+StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
+                                         AOTContext* aotContext)
+    : MacroAssembler(
+          alloc, aotContext ? nullptr : CompileRuntime::get(cx->runtime()),
+          aotContext ? nullptr : CompileRealm::get(cx->realm()),
+          aotContext) {}
 
 OffThreadMacroAssembler::OffThreadMacroAssembler(TempAllocator& alloc,
                                                  CompileRealm* realm)
@@ -5005,7 +5225,6 @@ void MacroAssembler::callWithABINoProfiler(void* fun, ABIType result,
 
 #ifdef JS_CHECK_UNSAFE_CALL_WITH_ABI
   if (check == CheckUnsafeCallWithABI::Check) {
-    // Check JSContext::inUnsafeCallWithABI was cleared as expected.
     Label ok;
     push(ReturnReg);
     loadJSContext(ReturnReg);
@@ -8687,11 +8906,13 @@ void MacroAssembler::debugAssertObjHasFixedSlots(Register obj,
 void MacroAssembler::debugAssertObjectHasClass(Register obj, Register scratch,
                                                const JSClass* clasp) {
 #ifdef DEBUG
-  Label done;
-  branchTestObjClassNoSpectreMitigations(Assembler::Equal, obj, clasp, scratch,
-                                         &done);
-  assumeUnreachable("Class check failed");
-  bind(&done);
+  if (!isAOT()) {
+    Label done;
+    branchTestObjClassNoSpectreMitigations(Assembler::Equal, obj, clasp,
+                                           scratch, &done);
+    assumeUnreachable("Class check failed");
+    bind(&done);
+  }
 #endif
 }
 
@@ -9399,11 +9620,13 @@ static void LoadNativeIterator(MacroAssembler& masm, Register obj,
 
 #ifdef DEBUG
   // Assert we have a PropertyIteratorObject.
-  Label ok;
-  masm.branchTestObjClass(Assembler::Equal, obj,
-                          &PropertyIteratorObject::class_, dest, obj, &ok);
-  masm.assumeUnreachable("Expected PropertyIteratorObject!");
-  masm.bind(&ok);
+  if (!masm.isAOT()) {
+    Label ok;
+    masm.branchTestObjClass(Assembler::Equal, obj,
+                            &PropertyIteratorObject::class_, dest, obj, &ok);
+    masm.assumeUnreachable("Expected PropertyIteratorObject!");
+    masm.bind(&ok);
+  }
 #endif
 
   // Load NativeIterator object.
