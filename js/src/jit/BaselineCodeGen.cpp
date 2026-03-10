@@ -6054,6 +6054,8 @@ bool BaselineCodeGen<Handler>::emit_SuperFun() {
   // Unbox callee.
   masm.unboxObject(R0, callee);
 
+// NOTE(Justin): why is this here? We should not pollute baseline codegen
+// We should just remove this.
 #ifdef DEBUG
   if (!aot_) {
     Label classCheckDone;
@@ -7082,6 +7084,10 @@ bool BaselineInterpreterGenerator::emitDebugTrap() {
   if (!debugTrapOffsets_.append(offset.offset())) {
     return false;
   }
+  // NOTE(Justin): What is the difference between aotDebugTraps_ and the
+  // existing debugTrapOffsets_? Whatever Baseline manifest that needs
+  // to be written out, why can it not just use the existing traps? Why
+  // are we reinventing the wheel?
 #ifdef ENABLE_AOT_BASELINE
   if (aot_) {
     if (!aotDebugTraps_.append(offset.offset())) {
@@ -7236,7 +7242,14 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 #endif
 
   tableOffset_ = masm.currentOffset();
-
+  
+  // NOTE(Justin): This seems like one of the final remaining sites of
+  // AOT clutter in baseline codegen. Somewhat poetically it is precsiely
+  // the point at which we started the AOT journey. It is tricky because
+  // the dispatch table patch is computed via the table offset added with
+  // the op index multiplied by the size of a pointer. Can we not find
+  // someway to have an `masm.writeAOTCodePointer` to cleanly move this
+  // beneath the masm interfacec like the rest of baseline codegen?
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
     const Label& opLabel = opLabels[i];
     MOZ_ASSERT(opLabel.bound());
@@ -7447,11 +7460,9 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 
 #ifdef ENABLE_AOT_BASELINE
     // Serialize the baseline interpreter code and embedded manifest to binary.
-    if (JitOptions.dumpBaselineInterp) {
-      if (!dumpAOTInterp(cx, code)) {
-        JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT manifest");
-        return false;
-      }
+    if (JitOptions.dumpBaselineInterp && !dumpAOTInterp(cx, code)) {
+      JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT manifest");
+      return false;
     }
 #endif
 
