@@ -59,11 +59,7 @@ class MacroAssembler;
   V(MegamorphicSetPropCache)    \
   V(StringToAtomCache)          \
   V(DispatchTable)              \
-  V(VMWrapper)                  \
-  V(DebugTrapHandler)           \
-  V(CppFunction)                \
-  V(PreBarrier)                 \
-  V(ExceptionTail)
+  V(AOTTableBase)
 
 enum class AOTRelocKind : uint16_t {
 #define EMIT_KIND(name) name,
@@ -194,28 +190,6 @@ struct PatchContext {
     uint32_t dispatchTableOffset;
 };
 
-enum class DebugTrapHandlerKind;
-
-// While trampolines are generated at runtime we must manually patch the
-// `callWithABI<Fn>` calls, since the absolute address of functions in
-// the text section is non-deterministic.
-enum class AOTCppFunctionId : uint32_t {
-  PostWriteBarrier,
-  FrameIsDebuggeeCheck,
-  HandleCodeCoverageAtPrologue,
-  HandleCodeCoverageAtPC,
-  Count
-};
-
-enum class AOTPreBarrierIndex : uint32_t {
-  Value = 0,
-  String,
-  Object,
-  Shape,
-  WasmAnyRef,
-  Count
-};
-
 class RuntimePatch {
   public:
     // Each patch has a kind tag, telling us which kind of patch to apply, and a
@@ -232,50 +206,6 @@ class RuntimePatch {
       p.kind = AOTRelocKind::DispatchTable;
       p.targetOffset = targetOffset_;
       p.auxData = handlerOffset_;
-      return p;
-    }
-
-    static RuntimePatch VMWrapperPatch(uint32_t targetOffset_,
-                                       VMFunctionId vmId_) {
-      RuntimePatch p;
-      p.kind = AOTRelocKind::VMWrapper;
-      p.targetOffset = targetOffset_;
-      p.auxData = uint32_t(vmId_);
-      return p;
-    }
-
-    static RuntimePatch DebugTrapPatch(uint32_t targetOffset_,
-                                       DebugTrapHandlerKind dbgKind_) {
-      RuntimePatch p;
-      p.kind = AOTRelocKind::DebugTrapHandler;
-      p.targetOffset = targetOffset_;
-      p.auxData = uint32_t(dbgKind_);
-      return p;
-    }
-
-    static RuntimePatch CppFunctionPatch(uint32_t targetOffset_,
-                                         AOTCppFunctionId fnId) {
-      RuntimePatch p;
-      p.kind = AOTRelocKind::CppFunction;
-      p.targetOffset = targetOffset_;
-      p.auxData = uint32_t(fnId);
-      return p;
-    }
-
-    static RuntimePatch PreBarrierPatch(uint32_t targetOffset_,
-                                        AOTPreBarrierIndex idx) {
-      RuntimePatch p;
-      p.kind = AOTRelocKind::PreBarrier;
-      p.targetOffset = targetOffset_;
-      p.auxData = uint32_t(idx);
-      return p;
-    }
-
-    static RuntimePatch ExceptionTailPatch(uint32_t targetOffset_) {
-      RuntimePatch p;
-      p.kind = AOTRelocKind::ExceptionTail;
-      p.targetOffset = targetOffset_;
-      p.auxData = 0;
       return p;
     }
 
@@ -298,8 +228,6 @@ using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
 
 class JitCode;
 
-void* ResolveCppFunction(AOTCppFunctionId id);
-
 [[nodiscard]] JitCode* AllocateAndPatchAOTCode(
     JSContext* cx, const AOTBlobDirectoryEntry* entry,
     const uint8_t* containerBase, uint32_t headerSize,
@@ -314,7 +242,6 @@ void* ResolveCppFunction(AOTCppFunctionId id);
 // the single flag that switches the whole pipeline into AOT mode.
 struct AOTAccumulator {
   RuntimePatchVector runtimePatches;
-
   void registerPatch(RuntimePatch&& patch) {
     MOZ_ALWAYS_TRUE(runtimePatches.append(std::move(patch)));
   }
@@ -334,6 +261,70 @@ class AOTContext {
  private:
   MacroAssembler* masm_ = nullptr;
   AOTAccumulator accumulator_;
+};
+
+
+// Slots available in the AOTIndirectionTable.  Each slot holds a single
+// uintptr_t that AOT code loads at runtime instead of relying on a patched
+// movabs.  One slot per scalar (non-parametric) AOTRelocKind.
+enum class AOTIndirectionSlot : uint32_t {
+  JSRuntimePtr = 0,
+  JSContextPtr,
+  InterruptBits,
+  JitActivation,
+  RealmPtr,
+  ContextRealm,
+  WellKnownSymbols,
+  JitRuntime,
+  LastBufferedCell,
+  ProfilerEnabled,
+  ProfilerExitFrameTail,
+  DoubleToInt32Stub,
+  MegamorphicCache,
+  MegamorphicSetPropCache,
+  StringToAtomCache,
+  ExceptionTail,
+  DebugTrapInterpreter,
+  DebugTrapCompiler,
+  CppFn_PostWriteBarrier,
+  CppFn_FrameIsDebuggeeCheck,
+  CppFn_HandleCodeCoverageAtPrologue,
+  CppFn_HandleCodeCoverageAtPC,
+  PreBarrier_Value,
+  PreBarrier_String,
+  PreBarrier_Object,
+  PreBarrier_Shape,
+  PreBarrier_WasmAnyRef,
+  VMWrapperBase,
+  Count
+};
+
+// A small, flat table of runtime pointers that AOT baseline code loads
+// indirectly via a patched movabs of the table base (AOTRelocKind::AOTTableBase)
+// followed by a slot load.  Owned inline by JitRuntime so its address is stable.
+class AOTIndirectionTable {
+ public:
+  AOTIndirectionTable() { std::memset(slots_, 0, sizeof(slots_)); }
+
+  void set(AOTIndirectionSlot slot, uintptr_t value) {
+    MOZ_ASSERT(uint32_t(slot) < uint32_t(AOTIndirectionSlot::Count));
+    slots_[uint32_t(slot)] = value;
+  }
+
+  uintptr_t get(AOTIndirectionSlot slot) const {
+    MOZ_ASSERT(uint32_t(slot) < uint32_t(AOTIndirectionSlot::Count));
+    return slots_[uint32_t(slot)];
+  }
+
+  static constexpr uint32_t offsetOfSlot(AOTIndirectionSlot slot) {
+    return uint32_t(slot) * sizeof(uintptr_t);
+  }
+
+  uintptr_t* baseAddress() { return slots_; }
+  const uintptr_t* baseAddress() const { return slots_; }
+
+ private:
+  uintptr_t slots_[uint32_t(AOTIndirectionSlot::Count)];
 };
 
 }  // namespace js::jit

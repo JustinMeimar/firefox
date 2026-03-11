@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <string>
 
 #include "frontend/CompilationStencil.h"
 #include "gc/Zone.h"
@@ -102,6 +103,7 @@ static void emitAsmZeroPadding(std::ostream& out, size_t len) {
 
 struct AOTBlobData {
   AOTBlobDirectoryEntry dirEntry;
+  std::string name;
   Vector<uint8_t, 0, SystemAllocPolicy> code;
   Vector<uint8_t, 0, SystemAllocPolicy> manifest;
   Vector<uint8_t, 0, SystemAllocPolicy> patches;
@@ -185,26 +187,27 @@ static bool writeAOTContainer(std::ostream& out,
 
   for (uint32_t i = 0; i < blobCount; i++) {
     const auto& blob = *blobs[i];
-    out << "// --- Blob " << i << " Code (" << blob.code.length()
-        << " bytes) ---\n";
+    const std::string& label = blob.name;
+
+    out << "// --- Blob " << i << " " << label << " ---\n";
+    out << "bl_aot_" << label << ":\n";
+
+    out << "bl_aot_" << label << "_code:\n";
     if (blob.code.length() > 0) {
       emitAsmBytes(out, blob.code.begin(), blob.code.length());
     }
 
-    out << "// --- Blob " << i << " Manifest (" << blob.manifest.length()
-        << " bytes) ---\n";
+    out << "bl_aot_" << label << "_manifest:\n";
     if (blob.manifest.length() > 0) {
       emitAsmBytes(out, blob.manifest.begin(), blob.manifest.length());
     }
 
-    out << "// --- Blob " << i << " Patches ("
-        << (blob.patches.length() / sizeof(RuntimePatch)) << ") ---\n";
+    out << "bl_aot_" << label << "_patches:\n";
     if (blob.patches.length() > 0) {
       emitAsmBytes(out, blob.patches.begin(), blob.patches.length());
     }
 
-    out << "// --- Blob " << i << " Metadata (" << blob.metadata.length()
-        << " bytes) ---\n";
+    out << "bl_aot_" << label << "_metadata:\n";
     if (blob.metadata.length() > 0) {
       emitAsmBytes(out, blob.metadata.begin(), blob.metadata.length());
     }
@@ -245,6 +248,7 @@ bool BuildAndSaveInterpBlob(JitCode* code, const AOTInterpManifest& scalars,
 
   interpBlob.dirEntry.kind = AOTBlobKind::BaselineInterpreter;
   interpBlob.dirEntry.nameHash = 0;
+  interpBlob.name = "BaselineInterpreter";
 
   if (!AOTBlobData::appendBytes(interpBlob.code, codeStart, codeSize)) {
     return false;
@@ -368,6 +372,7 @@ static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
   sm.runtimePatchCount = aotCtx.accumulator().runtimePatches.length();
   blobOut->dirEntry.kind = AOTBlobKind::SelfHostedFunction;
   blobOut->dirEntry.nameHash = mozilla::HashString(funcName);
+  blobOut->name = funcName;
 
   if (!AOTBlobData::appendBytes(blobOut->code, jitCode->raw(),
                                 jitCode->instructionsSize())) {
@@ -493,6 +498,15 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
           cx, DebugTrapHandlerKind::Compiler)) {
     return false;
   }
+
+  // Populate debug trap handler slots now that they've been generated.
+  AOTIndirectionTable& table = cx->runtime()->jitRuntime()->aotIndirectionTable();
+  table.set(AOTIndirectionSlot::DebugTrapInterpreter,
+            uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
+                DebugTrapHandlerKind::Interpreter)->raw()));
+  table.set(AOTIndirectionSlot::DebugTrapCompiler,
+            uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
+                DebugTrapHandlerKind::Compiler)->raw()));
 
   JitCode* code = AllocateAndPatchAOTCode(
       cx, entry, containerBase, manifest.HeaderSize,

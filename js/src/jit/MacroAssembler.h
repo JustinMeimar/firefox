@@ -368,6 +368,8 @@ struct BranchWasmRefIsSubtypeRegisters {
 //
 // Also see MacroAssembler::debugAssertCanonicalInt32().
 
+enum class DebugTrapHandlerKind;
+
 // The public entrypoint for emitting assembly. Note that a MacroAssembler can
 // use cx->lifoAlloc, so take care not to interleave masm use with other
 // lifoAlloc use if one will be destroyed before the other.
@@ -409,12 +411,16 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // strategy when AOT is on.
   void moveAOTReloc(AOTRelocKind kind, Register dest);
   void loadAOTReloc(AOTRelocKind kind, Register dest);
+
+  // Load a value from the AOTIndirectionTable stored in the current
+  // BaselineFrame.  Two loads: frame→table ptr, then table→slot value.
+  void loadAOTIndirectionSlot(AOTIndirectionSlot slot, Register dest);
   void branchAOTReloc32(Condition cond, AOTRelocKind kind, Imm32 rhs,
                         Label* label, Register scratch);
 
   // Parametric reference helpers.
   void loadVMWrapper(VMFunctionId id, Register dest);
-  void loadCppFunction(AOTCppFunctionId fnId, Register dest);
+  void loadCppFunction(AOTIndirectionSlot slot, Register dest);
   void loadDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
 
   // In AOT mode, call the pre-barrier trampoline via a patched movabs.

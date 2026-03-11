@@ -18,6 +18,7 @@
 #include "jstypes.h"
 
 #include "jit/ABIFunctions.h"
+#include "jit/AOT.h"
 #include "jit/BaselineICList.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CalleeToken.h"
@@ -238,6 +239,15 @@ class JitRuntime {
   MainThreadData<uint32_t> disallowArbitraryCode_{false};
 #endif
 
+  // Table of runtime pointers loaded indirectly by AOT baseline code.
+  AOTIndirectionTable aotIndirectionTable_;
+
+  // VM wrapper addresses for AOT code, indexed by VMFunctionId.
+  // Populated after trampolines are generated; the base address is stored
+  // in AOTIndirectionSlot::VMWrapperBase so AOT code can load it.
+  using AOTVMWrapperSlots = Vector<uintptr_t, 0, SystemAllocPolicy>;
+  AOTVMWrapperSlots aotVMWrapperSlots_;
+
   bool generateTrampolines(JSContext* cx);
   bool generateBaselineICFallbackCode(JSContext* cx);
 
@@ -386,6 +396,12 @@ class JitRuntime {
     return JS_DATA_TO_FUNC_PTR(EnterJitCode,
                                trampolineCode(enterJITOffset_).value);
   }
+
+  AOTIndirectionTable& aotIndirectionTable() { return aotIndirectionTable_; }
+  const AOTIndirectionTable& aotIndirectionTable() const {
+    return aotIndirectionTable_;
+  }
+  AOTVMWrapperSlots& aotVMWrapperSlots() { return aotVMWrapperSlots_; }
 
   // Return the registers from the native caller frame of the given JIT frame.
   // Nothing{} if frameStackAddress is NOT pointing at a native-to-JIT entry

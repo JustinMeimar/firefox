@@ -13,7 +13,6 @@
 
 #include "gc/Zone.h"
 #include "jit/AutoWritableJitCode.h"
-#include "jit/IonTypes.h"
 #include "jit/JitCode.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
@@ -72,12 +71,9 @@ uintptr_t ResolveAOTReloc(AOTRelocKind kind, JSContext* cx) {
               &cx->runtime()->caches().stringToAtomCache);
       return (uintptr_t)(cache + StringToAtomCache::offsetOfLastLookups());
     }
+    case AOTRelocKind::AOTTableBase:
+      return (uintptr_t)cx->runtime()->jitRuntime()->aotIndirectionTable().baseAddress();
     case AOTRelocKind::DispatchTable:
-    case AOTRelocKind::VMWrapper:
-    case AOTRelocKind::DebugTrapHandler:
-    case AOTRelocKind::CppFunction:
-    case AOTRelocKind::PreBarrier:
-    case AOTRelocKind::ExceptionTail:
       MOZ_CRASH("Patch-only AOTRelocKind cannot be resolved at runtime");
     case AOTRelocKind::Count:
       break;
@@ -89,51 +85,11 @@ uintptr_t ResolveAOTReloc(AOTRelocKind kind, JSContext* cx) {
 // RuntimePatch resolution
 // ---------------------------------------------------------------------------
 
-void* ResolveCppFunction(AOTCppFunctionId id) {
-  switch (id) {
-    case AOTCppFunctionId::PostWriteBarrier:
-      return reinterpret_cast<void*>(PostWriteBarrier);
-    case AOTCppFunctionId::FrameIsDebuggeeCheck:
-      return reinterpret_cast<void*>(FrameIsDebuggeeCheck);
-    case AOTCppFunctionId::HandleCodeCoverageAtPrologue:
-      return reinterpret_cast<void*>(HandleCodeCoverageAtPrologue);
-    case AOTCppFunctionId::HandleCodeCoverageAtPC:
-      return reinterpret_cast<void*>(HandleCodeCoverageAtPC);
-    case AOTCppFunctionId::Count:
-      break;
-  }
-  MOZ_CRASH("Unknown AOTCppFunctionId");
-}
-
 uintptr_t RuntimePatch::getValueToPatch(const PatchContext& pc) const {
   // Patch-only kinds require union data that ResolveAOTReloc doesn't have.
   switch(kind) {
     case AOTRelocKind::DispatchTable:
       return (uintptr_t)(pc.codeBase + auxData);
-    case AOTRelocKind::VMWrapper: {
-      TrampolinePtr ptr = pc.cx->runtime()->jitRuntime()->getVMWrapper(
-          VMFunctionId(auxData));
-      return (uintptr_t)(ptr.value);
-    }
-    case AOTRelocKind::DebugTrapHandler:
-      return (uintptr_t)pc.cx->runtime()->jitRuntime()->debugTrapHandler(
-          DebugTrapHandlerKind(auxData))->raw();
-    case AOTRelocKind::CppFunction:
-      return (uintptr_t)ResolveCppFunction(AOTCppFunctionId(auxData));
-    case AOTRelocKind::PreBarrier: {
-      MIRType type;
-      switch (AOTPreBarrierIndex(auxData)) {
-        case AOTPreBarrierIndex::Value: type = MIRType::Value; break;
-        case AOTPreBarrierIndex::String: type = MIRType::String; break;
-        case AOTPreBarrierIndex::Object: type = MIRType::Object; break;
-        case AOTPreBarrierIndex::Shape: type = MIRType::Shape; break;
-        case AOTPreBarrierIndex::WasmAnyRef: type = MIRType::WasmAnyRef; break;
-        default: MOZ_CRASH("Bad AOTPreBarrierIndex");
-      }
-      return (uintptr_t)pc.cx->runtime()->jitRuntime()->preBarrier(type).value;
-    }
-    case AOTRelocKind::ExceptionTail:
-      return (uintptr_t)pc.cx->runtime()->jitRuntime()->getExceptionTail().value;
     default:
       // All other kinds resolve identically to ResolveAOTReloc.
       return ResolveAOTReloc(kind, pc.cx);

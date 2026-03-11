@@ -4135,12 +4135,9 @@ static ImmPtr ResolveAOTRelocCompileTime(AOTRelocKind kind,
       return ImmPtr(
           (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups()));
     }
+    case AOTRelocKind::AOTTableBase:
+      return ImmPtr(rt->jitRuntime()->aotIndirectionTable().baseAddress());
     case AOTRelocKind::DispatchTable:
-    case AOTRelocKind::VMWrapper:
-    case AOTRelocKind::DebugTrapHandler:
-    case AOTRelocKind::CppFunction:
-    case AOTRelocKind::PreBarrier:
-    case AOTRelocKind::ExceptionTail:
       MOZ_CRASH("Patch-only AOTRelocKind not available at compile time");
     case AOTRelocKind::Count:
       break;
@@ -4155,11 +4152,52 @@ static void EmitAOTPatch(MacroAssembler& masm, RuntimePatch&& patch,
   masm.aot().accumulator().registerPatch(std::move(patch));
 }
 
+void MacroAssembler::loadAOTIndirectionSlot(AOTIndirectionSlot slot,
+                                            Register dest) {
+  // Patched movabs loads the table base, then a second load gets the slot.
+  MOZ_ASSERT(isAOT());
+  EmitAOTPatch(*this, RuntimePatch(AOTRelocKind::AOTTableBase, 0), dest);
+  loadPtr(Address(dest, AOTIndirectionTable::offsetOfSlot(slot)), dest);
+}
+
+// Map scalar AOTRelocKinds to their indirection table slot.  Returns
+// Count for parametric kinds that still need a patched movabs.
+static AOTIndirectionSlot RelocKindToSlot(AOTRelocKind kind) {
+  switch (kind) {
+#define MAP(name) case AOTRelocKind::name: return AOTIndirectionSlot::name;
+    MAP(JSRuntimePtr)
+    MAP(JSContextPtr)
+    MAP(InterruptBits)
+    MAP(JitActivation)
+    MAP(RealmPtr)
+    MAP(ContextRealm)
+    MAP(WellKnownSymbols)
+    MAP(JitRuntime)
+    MAP(LastBufferedCell)
+    MAP(ProfilerEnabled)
+    MAP(ProfilerExitFrameTail)
+    MAP(DoubleToInt32Stub)
+    MAP(MegamorphicCache)
+    MAP(MegamorphicSetPropCache)
+    MAP(StringToAtomCache)
+#undef MAP
+    default:
+      return AOTIndirectionSlot::Count;
+  }
+}
+
 void MacroAssembler::moveAOTReloc(AOTRelocKind kind, Register dest) {
   if (!isAOT()) {
     movePtr(ResolveAOTRelocCompileTime(kind, runtime()), dest);
     return;
   }
+  // Scalar kinds go through the indirection table — zero patches.
+  AOTIndirectionSlot slot = RelocKindToSlot(kind);
+  if (slot != AOTIndirectionSlot::Count) {
+    loadAOTIndirectionSlot(slot, dest);
+    return;
+  }
+  // Parametric kinds still use a patched movabs.
   EmitAOTPatch(*this, RuntimePatch(kind, 0), dest);
 }
 
@@ -4186,40 +4224,48 @@ void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
     movePtr(ImmPtr(ptr.value), dest);
     return;
   }
-  EmitAOTPatch(*this, RuntimePatch::VMWrapperPatch(0, id), dest);
+  // Load VMWrapperBase pointer from indirection table, then index into it.
+  loadAOTIndirectionSlot(AOTIndirectionSlot::VMWrapperBase, dest);
+  loadPtr(Address(dest, size_t(id) * sizeof(uintptr_t)), dest);
 }
 
-void MacroAssembler::loadCppFunction(AOTCppFunctionId fnId, Register dest) {
+void MacroAssembler::loadCppFunction(AOTIndirectionSlot slot, Register dest) {
   if (!isAOT()) {
-    movePtr(ImmPtr(ResolveCppFunction(fnId)), dest);
+    // In non-AOT mode the slot is already populated; load from the table
+    // that lives in JitRuntime.
+    movePtr(ImmPtr((void*)runtime()->jitRuntime()->aotIndirectionTable().get(slot)),
+            dest);
     return;
   }
-  EmitAOTPatch(*this, RuntimePatch::CppFunctionPatch(0, fnId), dest);
+  loadAOTIndirectionSlot(slot, dest);
 }
 
 void MacroAssembler::loadDebugTrapHandler(DebugTrapHandlerKind dbgKind,
                                           Register dest) {
+  AOTIndirectionSlot slot = dbgKind == DebugTrapHandlerKind::Interpreter
+                                ? AOTIndirectionSlot::DebugTrapInterpreter
+                                : AOTIndirectionSlot::DebugTrapCompiler;
   if (!isAOT()) {
     JitCode* handlerCode =
         runtime()->jitRuntime()->debugTrapHandler(dbgKind);
     movePtr(ImmPtr(handlerCode->raw()), dest);
     return;
   }
-  EmitAOTPatch(*this, RuntimePatch::DebugTrapPatch(0, dbgKind), dest);
+  loadAOTIndirectionSlot(slot, dest);
 }
 
-static AOTPreBarrierIndex PreBarrierIndexForMIRType(MIRType type) {
+static AOTIndirectionSlot PreBarrierSlotForMIRType(MIRType type) {
   switch (type) {
     case MIRType::Value:
-      return AOTPreBarrierIndex::Value;
+      return AOTIndirectionSlot::PreBarrier_Value;
     case MIRType::String:
-      return AOTPreBarrierIndex::String;
+      return AOTIndirectionSlot::PreBarrier_String;
     case MIRType::Object:
-      return AOTPreBarrierIndex::Object;
+      return AOTIndirectionSlot::PreBarrier_Object;
     case MIRType::Shape:
-      return AOTPreBarrierIndex::Shape;
+      return AOTIndirectionSlot::PreBarrier_Shape;
     case MIRType::WasmAnyRef:
-      return AOTPreBarrierIndex::WasmAnyRef;
+      return AOTIndirectionSlot::PreBarrier_WasmAnyRef;
     default:
       MOZ_CRASH("Unexpected MIRType for pre-barrier");
   }
@@ -4228,8 +4274,7 @@ static AOTPreBarrierIndex PreBarrierIndexForMIRType(MIRType type) {
 void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
   MOZ_ASSERT(isAOT());
   MOZ_ASSERT(scratch != PreBarrierReg);
-  AOTPreBarrierIndex idx = PreBarrierIndexForMIRType(type);
-  EmitAOTPatch(*this, RuntimePatch::PreBarrierPatch(0, idx), scratch);
+  loadAOTIndirectionSlot(PreBarrierSlotForMIRType(type), scratch);
   call(scratch);
 }
 
@@ -4252,7 +4297,7 @@ void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
 
 void MacroAssembler::handleFailure() {
   if (isAOT()) {
-    EmitAOTPatch(*this, RuntimePatch::ExceptionTailPatch(0), ScratchReg);
+    loadAOTIndirectionSlot(AOTIndirectionSlot::ExceptionTail, ScratchReg);
     jump(ScratchReg);
   } else {
     TrampolinePtr excTail = getExceptionTailTrampoline();

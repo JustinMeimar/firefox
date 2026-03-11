@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "debugger/DebugAPI.h"
+#include "jit/JitRuntime.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/JSContext.h"
 

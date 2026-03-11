@@ -123,9 +123,94 @@ bool JitRuntime::initialize(JSContext* cx) {
 
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
-  
+
+  // Populate AOT indirection table slots that don't depend on trampolines.
+  MOZ_ASSERT(cx->runtime());
+  JSRuntime* rt = cx->runtime();
+  aotIndirectionTable_.set(AOTIndirectionSlot::JSRuntimePtr,
+                           uintptr_t(rt));
+  aotIndirectionTable_.set(AOTIndirectionSlot::JSContextPtr,
+                           uintptr_t(cx));
+  aotIndirectionTable_.set(AOTIndirectionSlot::InterruptBits,
+                           uintptr_t(cx->addressOfInterruptBits()));
+  aotIndirectionTable_.set(AOTIndirectionSlot::JitActivation,
+                           uintptr_t(cx->addressOfJitActivation()));
+  aotIndirectionTable_.set(AOTIndirectionSlot::RealmPtr,
+                           uintptr_t(cx->addressOfRealm()));
+  aotIndirectionTable_.set(AOTIndirectionSlot::ContextRealm,
+                           uintptr_t(reinterpret_cast<uint8_t*>(cx) +
+                                     JSContext::offsetOfRealm()));
+  aotIndirectionTable_.set(AOTIndirectionSlot::WellKnownSymbols,
+                           uintptr_t(rt->wellKnownSymbols.ref()));
+  aotIndirectionTable_.set(AOTIndirectionSlot::JitRuntime,
+                           uintptr_t(this));
+  aotIndirectionTable_.set(AOTIndirectionSlot::LastBufferedCell,
+                           uintptr_t(rt->gc.addressOfLastBufferedWholeCell()));
+  aotIndirectionTable_.set(AOTIndirectionSlot::ProfilerEnabled,
+                           uintptr_t(rt->geckoProfiler().addressOfEnabled()));
+  aotIndirectionTable_.set(AOTIndirectionSlot::MegamorphicCache,
+                           uintptr_t(&rt->caches().megamorphicCache));
+  aotIndirectionTable_.set(AOTIndirectionSlot::MegamorphicSetPropCache,
+                           uintptr_t(rt->caches().megamorphicSetPropCache.get()));
+  {
+    auto* cache = reinterpret_cast<uint8_t*>(&rt->caches().stringToAtomCache);
+    aotIndirectionTable_.set(
+        AOTIndirectionSlot::StringToAtomCache,
+        uintptr_t(cache + StringToAtomCache::offsetOfLastLookups()));
+  }
+
+  // C++ function pointer slots — addresses are fixed for the process lifetime.
+  aotIndirectionTable_.set(AOTIndirectionSlot::CppFn_PostWriteBarrier,
+                           uintptr_t(PostWriteBarrier));
+  aotIndirectionTable_.set(AOTIndirectionSlot::CppFn_FrameIsDebuggeeCheck,
+                           uintptr_t(FrameIsDebuggeeCheck));
+  aotIndirectionTable_.set(AOTIndirectionSlot::CppFn_HandleCodeCoverageAtPrologue,
+                           uintptr_t(HandleCodeCoverageAtPrologue));
+  aotIndirectionTable_.set(AOTIndirectionSlot::CppFn_HandleCodeCoverageAtPC,
+                           uintptr_t(HandleCodeCoverageAtPC));
+
   if (!generateTrampolines(cx)) {
     return false;
+  }
+
+  // Trampoline-dependent slots — trampolineCode_ must exist now.
+  aotIndirectionTable_.set(
+      AOTIndirectionSlot::ProfilerExitFrameTail,
+      uintptr_t(getProfilerExitFrameTail().value));
+  aotIndirectionTable_.set(
+      AOTIndirectionSlot::DoubleToInt32Stub,
+      uintptr_t(getDoubleToInt32ValueStub().value));
+  aotIndirectionTable_.set(
+      AOTIndirectionSlot::ExceptionTail,
+      uintptr_t(getExceptionTail().value));
+  aotIndirectionTable_.set(
+      AOTIndirectionSlot::PreBarrier_Value,
+      uintptr_t(preBarrier(MIRType::Value).value));
+  aotIndirectionTable_.set(
+      AOTIndirectionSlot::PreBarrier_String,
+      uintptr_t(preBarrier(MIRType::String).value));
+  aotIndirectionTable_.set(
+      AOTIndirectionSlot::PreBarrier_Object,
+      uintptr_t(preBarrier(MIRType::Object).value));
+  aotIndirectionTable_.set(
+      AOTIndirectionSlot::PreBarrier_Shape,
+      uintptr_t(preBarrier(MIRType::Shape).value));
+  aotIndirectionTable_.set(
+      AOTIndirectionSlot::PreBarrier_WasmAnyRef,
+      uintptr_t(preBarrier(MIRType::WasmAnyRef).value));
+
+  // Populate VM wrapper slots and store base pointer in the indirection table.
+  {
+    size_t n = functionWrapperOffsets_.length();
+    if (!aotVMWrapperSlots_.reserve(n)) {
+      return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+      aotVMWrapperSlots_.infallibleAppend(
+          uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
+    }
+    aotIndirectionTable_.set(AOTIndirectionSlot::VMWrapperBase,
+                             uintptr_t(aotVMWrapperSlots_.begin()));
   }
 
   if (!generateBaselineICFallbackCode(cx)) {

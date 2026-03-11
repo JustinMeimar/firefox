@@ -659,7 +659,7 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   masm.passABIArg(objReg);
   {
     Register fnReg = regs.takeAny();
-    masm.loadCppFunction(AOTCppFunctionId::PostWriteBarrier, fnReg);
+    masm.loadCppFunction(AOTIndirectionSlot::CppFn_PostWriteBarrier, fnReg);
     masm.callWithABI(fnReg);
   }
 
@@ -986,7 +986,7 @@ bool BaselineInterpreterCodeGen::emitIsDebuggeeCheck() {
       masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
       masm.passABIArg(R0.scratchReg());
       Register fnReg = R2.scratchReg();
-      masm.loadCppFunction(AOTCppFunctionId::FrameIsDebuggeeCheck, fnReg);
+      masm.loadCppFunction(AOTIndirectionSlot::CppFn_FrameIsDebuggeeCheck, fnReg);
       masm.callWithABI(fnReg);
     }
     restoreInterpreterPCReg();
@@ -7253,7 +7253,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   masm.passABIArg(R0.scratchReg());
   {
     Register fnReg = R2.scratchReg();
-    masm.loadCppFunction(AOTCppFunctionId::HandleCodeCoverageAtPrologue, fnReg);
+    masm.loadCppFunction(AOTIndirectionSlot::CppFn_HandleCodeCoverageAtPrologue, fnReg);
     masm.callWithABI(fnReg);
   }
 
@@ -7274,7 +7274,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   {
     // R0 (rcx) and R2 (rax) are both used as ABI args; use R1 (rbx).
     Register fnReg = R1.scratchReg();
-    masm.loadCppFunction(AOTCppFunctionId::HandleCodeCoverageAtPC, fnReg);
+    masm.loadCppFunction(AOTIndirectionSlot::CppFn_HandleCodeCoverageAtPC, fnReg);
     masm.callWithABI(fnReg);
   }
 

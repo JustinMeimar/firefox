@@ -100,6 +100,7 @@ struct ScratchRegisterScope : public AutoRegisterScope {
 
 static constexpr Register ReturnReg = rax;
 static constexpr Register HeapReg = r15;
+
 static constexpr Register64 ReturnReg64(rax);
 static constexpr FloatRegister ReturnFloat32Reg =
     FloatRegister(X86Encoding::xmm0, FloatRegisters::Single);
