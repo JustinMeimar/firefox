@@ -13,6 +13,8 @@
 // This file is blob-kind-agnostic. Baseline-interpreter-specific and
 // baseline-compilation-specific manifests live in BaselineAOT.h.
 
+#include "mozilla/HashFunctions.h"
+
 #include <cstdint>
 #include <cstring>
 
@@ -28,17 +30,17 @@ namespace js::jit {
 
 class MacroAssembler;
 
-// =========================================================================
-// AOT relocation kinds
-// =========================================================================
-
-// Enumerates runtime-dependent references that the JIT codegen may need.
-// Each kind maps to a specific absolute address that varies
-// between processes (due to ASLR, different builds, etc.).
+// [SMDOC] AOT Relocation Kinds
 //
-// In non-AOT mode these resolve to ImmPtr at compile time. In AOT mode
-// they emit movWithPatch(sentinel) and register a RuntimePatch that is
-// applied at load time.
+// The AOT blob cannot embed absolute pointers because ASLR, runtime
+// layout, and even the set of compiled C++ helpers change between
+// processes.  AOTRelocKind enumerates every category of address that
+// must be fixed up at load time.
+//
+// During normal (non-AOT) codegen each kind resolves to an ImmPtr
+// immediately.  In AOT mode the codegen emits a movWithPatch with a
+// sentinel immediate and registers a RuntimePatch; the loader walks
+// the patch table and writes the real addresses before the code runs.
 
 #define AOT_RELOC_KINDS(V)   \
   V(JSRuntimePtr)               \
@@ -87,9 +89,13 @@ inline const char* AOTRelocKindName(AOTRelocKind kind) {
 // verify patch correctness.
 uintptr_t ResolveAOTReloc(AOTRelocKind kind, JSContext* cx);
 
-// =========================================================================
-// AOT container format
-// =========================================================================
+// [SMDOC] AOT Container Format
+//
+// The on-disk (and embedded) container is a flat binary with a fixed
+// header, a directory of blob entries, and the blob payloads (code,
+// manifest, patches, metadata).  Each blob carries its own kind tag
+// (interpreter vs. self-hosted function) so the loader can find the
+// right entry without external metadata.
 
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 static constexpr uint32_t AOT_CONTAINER_VERSION = 1;
@@ -110,8 +116,8 @@ static_assert(sizeof(AOTContainerHeader) == 16,
               "AOTContainerHeader must be 16 bytes");
 
 struct AOTBlobDirectoryEntry {
-  uint32_t kind;       // AOTBlobKind
-  uint32_t nameHash;   // reserved for future use
+  AOTBlobKind kind;
+  uint32_t nameHash;
   uint32_t codeOffset;
   uint32_t codeSize;
   uint32_t manifestOffset;
@@ -163,7 +169,7 @@ inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind,
   if (!hdr) return nullptr;
   const auto* dir = GetAOTBlobDirectory();
   for (uint32_t i = 0; i < hdr->blobCount; i++) {
-    if (static_cast<AOTBlobKind>(dir[i].kind) == kind &&
+    if (dir[i].kind == kind &&
         (nameHash == 0 || dir[i].nameHash == nameHash) &&
         dir[i].codeSize > 0) {
       return &dir[i];
@@ -172,21 +178,14 @@ inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind,
   return nullptr;
 }
 
-template <typename CharT>
-inline uint32_t AOTNameHash(const CharT* chars, size_t len) {
-  uint32_t h = 0;
-  for (size_t i = 0; i < len; i++) {
-    h = h * 31 + static_cast<uint8_t>(chars[i]);
-  }
-  return h;
-}
-inline uint32_t AOTNameHash(const char* s) {
-  return AOTNameHash(s, strlen(s));
-}
 
-// =========================================================================
-// Runtime patching
-// =========================================================================
+// [SMDOC] AOT Runtime Patching
+//
+// At load time every RuntimePatch is applied in order: the loader
+// resolves each patch's AOTRelocKind to a concrete address via
+// PatchContext, then writes that address into the code blob at the
+// recorded targetOffset.  RuntimePatch is a 12-byte POD so the patch
+// table can be memcpy'd straight out of the container.
 
 // Load time context required to apply patches.
 struct PatchContext {
@@ -297,10 +296,6 @@ static_assert(sizeof(RuntimePatch) == 12,
 
 using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
 
-// =========================================================================
-// Generic helpers
-// =========================================================================
-
 class JitCode;
 
 void* ResolveCppFunction(AOTCppFunctionId id);
@@ -310,13 +305,13 @@ void* ResolveCppFunction(AOTCppFunctionId id);
     const uint8_t* containerBase, uint32_t headerSize,
     CodeKind codeKind, uint32_t dispatchTableOffset);
 
-// =========================================================================
-// AOT accumulator and compilation context
-// =========================================================================
-
-// Accumulates runtime patches during AOT codegen. Generic — usable by
-// any AOT blob kind (baseline interp, baseline compilation, trampolines,
-// IC stubs, etc.).
+// [SMDOC] AOT Accumulator and Compilation Context
+//
+// AOTAccumulator collects RuntimePatch entries as codegen proceeds.
+// AOTContext bundles the accumulator with a back-pointer to the
+// MacroAssembler; it is stack-allocated by the caller and passed as a
+// non-owning pointer.  A non-null AOTContext on the MacroAssembler is
+// the single flag that switches the whole pipeline into AOT mode.
 struct AOTAccumulator {
   RuntimePatchVector runtimePatches;
 

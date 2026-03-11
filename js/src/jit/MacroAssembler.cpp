@@ -4233,6 +4233,23 @@ void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
   call(scratch);
 }
 
+void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
+                                              size_t index,
+                                              const Label& handler) {
+  MOZ_ASSERT(handler.bound());
+  if (isAOT()) {
+    uint32_t handlerOffset = handler.offset();
+    uint32_t targetOffset = tableOffset + (index * sizeof(uintptr_t));
+    RuntimePatch patch =
+        RuntimePatch::DispatchTablePatch(targetOffset, handlerOffset);
+    aot().accumulator().registerPatch(std::move(patch));
+  }
+  CodeLabel cl;
+  writeCodePointer(&cl);
+  cl.target()->bind(handler.offset());
+  addCodeLabel(cl);
+}
+
 void MacroAssembler::handleFailure() {
   if (isAOT()) {
     EmitAOTPatch(*this, RuntimePatch::ExceptionTailPatch(0), ScratchReg);

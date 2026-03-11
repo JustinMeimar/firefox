@@ -1349,7 +1349,7 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code,
   code_ = code;
 
   // Load manifest scalars from the container.
-  AOTManifestScalars s;
+  AOTInterpManifest s;
   memcpy(&s, containerBase + entry->manifestOffset, sizeof(s));
 
   interpretOpOffset_ = s.InterpretOp;

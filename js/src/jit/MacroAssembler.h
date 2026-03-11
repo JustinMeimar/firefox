@@ -420,6 +420,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // In AOT mode, call the pre-barrier trampoline via a patched movabs.
   void callPreBarrierAOT(MIRType type, Register scratch);
 
+  // Emit a code pointer for a dispatch table entry.  In AOT mode,
+  // also registers a DispatchTablePatch for runtime fixup.
+  void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
+                               const Label& handler);
+
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
     // shared between visitors in the CodeGenerator. This assertion

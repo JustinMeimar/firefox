@@ -6054,8 +6054,6 @@ bool BaselineCodeGen<Handler>::emit_SuperFun() {
   // Unbox callee.
   masm.unboxObject(R0, callee);
 
-// NOTE(Justin): why is this here? We should not pollute baseline codegen
-// We should just remove this.
 #ifdef DEBUG
   if (!aot_) {
     Label classCheckDone;
@@ -7084,18 +7082,6 @@ bool BaselineInterpreterGenerator::emitDebugTrap() {
   if (!debugTrapOffsets_.append(offset.offset())) {
     return false;
   }
-  // NOTE(Justin): What is the difference between aotDebugTraps_ and the
-  // existing debugTrapOffsets_? Whatever Baseline manifest that needs
-  // to be written out, why can it not just use the existing traps? Why
-  // are we reinventing the wheel?
-#ifdef ENABLE_AOT_BASELINE
-  if (aot_) {
-    if (!aotDebugTraps_.append(offset.offset())) {
-      return false;
-    }
-  }
-#endif
-
   return true;
 }
 
@@ -7242,28 +7228,9 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 #endif
 
   tableOffset_ = masm.currentOffset();
-  
-  // NOTE(Justin): This seems like one of the final remaining sites of
-  // AOT clutter in baseline codegen. Somewhat poetically it is precsiely
-  // the point at which we started the AOT journey. It is tricky because
-  // the dispatch table patch is computed via the table offset added with
-  // the op index multiplied by the size of a pointer. Can we not find
-  // someway to have an `masm.writeAOTCodePointer` to cleanly move this
-  // beneath the masm interfacec like the rest of baseline codegen?
+
   for (size_t i = 0; i < JSOP_LIMIT; i++) {
-    const Label& opLabel = opLabels[i];
-    MOZ_ASSERT(opLabel.bound());
-    CodeLabel cl;
-    if (aot_) {
-      uint32_t handlerOffset = opLabel.offset();
-      uint32_t targetOffset = tableOffset_ + (i * sizeof(uintptr_t));
-      RuntimePatch patch =
-          RuntimePatch::DispatchTablePatch(targetOffset, handlerOffset);
-      aot_->accumulator().registerPatch(std::move(patch));
-    }
-    masm.writeCodePointer(&cl);
-    cl.target()->bind(opLabel.offset());
-    masm.addCodeLabel(cl);
+    masm.writeDispatchTableEntry(tableOffset_, i, opLabels[i]);
   }
 
   return true;
@@ -7318,7 +7285,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 #ifdef ENABLE_AOT_BASELINE
 bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
   // Build manifest scalars from generator state.
-  AOTManifestScalars s;
+  AOTInterpManifest s;
   s.InterpretOp = interpretOpOffset_;
   s.InterpretOpNoDebugTrap = interpretOpNoDebugTrapOffset_;
   s.BailoutPrologue = bailoutPrologueOffset_.offset();
@@ -7332,7 +7299,7 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
   s.HeaderSize = code->headerSize();
   s.PrologueEndOffset = warmUpCheckPrologueOffset_.offset();
   s.DebugInstrumentationCount = handler.debugInstrumentationOffsets().length();
-  s.DebugTrapCount = aotDebugTraps_.length();
+  s.DebugTrapCount = debugTrapOffsets_.length();
   s.CodeCoverageCount = handler.codeCoverageOffsets().length();
   s.ICReturnCount = handler.icReturnOffsets().length();
   s.RuntimePatchCount = aot_->accumulator().runtimePatches.length();
@@ -7344,7 +7311,7 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
     return metadata.append(bytes, count * sizeof(*data));
   };
   const auto& debugInstr = handler.debugInstrumentationOffsets();
-  const auto& debugTraps = aotDebugTraps_;
+  const auto& debugTraps = debugTrapOffsets_;
   const auto& coverage = handler.codeCoverageOffsets();
   const auto& icReturns = handler.icReturnOffsets();
 

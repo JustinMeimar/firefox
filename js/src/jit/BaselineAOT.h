@@ -15,42 +15,40 @@
 
 namespace js::jit {
 
+class BaselineInterpreter;
+
 static constexpr const char* kAOTOutputPath =
     "js/src/jit/AOTBaselineInterpreter.S";
 
-// =========================================================================
-// Baseline interpreter manifest
-// =========================================================================
-
-#define BASELINE_MANIFEST_FIELDS(V) \
-  V(InterpretOp)                    \
-  V(InterpretOpNoDebugTrap)         \
-  V(BailoutPrologue)                \
-  V(ProfilerEnterToggle)            \
-  V(ProfilerExitToggle)             \
-  V(DebugTrapHandler)               \
-  V(DispatchTableOffset)            \
-  V(CallVMDebugPrologue)            \
-  V(CallVMDebugEpilogue)            \
-  V(CallVMDebugAfterYield)          \
-  V(HeaderSize)                     \
-  V(PrologueEndOffset)              \
-  V(DebugInstrumentationCount)      \
-  V(DebugTrapCount)                 \
-  V(CodeCoverageCount)              \
-  V(ICReturnCount)                  \
-  V(RuntimePatchCount)
-
-struct AOTManifestScalars {
-#define DECLARE_FIELD(name) uint32_t name = 0;
-  BASELINE_MANIFEST_FIELDS(DECLARE_FIELD)
-#undef DECLARE_FIELD
+// [SMDOC] AOT Baseline Interpreter Manifest
+//
+// Fixed-size header serialized alongside the interpreter code blob.  Each
+// field records a byte offset (or count) that the load-time code needs to
+// reconstruct the BaselineInterpreter state: opcode handler entry points,
+// profiler/debug toggle sites, and the lengths of the variable-length
+// metadata arrays that follow the manifest in the blob.
+struct AOTInterpManifest {
+  uint32_t InterpretOp = 0;
+  uint32_t InterpretOpNoDebugTrap = 0;
+  uint32_t BailoutPrologue = 0;
+  uint32_t ProfilerEnterToggle = 0;
+  uint32_t ProfilerExitToggle = 0;
+  uint32_t DebugTrapHandler = 0;
+  uint32_t DispatchTableOffset = 0;
+  uint32_t CallVMDebugPrologue = 0;
+  uint32_t CallVMDebugEpilogue = 0;
+  uint32_t CallVMDebugAfterYield = 0;
+  uint32_t HeaderSize = 0;
+  uint32_t PrologueEndOffset = 0;
+  uint32_t DebugInstrumentationCount = 0;
+  uint32_t DebugTrapCount = 0;
+  uint32_t CodeCoverageCount = 0;
+  uint32_t ICReturnCount = 0;
+  uint32_t RuntimePatchCount = 0;
 };
 
-// =========================================================================
-// Baseline compilation (self-hosted) manifest
-// =========================================================================
-
+// [SMDOC] AOT Baseline Compilation (Self-Hosted) Manifest
+//
 // Per-script manifest for AOT-compiled self-hosted functions.
 struct AOTScriptManifest {
   uint32_t warmUpCheckPrologueOffset;
@@ -65,19 +63,13 @@ struct AOTScriptManifest {
   uint32_t runtimePatchCount;
 };
 
-// =========================================================================
-// Baseline AOT dump/load functions
-// =========================================================================
-
-class BaselineInterpreter;
-
 // Build and save the interpreter AOT blob to the saved-blob slot.
 // Called from BaselineInterpreterGenerator::dumpAOTInterp with all
 // the data extracted from the generator.  The metadata byte vectors
 // are pre-packed by the caller (debugInstr, debugTraps, coverage,
 // icReturns concatenated).
 [[nodiscard]] bool BuildAndSaveInterpBlob(
-    JitCode* code, const AOTManifestScalars& scalars,
+    JitCode* code, const AOTInterpManifest& scalars,
     const RuntimePatchVector& patches,
     const uint8_t* metadataBytes, size_t metadataSize);
 

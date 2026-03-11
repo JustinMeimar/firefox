@@ -599,10 +599,6 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   uint32_t compileRuntimePtrOffset_ = 0;
 
 #ifdef ENABLE_AOT_BASELINE
-  // Debug trap offsets for AOT serialization (duplicates debugTrapOffsets_
-  // but consumed separately by the AOT dump path).
-  Vector<uint32_t, 0, SystemAllocPolicy> aotDebugTraps_;
-
   [[nodiscard]] bool dumpAOTInterp(JSContext* cx, JitCode* code);
 #endif
 

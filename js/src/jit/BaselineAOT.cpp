@@ -171,8 +171,8 @@ static bool writeAOTContainer(std::ostream& out,
   emitAsmBytes(out, reinterpret_cast<const uint8_t*>(&hdr), sizeof(hdr));
 
   for (uint32_t i = 0; i < blobCount; i++) {
-    out << "// --- Directory Entry " << i << " (kind=" << dirEntries[i].kind
-        << ") ---\n";
+    out << "// --- Directory Entry " << i << " (kind="
+        << static_cast<uint32_t>(dirEntries[i].kind) << ") ---\n";
     emitAsmBytes(out, reinterpret_cast<const uint8_t*>(&dirEntries[i]),
                  sizeof(AOTBlobDirectoryEntry));
   }
@@ -228,7 +228,7 @@ static bool writeAOTContainer(std::ostream& out,
 // DumpAOTContainer() which runs later once a realm exists.
 static mozilla::Maybe<AOTBlobData> sSavedInterpreterBlob;
 
-bool BuildAndSaveInterpBlob(JitCode* code, const AOTManifestScalars& scalars,
+bool BuildAndSaveInterpBlob(JitCode* code, const AOTInterpManifest& scalars,
                             const RuntimePatchVector& patches,
                             const uint8_t* metadataBytes,
                             size_t metadataSize) {
@@ -243,8 +243,7 @@ bool BuildAndSaveInterpBlob(JitCode* code, const AOTManifestScalars& scalars,
   sSavedInterpreterBlob.emplace();
   AOTBlobData& interpBlob = *sSavedInterpreterBlob;
 
-  interpBlob.dirEntry.kind =
-      static_cast<uint32_t>(AOTBlobKind::BaselineInterpreter);
+  interpBlob.dirEntry.kind = AOTBlobKind::BaselineInterpreter;
   interpBlob.dirEntry.nameHash = 0;
 
   if (!AOTBlobData::appendBytes(interpBlob.code, codeStart, codeSize)) {
@@ -367,9 +366,8 @@ static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
   sm.codeSize = jitCode->instructionsSize();
   sm.headerSize = jitCode->headerSize();
   sm.runtimePatchCount = aotCtx.accumulator().runtimePatches.length();
-  blobOut->dirEntry.kind =
-      static_cast<uint32_t>(AOTBlobKind::SelfHostedFunction);
-  blobOut->dirEntry.nameHash = AOTNameHash(funcName);
+  blobOut->dirEntry.kind = AOTBlobKind::SelfHostedFunction;
+  blobOut->dirEntry.nameHash = mozilla::HashString(funcName);
 
   if (!AOTBlobData::appendBytes(blobOut->code, jitCode->raw(),
                                 jitCode->instructionsSize())) {
@@ -483,7 +481,7 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
 
   const uint8_t* containerBase = GetAOTContainer();
 
-  AOTManifestScalars manifest;
+  AOTInterpManifest manifest;
   memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
 
   // Ensure debug trap handlers exist before allocating writable code.
@@ -547,8 +545,8 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
   JS::AutoCheckCannotGC nogc;
   uint32_t nameHash = name->hasLatin1Chars()
-      ? AOTNameHash(name->latin1Chars(nogc), name->length())
-      : AOTNameHash(name->twoByteChars(nogc), name->length());
+      ? mozilla::HashStringKnownLength(name->latin1Chars(nogc), name->length())
+      : mozilla::HashStringKnownLength(name->twoByteChars(nogc), name->length());
 
   const AOTBlobDirectoryEntry* entry =
       FindAOTBlob(AOTBlobKind::SelfHostedFunction, nameHash);
