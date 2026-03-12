@@ -18,82 +18,24 @@
 #include "jit/JitSpewer.h"
 #include "jit/JitZone.h"
 #include "jit/ProcessExecutableMemory.h"
-#include "jit/VMFunctions.h"
-#include "vm/Caches.h"
 #include "vm/JSContext.h"
 
 namespace js::jit {
 
 // ---------------------------------------------------------------------------
-// AOT relocation resolution
+// RuntimePatch — always patches the AOT table base address
 // ---------------------------------------------------------------------------
-
-uintptr_t ResolveAOTReloc(AOTRelocKind kind, JSContext* cx) {
-  switch (kind) {
-    case AOTRelocKind::JSRuntimePtr:
-      return (uintptr_t)cx->runtime();
-    case AOTRelocKind::JSContextPtr:
-      return (uintptr_t)cx;
-    case AOTRelocKind::InterruptBits:
-      return (uintptr_t)cx->addressOfInterruptBits();
-    case AOTRelocKind::JitActivation:
-      return (uintptr_t)cx->addressOfJitActivation();
-    case AOTRelocKind::RealmPtr:
-      return (uintptr_t)cx->addressOfRealm();
-    case AOTRelocKind::ContextRealm:
-      return (uintptr_t)(reinterpret_cast<const uint8_t*>(cx) +
-                         JSContext::offsetOfRealm());
-    case AOTRelocKind::WellKnownSymbols:
-      return (uintptr_t)cx->runtime()->wellKnownSymbols.ref();
-    case AOTRelocKind::JitRuntime:
-      return (uintptr_t)cx->runtime()->jitRuntime();
-    case AOTRelocKind::LastBufferedCell:
-      return (uintptr_t)cx->runtime()->gc.addressOfLastBufferedWholeCell();
-    case AOTRelocKind::ProfilerEnabled:
-      return (uintptr_t)cx->runtime()->geckoProfiler().addressOfEnabled();
-    case AOTRelocKind::ProfilerExitFrameTail: {
-      TrampolinePtr ptr =
-          cx->runtime()->jitRuntime()->getProfilerExitFrameTail();
-      return (uintptr_t)(ptr.value);
-    }
-    case AOTRelocKind::DoubleToInt32Stub: {
-      TrampolinePtr ptr =
-          cx->runtime()->jitRuntime()->getDoubleToInt32ValueStub();
-      return (uintptr_t)(ptr.value);
-    }
-    case AOTRelocKind::MegamorphicCache:
-      return (uintptr_t)&cx->runtime()->caches().megamorphicCache;
-    case AOTRelocKind::MegamorphicSetPropCache:
-      return (uintptr_t)cx->runtime()->caches().megamorphicSetPropCache.get();
-    case AOTRelocKind::StringToAtomCache: {
-      auto* cache =
-          reinterpret_cast<const uint8_t*>(
-              &cx->runtime()->caches().stringToAtomCache);
-      return (uintptr_t)(cache + StringToAtomCache::offsetOfLastLookups());
-    }
-    case AOTRelocKind::AOTTableBase:
-      return (uintptr_t)cx->runtime()->jitRuntime()->aotIndirectionTable().baseAddress();
-    case AOTRelocKind::Count:
-      break;
-  }
-  MOZ_CRASH("Unknown AOTRelocKind");
-}
-
-// ---------------------------------------------------------------------------
-// RuntimePatch resolution
-// ---------------------------------------------------------------------------
-
-uintptr_t RuntimePatch::getValueToPatch(const PatchContext& pc) const {
-  return ResolveAOTReloc(kind, pc.cx);
-}
 
 void RuntimePatch::apply(const PatchContext& pc) const {
-  uintptr_t val = getValueToPatch(pc);
+  uintptr_t val = uintptr_t(
+      pc.cx->runtime()->jitRuntime()->aotIndirectionTable().baseAddress());
   uint8_t* target = pc.codeBase + targetOffset;
 #ifdef DEBUG
   uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
-  JitSpew(JitSpew_BaselineAOT, "Runtime patch [%s] @ offset %u: before=0x%016lx after=0x%016lx",
-          AOTRelocKindName(kind), targetOffset, beforeValue, val);
+  JitSpew(JitSpew_BaselineAOT,
+          "Runtime patch [AOTTableBase] @ offset %u: "
+          "before=0x%016lx after=0x%016lx",
+          targetOffset, beforeValue, val);
 #endif
   *reinterpret_cast<uintptr_t*>(target) = val;
 }

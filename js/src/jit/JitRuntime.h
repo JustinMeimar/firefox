@@ -244,7 +244,7 @@ class JitRuntime {
 
   // VM wrapper addresses for AOT code, indexed by VMFunctionId.
   // Populated after trampolines are generated; the base address is stored
-  // in AOTIndirectionSlot::VMWrapperBase so AOT code can load it.
+  // in AOTSlot::VMWrapperBase so AOT code can load it.
   using AOTVMWrapperSlots = Vector<uintptr_t, 0, SystemAllocPolicy>;
   AOTVMWrapperSlots aotVMWrapperSlots_;
 

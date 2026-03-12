@@ -127,46 +127,46 @@ bool JitRuntime::initialize(JSContext* cx) {
   // Populate AOT indirection table slots that don't depend on trampolines.
   MOZ_ASSERT(cx->runtime());
   JSRuntime* rt = cx->runtime();
-  aotIndirectionTable_.set(AOTIndirectionSlot::JSRuntimePtr,
+  aotIndirectionTable_.set(AOTSlot::JSRuntimePtr,
                            uintptr_t(rt));
-  aotIndirectionTable_.set(AOTIndirectionSlot::JSContextPtr,
+  aotIndirectionTable_.set(AOTSlot::JSContextPtr,
                            uintptr_t(cx));
-  aotIndirectionTable_.set(AOTIndirectionSlot::InterruptBits,
+  aotIndirectionTable_.set(AOTSlot::InterruptBits,
                            uintptr_t(cx->addressOfInterruptBits()));
-  aotIndirectionTable_.set(AOTIndirectionSlot::JitActivation,
+  aotIndirectionTable_.set(AOTSlot::JitActivation,
                            uintptr_t(cx->addressOfJitActivation()));
-  aotIndirectionTable_.set(AOTIndirectionSlot::RealmPtr,
+  aotIndirectionTable_.set(AOTSlot::RealmPtr,
                            uintptr_t(cx->addressOfRealm()));
-  aotIndirectionTable_.set(AOTIndirectionSlot::ContextRealm,
+  aotIndirectionTable_.set(AOTSlot::ContextRealm,
                            uintptr_t(reinterpret_cast<uint8_t*>(cx) +
                                      JSContext::offsetOfRealm()));
-  aotIndirectionTable_.set(AOTIndirectionSlot::WellKnownSymbols,
+  aotIndirectionTable_.set(AOTSlot::WellKnownSymbols,
                            uintptr_t(rt->wellKnownSymbols.ref()));
-  aotIndirectionTable_.set(AOTIndirectionSlot::JitRuntime,
+  aotIndirectionTable_.set(AOTSlot::JitRuntime,
                            uintptr_t(this));
-  aotIndirectionTable_.set(AOTIndirectionSlot::LastBufferedCell,
+  aotIndirectionTable_.set(AOTSlot::LastBufferedCell,
                            uintptr_t(rt->gc.addressOfLastBufferedWholeCell()));
-  aotIndirectionTable_.set(AOTIndirectionSlot::ProfilerEnabled,
+  aotIndirectionTable_.set(AOTSlot::ProfilerEnabled,
                            uintptr_t(rt->geckoProfiler().addressOfEnabled()));
-  aotIndirectionTable_.set(AOTIndirectionSlot::MegamorphicCache,
+  aotIndirectionTable_.set(AOTSlot::MegamorphicCache,
                            uintptr_t(&rt->caches().megamorphicCache));
-  aotIndirectionTable_.set(AOTIndirectionSlot::MegamorphicSetPropCache,
+  aotIndirectionTable_.set(AOTSlot::MegamorphicSetPropCache,
                            uintptr_t(rt->caches().megamorphicSetPropCache.get()));
   {
     auto* cache = reinterpret_cast<uint8_t*>(&rt->caches().stringToAtomCache);
     aotIndirectionTable_.set(
-        AOTIndirectionSlot::StringToAtomCache,
+        AOTSlot::StringToAtomCache,
         uintptr_t(cache + StringToAtomCache::offsetOfLastLookups()));
   }
 
   // C++ function pointer slots — addresses are fixed for the process lifetime.
-  aotIndirectionTable_.set(AOTIndirectionSlot::CppFn_PostWriteBarrier,
+  aotIndirectionTable_.set(AOTSlot::CppFn_PostWriteBarrier,
                            uintptr_t(PostWriteBarrier));
-  aotIndirectionTable_.set(AOTIndirectionSlot::CppFn_FrameIsDebuggeeCheck,
+  aotIndirectionTable_.set(AOTSlot::CppFn_FrameIsDebuggeeCheck,
                            uintptr_t(FrameIsDebuggeeCheck));
-  aotIndirectionTable_.set(AOTIndirectionSlot::CppFn_HandleCodeCoverageAtPrologue,
+  aotIndirectionTable_.set(AOTSlot::CppFn_HandleCodeCoverageAtPrologue,
                            uintptr_t(HandleCodeCoverageAtPrologue));
-  aotIndirectionTable_.set(AOTIndirectionSlot::CppFn_HandleCodeCoverageAtPC,
+  aotIndirectionTable_.set(AOTSlot::CppFn_HandleCodeCoverageAtPC,
                            uintptr_t(HandleCodeCoverageAtPC));
 
   if (!generateTrampolines(cx)) {
@@ -175,28 +175,28 @@ bool JitRuntime::initialize(JSContext* cx) {
 
   // Trampoline-dependent slots — trampolineCode_ must exist now.
   aotIndirectionTable_.set(
-      AOTIndirectionSlot::ProfilerExitFrameTail,
+      AOTSlot::ProfilerExitFrameTail,
       uintptr_t(getProfilerExitFrameTail().value));
   aotIndirectionTable_.set(
-      AOTIndirectionSlot::DoubleToInt32Stub,
+      AOTSlot::DoubleToInt32Stub,
       uintptr_t(getDoubleToInt32ValueStub().value));
   aotIndirectionTable_.set(
-      AOTIndirectionSlot::ExceptionTail,
+      AOTSlot::ExceptionTail,
       uintptr_t(getExceptionTail().value));
   aotIndirectionTable_.set(
-      AOTIndirectionSlot::PreBarrier_Value,
+      AOTSlot::PreBarrier_Value,
       uintptr_t(preBarrier(MIRType::Value).value));
   aotIndirectionTable_.set(
-      AOTIndirectionSlot::PreBarrier_String,
+      AOTSlot::PreBarrier_String,
       uintptr_t(preBarrier(MIRType::String).value));
   aotIndirectionTable_.set(
-      AOTIndirectionSlot::PreBarrier_Object,
+      AOTSlot::PreBarrier_Object,
       uintptr_t(preBarrier(MIRType::Object).value));
   aotIndirectionTable_.set(
-      AOTIndirectionSlot::PreBarrier_Shape,
+      AOTSlot::PreBarrier_Shape,
       uintptr_t(preBarrier(MIRType::Shape).value));
   aotIndirectionTable_.set(
-      AOTIndirectionSlot::PreBarrier_WasmAnyRef,
+      AOTSlot::PreBarrier_WasmAnyRef,
       uintptr_t(preBarrier(MIRType::WasmAnyRef).value));
 
   // Populate VM wrapper slots and store base pointer in the indirection table.
@@ -209,7 +209,7 @@ bool JitRuntime::initialize(JSContext* cx) {
       aotVMWrapperSlots_.infallibleAppend(
           uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
     }
-    aotIndirectionTable_.set(AOTIndirectionSlot::VMWrapperBase,
+    aotIndirectionTable_.set(AOTSlot::VMWrapperBase,
                              uintptr_t(aotVMWrapperSlots_.begin()));
   }
 

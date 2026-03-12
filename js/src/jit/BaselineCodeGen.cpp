@@ -640,7 +640,7 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   // Check one element cache to avoid VM call.
   Label skipBarrier;
   Register ptrReg = R1.scratchReg();
-  masm.loadAOTReloc(AOTRelocKind::LastBufferedCell, ptrReg);
+  masm.loadAOTSlot(AOTSlot::LastBufferedCell, ptrReg);
   masm.branchPtr(Assembler::Equal, ptrReg, objReg, &skipBarrier);
 
   saveInterpreterPCReg();
@@ -654,12 +654,12 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   masm.pushValue(R0);
 
   masm.setupUnalignedABICall(scratch);
-  masm.loadRuntime(scratch);
+  masm.loadAOTRuntime(scratch);
   masm.passABIArg(scratch);
   masm.passABIArg(objReg);
   {
     Register fnReg = regs.takeAny();
-    masm.loadCppFunction(AOTIndirectionSlot::CppFn_PostWriteBarrier, fnReg);
+    masm.moveAOTSlot(AOTSlot::CppFn_PostWriteBarrier, fnReg);
     masm.callWithABI(fnReg);
   }
 
@@ -894,7 +894,7 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
   uint32_t callOffset;
   {
     Register scratch = R0.scratchReg();
-    masm.loadVMWrapper(id, scratch);
+    masm.loadAOTVMWrapper(id, scratch);
     masm.call(scratch);
     callOffset = masm.currentOffset();
   }
@@ -986,7 +986,7 @@ bool BaselineInterpreterCodeGen::emitIsDebuggeeCheck() {
       masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
       masm.passABIArg(R0.scratchReg());
       Register fnReg = R2.scratchReg();
-      masm.loadCppFunction(AOTIndirectionSlot::CppFn_FrameIsDebuggeeCheck, fnReg);
+      masm.moveAOTSlot(AOTSlot::CppFn_FrameIsDebuggeeCheck, fnReg);
       masm.callWithABI(fnReg);
     }
     restoreInterpreterPCReg();
@@ -1585,7 +1585,7 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
 
   Label done;
   Register scratch = R0.scratchReg();
-  masm.branchAOTReloc32(Assembler::Equal, AOTRelocKind::InterruptBits, Imm32(0),
+  masm.branchAOTSlot32(Assembler::Equal, AOTSlot::InterruptBits, Imm32(0),
                         &done, scratch);
 
   prepareVMCall();
@@ -1755,9 +1755,9 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     {
       Label checkOk;
       Register ptrReg = regs.takeAny();
-      masm.branchAOTReloc32(Assembler::Equal, AOTRelocKind::ProfilerEnabled,
+      masm.branchAOTSlot32(Assembler::Equal, AOTSlot::ProfilerEnabled,
                             Imm32(0), &checkOk, ptrReg);
-      masm.loadAOTReloc(AOTRelocKind::JitActivation, scratchReg);
+      masm.loadAOTSlot(AOTSlot::JitActivation, scratchReg);
       masm.loadPtr(
           Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
           scratchReg);
@@ -2005,7 +2005,7 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   Label noInstrument;
   CodeOffset toggleOffset = masm.toggledJump(&noInstrument);
   Register ptrReg = R1.scratchReg();
-  masm.moveAOTReloc(AOTRelocKind::ProfilerExitFrameTail, ptrReg);
+  masm.moveAOTSlot(AOTSlot::ProfilerExitFrameTail, ptrReg);
   masm.jump(ptrReg);
 
   masm.bind(&noInstrument);
@@ -2826,7 +2826,7 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   Register scratch2 = R1.scratchReg();
   LoadUint8Operand(masm, scratch1);
 
-  masm.moveAOTReloc(AOTRelocKind::WellKnownSymbols, scratch2);
+  masm.moveAOTSlot(AOTSlot::WellKnownSymbols, scratch2);
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
   frame.push(R0);
@@ -5793,7 +5793,7 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
   // Note: this stub may clobber scratch1.
   {
     Register stubReg = scratch1;
-    masm.moveAOTReloc(AOTRelocKind::DoubleToInt32Stub, stubReg);
+    masm.moveAOTSlot(AOTSlot::DoubleToInt32Stub, stubReg);
     masm.call(stubReg);
   }
 
@@ -6259,7 +6259,7 @@ bool BaselineInterpreterCodeGen::emitAfterYieldDebugInstrumentation(
   if (!handler.addDebugInstrumentationOffset(toggleOffset)) {
     return false;
   }
-  masm.loadAOTReloc(AOTRelocKind::RealmPtr, scratch);
+  masm.loadAOTSlot(AOTSlot::RealmPtr, scratch);
   masm.branchTest32(Assembler::Zero,
                     Address(scratch, Realm::offsetOfDebugModeBits()),
                     Imm32(Realm::debugModeIsDebuggeeBit()), &done);
@@ -6491,9 +6491,9 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     Register scratchReg = scratch2;
     Label skip;
 
-    masm.branchAOTReloc32(Assembler::Equal, AOTRelocKind::ProfilerEnabled,
+    masm.branchAOTSlot32(Assembler::Equal, AOTSlot::ProfilerEnabled,
                           Imm32(0), &skip, scratch1);
-    masm.moveAOTReloc(AOTRelocKind::JSContextPtr, scratchReg);
+    masm.moveAOTSlot(AOTSlot::JSContextPtr, scratchReg);
     masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
                  scratchReg);
     masm.storePtr(
@@ -7224,7 +7224,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     debugTrapHandlerOffset_ = masm.currentOffset();
     {
       Register ptrReg = R1.scratchReg();
-      masm.loadDebugTrapHandler(DebugTrapHandlerKind::Interpreter, ptrReg);
+      masm.loadAOTDebugTrapHandler(DebugTrapHandlerKind::Interpreter, ptrReg);
       masm.jump(ptrReg);
     }
   }
@@ -7269,7 +7269,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   masm.passABIArg(R0.scratchReg());
   {
     Register fnReg = R2.scratchReg();
-    masm.loadCppFunction(AOTIndirectionSlot::CppFn_HandleCodeCoverageAtPrologue, fnReg);
+    masm.moveAOTSlot(AOTSlot::CppFn_HandleCodeCoverageAtPrologue, fnReg);
     masm.callWithABI(fnReg);
   }
 
@@ -7290,7 +7290,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   {
     // R0 (rcx) and R2 (rax) are both used as ABI args; use R1 (rbx).
     Register fnReg = R1.scratchReg();
-    masm.loadCppFunction(AOTIndirectionSlot::CppFn_HandleCodeCoverageAtPC, fnReg);
+    masm.moveAOTSlot(AOTSlot::CppFn_HandleCodeCoverageAtPC, fnReg);
     masm.callWithABI(fnReg);
   }
 

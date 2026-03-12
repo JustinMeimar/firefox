@@ -501,10 +501,10 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
 
   // Populate debug trap handler slots now that they've been generated.
   AOTIndirectionTable& table = cx->runtime()->jitRuntime()->aotIndirectionTable();
-  table.set(AOTIndirectionSlot::DebugTrapInterpreter,
+  table.set(AOTSlot::DebugTrapInterpreter,
             uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
                 DebugTrapHandlerKind::Interpreter)->raw()));
-  table.set(AOTIndirectionSlot::DebugTrapCompiler,
+  table.set(AOTSlot::DebugTrapCompiler,
             uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
                 DebugTrapHandlerKind::Compiler)->raw()));
 

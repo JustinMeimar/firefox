@@ -400,31 +400,34 @@ class MacroAssembler : public MacroAssemblerSpecific {
                           AOTContext* aotContext = nullptr);
 
  public:
-  bool isAOT() const { return aotContext_ != nullptr; }
+  bool isAOT() const {
+#ifdef ENABLE_AOT_BASELINE
+    return aotContext_ != nullptr;
+#else
+    return false;
+#endif
+  }
 
+  // Dual-mode helpers: work in both AOT and non-AOT modes.
+  // In AOT mode, load via indirection table; otherwise use direct pointers.
+  void loadAOTVMWrapper(VMFunctionId id, Register dest);
+  void loadAOTDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
+
+#ifdef ENABLE_AOT_BASELINE
   AOTContext& aot() const {
     MOZ_ASSERT(aotContext_);
     return *aotContext_;
   }
 
-  // Wraps regular codegen in non-aot mode and dispatches to the set
-  // strategy when AOT is on.
-  void moveAOTReloc(AOTRelocKind kind, Register dest);
-  void loadAOTReloc(AOTRelocKind kind, Register dest);
-
-  // Load a value from the AOTIndirectionTable stored in the current
-  // BaselineFrame.  Two loads: frame→table ptr, then table→slot value.
-  void loadAOTIndirectionSlot(AOTIndirectionSlot slot, Register dest);
-  void branchAOTReloc32(Condition cond, AOTRelocKind kind, Imm32 rhs,
-                        Label* label, Register scratch);
-
-  // Parametric reference helpers.
-  void loadVMWrapper(VMFunctionId id, Register dest);
-  void loadCppFunction(AOTIndirectionSlot slot, Register dest);
-  void loadDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
-
-  // In AOT mode, call the pre-barrier trampoline via a patched movabs.
+  // AOT slot helpers. In AOT mode, emit patched movabs + slot loads.
+  // In non-AOT mode, resolve the slot to a concrete address at compile time.
+  void* aotSlotAddress(AOTSlot slot);
+  void moveAOTSlot(AOTSlot slot, Register dest);
+  void loadAOTSlot(AOTSlot slot, Register dest);
+  void branchAOTSlot32(Condition cond, AOTSlot slot, Imm32 rhs,
+                       Label* label, Register scratch);
   void callPreBarrierAOT(MIRType type, Register scratch);
+#endif
 
   // Emit a dispatch table entry.  In AOT mode, emits a PIC-friendly
   // int32 offset relative to the table base.  Otherwise emits an
@@ -1961,9 +1964,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   inline void branchTestNeedsIncrementalBarrier(Condition cond, Label* label);
   inline void branchTestNeedsIncrementalBarrierAnyZone(Condition cond,
-                                                       Label* label,
-                                                       Register scratch);
-  inline void branchTestNeedsIncrementalBarrierRuntime(Condition cond,
                                                        Label* label,
                                                        Register scratch);
 
@@ -5126,8 +5126,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void loadRuntimeFuse(RuntimeFuses::FuseIndex index, Register dest);
 
-  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail,
-                        Register scratch = InvalidReg);
+  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail);
 
   void switchToRealm(Register realm, Register scratch = InvalidReg);
   void switchToRealm(const void* realm, Register scratch);
@@ -5136,8 +5135,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void switchToWasmInstanceRealm(Register scratch1, Register scratch2);
   void debugAssertContextRealm(const void* realm, Register scratch);
 
-  void guardObjectHasSameRealm(Register obj, Register scratch, Label* fail,
-                               Register scratch2 = InvalidReg);
+  void guardObjectHasSameRealm(Register obj, Register scratch, Label* fail);
 
   template <typename ValueType>
   void storeLocalAllocSite(ValueType value, Register scratch);
@@ -5245,7 +5243,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  private:
   TrampolinePtr preBarrierTrampoline(MIRType type);
-  TrampolinePtr getExceptionTailTrampoline() const;
 
   template <typename T>
   void unguardedCallPreBarrier(const T& address, MIRType type) {
@@ -5259,9 +5256,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Push(PreBarrierReg);
     computeEffectiveAddress(address, PreBarrierReg);
 
+#ifdef ENABLE_AOT_BASELINE
     if (isAOT()) {
       callPreBarrierAOT(type, ScratchReg);
-    } else {
+    } else
+#endif
+    {
       TrampolinePtr preBarrier = preBarrierTrampoline(type);
       call(preBarrier);
     }
@@ -5275,11 +5275,16 @@ class MacroAssembler : public MacroAssemblerSpecific {
   template <typename T>
   void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
-    if (!isAOT()) {
-      branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
-    } else {
-      branchTestNeedsIncrementalBarrierRuntime(Assembler::Zero, &done,
+#ifdef ENABLE_AOT_BASELINE
+    if (isAOT()) {
+      // AOT code has no realm, so use the AnyZone variant which loads
+      // cx->zone to check the barrier flag.
+      branchTestNeedsIncrementalBarrierAnyZone(Assembler::Zero, &done,
                                                ScratchReg);
+    } else
+#endif
+    {
+      branchTestNeedsIncrementalBarrier(Assembler::Zero, &done);
     }
     unguardedCallPreBarrier(address, type);
     bind(&done);
@@ -5749,8 +5754,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
     isCallableOrConstructor(false, obj, output, isProxy);
   }
 
-  void setIsCrossRealmArrayConstructor(Register obj, Register output,
-                                       Register scratch = InvalidReg);
+  void setIsCrossRealmArrayConstructor(Register obj, Register output);
 
   void setIsDefinitelyTypedArrayConstructor(Register obj, Register output);
 
@@ -5950,7 +5954,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
  public:
   // Load the JSRuntime pointer into the given register.
   // Works in both AOT and non-AOT modes.
-  void loadRuntime(Register reg);
+  void loadAOTRuntime(Register reg);
 
  public:
   void enableProfilingInstrumentation() {
