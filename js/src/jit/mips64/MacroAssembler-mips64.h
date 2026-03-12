@@ -423,7 +423,6 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64 {
     writeInst(-1);
     writeInst(-1);
   }
-
   void jump(Label* label) { ma_b(label); }
   void jump(Register reg) {
     as_jr(reg);

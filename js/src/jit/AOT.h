@@ -58,7 +58,6 @@ class MacroAssembler;
   V(MegamorphicCache)           \
   V(MegamorphicSetPropCache)    \
   V(StringToAtomCache)          \
-  V(DispatchTable)              \
   V(AOTTableBase)
 
 enum class AOTRelocKind : uint16_t {
@@ -187,7 +186,6 @@ inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind,
 struct PatchContext {
     JSContext* cx;
     uint8_t* codeBase;
-    uint32_t dispatchTableOffset;
 };
 
 class RuntimePatch {
@@ -197,32 +195,19 @@ class RuntimePatch {
     AOTRelocKind kind;
     uint32_t targetOffset;
 
-    // Auxiliary data — interpretation depends on kind.
-    uint32_t auxData;
-
-    static RuntimePatch DispatchTablePatch(uint32_t targetOffset_,
-                                           uint32_t handlerOffset_) {
-      RuntimePatch p;
-      p.kind = AOTRelocKind::DispatchTable;
-      p.targetOffset = targetOffset_;
-      p.auxData = handlerOffset_;
-      return p;
-    }
-
     explicit RuntimePatch(AOTRelocKind kind_, uint32_t targetOffset_) :
       kind(kind_), targetOffset(targetOffset_) {}
 
     void apply(const PatchContext& pc) const;
 
   private:
-    RuntimePatch() = default;
     uintptr_t getValueToPatch(const PatchContext& pc) const;
 };
 
 static constexpr uintptr_t AOT_PATCH_SENTINEL = 0x0000A070DEADBEEF;
 
-static_assert(sizeof(RuntimePatch) == 12,
-              "RuntimePatch size must be 12 bytes");
+static_assert(sizeof(RuntimePatch) == 8,
+              "RuntimePatch size must be 8 bytes");
 
 using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
 
@@ -231,7 +216,7 @@ class JitCode;
 [[nodiscard]] JitCode* AllocateAndPatchAOTCode(
     JSContext* cx, const AOTBlobDirectoryEntry* entry,
     const uint8_t* containerBase, uint32_t headerSize,
-    CodeKind codeKind, uint32_t dispatchTableOffset);
+    CodeKind codeKind);
 
 // [SMDOC] AOT Accumulator and Compilation Context
 //

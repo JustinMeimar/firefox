@@ -602,7 +602,6 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     writeInst(-1);
     writeInst(-1);
   }
-
   void jump(Label* label) { ma_b(label); }
   void jump(Register reg) { as_jirl(zero, reg, BOffImm16(0)); }
   void jump(const Address& address) {

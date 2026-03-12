@@ -73,8 +73,6 @@ uintptr_t ResolveAOTReloc(AOTRelocKind kind, JSContext* cx) {
     }
     case AOTRelocKind::AOTTableBase:
       return (uintptr_t)cx->runtime()->jitRuntime()->aotIndirectionTable().baseAddress();
-    case AOTRelocKind::DispatchTable:
-      MOZ_CRASH("Patch-only AOTRelocKind cannot be resolved at runtime");
     case AOTRelocKind::Count:
       break;
   }
@@ -86,14 +84,7 @@ uintptr_t ResolveAOTReloc(AOTRelocKind kind, JSContext* cx) {
 // ---------------------------------------------------------------------------
 
 uintptr_t RuntimePatch::getValueToPatch(const PatchContext& pc) const {
-  // Patch-only kinds require union data that ResolveAOTReloc doesn't have.
-  switch(kind) {
-    case AOTRelocKind::DispatchTable:
-      return (uintptr_t)(pc.codeBase + auxData);
-    default:
-      // All other kinds resolve identically to ResolveAOTReloc.
-      return ResolveAOTReloc(kind, pc.cx);
-  }
+  return ResolveAOTReloc(kind, pc.cx);
 }
 
 void RuntimePatch::apply(const PatchContext& pc) const {
@@ -114,8 +105,7 @@ void RuntimePatch::apply(const PatchContext& pc) const {
 JitCode* AllocateAndPatchAOTCode(JSContext* cx,
                                  const AOTBlobDirectoryEntry* entry,
                                  const uint8_t* containerBase,
-                                 uint32_t headerSize, CodeKind codeKind,
-                                 uint32_t dispatchTableOffset) {
+                                 uint32_t headerSize, CodeKind codeKind) {
   uint32_t codeSize = entry->codeSize;
 
   mozilla::Maybe<AutoAllocInAtomsZone> az;
@@ -158,7 +148,7 @@ JitCode* AllocateAndPatchAOTCode(JSContext* cx,
     code->setInstructionsSize(codeSize);
 
     if (entry->patchesCount > 0) {
-      PatchContext patchCtx({cx, codeStart, dispatchTableOffset});
+      PatchContext patchCtx({cx, codeStart});
       const auto* patches = reinterpret_cast<const RuntimePatch*>(
           containerBase + entry->patchesOffset);
       for (uint32_t i = 0; i < entry->patchesCount; i++) {

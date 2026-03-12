@@ -7107,20 +7107,38 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   Label interpretOpAfterDebugTrap;
   masm.bind(&interpretOpAfterDebugTrap);
 
-  // Load pc, bytecode op.
-  Register pcReg = LoadBytecodePC(masm, scratch1);
-  masm.load8ZeroExtend(Address(pcReg, 0), scratch1);
-
-  // Load dispatch table base into scratch2 and jump to table[op].
-  {
+  // Emit the dispatch sequence: load the table base (RIP-relative), index
+  // into it by opcode, and jump to the handler.  In AOT mode the table
+  // contains int32 offsets relative to the table base, so we need an extra
+  // add before the jump.  In non-AOT mode the table contains absolute
+  // pointers and we can do a single indirect jump.
+  auto emitDispatch = [&](Register opcodeReg) -> bool {
     CodeOffset label = masm.moveNearAddressWithPatch(scratch2);
     if (!tableLabels_.append(label)) {
       return false;
     }
-  }
-  {
-    BaseIndex pointer(scratch2, scratch1, ScalePointer);
-    masm.branchToComputedAddress(pointer);
+#ifdef ENABLE_AOT_BASELINE
+    if (masm.isAOT()) {
+      // Table entries are int32 offsets relative to the table base.
+      BaseIndex entry(scratch2, opcodeReg, TimesFour);
+      masm.load32SignExtendToPtr(entry, opcodeReg);
+      masm.addPtr(scratch2, opcodeReg);
+      masm.jump(opcodeReg);
+    } else
+#endif
+    {
+      BaseIndex pointer(scratch2, opcodeReg, ScalePointer);
+      masm.branchToComputedAddress(pointer);
+    }
+    return true;
+  };
+
+  // Load pc, bytecode op.
+  Register pcReg = LoadBytecodePC(masm, scratch1);
+  masm.load8ZeroExtend(Address(pcReg, 0), scratch1);
+
+  if (!emitDispatch(scratch1)) {
+    return false;
   }
 
   // At the end of each op, emit code to bump the pc and jump to the
@@ -7156,15 +7174,8 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 
     // Load the opcode, jump to table[op].
     masm.load8ZeroExtend(Address(InterpreterPCRegAtDispatch, 0), scratch1);
-    {
-      CodeOffset label = masm.moveNearAddressWithPatch(scratch2);
-      if (!tableLabels_.append(label)) {
-        return false;
-      }
-    }
-    {
-      BaseIndex pointer(scratch2, scratch1, ScalePointer);
-      masm.branchToComputedAddress(pointer);
+    if (!emitDispatch(scratch1)) {
+      return false;
     }
     return true;
   };
@@ -7218,12 +7229,17 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     }
   }
 
-  // Emit the dispatch table. Each entry is a code pointer to the handler
-  // for the corresponding opcode.
-  masm.haltingAlign(sizeof(void*));
+  // Emit the dispatch table.  In AOT mode entries are int32 offsets
+  // relative to the table base; otherwise they are absolute code pointers.
+  size_t entrySize =
+#ifdef ENABLE_AOT_BASELINE
+      masm.isAOT() ? sizeof(int32_t) :
+#endif
+      sizeof(uintptr_t);
+  masm.haltingAlign(entrySize);
 
 #if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
-  size_t numInstructions = JSOP_LIMIT * (sizeof(uintptr_t) / sizeof(uint32_t));
+  size_t numInstructions = JSOP_LIMIT * (entrySize / sizeof(uint32_t));
   AutoForbidPoolsAndNops afp(&masm, numInstructions);
 #endif
 

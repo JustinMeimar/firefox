@@ -77,6 +77,10 @@ void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
   movslq(Operand(src), dest);
 }
 
+void MacroAssembler::load32SignExtendToPtr(const BaseIndex& src, Register dest) {
+  movslq(Operand(src), dest);
+}
+
 // ===============================================================
 // Logical instructions
 

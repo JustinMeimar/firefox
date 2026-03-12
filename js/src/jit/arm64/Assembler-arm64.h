@@ -634,7 +634,6 @@ class Assembler : public vixl::Assembler {
     BufferOffset off = EmitData(&x, sizeof(uintptr_t));
     label->patchAt()->bind(off.getOffset());
   }
-
   void verifyHeapAccessDisassembly(uint32_t begin, uint32_t end,
                                    const Disassembler::HeapAccess& heapAccess) {
     MOZ_CRASH("verifyHeapAccessDisassembly");

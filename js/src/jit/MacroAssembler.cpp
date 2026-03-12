@@ -4137,8 +4137,6 @@ static ImmPtr ResolveAOTRelocCompileTime(AOTRelocKind kind,
     }
     case AOTRelocKind::AOTTableBase:
       return ImmPtr(rt->jitRuntime()->aotIndirectionTable().baseAddress());
-    case AOTRelocKind::DispatchTable:
-      MOZ_CRASH("Patch-only AOTRelocKind not available at compile time");
     case AOTRelocKind::Count:
       break;
   }
@@ -4282,13 +4280,15 @@ void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
                                               size_t index,
                                               const Label& handler) {
   MOZ_ASSERT(handler.bound());
+#ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
-    uint32_t handlerOffset = handler.offset();
-    uint32_t targetOffset = tableOffset + (index * sizeof(uintptr_t));
-    RuntimePatch patch =
-        RuntimePatch::DispatchTablePatch(targetOffset, handlerOffset);
-    aot().accumulator().registerPatch(std::move(patch));
+    // AOT mode: emit a position-independent int32 offset relative to the
+    // table base.  No runtime patch needed — the offset is baked in.
+    int32_t relOffset = int32_t(handler.offset()) - int32_t(tableOffset);
+    writeInt32Data(relOffset);
+    return;
   }
+#endif
   CodeLabel cl;
   writeCodePointer(&cl);
   cl.target()->bind(handler.offset());

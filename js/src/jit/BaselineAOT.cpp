@@ -510,7 +510,7 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
 
   JitCode* code = AllocateAndPatchAOTCode(
       cx, entry, containerBase, manifest.HeaderSize,
-      CodeKind::Other, manifest.DispatchTableOffset);
+      CodeKind::Other);
   if (!code) {
     return false;
   }
@@ -580,7 +580,7 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
   JitCode* code = AllocateAndPatchAOTCode(cx, entry, containerBase,
                                           manifest.headerSize,
-                                          CodeKind::Baseline, 0);
+                                          CodeKind::Baseline);
   if (!code) {
     return false;
   }

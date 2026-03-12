@@ -426,8 +426,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // In AOT mode, call the pre-barrier trampoline via a patched movabs.
   void callPreBarrierAOT(MIRType type, Register scratch);
 
-  // Emit a code pointer for a dispatch table entry.  In AOT mode,
-  // also registers a DispatchTablePatch for runtime fixup.
+  // Emit a dispatch table entry.  In AOT mode, emits a PIC-friendly
+  // int32 offset relative to the table base.  Otherwise emits an
+  // absolute code pointer patched via CodeLabel.
   void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
                                const Label& handler);
 
@@ -1093,6 +1094,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Load instructions
 
   inline void load32SignExtendToPtr(const Address& src, Register dest) PER_ARCH;
+  inline void load32SignExtendToPtr(const BaseIndex& src, Register dest) DEFINED_ON(x86, x64);
 
   inline void loadAbiReturnAddress(Register dest) PER_SHARED_ARCH;
 
