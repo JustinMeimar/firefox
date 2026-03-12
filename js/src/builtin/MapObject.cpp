@@ -619,6 +619,11 @@ MapObject* MapObject::createWithProto(JSContext* cx, HandleObject proto,
   return mapObj;
 }
 
+extern "C" MapObject* MapObjectCreate(JSContext* cx,
+                                      HandleObject proto /* = nullptr */) {
+  return MapObject::create(cx, proto);
+}
+
 MapObject* MapObject::create(JSContext* cx,
                              HandleObject proto /* = nullptr */) {
   if (proto) {
@@ -770,6 +775,12 @@ bool MapObject::tryOptimizeCtorWithIterable(JSContext* cx,
   }
 
   return true;
+}
+
+extern "C" MapObject* MapObjectCreateFromIterable(
+    JSContext* cx, Handle<JSObject*> proto, Handle<Value> iterable,
+    Handle<MapObject*> allocatedFromJit) {
+  return MapObject::createFromIterable(cx, proto, iterable, allocatedFromJit);
 }
 
 // static
@@ -1344,6 +1355,11 @@ SetObject* SetObject::createWithProto(JSContext* cx, HandleObject proto,
   return setObj;
 }
 
+extern "C" SetObject* SetObjectCreate(JSContext* cx,
+                                      HandleObject proto /* = nullptr */) {
+  return SetObject::create(cx, proto);
+}
+
 SetObject* SetObject::create(JSContext* cx,
                              HandleObject proto /* = nullptr */) {
   if (proto) {
@@ -1495,6 +1511,12 @@ bool SetObject::tryOptimizeCtorWithIterable(JSContext* cx,
   }
 
   return true;
+}
+
+extern "C" SetObject* SetObjectCreateFromIterable(
+    JSContext* cx, Handle<JSObject*> proto, Handle<Value> iterable,
+    Handle<SetObject*> allocatedFromJit) {
+  return SetObject::createFromIterable(cx, proto, iterable, allocatedFromJit);
 }
 
 // static

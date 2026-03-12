@@ -725,7 +725,7 @@ class ArrayIteratorObject : public NativeObject {
 };
 
 ArrayIteratorObject* NewArrayIteratorTemplate(JSContext* cx);
-ArrayIteratorObject* NewArrayIterator(JSContext* cx);
+extern "C" ArrayIteratorObject* NewArrayIterator(JSContext* cx);
 
 class StringIteratorObject : public NativeObject {
  public:
@@ -733,7 +733,7 @@ class StringIteratorObject : public NativeObject {
 };
 
 StringIteratorObject* NewStringIteratorTemplate(JSContext* cx);
-StringIteratorObject* NewStringIterator(JSContext* cx);
+extern "C" StringIteratorObject* NewStringIterator(JSContext* cx);
 
 class RegExpStringIteratorObject : public NativeObject {
  public:
@@ -741,7 +741,7 @@ class RegExpStringIteratorObject : public NativeObject {
 };
 
 RegExpStringIteratorObject* NewRegExpStringIteratorTemplate(JSContext* cx);
-RegExpStringIteratorObject* NewRegExpStringIterator(JSContext* cx);
+extern "C" RegExpStringIteratorObject* NewRegExpStringIterator(JSContext* cx);
 
 #ifdef NIGHTLY_BUILD
 class IteratorRangeObject : public NativeObject {
@@ -759,10 +759,12 @@ PropertyIteratorObject* LookupInIteratorCache(JSContext* cx, HandleObject obj);
 PropertyIteratorObject* LookupInShapeIteratorCache(JSContext* cx,
                                                    HandleObject obj);
 
-PropertyIteratorObject* GetIterator(JSContext* cx, HandleObject obj);
-PropertyIteratorObject* GetIteratorWithIndices(JSContext* cx, HandleObject obj);
+extern "C" PropertyIteratorObject* GetIterator(JSContext* cx, HandleObject obj);
+extern "C" PropertyIteratorObject* GetIteratorWithIndices(JSContext* cx,
+                                                          HandleObject obj);
 
-PropertyIteratorObject* ValueToIterator(JSContext* cx, HandleValue vp);
+extern "C" PropertyIteratorObject* ValueToIterator(JSContext* cx,
+                                                   HandleValue vp);
 
 void CloseIterator(JSObject* obj);
 

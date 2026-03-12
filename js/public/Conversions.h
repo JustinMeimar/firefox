@@ -66,7 +66,8 @@ extern JS_PUBLIC_API bool ToUint64Slow(JSContext* cx, JS::HandleValue v,
                                        uint64_t* out);
 
 /* DO NOT CALL THIS. Use JS::ToString. */
-extern JS_PUBLIC_API JSString* ToStringSlow(JSContext* cx, JS::HandleValue v);
+extern "C" JS_PUBLIC_API JSString* ToStringSlow(JSContext* cx,
+                                                JS::HandleValue v);
 
 /* DO NOT CALL THIS. Use JS::ToObject. */
 extern JS_PUBLIC_API JSObject* ToObjectSlow(JSContext* cx, JS::HandleValue v,
@@ -546,7 +547,9 @@ inline int16_t ToInt16(double d) { return ToSignedInteger<int16_t>(d); }
 inline uint16_t ToUint16(double d) { return ToUnsignedInteger<uint16_t>(d); }
 
 /* ES5 9.5 ToInt32 (specialized for doubles). */
-inline int32_t ToInt32(double d) { return ToSignedInteger<int32_t>(d); }
+extern "C" inline int32_t ToInt32(double d) {
+  return ToSignedInteger<int32_t>(d);
+}
 
 /* ES5 9.6 (specialized for doubles). */
 inline uint32_t ToUint32(double d) { return ToUnsignedInteger<uint32_t>(d); }

@@ -192,7 +192,7 @@ class MOZ_RAII TrialInliner {
   ICScript* icScript_;
 };
 
-bool DoTrialInlining(JSContext* cx, BaselineFrame* frame);
+extern "C" bool DoTrialInlining(JSContext* cx, BaselineFrame* frame);
 
 }  // namespace jit
 }  // namespace js

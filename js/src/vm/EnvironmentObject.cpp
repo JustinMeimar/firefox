@@ -105,6 +105,12 @@ static T* CreateEnvironmentObject(JSContext* cx, Handle<SharedShape*> shape,
   return CreateEnvironmentObject<T>(cx, shape, heap);
 }
 
+extern "C" CallObject* CallObjectCreateWithShape(JSContext* cx,
+                                                 Handle<SharedShape*> shape,
+                                                 gc::Heap heap) {
+  return CallObject::createWithShape(cx, shape, heap);
+}
+
 CallObject* CallObject::createWithShape(JSContext* cx,
                                         Handle<SharedShape*> shape,
                                         gc::Heap heap) {
@@ -333,6 +339,11 @@ VarEnvironmentObject* VarEnvironmentObject::createHollowForDebug(
 VarEnvironmentObject* VarEnvironmentObject::createTemplateObject(
     JSContext* cx, Handle<VarScope*> scope) {
   return create(cx, scope, nullptr, gc::Heap::Tenured);
+}
+
+extern "C" VarEnvironmentObject* VarEnvironmentObjectCreateWithoutEnclosing(
+    JSContext* cx, Handle<VarScope*> scope) {
+  return VarEnvironmentObject::createWithoutEnclosing(cx, scope);
 }
 
 /* static */
@@ -1106,6 +1117,12 @@ BlockLexicalEnvironmentObject::createTemplateObject(
   return create(cx, scope, nullptr, gc::Heap::Tenured);
 }
 
+extern "C" BlockLexicalEnvironmentObject*
+BlockLexicalEnvironmentObjectCreateWithoutEnclosing(
+    JSContext* cx, Handle<LexicalScope*> scope) {
+  return BlockLexicalEnvironmentObject::createWithoutEnclosing(cx, scope);
+}
+
 /* static */
 BlockLexicalEnvironmentObject*
 BlockLexicalEnvironmentObject::createWithoutEnclosing(
@@ -1182,6 +1199,11 @@ NamedLambdaObject* NamedLambdaObject::createTemplateObject(
   return create(cx, callee, nullptr, gc::Heap::Tenured);
 }
 
+extern "C" NamedLambdaObject* NamedLambdaObjectCreateWithoutEnclosing(
+    JSContext* cx, HandleFunction callee, gc::Heap heap) {
+  return NamedLambdaObject::createWithoutEnclosing(cx, callee, heap);
+}
+
 /* static */
 NamedLambdaObject* NamedLambdaObject::createWithoutEnclosing(
     JSContext* cx, HandleFunction callee, gc::Heap heap) {
@@ -1236,6 +1258,12 @@ ClassBodyLexicalEnvironmentObject*
 ClassBodyLexicalEnvironmentObject::createTemplateObject(
     JSContext* cx, Handle<ClassBodyScope*> scope) {
   return create(cx, scope, nullptr, gc::Heap::Tenured);
+}
+
+extern "C" ClassBodyLexicalEnvironmentObject*
+ClassBodyLexicalEnvironmentObjectCreateWithoutEnclosing(
+    JSContext* cx, Handle<ClassBodyScope*> scope) {
+  return ClassBodyLexicalEnvironmentObject::createWithoutEnclosing(cx, scope);
 }
 
 /* static */

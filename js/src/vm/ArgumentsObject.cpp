@@ -393,6 +393,11 @@ ArgumentsObject* ArgumentsObject::createUnexpected(JSContext* cx,
   return create(cx, callee, frame.numActualArgs(), copy);
 }
 
+extern "C" ArgumentsObject* ArgumentsObjectCreateForIon(
+    JSContext* cx, jit::JitFrameLayout* frame, HandleObject scopeChain) {
+  return ArgumentsObject::createForIon(cx, frame, scopeChain);
+}
+
 ArgumentsObject* ArgumentsObject::createForIon(JSContext* cx,
                                                jit::JitFrameLayout* frame,
                                                HandleObject scopeChain) {
@@ -414,6 +419,13 @@ ArgumentsObject* ArgumentsObject::createFromValueArray(
       cx, scopeChain->is<CallObject>() ? scopeChain.get() : nullptr);
   CopyInlinedArgs copy(argsArray, callObj, callee);
   return create(cx, callee, numActuals, copy);
+}
+
+extern "C" ArgumentsObject* ArgumentsObjectCreateForInlinedIon(
+    JSContext* cx, Value* args, HandleFunction callee, HandleObject scopeChain,
+    uint32_t numActuals) {
+  return ArgumentsObject::createForInlinedIon(cx, args, callee, scopeChain,
+                                              numActuals);
 }
 
 /* static */

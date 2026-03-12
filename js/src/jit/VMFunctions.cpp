@@ -669,6 +669,16 @@ template bool StringsEqual<EqualityKind::NotEqual>(JSContext* cx,
                                                    HandleString lhs,
                                                    HandleString rhs, bool* res);
 
+extern "C" bool StringsEqual(JSContext* cx, HandleString lhs, HandleString rhs,
+                             bool* res) {
+  return StringsEqual<EqualityKind::Equal>(cx, lhs, rhs, res);
+}
+
+extern "C" bool StringsNotEqual(JSContext* cx, HandleString lhs,
+                                HandleString rhs, bool* res) {
+  return StringsEqual<EqualityKind::NotEqual>(cx, lhs, rhs, res);
+}
+
 template <ComparisonKind Kind>
 bool StringsCompare(JSContext* cx, HandleString lhs, HandleString rhs,
                     bool* res) {
@@ -690,6 +700,17 @@ template bool StringsCompare<ComparisonKind::LessThan>(JSContext* cx,
                                                        bool* res);
 template bool StringsCompare<ComparisonKind::GreaterThanOrEqual>(
     JSContext* cx, HandleString lhs, HandleString rhs, bool* res);
+
+extern "C" bool StringsCompareGreaterThanOrEquals(JSContext* cx,
+                                                  HandleString lhs,
+                                                  HandleString rhs, bool* res) {
+  return StringsCompare<ComparisonKind::GreaterThanOrEqual>(cx, lhs, rhs, res);
+}
+
+extern "C" bool StringsCompareLessThan(JSContext* cx, HandleString lhs,
+                                       HandleString rhs, bool* res) {
+  return StringsCompare<ComparisonKind::LessThan>(cx, lhs, rhs, res);
+}
 
 JSString* ArrayJoin(JSContext* cx, HandleObject array, HandleString sep) {
   JS::RootedValueArray<3> argv(cx);
@@ -1060,6 +1081,10 @@ JSObject* WrapObjectPure(JSContext* cx, JSObject* obj) {
   }
 
   return nullptr;
+}
+
+extern "C" bool BaselineDebugPrologue(JSContext* cx, BaselineFrame* frame) {
+  return DebugPrologue(cx, frame);
 }
 
 bool DebugPrologue(JSContext* cx, BaselineFrame* frame) {
@@ -2367,6 +2392,18 @@ template bool SetElementMegamorphic<true>(JSContext* cx, HandleObject obj,
                                           HandleValue index, HandleValue value,
                                           bool strict);
 
+extern "C" bool SetElementMegamorphicNoCache(JSContext* cx, HandleObject obj,
+                                             HandleValue index,
+                                             HandleValue value, bool strict) {
+  return SetElementMegamorphic<false>(cx, obj, index, value, strict);
+}
+
+extern "C" bool SetElementMegamorphicYesCache(JSContext* cx, HandleObject obj,
+                                              HandleValue index,
+                                              HandleValue value, bool strict) {
+  return SetElementMegamorphic<true>(cx, obj, index, value, strict);
+}
+
 template <bool Cached>
 bool SetPropertyMegamorphic(JSContext* cx, HandleObject obj, HandleId id,
                             HandleValue value, bool strict) {
@@ -2392,6 +2429,18 @@ template bool SetPropertyMegamorphic<false>(JSContext* cx, HandleObject obj,
 template bool SetPropertyMegamorphic<true>(JSContext* cx, HandleObject obj,
                                            HandleId id, HandleValue value,
                                            bool strict);
+
+extern "C" bool SetPropertyMegamorphicNoCache(JSContext* cx, HandleObject obj,
+                                              HandleId id, HandleValue value,
+                                              bool strict) {
+  return SetPropertyMegamorphic<false>(cx, obj, id, value, strict);
+}
+
+extern "C" bool SetPropertyMegamorphicYesCache(JSContext* cx, HandleObject obj,
+                                               HandleId id, HandleValue value,
+                                               bool strict) {
+  return SetPropertyMegamorphic<true>(cx, obj, id, value, strict);
+}
 
 void HandleCodeCoverageAtPC(BaselineFrame* frame, jsbytecode* pc) {
   AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
@@ -2757,6 +2806,16 @@ template bool BigIntStringEqual<EqualityKind::NotEqual>(JSContext* cx,
                                                         HandleString y,
                                                         bool* res);
 
+extern "C" bool BigIntStringEqual(JSContext* cx, HandleBigInt x, HandleString y,
+                                  bool* res) {
+  return BigIntStringEqual<EqualityKind::Equal>(cx, x, y, res);
+}
+
+extern "C" bool BigIntStringNotEqual(JSContext* cx, HandleBigInt x,
+                                     HandleString y, bool* res) {
+  return BigIntStringEqual<EqualityKind::NotEqual>(cx, x, y, res);
+}
+
 template <ComparisonKind Kind>
 bool BigIntStringCompare(JSContext* cx, HandleBigInt x, HandleString y,
                          bool* res) {
@@ -2779,6 +2838,16 @@ template bool BigIntStringCompare<ComparisonKind::LessThan>(JSContext* cx,
 template bool BigIntStringCompare<ComparisonKind::GreaterThanOrEqual>(
     JSContext* cx, HandleBigInt x, HandleString y, bool* res);
 
+extern "C" bool BigIntStringLessThan(JSContext* cx, HandleBigInt x,
+                                     HandleString y, bool* res) {
+  return BigIntStringCompare<ComparisonKind::LessThan>(cx, x, y, res);
+}
+
+extern "C" bool BigIntStringGreaterThanOrEqual(JSContext* cx, HandleBigInt x,
+                                               HandleString y, bool* res) {
+  return BigIntStringCompare<ComparisonKind::GreaterThanOrEqual>(cx, x, y, res);
+}
+
 template <ComparisonKind Kind>
 bool StringBigIntCompare(JSContext* cx, HandleString x, HandleBigInt y,
                          bool* res) {
@@ -2800,6 +2869,16 @@ template bool StringBigIntCompare<ComparisonKind::LessThan>(JSContext* cx,
                                                             bool* res);
 template bool StringBigIntCompare<ComparisonKind::GreaterThanOrEqual>(
     JSContext* cx, HandleString x, HandleBigInt y, bool* res);
+
+extern "C" bool StringBigIntGreaterThanOrEqual(JSContext* cx, HandleString x,
+                                               HandleBigInt y, bool* res) {
+  return StringBigIntCompare<ComparisonKind::GreaterThanOrEqual>(cx, x, y, res);
+}
+
+extern "C" bool StringBigIntLessThan(JSContext* cx, HandleString x,
+                                     HandleBigInt y, bool* res) {
+  return StringBigIntCompare<ComparisonKind::LessThan>(cx, x, y, res);
+}
 
 BigInt* BigIntAsIntN(JSContext* cx, HandleBigInt x, int32_t bits) {
   MOZ_ASSERT(bits >= 0);
@@ -3172,6 +3251,10 @@ float RoundFloat16ToFloat32(int32_t d) {
 float RoundFloat16ToFloat32(float d) {
   AutoUnsafeCallWithABI unsafe;
   return static_cast<float>(js::float16{d});
+}
+
+extern "C" float RoundFloat16ToFloat32_double(double d) {
+  return RoundFloat16ToFloat32(d);
 }
 
 float RoundFloat16ToFloat32(double d) {

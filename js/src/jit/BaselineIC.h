@@ -378,128 +378,134 @@ bool ICSupportsPolymorphicTypeData(JSOp op);
 
 struct IonOsrTempData;
 
-extern bool DoCallFallback(JSContext* cx, BaselineFrame* frame,
-                           ICFallbackStub* stub, uint32_t argc, Value* vp,
-                           MutableHandleValue res);
+extern "C" bool DoCallFallback(JSContext* cx, BaselineFrame* frame,
+                               ICFallbackStub* stub, uint32_t argc, Value* vp,
+                               MutableHandleValue res);
 
-extern bool DoSpreadCallFallback(JSContext* cx, BaselineFrame* frame,
-                                 ICFallbackStub* stub, Value* vp,
-                                 MutableHandleValue res);
+extern "C" bool DoSpreadCallFallback(JSContext* cx, BaselineFrame* frame,
+                                     ICFallbackStub* stub, Value* vp,
+                                     MutableHandleValue res);
 
-extern bool DoToBoolFallback(JSContext* cx, BaselineFrame* frame,
-                             ICFallbackStub* stub, HandleValue arg,
-                             MutableHandleValue ret);
+extern "C" bool DoToBoolFallback(JSContext* cx, BaselineFrame* frame,
+                                 ICFallbackStub* stub, HandleValue arg,
+                                 MutableHandleValue ret);
 
-extern bool DoGetElemSuperFallback(JSContext* cx, BaselineFrame* frame,
-                                   ICFallbackStub* stub, HandleValue lhs,
-                                   HandleValue rhs, HandleValue receiver,
-                                   MutableHandleValue res);
+extern "C" bool DoGetElemSuperFallback(JSContext* cx, BaselineFrame* frame,
+                                       ICFallbackStub* stub, HandleValue lhs,
+                                       HandleValue rhs, HandleValue receiver,
+                                       MutableHandleValue res);
 
-extern bool DoGetElemFallback(JSContext* cx, BaselineFrame* frame,
-                              ICFallbackStub* stub, HandleValue lhs,
-                              HandleValue rhs, MutableHandleValue res);
+extern "C" bool DoGetElemFallback(JSContext* cx, BaselineFrame* frame,
+                                  ICFallbackStub* stub, HandleValue lhs,
+                                  HandleValue rhs, MutableHandleValue res);
 
-extern bool DoSetElemFallback(JSContext* cx, BaselineFrame* frame,
-                              ICFallbackStub* stub, Value* stack,
-                              HandleValue objv, HandleValue index,
-                              HandleValue rhs);
+extern "C" bool DoSetElemFallback(JSContext* cx, BaselineFrame* frame,
+                                  ICFallbackStub* stub, Value* stack,
+                                  HandleValue objv, HandleValue index,
+                                  HandleValue rhs);
 
-extern bool DoInFallback(JSContext* cx, BaselineFrame* frame,
-                         ICFallbackStub* stub, HandleValue key,
-                         HandleValue objValue, MutableHandleValue res);
-
-extern bool DoHasOwnFallback(JSContext* cx, BaselineFrame* frame,
-                             ICFallbackStub* stub, HandleValue keyValue,
+extern "C" bool DoInFallback(JSContext* cx, BaselineFrame* frame,
+                             ICFallbackStub* stub, HandleValue key,
                              HandleValue objValue, MutableHandleValue res);
 
-extern bool DoCheckPrivateFieldFallback(JSContext* cx, BaselineFrame* frame,
-                                        ICFallbackStub* stub,
-                                        HandleValue objValue,
-                                        HandleValue keyValue,
-                                        MutableHandleValue res);
+extern "C" bool DoHasOwnFallback(JSContext* cx, BaselineFrame* frame,
+                                 ICFallbackStub* stub, HandleValue keyValue,
+                                 HandleValue objValue, MutableHandleValue res);
 
-extern bool DoGetNameFallback(JSContext* cx, BaselineFrame* frame,
-                              ICFallbackStub* stub, HandleObject envChain,
-                              MutableHandleValue res);
+extern "C" bool DoCheckPrivateFieldFallback(JSContext* cx, BaselineFrame* frame,
+                                            ICFallbackStub* stub,
+                                            HandleValue objValue,
+                                            HandleValue keyValue,
+                                            MutableHandleValue res);
 
-extern bool DoBindNameFallback(JSContext* cx, BaselineFrame* frame,
-                               ICFallbackStub* stub, HandleObject envChain,
-                               MutableHandleValue res);
-
-extern bool DoLazyConstantFallback(JSContext* cx, BaselineFrame* frame,
-                                   ICFallbackStub* stub,
-                                   MutableHandleValue res);
-
-extern bool DoGetPropFallback(JSContext* cx, BaselineFrame* frame,
-                              ICFallbackStub* stub, HandleValue val,
-                              MutableHandleValue res);
-
-extern bool DoGetPropSuperFallback(JSContext* cx, BaselineFrame* frame,
-                                   ICFallbackStub* stub, HandleValue receiver,
-                                   HandleValue val, MutableHandleValue res);
-
-extern bool DoSetPropFallback(JSContext* cx, BaselineFrame* frame,
-                              ICFallbackStub* stub, Value* stack,
-                              HandleValue lhs, HandleValue rhs);
-
-extern bool DoGetIteratorFallback(JSContext* cx, BaselineFrame* frame,
-                                  ICFallbackStub* stub, HandleValue value,
+extern "C" bool DoGetNameFallback(JSContext* cx, BaselineFrame* frame,
+                                  ICFallbackStub* stub, HandleObject envChain,
                                   MutableHandleValue res);
 
-extern bool DoOptimizeSpreadCallFallback(JSContext* cx, BaselineFrame* frame,
-                                         ICFallbackStub* stub,
-                                         HandleValue value,
-                                         MutableHandleValue res);
+extern "C" bool DoBindNameFallback(JSContext* cx, BaselineFrame* frame,
+                                   ICFallbackStub* stub, HandleObject envChain,
+                                   MutableHandleValue res);
 
-extern bool DoInstanceOfFallback(JSContext* cx, BaselineFrame* frame,
-                                 ICFallbackStub* stub, HandleValue lhs,
-                                 HandleValue rhs, MutableHandleValue res);
+extern "C" bool DoLazyConstantFallback(JSContext* cx, BaselineFrame* frame,
+                                       ICFallbackStub* stub,
+                                       MutableHandleValue res);
 
-extern bool DoTypeOfFallback(JSContext* cx, BaselineFrame* frame,
-                             ICFallbackStub* stub, HandleValue val,
-                             MutableHandleValue res);
+extern "C" bool DoGetPropFallback(JSContext* cx, BaselineFrame* frame,
+                                  ICFallbackStub* stub, HandleValue val,
+                                  MutableHandleValue res);
 
-extern bool DoTypeOfEqFallback(JSContext* cx, BaselineFrame* frame,
-                               ICFallbackStub* stub, HandleValue val,
-                               MutableHandleValue res);
+extern "C" bool DoGetPropSuperFallback(JSContext* cx, BaselineFrame* frame,
+                                       ICFallbackStub* stub,
+                                       HandleValue receiver, HandleValue val,
+                                       MutableHandleValue res);
 
-extern bool DoToPropertyKeyFallback(JSContext* cx, BaselineFrame* frame,
-                                    ICFallbackStub* stub, HandleValue val,
-                                    MutableHandleValue res);
+extern "C" bool DoSetPropFallback(JSContext* cx, BaselineFrame* frame,
+                                  ICFallbackStub* stub, Value* stack,
+                                  HandleValue lhs, HandleValue rhs);
 
-extern bool DoRestFallback(JSContext* cx, BaselineFrame* frame,
-                           ICFallbackStub* stub, MutableHandleValue res);
+extern "C" bool DoGetIteratorFallback(JSContext* cx, BaselineFrame* frame,
+                                      ICFallbackStub* stub, HandleValue value,
+                                      MutableHandleValue res);
 
-extern bool DoUnaryArithFallback(JSContext* cx, BaselineFrame* frame,
+extern "C" bool DoOptimizeSpreadCallFallback(JSContext* cx,
+                                             BaselineFrame* frame,
+                                             ICFallbackStub* stub,
+                                             HandleValue value,
+                                             MutableHandleValue res);
+
+extern "C" bool DoInstanceOfFallback(JSContext* cx, BaselineFrame* frame,
+                                     ICFallbackStub* stub, HandleValue lhs,
+                                     HandleValue rhs, MutableHandleValue res);
+
+extern "C" bool DoTypeOfFallback(JSContext* cx, BaselineFrame* frame,
                                  ICFallbackStub* stub, HandleValue val,
                                  MutableHandleValue res);
 
-extern bool DoBinaryArithFallback(JSContext* cx, BaselineFrame* frame,
+extern "C" bool DoTypeOfEqFallback(JSContext* cx, BaselineFrame* frame,
+                                   ICFallbackStub* stub, HandleValue val,
+                                   MutableHandleValue res);
+
+extern "C" bool DoToPropertyKeyFallback(JSContext* cx, BaselineFrame* frame,
+                                        ICFallbackStub* stub, HandleValue val,
+                                        MutableHandleValue res);
+
+extern "C" bool DoRestFallback(JSContext* cx, BaselineFrame* frame,
+                               ICFallbackStub* stub, MutableHandleValue res);
+
+extern "C" bool DoUnaryArithFallback(JSContext* cx, BaselineFrame* frame,
+                                     ICFallbackStub* stub, HandleValue val,
+                                     MutableHandleValue res);
+
+extern "C" bool DoBinaryArithFallback(JSContext* cx, BaselineFrame* frame,
+                                      ICFallbackStub* stub, HandleValue lhs,
+                                      HandleValue rhs, MutableHandleValue ret);
+
+extern "C" bool DoNewArrayFallback(JSContext* cx, BaselineFrame* frame,
+                                   ICFallbackStub* stub,
+                                   MutableHandleValue res);
+
+extern "C" bool DoNewObjectFallback(JSContext* cx, BaselineFrame* frame,
+                                    ICFallbackStub* stub,
+                                    MutableHandleValue res);
+
+extern "C" bool DoLambdaFallback(JSContext* cx, BaselineFrame* frame,
+                                 ICFallbackStub* stub, MutableHandleValue res);
+
+extern "C" bool DoCompareFallback(JSContext* cx, BaselineFrame* frame,
                                   ICFallbackStub* stub, HandleValue lhs,
                                   HandleValue rhs, MutableHandleValue ret);
 
-extern bool DoNewArrayFallback(JSContext* cx, BaselineFrame* frame,
-                               ICFallbackStub* stub, MutableHandleValue res);
+extern "C" bool DoCloseIterFallback(JSContext* cx, BaselineFrame* frame,
+                                    ICFallbackStub* stub, HandleObject iter);
 
-extern bool DoNewObjectFallback(JSContext* cx, BaselineFrame* frame,
-                                ICFallbackStub* stub, MutableHandleValue res);
-
-extern bool DoLambdaFallback(JSContext* cx, BaselineFrame* frame,
-                             ICFallbackStub* stub, MutableHandleValue res);
-
-extern bool DoCompareFallback(JSContext* cx, BaselineFrame* frame,
-                              ICFallbackStub* stub, HandleValue lhs,
-                              HandleValue rhs, MutableHandleValue ret);
-
-extern bool DoCloseIterFallback(JSContext* cx, BaselineFrame* frame,
-                                ICFallbackStub* stub, HandleObject iter);
-
-extern bool DoOptimizeGetIteratorFallback(JSContext* cx, BaselineFrame* frame,
-                                          ICFallbackStub* stub,
-                                          HandleValue value,
-                                          MutableHandleValue res);
-extern bool DoGetImportFallback(JSContext* cx, BaselineFrame* frame,
-                                ICFallbackStub* stub, MutableHandleValue res);
+extern "C" bool DoOptimizeGetIteratorFallback(JSContext* cx,
+                                              BaselineFrame* frame,
+                                              ICFallbackStub* stub,
+                                              HandleValue value,
+                                              MutableHandleValue res);
+extern "C" bool DoGetImportFallback(JSContext* cx, BaselineFrame* frame,
+                                    ICFallbackStub* stub,
+                                    MutableHandleValue res);
 
 }  // namespace jit
 }  // namespace js

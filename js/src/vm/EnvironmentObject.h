@@ -1715,10 +1715,9 @@ ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
     JSContext* cx, AbstractGeneratorObject& genObj, JSScript* script,
     MutableHandleValue res);
 
-[[nodiscard]] bool GlobalOrEvalDeclInstantiation(JSContext* cx,
-                                                 HandleObject envChain,
-                                                 HandleScript script,
-                                                 GCThingIndex lastFun);
+extern "C" [[nodiscard]] bool GlobalOrEvalDeclInstantiation(
+    JSContext* cx, HandleObject envChain, HandleScript script,
+    GCThingIndex lastFun);
 
 [[nodiscard]] bool InitFunctionEnvironmentObjects(JSContext* cx,
                                                   AbstractFramePtr frame);

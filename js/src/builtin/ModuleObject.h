@@ -575,10 +575,13 @@ class GraphLoadingStateRecordObject : public NativeObject {
                 Handle<JS::Value> error);
 };
 
-JSObject* GetOrCreateModuleMetaObject(JSContext* cx, HandleObject module);
+extern "C" JSObject* GetOrCreateModuleMetaObject(JSContext* cx,
+                                                 HandleObject module);
 
-JSObject* StartDynamicModuleImport(JSContext* cx, HandleScript script,
-                                   HandleValue specifier, HandleValue options);
+extern "C" JSObject* StartDynamicModuleImport(JSContext* cx,
+                                              HandleScript script,
+                                              HandleValue specifier,
+                                              HandleValue options);
 
 }  // namespace js
 

@@ -220,8 +220,8 @@ template <typename CharT>
 template <typename CharT>
 double CharsToNumber(const CharT* chars, size_t length);
 
-[[nodiscard]] extern bool StringToNumber(JSContext* cx, JSString* str,
-                                         double* result);
+extern "C" [[nodiscard]] bool StringToNumber(JSContext* cx, JSString* str,
+                                             double* result);
 
 [[nodiscard]] extern bool StringToNumberPure(JSContext* cx, JSString* str,
                                              double* result);
@@ -232,8 +232,8 @@ extern double LinearStringToNumber(const JSLinearString* str);
 extern double OffThreadAtomToNumber(const JSOffThreadAtom* str);
 
 // Parse the input string as if Number.parseInt had been called.
-extern bool NumberParseInt(JSContext* cx, JS::HandleString str, int32_t radix,
-                           JS::MutableHandleValue result);
+extern "C" bool NumberParseInt(JSContext* cx, JS::HandleString str,
+                               int32_t radix, JS::MutableHandleValue result);
 
 /* ES5 9.3 ToNumber, overwriting *vp with the appropriate number value. */
 [[nodiscard]] MOZ_ALWAYS_INLINE bool ToNumber(JSContext* cx,

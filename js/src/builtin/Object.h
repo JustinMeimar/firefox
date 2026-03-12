@@ -23,8 +23,8 @@ class PlainObject;
 PlainObject* ObjectCreateImpl(JSContext* cx, HandleObject proto,
                               NewObjectKind newKind = GenericObject);
 
-PlainObject* ObjectCreateWithTemplate(JSContext* cx,
-                                      Handle<PlainObject*> templateObj);
+extern "C" PlainObject* ObjectCreateWithTemplate(
+    JSContext* cx, Handle<PlainObject*> templateObj);
 
 // Object methods exposed so they can be installed in the self-hosting global.
 [[nodiscard]] bool obj_propertyIsEnumerable(JSContext* cx, unsigned argc,

@@ -944,8 +944,8 @@ extern bool FromPropertyDescriptorToObject(JSContext* cx,
 
 // obj is a JSObject*, but we root it immediately up front. We do it
 // that way because we need a Rooted temporary in this method anyway.
-extern bool IsPrototypeOf(JSContext* cx, HandleObject protoObj, JSObject* obj,
-                          bool* result);
+extern "C" bool IsPrototypeOf(JSContext* cx, HandleObject protoObj,
+                              JSObject* obj, bool* result);
 
 /* Wrap boolean, number or string as Boolean, Number or String object. */
 extern JSObject* PrimitiveToObject(JSContext* cx, const Value& v);

@@ -4693,6 +4693,17 @@ bool js::GetAndClearException(JSContext* cx, MutableHandleValue res) {
   return GetAndClearExceptionAndStack(cx, res, &stack);
 }
 
+extern "C" bool DelPropOperationNonStrict(JSContext* cx, HandleValue val,
+                                          Handle<PropertyName*> name,
+                                          bool* res) {
+  return js::DelPropOperation<false>(cx, val, name, res);
+}
+
+extern "C" bool DelPropOperationStrict(JSContext* cx, HandleValue val,
+                                       Handle<PropertyName*> name, bool* res) {
+  return js::DelPropOperation<true>(cx, val, name, res);
+}
+
 template <bool strict>
 bool js::DelPropOperation(JSContext* cx, HandleValue val,
                           Handle<PropertyName*> name, bool* res) {
@@ -4725,6 +4736,16 @@ template bool js::DelPropOperation<true>(JSContext* cx, HandleValue val,
 template bool js::DelPropOperation<false>(JSContext* cx, HandleValue val,
                                           Handle<PropertyName*> name,
                                           bool* res);
+
+extern "C" bool DelElemOperationNonStrict(JSContext* cx, HandleValue val,
+                                          HandleValue index, bool* res) {
+  return js::DelElemOperation<true>(cx, val, index, res);
+}
+
+extern "C" bool DelElemOperationStrict(JSContext* cx, HandleValue val,
+                                       HandleValue index, bool* res) {
+  return js::DelElemOperation<false>(cx, val, index, res);
+}
 
 template <bool strict>
 bool js::DelElemOperation(JSContext* cx, HandleValue val, HandleValue index,

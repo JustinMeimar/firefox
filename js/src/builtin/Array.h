@@ -94,8 +94,8 @@ extern ArrayObject* NewDenseCopiedArrayWithProto(JSContext* cx, uint32_t length,
 extern ArrayObject* NewDenseFullyAllocatedArrayWithShape(
     JSContext* cx, uint32_t length, Handle<SharedShape*> shape);
 
-extern ArrayObject* NewArrayWithShape(JSContext* cx, uint32_t length,
-                                      Handle<Shape*> shape);
+extern "C" ArrayObject* NewArrayWithShape(JSContext* cx, uint32_t length,
+                                          Handle<Shape*> shape);
 
 extern bool ToLength(JSContext* cx, HandleValue v, uint64_t* out);
 
@@ -131,12 +131,13 @@ extern bool array_sort(JSContext* cx, unsigned argc, js::Value* vp);
 
 extern void ArrayShiftMoveElements(ArrayObject* arr);
 
-extern JSObject* ArraySliceDense(JSContext* cx, HandleObject obj, int32_t begin,
-                                 int32_t end, HandleObject result);
-
-extern JSObject* ArgumentsSliceDense(JSContext* cx, HandleObject obj,
+extern "C" JSObject* ArraySliceDense(JSContext* cx, HandleObject obj,
                                      int32_t begin, int32_t end,
                                      HandleObject result);
+
+extern "C" JSObject* ArgumentsSliceDense(JSContext* cx, HandleObject obj,
+                                         int32_t begin, int32_t end,
+                                         HandleObject result);
 
 extern ArrayObject* NewArrayWithNullProto(JSContext* cx);
 
@@ -149,10 +150,9 @@ extern ArrayObject* NewArrayWithNullProto(JSContext* cx);
  */
 extern bool NewbornArrayPush(JSContext* cx, HandleObject obj, const Value& v);
 
-extern ArrayObject* ArrayConstructorOneArg(JSContext* cx,
-                                           Handle<ArrayObject*> templateObject,
-                                           int32_t lengthInt,
-                                           gc::AllocSite* site);
+extern "C" ArrayObject* ArrayConstructorOneArg(
+    JSContext* cx, Handle<ArrayObject*> templateObject, int32_t lengthInt,
+    gc::AllocSite* site);
 
 #ifdef DEBUG
 extern bool ArrayInfo(JSContext* cx, unsigned argc, Value* vp);
@@ -176,7 +176,7 @@ extern bool ObjectMayHaveExtraIndexedProperties(JSObject* obj);
 extern bool PrototypeMayHaveIndexedProperties(NativeObject* obj);
 
 // JS::IsArray has multiple overloads, use js::IsArrayFromJit to disambiguate.
-extern bool IsArrayFromJit(JSContext* cx, HandleObject obj, bool* isArray);
+extern "C" bool IsArrayFromJit(JSContext* cx, HandleObject obj, bool* isArray);
 
 extern bool ArrayLengthGetter(JSContext* cx, HandleObject obj, HandleId id,
                               MutableHandleValue vp);

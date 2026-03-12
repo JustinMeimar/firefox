@@ -40,12 +40,12 @@ extern bool str_codePointAt(JSContext* cx, unsigned argc, Value* vp);
 
 extern bool str_endsWith(JSContext* cx, unsigned argc, Value* vp);
 
-ArrayObject* StringSplitString(JSContext* cx, HandleString str,
-                               HandleString sep, uint32_t limit);
+extern "C" ArrayObject* StringSplitString(JSContext* cx, HandleString str,
+                                          HandleString sep, uint32_t limit);
 
-JSString* StringFlatReplaceString(JSContext* cx, HandleString string,
-                                  HandleString pattern,
-                                  HandleString replacement);
+extern "C" JSString* StringFlatReplaceString(JSContext* cx, HandleString string,
+                                             HandleString pattern,
+                                             HandleString replacement);
 
 JSString* str_replace_string_raw(JSContext* cx, HandleString string,
                                  HandleString pattern,
@@ -55,30 +55,30 @@ JSString* str_replaceAll_string_raw(JSContext* cx, HandleString string,
                                     HandleString pattern,
                                     HandleString replacement);
 
-extern bool StringIncludes(JSContext* cx, HandleString string,
-                           HandleString searchString, bool* result);
+extern "C" bool StringIncludes(JSContext* cx, HandleString string,
+                               HandleString searchString, bool* result);
 
-extern bool StringIndexOf(JSContext* cx, HandleString string,
-                          HandleString searchString, int32_t* result);
-
-extern bool StringLastIndexOf(JSContext* cx, HandleString string,
+extern "C" bool StringIndexOf(JSContext* cx, HandleString string,
                               HandleString searchString, int32_t* result);
 
-extern bool StringStartsWith(JSContext* cx, HandleString string,
-                             HandleString searchString, bool* result);
+extern "C" bool StringLastIndexOf(JSContext* cx, HandleString string,
+                                  HandleString searchString, int32_t* result);
 
-extern bool StringEndsWith(JSContext* cx, HandleString string,
-                           HandleString searchString, bool* result);
+extern "C" bool StringStartsWith(JSContext* cx, HandleString string,
+                                 HandleString searchString, bool* result);
 
-extern JSLinearString* StringToLowerCase(JSContext* cx, JSString* string);
+extern "C" bool StringEndsWith(JSContext* cx, HandleString string,
+                               HandleString searchString, bool* result);
 
-extern JSLinearString* StringToUpperCase(JSContext* cx, JSString* string);
+extern "C" JSLinearString* StringToLowerCase(JSContext* cx, JSString* string);
 
-extern JSString* StringTrim(JSContext* cx, HandleString string);
+extern "C" JSLinearString* StringToUpperCase(JSContext* cx, JSString* string);
 
-extern JSString* StringTrimStart(JSContext* cx, HandleString string);
+extern "C" JSString* StringTrim(JSContext* cx, HandleString string);
 
-extern JSString* StringTrimEnd(JSContext* cx, HandleString string);
+extern "C" JSString* StringTrimStart(JSContext* cx, HandleString string);
+
+extern "C" JSString* StringTrimEnd(JSContext* cx, HandleString string);
 
 extern bool StringConstructor(JSContext* cx, unsigned argc, Value* vp);
 
@@ -86,9 +86,10 @@ extern bool FlatStringMatch(JSContext* cx, unsigned argc, Value* vp);
 
 extern bool FlatStringSearch(JSContext* cx, unsigned argc, Value* vp);
 
-extern JSLinearString* StringFromCharCode(JSContext* cx, int32_t charCode);
+extern "C" JSLinearString* StringFromCharCode(JSContext* cx, int32_t charCode);
 
-extern JSLinearString* StringFromCodePoint(JSContext* cx, char32_t codePoint);
+extern "C" JSLinearString* StringFromCodePoint(JSContext* cx,
+                                               char32_t codePoint);
 
 #if JS_HAS_INTL_API
 bool LocaleHasDefaultCaseMapping(const char* locale);

@@ -403,8 +403,9 @@ bool CanBaselineInterpretScript(JSScript* script);
 // Called by the Baseline Interpreter to compile a script for the Baseline JIT.
 // |res| is set to the native code address in the BaselineScript to jump to, or
 // nullptr if we were unable to compile this script.
-bool BaselineCompileFromBaselineInterpreter(JSContext* cx, BaselineFrame* frame,
-                                            uint8_t** res);
+extern "C" bool BaselineCompileFromBaselineInterpreter(JSContext* cx,
+                                                       BaselineFrame* frame,
+                                                       uint8_t** res);
 
 void FinishDiscardBaselineScript(JS::GCContext* gcx, JSScript* script);
 
@@ -470,7 +471,7 @@ enum class BaselineOption : uint8_t {
 using BaselineOptions = EnumFlags<BaselineOption>;
 
 bool DispatchOffThreadBaselineBatchEager(JSContext* cx);
-bool DispatchOffThreadBaselineBatch(JSContext* cx);
+extern "C" bool DispatchOffThreadBaselineBatch(JSContext* cx);
 
 MethodStatus BaselineCompile(JSContext* cx, JSScript* script,
                              BaselineOptions options);

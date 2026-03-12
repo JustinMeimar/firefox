@@ -1005,6 +1005,12 @@ void BaselineScript::computeResumeNativeOffsets(
                  computeNative);
 }
 
+extern "C" bool BaselineScriptOSREntryForFrame(JSContext* cx,
+                                               BaselineFrame* frame,
+                                               uint8_t** entry) {
+  return BaselineScript::OSREntryForFrame(cx, frame, entry);
+}
+
 bool BaselineScript::OSREntryForFrame(JSContext* cx, BaselineFrame* frame,
                                       uint8_t** entry) {
   MOZ_ASSERT(frame->runningInInterpreter());

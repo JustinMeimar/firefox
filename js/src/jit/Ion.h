@@ -38,8 +38,8 @@ class BaselineFrame;
 
 bool CanIonCompileScript(JSContext* cx, JSScript* script);
 
-[[nodiscard]] bool IonCompileScriptForBaselineAtEntry(JSContext* cx,
-                                                      BaselineFrame* frame);
+extern "C" [[nodiscard]] bool IonCompileScriptForBaselineAtEntry(
+    JSContext* cx, BaselineFrame* frame);
 
 struct IonOsrTempData {
   void* jitcode;
@@ -53,11 +53,9 @@ struct IonOsrTempData {
   }
 };
 
-[[nodiscard]] bool IonCompileScriptForBaselineOSR(JSContext* cx,
-                                                  BaselineFrame* frame,
-                                                  uint32_t frameSize,
-                                                  jsbytecode* pc,
-                                                  IonOsrTempData** infoPtr);
+extern "C" [[nodiscard]] bool IonCompileScriptForBaselineOSR(
+    JSContext* cx, BaselineFrame* frame, uint32_t frameSize, jsbytecode* pc,
+    IonOsrTempData** infoPtr);
 
 MethodStatus CanEnterIon(JSContext* cx, RunState& state);
 

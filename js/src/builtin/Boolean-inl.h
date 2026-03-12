@@ -14,7 +14,7 @@
 
 namespace js {
 
-inline bool EmulatesUndefined(JSObject* obj) {
+extern "C" inline bool EmulatesUndefined(JSObject* obj) {
   // Called from ProcessTryNotes via ToBoolean with a pending exception.
   AutoUnsafeCallWithABI unsafe(UnsafeABIStrictness::AllowPendingExceptions);
   JSObject* actual =

@@ -84,7 +84,8 @@ extern JSAtom* AtomizeUTF8Chars(JSContext* cx, const char* utf8Chars,
 
 extern JSAtom* AtomizeStringSlow(JSContext* cx, JSString* str);
 
-MOZ_ALWAYS_INLINE JSAtom* AtomizeString(JSContext* cx, JSString* str) {
+extern "C" MOZ_ALWAYS_INLINE JSAtom* AtomizeString(JSContext* cx,
+                                                   JSString* str) {
   // Inlined fast path for atoms. This covers ~71% of calls to this function on
   // Speedometer 3.
   if (str->isAtom()) {

@@ -35,8 +35,9 @@ uint32_t FuzzilliHashDouble(double value);
 
 uint32_t FuzzilliHashBigInt(BigInt* bigInt);
 
-void FuzzilliHashObjectInl(JSContext* cx, JSObject* obj, uint32_t* out);
-void FuzzilliHashObject(JSContext* cx, JSObject* obj);
+extern "C" void FuzzilliHashObjectInl(JSContext* cx, JSObject* obj,
+                                      uint32_t* out);
+extern "C" void FuzzilliHashObject(JSContext* cx, JSObject* obj);
 #endif
 
 } /* namespace js */

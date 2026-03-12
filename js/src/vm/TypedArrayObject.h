@@ -200,13 +200,13 @@ class ResizableTypedArrayObject : public TypedArrayObject {
 
 class ImmutableTypedArrayObject : public TypedArrayObject {};
 
-extern TypedArrayObject* NewTypedArrayWithTemplateAndLength(
+extern "C" TypedArrayObject* NewTypedArrayWithTemplateAndLength(
     JSContext* cx, HandleObject templateObj, int32_t len);
 
-extern TypedArrayObject* NewTypedArrayWithTemplateAndArray(
+extern "C" TypedArrayObject* NewTypedArrayWithTemplateAndArray(
     JSContext* cx, HandleObject templateObj, HandleObject array);
 
-extern TypedArrayObject* NewTypedArrayWithTemplateAndBuffer(
+extern "C" TypedArrayObject* NewTypedArrayWithTemplateAndBuffer(
     JSContext* cx, HandleObject templateObj, HandleObject arrayBuffer,
     HandleValue byteOffset, HandleValue length);
 
@@ -351,28 +351,28 @@ void TypedArrayFillFloat32(TypedArrayObject* obj, float fillValue,
 void TypedArrayFillBigInt(TypedArrayObject* obj, BigInt* fillValue,
                           intptr_t start, intptr_t end);
 
-bool TypedArraySet(JSContext* cx, TypedArrayObject* target,
-                   TypedArrayObject* source, intptr_t offset);
+extern "C" bool TypedArraySet(JSContext* cx, TypedArrayObject* target,
+                              TypedArrayObject* source, intptr_t offset);
 
 void TypedArraySetInfallible(TypedArrayObject* target, TypedArrayObject* source,
                              intptr_t offset);
 
-bool TypedArraySetFromSubarray(JSContext* cx, TypedArrayObject* target,
-                               TypedArrayObject* source, intptr_t offset,
-                               intptr_t sourceOffset, intptr_t sourceLength);
+extern "C" bool TypedArraySetFromSubarray(
+    JSContext* cx, TypedArrayObject* target, TypedArrayObject* source,
+    intptr_t offset, intptr_t sourceOffset, intptr_t sourceLength);
 
 void TypedArraySetFromSubarrayInfallible(TypedArrayObject* target,
                                          TypedArrayObject* source,
                                          intptr_t offset, intptr_t sourceOffset,
                                          intptr_t sourceLength);
 
-TypedArrayObject* TypedArraySubarray(JSContext* cx,
-                                     Handle<TypedArrayObject*> obj,
-                                     intptr_t start, intptr_t end);
+extern "C" TypedArrayObject* TypedArraySubarray(JSContext* cx,
+                                                Handle<TypedArrayObject*> obj,
+                                                intptr_t start, intptr_t end);
 
-TypedArrayObject* TypedArraySubarrayWithLength(JSContext* cx,
-                                               Handle<TypedArrayObject*> obj,
-                                               intptr_t start, intptr_t length);
+extern "C" TypedArrayObject* TypedArraySubarrayWithLength(
+    JSContext* cx, Handle<TypedArrayObject*> obj, intptr_t start,
+    intptr_t length);
 
 TypedArrayObject* TypedArraySubarrayRecover(JSContext* cx,
                                             Handle<TypedArrayObject*> obj,

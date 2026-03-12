@@ -296,6 +296,13 @@ bool BoundFunctionObject::functionBind(JSContext* cx, unsigned argc,
   return true;
 }
 
+extern "C" BoundFunctionObject* FunctionBindImpl(
+    JSContext* cx, Handle<JSObject*> target, Value* args, uint32_t argc,
+    Handle<BoundFunctionObject*> maybeBound) {
+  return BoundFunctionObject::functionBindImpl(cx, target, args, argc,
+                                               maybeBound);
+}
+
 // ES2023 20.2.3.2 Function.prototype.bind
 // https://tc39.es/ecma262/#sec-function.prototype.bind
 //
@@ -417,6 +424,11 @@ BoundFunctionObject* BoundFunctionObject::functionBindImpl(
   return bound;
 }
 
+extern "C" BoundFunctionObject* FunctionBindCreate(
+    JSContext* cx, Handle<BoundFunctionObject*> templateObj) {
+  return BoundFunctionObject::createWithTemplate(cx, templateObj);
+}
+
 // static
 BoundFunctionObject* BoundFunctionObject::createWithTemplate(
     JSContext* cx, Handle<BoundFunctionObject*> templateObj) {
@@ -430,6 +442,13 @@ BoundFunctionObject* BoundFunctionObject::createWithTemplate(
   bound->initLength(templateObj->getLengthForInitialShape().toInt32());
   bound->initName(&templateObj->getNameForInitialShape().toString()->asAtom());
   return bound;
+}
+
+extern "C" BoundFunctionObject* FunctionBindSpecializedBaseline(
+    JSContext* cx, Handle<JSObject*> target, Value* args, uint32_t argc,
+    Handle<BoundFunctionObject*> templateObj) {
+  return BoundFunctionObject::functionBindSpecializedBaseline(
+      cx, target, args, argc, templateObj);
 }
 
 // static

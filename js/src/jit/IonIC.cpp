@@ -164,6 +164,13 @@ static void TryAttachIonStub(JSContext* cx, IonIC* ic, IonScript* ionScript,
   }
 }
 
+extern "C" bool IonGetPropertyICUpdate(JSContext* cx, HandleScript outerScript,
+                                       IonGetPropertyIC* ic, HandleValue val,
+                                       HandleValue idVal,
+                                       MutableHandleValue res) {
+  return IonGetPropertyIC::update(cx, outerScript, ic, val, idVal, res);
+}
+
 /* static */
 bool IonGetPropertyIC::update(JSContext* cx, HandleScript outerScript,
                               IonGetPropertyIC* ic, HandleValue val,
@@ -205,6 +212,14 @@ bool IonGetPropertyIC::update(JSContext* cx, HandleScript outerScript,
   return true;
 }
 
+extern "C" bool IonGetPropSuperICUpdate(JSContext* cx, HandleScript outerScript,
+                                        IonGetPropSuperIC* ic, HandleObject obj,
+                                        HandleValue receiver, HandleValue idVal,
+                                        MutableHandleValue res) {
+  return IonGetPropSuperIC::update(cx, outerScript, ic, obj, receiver, idVal,
+                                   res);
+}
+
 /* static */
 bool IonGetPropSuperIC::update(JSContext* cx, HandleScript outerScript,
                                IonGetPropSuperIC* ic, HandleObject obj,
@@ -238,6 +253,12 @@ bool IonGetPropSuperIC::update(JSContext* cx, HandleScript outerScript,
   }
 
   return true;
+}
+
+extern "C" bool IonSetPropertyICUpdate(JSContext* cx, HandleScript outerScript,
+                                       IonSetPropertyIC* ic, HandleObject obj,
+                                       HandleValue idVal, HandleValue rhs) {
+  return IonSetPropertyIC::update(cx, outerScript, ic, obj, idVal, rhs);
 }
 
 /* static */
@@ -367,6 +388,12 @@ bool IonSetPropertyIC::update(JSContext* cx, HandleScript outerScript,
   return true;
 }
 
+extern "C" bool IonGetNameICUpdate(JSContext* cx, HandleScript outerScript,
+                                   IonGetNameIC* ic, HandleObject envChain,
+                                   MutableHandleValue res) {
+  return IonGetNameIC::update(cx, outerScript, ic, envChain, res);
+}
+
 /* static */
 bool IonGetNameIC::update(JSContext* cx, HandleScript outerScript,
                           IonGetNameIC* ic, HandleObject envChain,
@@ -391,6 +418,13 @@ bool IonGetNameIC::update(JSContext* cx, HandleScript outerScript,
   return FetchName<GetNameMode::Normal>(cx, obj, holder, name, prop, res);
 }
 
+extern "C" JSObject* IonBindNameICUpdate(JSContext* cx,
+                                         HandleScript outerScript,
+                                         IonBindNameIC* ic,
+                                         HandleObject envChain) {
+  return IonBindNameIC::update(cx, outerScript, ic, envChain);
+}
+
 /* static */
 JSObject* IonBindNameIC::update(JSContext* cx, HandleScript outerScript,
                                 IonBindNameIC* ic, HandleObject envChain) {
@@ -410,6 +444,13 @@ JSObject* IonBindNameIC::update(JSContext* cx, HandleScript outerScript,
   return LookupNameUnqualified(cx, name, envChain);
 }
 
+extern "C" JSObject* IonGetIteratorICUpdate(JSContext* cx,
+                                            HandleScript outerScript,
+                                            IonGetIteratorIC* ic,
+                                            HandleValue value) {
+  return IonGetIteratorIC::update(cx, outerScript, ic, value);
+}
+
 /* static */
 JSObject* IonGetIteratorIC::update(JSContext* cx, HandleScript outerScript,
                                    IonGetIteratorIC* ic, HandleValue value) {
@@ -418,6 +459,14 @@ JSObject* IonGetIteratorIC::update(JSContext* cx, HandleScript outerScript,
   TryAttachIonStub<GetIteratorIRGenerator>(cx, ic, ionScript, value);
 
   return ValueToIterator(cx, value);
+}
+
+extern "C" bool IonOptimizeSpreadCallICUpdate(JSContext* cx,
+                                              HandleScript outerScript,
+                                              IonOptimizeSpreadCallIC* ic,
+                                              HandleValue value,
+                                              MutableHandleValue result) {
+  return IonOptimizeSpreadCallIC::update(cx, outerScript, ic, value, result);
 }
 
 /* static */
@@ -430,6 +479,12 @@ bool IonOptimizeSpreadCallIC::update(JSContext* cx, HandleScript outerScript,
   TryAttachIonStub<OptimizeSpreadCallIRGenerator>(cx, ic, ionScript, value);
 
   return OptimizeSpreadCall(cx, value, result);
+}
+
+extern "C" bool IonHasOwnICUpdate(JSContext* cx, HandleScript outerScript,
+                                  IonHasOwnIC* ic, HandleValue val,
+                                  HandleValue idVal, int32_t* res) {
+  return IonHasOwnIC::update(cx, outerScript, ic, val, idVal, res);
 }
 
 /* static */
@@ -450,6 +505,14 @@ bool IonHasOwnIC::update(JSContext* cx, HandleScript outerScript,
   return true;
 }
 
+extern "C" bool IonCheckPrivateFieldICUpdate(JSContext* cx,
+                                             HandleScript outerScript,
+                                             IonCheckPrivateFieldIC* ic,
+                                             HandleValue val, HandleValue idVal,
+                                             bool* res) {
+  return IonCheckPrivateFieldIC::update(cx, outerScript, ic, val, idVal, res);
+}
+
 /* static */
 bool IonCheckPrivateFieldIC::update(JSContext* cx, HandleScript outerScript,
                                     IonCheckPrivateFieldIC* ic, HandleValue val,
@@ -463,6 +526,12 @@ bool IonCheckPrivateFieldIC::update(JSContext* cx, HandleScript outerScript,
   return CheckPrivateFieldOperation(cx, pc, val, idVal, res);
 }
 
+extern "C" bool IonInICUpdate(JSContext* cx, HandleScript outerScript,
+                              IonInIC* ic, HandleValue key, HandleObject obj,
+                              bool* res) {
+  return IonInIC::update(cx, outerScript, ic, key, obj, res);
+}
+
 /* static */
 bool IonInIC::update(JSContext* cx, HandleScript outerScript, IonInIC* ic,
                      HandleValue key, HandleObject obj, bool* res) {
@@ -474,6 +543,13 @@ bool IonInIC::update(JSContext* cx, HandleScript outerScript, IonInIC* ic,
 
   return OperatorIn(cx, key, obj, res);
 }
+
+extern "C" bool IonInstanceOfICUpdate(JSContext* cx, HandleScript outerScript,
+                                      IonInstanceOfIC* ic, HandleValue lhs,
+                                      HandleObject rhs, bool* res) {
+  return IonInstanceOfIC::update(cx, outerScript, ic, lhs, rhs, res);
+}
+
 /* static */
 bool IonInstanceOfIC::update(JSContext* cx, HandleScript outerScript,
                              IonInstanceOfIC* ic, HandleValue lhs,
@@ -483,6 +559,14 @@ bool IonInstanceOfIC::update(JSContext* cx, HandleScript outerScript,
   TryAttachIonStub<InstanceOfIRGenerator>(cx, ic, ionScript, lhs, rhs);
 
   return InstanceofOperator(cx, rhs, lhs, res);
+}
+
+extern "C" bool IonToPropertyKeyICUpdate(JSContext* cx,
+                                         HandleScript outerScript,
+                                         IonToPropertyKeyIC* ic,
+                                         HandleValue val,
+                                         MutableHandleValue res) {
+  return IonToPropertyKeyIC::update(cx, outerScript, ic, val, res);
 }
 
 /*  static */
@@ -496,6 +580,11 @@ bool IonToPropertyKeyIC::update(JSContext* cx, HandleScript outerScript,
   return ToPropertyKeyOperation(cx, val, res);
 }
 
+extern "C" bool IonCloseIterICUpdate(JSContext* cx, HandleScript outerScript,
+                                     IonCloseIterIC* ic, HandleObject iter) {
+  return IonCloseIterIC::update(cx, outerScript, ic, iter);
+}
+
 /* static */
 bool IonCloseIterIC::update(JSContext* cx, HandleScript outerScript,
                             IonCloseIterIC* ic, HandleObject iter) {
@@ -505,6 +594,14 @@ bool IonCloseIterIC::update(JSContext* cx, HandleScript outerScript,
   TryAttachIonStub<CloseIterIRGenerator>(cx, ic, ionScript, iter, kind);
 
   return CloseIterOperation(cx, iter, kind);
+}
+
+extern "C" bool IonOptimizeGetIteratorICUpdate(JSContext* cx,
+                                               HandleScript outerScript,
+                                               IonOptimizeGetIteratorIC* ic,
+                                               HandleValue value,
+                                               bool* result) {
+  return IonOptimizeGetIteratorIC::update(cx, outerScript, ic, value, result);
 }
 
 /* static */
@@ -517,6 +614,12 @@ bool IonOptimizeGetIteratorIC::update(JSContext* cx, HandleScript outerScript,
 
   *result = OptimizeGetIterator(value, cx);
   return true;
+}
+
+extern "C" bool IonUnaryArithICUpdate(JSContext* cx, HandleScript outerScript,
+                                      IonUnaryArithIC* ic, HandleValue val,
+                                      MutableHandleValue res) {
+  return IonUnaryArithIC::update(cx, outerScript, ic, val, res);
 }
 
 /*  static */
@@ -577,6 +680,13 @@ bool IonUnaryArithIC::update(JSContext* cx, HandleScript outerScript,
   TryAttachIonStub<UnaryArithIRGenerator>(cx, ic, ionScript, op, val, res);
 
   return true;
+}
+
+extern "C" bool IonBinaryArithICUpdate(JSContext* cx, HandleScript outerScript,
+                                       IonBinaryArithIC* ic, HandleValue lhs,
+                                       HandleValue rhs,
+                                       MutableHandleValue ret) {
+  return IonBinaryArithIC::update(cx, outerScript, ic, lhs, rhs, ret);
 }
 
 /* static */
@@ -670,6 +780,12 @@ bool IonBinaryArithIC::update(JSContext* cx, HandleScript outerScript,
                                            ret);
 
   return true;
+}
+
+extern "C" bool IonCompareICUpdate(JSContext* cx, HandleScript outerScript,
+                                   IonCompareIC* ic, HandleValue lhs,
+                                   HandleValue rhs, bool* res) {
+  return IonCompareIC::update(cx, outerScript, ic, lhs, rhs, res);
 }
 
 /* static */

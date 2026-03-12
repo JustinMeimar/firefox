@@ -38,7 +38,8 @@ class JSONPrinter;
 extern RegExpObject* RegExpAlloc(JSContext* cx, NewObjectKind newKind,
                                  HandleObject proto = nullptr);
 
-extern JSObject* CloneRegExpObject(JSContext* cx, Handle<RegExpObject*> regex);
+extern "C" JSObject* CloneRegExpObject(JSContext* cx,
+                                       Handle<RegExpObject*> regex);
 
 class RegExpObject : public NativeObject {
   static const unsigned LAST_INDEX_SLOT = 0;

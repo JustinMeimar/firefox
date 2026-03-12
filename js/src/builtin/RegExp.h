@@ -59,29 +59,25 @@ JSObject* InitRegExpClass(JSContext* cx, HandleObject obj);
 [[nodiscard]] extern bool RegExpMatcher(JSContext* cx, unsigned argc,
                                         Value* vp);
 
-[[nodiscard]] extern bool RegExpMatcherRaw(JSContext* cx, HandleObject regexp,
-                                           HandleString input,
-                                           int32_t lastIndex,
-                                           MatchPairs* maybeMatches,
-                                           MutableHandleValue output);
+extern "C" [[nodiscard]] bool RegExpMatcherRaw(
+    JSContext* cx, HandleObject regexp, HandleString input, int32_t lastIndex,
+    MatchPairs* maybeMatches, MutableHandleValue output);
 
 [[nodiscard]] extern bool RegExpSearcher(JSContext* cx, unsigned argc,
                                          Value* vp);
 
-[[nodiscard]] extern bool RegExpSearcherRaw(JSContext* cx, HandleObject regexp,
-                                            HandleString input,
-                                            int32_t lastIndex,
-                                            MatchPairs* maybeMatches,
-                                            int32_t* result);
+extern "C" [[nodiscard]] bool RegExpSearcherRaw(
+    JSContext* cx, HandleObject regexp, HandleString input, int32_t lastIndex,
+    MatchPairs* maybeMatches, int32_t* result);
 
 [[nodiscard]] extern bool RegExpSearcherLastLimit(JSContext* cx, unsigned argc,
                                                   Value* vp);
 
-[[nodiscard]] extern bool RegExpBuiltinExecMatchFromJit(
+extern "C" [[nodiscard]] bool RegExpBuiltinExecMatchFromJit(
     JSContext* cx, Handle<RegExpObject*> regexp, HandleString input,
     MatchPairs* maybeMatches, MutableHandleValue output);
 
-[[nodiscard]] extern bool RegExpBuiltinExecTestFromJit(
+extern "C" [[nodiscard]] bool RegExpBuiltinExecTestFromJit(
     JSContext* cx, Handle<RegExpObject*> regexp, HandleString input,
     bool* result);
 
@@ -142,16 +138,17 @@ JSObject* InitRegExpClass(JSContext* cx, HandleObject obj);
     Handle<JSLinearString*> replacement, size_t firstDollarIndex,
     HandleValue namedCaptures, MutableHandleValue rval);
 
-[[nodiscard]] extern bool RegExpHasCaptureGroups(JSContext* cx,
-                                                 Handle<RegExpObject*> obj,
-                                                 Handle<JSString*> input,
-                                                 bool* result);
+extern "C" [[nodiscard]] bool RegExpHasCaptureGroups(JSContext* cx,
+                                                     Handle<RegExpObject*> obj,
+                                                     Handle<JSString*> input,
+                                                     bool* result);
 
 [[nodiscard]] extern bool GetFirstDollarIndex(JSContext* cx, unsigned argc,
                                               Value* vp);
 
-[[nodiscard]] extern bool GetFirstDollarIndexRaw(JSContext* cx, JSString* str,
-                                                 int32_t* index);
+extern "C" [[nodiscard]] bool GetFirstDollarIndexRaw(JSContext* cx,
+                                                     JSString* str,
+                                                     int32_t* index);
 
 template <typename StringT>
 extern int32_t GetFirstDollarIndexRawFlat(const StringT* text);

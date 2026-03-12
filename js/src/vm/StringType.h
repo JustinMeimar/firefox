@@ -2165,8 +2165,8 @@ extern bool HasSubstringAt(const JSLinearString* text,
  * Negative, overlarge, swapped, etc. |beginInt| and |lengthInt| are forbidden
  * and constitute API misuse.
  */
-JSString* SubstringKernel(JSContext* cx, HandleString str, int32_t beginInt,
-                          int32_t lengthInt);
+extern "C" JSString* SubstringKernel(JSContext* cx, HandleString str,
+                                     int32_t beginInt, int32_t lengthInt);
 
 inline js::HashNumber HashStringChars(const JSLinearString* str) {
   JS::AutoCheckCannotGC nogc;

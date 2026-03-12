@@ -204,8 +204,8 @@ inline bool GetIntrinsicOperation(JSContext* cx, HandleScript script,
   return GlobalObject::getIntrinsicValue(cx, cx->global(), name, vp);
 }
 
-inline bool SetIntrinsicOperation(JSContext* cx, JSScript* script,
-                                  jsbytecode* pc, HandleValue val) {
+extern "C" inline bool SetIntrinsicOperation(JSContext* cx, JSScript* script,
+                                             jsbytecode* pc, HandleValue val) {
   Rooted<PropertyName*> name(cx, script->getName(pc));
   return GlobalObject::setIntrinsicValue(cx, cx->global(), name, val);
 }
@@ -507,11 +507,11 @@ static MOZ_ALWAYS_INLINE bool InitElemOperation(JSContext* cx, jsbytecode* pc,
   return DefineDataProperty(cx, obj, id, val, flags);
 }
 
-static MOZ_ALWAYS_INLINE bool CheckPrivateFieldOperation(JSContext* cx,
-                                                         jsbytecode* pc,
-                                                         HandleValue val,
-                                                         HandleValue idval,
-                                                         bool* result) {
+extern "C" MOZ_ALWAYS_INLINE bool CheckPrivateFieldOperation(JSContext* cx,
+                                                             jsbytecode* pc,
+                                                             HandleValue val,
+                                                             HandleValue idval,
+                                                             bool* result) {
   MOZ_ASSERT(idval.isSymbol());
   MOZ_ASSERT(idval.toSymbol()->isPrivateName());
 
@@ -560,7 +560,8 @@ static MOZ_ALWAYS_INLINE bool CheckPrivateFieldOperation(JSContext* cx,
   return false;
 }
 
-static inline JS::Symbol* NewPrivateName(JSContext* cx, Handle<JSAtom*> name) {
+extern "C" inline JS::Symbol* NewPrivateName(JSContext* cx,
+                                             Handle<JSAtom*> name) {
   return JS::Symbol::new_(cx, JS::SymbolCode::PrivateNameSymbol, name);
 }
 

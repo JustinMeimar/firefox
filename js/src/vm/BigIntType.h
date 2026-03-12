@@ -504,7 +504,7 @@ extern JS::BigInt* ParseBigIntLiteral(
 extern mozilla::Maybe<int64_t> ParseBigInt64Literal(
     mozilla::Range<const char16_t> chars);
 
-extern JS::BigInt* ToBigInt(JSContext* cx, JS::Handle<JS::Value> v);
+extern "C" JS::BigInt* ToBigInt(JSContext* cx, JS::Handle<JS::Value> v);
 extern JS::Result<int64_t> ToBigInt64(JSContext* cx, JS::Handle<JS::Value> v);
 extern JS::Result<uint64_t> ToBigUint64(JSContext* cx, JS::Handle<JS::Value> v);
 

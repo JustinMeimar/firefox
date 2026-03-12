@@ -101,6 +101,10 @@ bool AnyRef::fromJSValue(JSContext* cx, HandleValue value,
   return true;
 }
 
+extern "C" JSObject* BoxBoxableValue(JSContext* cx, HandleValue value) {
+  return AnyRef::boxValue(cx, value);
+}
+
 JSObject* AnyRef::boxValue(JSContext* cx, HandleValue value) {
   MOZ_ASSERT(AnyRef::valueNeedsBoxing(value));
   return WasmValueBox::create(cx, value);

@@ -771,6 +771,10 @@ JSLinearString* js::Int32ToString(JSContext* cx, int32_t si) {
 template JSLinearString* js::Int32ToString<CanGC>(JSContext* cx, int32_t si);
 template JSLinearString* js::Int32ToString<NoGC>(JSContext* cx, int32_t si);
 
+extern "C" JSLinearString* Int32ToString(JSContext* cx, int32_t si) {
+  return js::Int32ToString<CanGC>(cx, si);
+}
+
 template <AllowGC allowGC>
 JSLinearString* js::Int32ToStringWithHeap(JSContext* cx, int32_t si,
                                           gc::Heap heap) {
@@ -1693,6 +1697,11 @@ static JSLinearString* Int32ToStringWithBase(JSContext* cx, int32_t i,
   return s;
 }
 
+extern "C" JSLinearString* Int32ToStringWithBase(JSContext* cx, int32_t i,
+                                                 int32_t base) {
+  return Int32ToStringWithBase<CanGC>(cx, i, base);
+}
+
 template <AllowGC allowGC>
 static JSString* NumberToStringWithBase(JSContext* cx, double d, int32_t base) {
   MOZ_ASSERT(2 <= base && base <= 36);
@@ -1752,6 +1761,10 @@ JSString* js::NumberToString(JSContext* cx, double d) {
 template JSString* js::NumberToString<CanGC>(JSContext* cx, double d);
 
 template JSString* js::NumberToString<NoGC>(JSContext* cx, double d);
+
+extern "C" JSString* NumberToString(JSContext* cx, double d) {
+  return js::NumberToString<CanGC>(cx, d);
+}
 
 JSString* js::NumberToStringPure(JSContext* cx, double d) {
   AutoUnsafeCallWithABI unsafe;

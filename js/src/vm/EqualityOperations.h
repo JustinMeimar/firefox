@@ -40,8 +40,8 @@ extern bool LooselyEqual(JSContext* cx, JS::Handle<JS::Value> lval,
  * Computes |SameValue(v1, v2)| -- strict equality except that NaNs are
  * considered equal and opposite-signed zeroes are considered unequal.
  */
-extern bool SameValue(JSContext* cx, const JS::Value& v1, const JS::Value& v2,
-                      bool* same);
+extern "C" bool SameValue(JSContext* cx, const JS::Value& v1,
+                          const JS::Value& v2, bool* same);
 
 /**
  * Computes |SameValueZero(v1, v2)| -- strict equality except that NaNs are

@@ -90,23 +90,25 @@ size_t proxy_ObjectMoved(JSObject* obj, JSObject* old);
 
 // These functions are used by JIT code
 
-bool ProxyHas(JSContext* cx, HandleObject proxy, HandleValue idVal,
-              bool* result);
+extern "C" bool ProxyHas(JSContext* cx, HandleObject proxy, HandleValue idVal,
+                         bool* result);
 
-bool ProxyHasOwn(JSContext* cx, HandleObject proxy, HandleValue idVal,
-                 bool* result);
+extern "C" bool ProxyHasOwn(JSContext* cx, HandleObject proxy,
+                            HandleValue idVal, bool* result);
 
-bool ProxyGetProperty(JSContext* cx, HandleObject proxy, HandleId id,
-                      MutableHandleValue vp);
+extern "C" bool ProxyGetProperty(JSContext* cx, HandleObject proxy, HandleId id,
+                                 MutableHandleValue vp);
 
-bool ProxyGetPropertyByValue(JSContext* cx, HandleObject proxy,
-                             HandleValue idVal, MutableHandleValue vp);
+extern "C" bool ProxyGetPropertyByValue(JSContext* cx, HandleObject proxy,
+                                        HandleValue idVal,
+                                        MutableHandleValue vp);
 
-bool ProxySetProperty(JSContext* cx, HandleObject proxy, HandleId id,
-                      HandleValue val, bool strict);
+extern "C" bool ProxySetProperty(JSContext* cx, HandleObject proxy, HandleId id,
+                                 HandleValue val, bool strict);
 
-bool ProxySetPropertyByValue(JSContext* cx, HandleObject proxy,
-                             HandleValue idVal, HandleValue val, bool strict);
+extern "C" bool ProxySetPropertyByValue(JSContext* cx, HandleObject proxy,
+                                        HandleValue idVal, HandleValue val,
+                                        bool strict);
 } /* namespace js */
 
 #endif /* proxy_Proxy_h */

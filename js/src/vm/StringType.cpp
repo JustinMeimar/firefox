@@ -1375,6 +1375,13 @@ template JSString* js::ConcatStrings<NoGC>(JSContext* cx, JSString* const& left,
                                            JSString* const& right,
                                            gc::Heap heap);
 
+extern "C" JSString* ConcatStrings(
+    JSContext* cx, typename MaybeRooted<JSString*, CanGC>::HandleType left,
+    typename MaybeRooted<JSString*, CanGC>::HandleType right,
+    js::gc::Heap heap = js::gc::Heap::Default) {
+  return ConcatStrings<CanGC>(cx, left, right, heap);
+}
+
 bool JSLinearString::hasCharsInCollectedNurseryRegion() const {
   if (isPermanentAtom()) {
     // Nursery::inCollectedRegion(void*) should only be called on the nursery's

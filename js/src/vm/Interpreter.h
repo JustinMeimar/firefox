@@ -31,13 +31,13 @@ class PlainObject;
  * Convert null/undefined |thisv| into the global lexical's |this| object, and
  * replace other primitives with boxed versions.
  */
-extern JSObject* BoxNonStrictThis(JSContext* cx, HandleValue thisv);
+extern "C" JSObject* BoxNonStrictThis(JSContext* cx, HandleValue thisv);
 
 extern bool GetFunctionThis(JSContext* cx, AbstractFramePtr frame,
                             MutableHandleValue res);
 
-extern void GetNonSyntacticGlobalThis(JSContext* cx, HandleObject envChain,
-                                      MutableHandleValue res);
+extern "C" void GetNonSyntacticGlobalThis(JSContext* cx, HandleObject envChain,
+                                          MutableHandleValue res);
 
 /*
  * numToSkip is the number of stack values the expression decompiler should skip
@@ -525,19 +525,22 @@ bool HandleClosingGeneratorReturn(JSContext* cx, AbstractFramePtr frame,
 
 /************************************************************************/
 
-bool ThrowOperation(JSContext* cx, HandleValue v);
+extern "C" bool ThrowOperation(JSContext* cx, HandleValue v);
 
-bool ThrowWithStackOperation(JSContext* cx, HandleValue v, HandleValue stack);
+extern "C" bool ThrowWithStackOperation(JSContext* cx, HandleValue v,
+                                        HandleValue stack);
 
-bool GetPendingExceptionStack(JSContext* cx, MutableHandleValue vp);
+extern "C" bool GetPendingExceptionStack(JSContext* cx, MutableHandleValue vp);
 
 bool GetProperty(JSContext* cx, HandleValue value, Handle<PropertyName*> name,
                  MutableHandleValue vp);
 
-JSObject* LambdaBaselineFallback(JSContext* cx, HandleFunction fun,
-                                 HandleObject parent, gc::AllocSite* site);
-JSObject* LambdaOptimizedFallback(JSContext* cx, HandleFunction fun,
-                                  HandleObject parent, gc::Heap heap);
+extern "C" JSObject* LambdaBaselineFallback(JSContext* cx, HandleFunction fun,
+                                            HandleObject parent,
+                                            gc::AllocSite* site);
+extern "C" JSObject* LambdaOptimizedFallback(JSContext* cx, HandleFunction fun,
+                                             HandleObject parent,
+                                             gc::Heap heap);
 JSObject* Lambda(JSContext* cx, HandleFunction fun, HandleObject parent,
                  gc::Heap heap = gc::Heap::Default,
                  gc::AllocSite* site = nullptr);
@@ -607,37 +610,41 @@ template <bool strict>
 bool DelElemOperation(JSContext* cx, HandleValue val, HandleValue index,
                       bool* res);
 
-JSObject* BindVarOperation(JSContext* cx, JSObject* envChain);
+extern "C" JSObject* BindVarOperation(JSContext* cx, JSObject* envChain);
 
-JSObject* ImportMetaOperation(JSContext* cx, HandleScript script);
+extern "C" JSObject* ImportMetaOperation(JSContext* cx, HandleScript script);
 
-JSObject* BuiltinObjectOperation(JSContext* cx, BuiltinObjectKind kind);
+extern "C" JSObject* BuiltinObjectOperation(JSContext* cx,
+                                            BuiltinObjectKind kind);
 
-bool ThrowMsgOperation(JSContext* cx, const unsigned throwMsgKind);
+extern "C" bool ThrowMsgOperation(JSContext* cx, const unsigned throwMsgKind);
 
-bool GetAndClearException(JSContext* cx, MutableHandleValue res);
+extern "C" bool GetAndClearException(JSContext* cx, MutableHandleValue res);
 
 bool GetAndClearExceptionAndStack(JSContext* cx, MutableHandleValue res,
                                   MutableHandle<SavedFrame*> stack);
 
-bool DeleteNameOperation(JSContext* cx, Handle<PropertyName*> name,
-                         HandleObject envChain, MutableHandleValue res);
+extern "C" bool DeleteNameOperation(JSContext* cx, Handle<PropertyName*> name,
+                                    HandleObject envChain,
+                                    MutableHandleValue res);
 
-void ImplicitThisOperation(JSContext* cx, HandleObject env,
-                           MutableHandleValue res);
+extern "C" void ImplicitThisOperation(JSContext* cx, HandleObject env,
+                                      MutableHandleValue res);
 
-bool InitPropGetterSetterOperation(JSContext* cx, jsbytecode* pc,
-                                   HandleObject obj, Handle<PropertyName*> name,
-                                   HandleObject val);
+extern "C" bool InitPropGetterSetterOperation(JSContext* cx, jsbytecode* pc,
+                                              HandleObject obj,
+                                              Handle<PropertyName*> name,
+                                              HandleObject val);
 
 unsigned GetInitDataPropAttrs(JSOp op);
 
 bool EnterWithOperation(JSContext* cx, AbstractFramePtr frame, HandleValue val,
                         Handle<WithScope*> scope);
 
-bool InitElemGetterSetterOperation(JSContext* cx, jsbytecode* pc,
-                                   HandleObject obj, HandleValue idval,
-                                   HandleObject val);
+extern "C" bool InitElemGetterSetterOperation(JSContext* cx, jsbytecode* pc,
+                                              HandleObject obj,
+                                              HandleValue idval,
+                                              HandleObject val);
 
 bool SpreadCallOperation(JSContext* cx, HandleScript script, jsbytecode* pc,
                          HandleValue thisv, HandleValue callee, HandleValue arr,
@@ -654,45 +661,49 @@ enum class SyncDisposalClosureSlots : uint8_t {
 };
 bool SyncDisposalClosure(JSContext* cx, unsigned argc, JS::Value* vp);
 
-ErrorObject* CreateSuppressedError(JSContext* cx, JS::Handle<JS::Value> error,
-                                   JS::Handle<JS::Value> suppressed);
+extern "C" ErrorObject* CreateSuppressedError(JSContext* cx,
+                                              JS::Handle<JS::Value> error,
+                                              JS::Handle<JS::Value> suppressed);
 
-bool AddDisposableResourceToCapability(JSContext* cx, JS::Handle<JSObject*> env,
-                                       JS::Handle<JS::Value> val,
-                                       JS::Handle<JS::Value> method,
-                                       bool needsClosure, UsingHint hint);
+extern "C" bool AddDisposableResourceToCapability(
+    JSContext* cx, JS::Handle<JSObject*> env, JS::Handle<JS::Value> val,
+    JS::Handle<JS::Value> method, bool needsClosure, UsingHint hint);
 #endif
 
-ArrayObject* ArrayFromArgumentsObject(JSContext* cx,
-                                      Handle<ArgumentsObject*> args);
+extern "C" ArrayObject* ArrayFromArgumentsObject(JSContext* cx,
+                                                 Handle<ArgumentsObject*> args);
 
-JSObject* NewObjectOperation(JSContext* cx, HandleScript script,
-                             const jsbytecode* pc);
+extern "C" JSObject* NewObjectOperation(JSContext* cx, HandleScript script,
+                                        const jsbytecode* pc);
 
-JSObject* NewPlainObjectBaselineFallback(JSContext* cx,
-                                         Handle<SharedShape*> shape,
-                                         gc::AllocKind allocKind,
-                                         gc::AllocSite* site);
+extern "C" JSObject* NewPlainObjectBaselineFallback(JSContext* cx,
+                                                    Handle<SharedShape*> shape,
+                                                    gc::AllocKind allocKind,
+                                                    gc::AllocSite* site);
 
-JSObject* NewPlainObjectOptimizedFallback(JSContext* cx,
-                                          Handle<SharedShape*> shape,
-                                          gc::AllocKind allocKind,
-                                          gc::Heap initialHeap);
+extern "C" JSObject* NewPlainObjectOptimizedFallback(JSContext* cx,
+                                                     Handle<SharedShape*> shape,
+                                                     gc::AllocKind allocKind,
+                                                     gc::Heap initialHeap);
 
-ArrayObject* NewArrayOperation(JSContext* cx, uint32_t length,
-                               NewObjectKind newKind = GenericObject);
+extern "C" ArrayObject* NewArrayOperation(
+    JSContext* cx, uint32_t length, NewObjectKind newKind = GenericObject);
 
 // Called from JIT code when inline array allocation fails.
-ArrayObject* NewArrayObjectBaselineFallback(JSContext* cx, uint32_t length,
-                                            gc::AllocKind allocKind,
-                                            gc::AllocSite* site);
-ArrayObject* NewArrayObjectOptimizedFallback(JSContext* cx, uint32_t length,
-                                             gc::AllocKind allocKind,
-                                             NewObjectKind newKind);
+extern "C" ArrayObject* NewArrayObjectBaselineFallback(JSContext* cx,
+                                                       uint32_t length,
+                                                       gc::AllocKind allocKind,
+                                                       gc::AllocSite* site);
+extern "C" ArrayObject* NewArrayObjectOptimizedFallback(JSContext* cx,
+                                                        uint32_t length,
+                                                        gc::AllocKind allocKind,
+                                                        NewObjectKind newKind);
 
-[[nodiscard]] bool GetImportOperation(JSContext* cx, HandleObject envChain,
-                                      HandleScript script, jsbytecode* pc,
-                                      MutableHandleValue vp);
+extern "C" [[nodiscard]] bool GetImportOperation(JSContext* cx,
+                                                 HandleObject envChain,
+                                                 HandleScript script,
+                                                 jsbytecode* pc,
+                                                 MutableHandleValue vp);
 
 void ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
                                HandleId id);
@@ -705,34 +716,40 @@ void ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
 
 void ReportInNotObjectError(JSContext* cx, HandleValue lref, HandleValue rref);
 
-bool ThrowCheckIsObject(JSContext* cx, CheckIsObjectKind kind);
+extern "C" bool ThrowCheckIsObject(JSContext* cx, CheckIsObjectKind kind);
 
-bool ThrowUninitializedThis(JSContext* cx);
+extern "C" bool ThrowUninitializedThis(JSContext* cx);
 
-bool ThrowInitializedThis(JSContext* cx);
+extern "C" bool ThrowInitializedThis(JSContext* cx);
 
-bool ThrowObjectCoercible(JSContext* cx, HandleValue value);
+extern "C" bool ThrowObjectCoercible(JSContext* cx, HandleValue value);
 
-bool Debug_CheckSelfHosted(JSContext* cx, HandleValue funVal);
+extern "C" bool Debug_CheckSelfHosted(JSContext* cx, HandleValue funVal);
 
-bool CheckClassHeritageOperation(JSContext* cx, HandleValue heritage);
+extern "C" bool CheckClassHeritageOperation(JSContext* cx,
+                                            HandleValue heritage);
 
-PlainObject* ObjectWithProtoOperation(JSContext* cx, HandleValue proto);
+extern "C" PlainObject* ObjectWithProtoOperation(JSContext* cx,
+                                                 HandleValue proto);
 
-JSObject* FunWithProtoOperation(JSContext* cx, HandleFunction fun,
-                                HandleObject parent, HandleObject proto);
+extern "C" JSObject* FunWithProtoOperation(JSContext* cx, HandleFunction fun,
+                                           HandleObject parent,
+                                           HandleObject proto);
 
-bool SetPropertySuper(JSContext* cx, HandleValue lval, HandleValue receiver,
-                      Handle<PropertyName*> name, HandleValue rval,
-                      bool strict);
+extern "C" bool SetPropertySuper(JSContext* cx, HandleValue lval,
+                                 HandleValue receiver,
+                                 Handle<PropertyName*> name, HandleValue rval,
+                                 bool strict);
 
-bool SetElementSuper(JSContext* cx, HandleValue lval, HandleValue receiver,
-                     HandleValue index, HandleValue rval, bool strict);
+extern "C" bool SetElementSuper(JSContext* cx, HandleValue lval,
+                                HandleValue receiver, HandleValue index,
+                                HandleValue rval, bool strict);
 
-bool LoadAliasedDebugVar(JSContext* cx, JSObject* env, jsbytecode* pc,
-                         MutableHandleValue result);
+extern "C" bool LoadAliasedDebugVar(JSContext* cx, JSObject* env,
+                                    jsbytecode* pc, MutableHandleValue result);
 
-bool CloseIterOperation(JSContext* cx, HandleObject iter, CompletionKind kind);
+extern "C" bool CloseIterOperation(JSContext* cx, HandleObject iter,
+                                   CompletionKind kind);
 } /* namespace js */
 
 #endif /* vm_Interpreter_h */

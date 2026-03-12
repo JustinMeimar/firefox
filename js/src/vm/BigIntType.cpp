@@ -247,6 +247,10 @@ BigInt* BigInt::createFromNonZeroRawUint64(JSContext* cx, uint64_t n,
   return result;
 }
 
+extern "C" BigInt* BigIntNeg(JSContext* cx, HandleBigInt x) {
+  return BigInt::neg(cx, x);
+}
+
 BigInt* BigInt::neg(JSContext* cx, HandleBigInt x) {
   if (x->isZero()) {
     return x;
@@ -1102,6 +1106,10 @@ BigInt* BigInt::absoluteSubOne(JSContext* cx, HandleBigInt x,
   return destructivelyTrimHighZeroDigits(cx, result);
 }
 
+extern "C" BigInt* BigIntInc(JSContext* cx, HandleBigInt x) {
+  return BigInt::inc(cx, x);
+}
+
 BigInt* BigInt::inc(JSContext* cx, HandleBigInt x) {
   if (x->isZero()) {
     return one(cx);
@@ -1113,6 +1121,10 @@ BigInt* BigInt::inc(JSContext* cx, HandleBigInt x) {
   }
 
   return absoluteAddOne(cx, x, isNegative);
+}
+
+extern "C" BigInt* BigIntDec(JSContext* cx, HandleBigInt x) {
+  return BigInt::dec(cx, x);
 }
 
 BigInt* BigInt::dec(JSContext* cx, HandleBigInt x) {
@@ -1822,6 +1834,10 @@ BigInt* BigInt::createFromInt64(JSContext* cx, int64_t n, gc::Heap heap) {
   return res;
 }
 
+extern "C" BigInt* BigIntCreateFromIntPtr(JSContext* cx, intptr_t n) {
+  return BigInt::createFromIntPtr(cx, n);
+}
+
 BigInt* BigInt::createFromIntPtr(JSContext* cx, intptr_t n) {
   static_assert(sizeof(intptr_t) == sizeof(BigInt::Digit));
 
@@ -1865,6 +1881,10 @@ BigInt* BigInt::copy(JSContext* cx, HandleBigInt x, gc::Heap heap) {
   return result;
 }
 
+extern "C" BigInt* BigIntAdd(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::add(cx, x, y);
+}
+
 // BigInt proposal section 1.1.7
 BigInt* BigInt::add(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   bool xNegative = x->isNegative();
@@ -1889,6 +1909,10 @@ BigInt* BigInt::add(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   return absoluteSub(cx, y, x, !xNegative);
 }
 
+extern "C" BigInt* BigIntSub(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::sub(cx, x, y);
+}
+
 // BigInt proposal section 1.1.8
 BigInt* BigInt::sub(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   bool xNegative = x->isNegative();
@@ -1910,6 +1934,10 @@ BigInt* BigInt::sub(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   }
 
   return absoluteSub(cx, y, x, !xNegative);
+}
+
+extern "C" BigInt* BigIntMul(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::mul(cx, x, y);
 }
 
 // BigInt proposal section 1.1.4
@@ -1956,6 +1984,10 @@ BigInt* BigInt::mul(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   return destructivelyTrimHighZeroDigits(cx, result);
 }
 
+extern "C" BigInt* BigIntDiv(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::div(cx, x, y);
+}
+
 // BigInt proposal section 1.1.5
 BigInt* BigInt::div(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   // 1. If y is 0n, throw a RangeError exception.
@@ -1997,6 +2029,10 @@ BigInt* BigInt::div(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   }
 
   return destructivelyTrimHighZeroDigits(cx, quotient);
+}
+
+extern "C" BigInt* BigIntMod(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::mod(cx, x, y);
 }
 
 // BigInt proposal section 1.1.6
@@ -2148,6 +2184,10 @@ bool BigInt::divmod(JSContext* cx, Handle<BigInt*> x, Handle<BigInt*> y,
       "remainder has the correct sign");
 
   return true;
+}
+
+extern "C" BigInt* BigIntPow(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::pow(cx, x, y);
 }
 
 // BigInt proposal section 1.1.3
@@ -2466,6 +2506,11 @@ BigInt* BigInt::rshByAbsolute(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   return destructivelyTrimHighZeroDigits(cx, result);
 }
 
+extern "C" BigInt* BigIntLeftShift(JSContext* cx, HandleBigInt x,
+                                   HandleBigInt y) {
+  return BigInt::lsh(cx, x, y);
+}
+
 // BigInt proposal section 1.1.9. BigInt::leftShift ( x, y )
 BigInt* BigInt::lsh(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   if (y->isNegative()) {
@@ -2474,12 +2519,21 @@ BigInt* BigInt::lsh(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   return lshByAbsolute(cx, x, y);
 }
 
+extern "C" BigInt* BigIntRightShift(JSContext* cx, HandleBigInt x,
+                                    HandleBigInt y) {
+  return BigInt::rsh(cx, x, y);
+}
+
 // BigInt proposal section 1.1.10. BigInt::signedRightShift ( x, y )
 BigInt* BigInt::rsh(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   if (y->isNegative()) {
     return lshByAbsolute(cx, x, y);
   }
   return rshByAbsolute(cx, x, y);
+}
+
+extern "C" BigInt* BigIntBitAnd(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::bitAnd(cx, x, y);
 }
 
 // BigInt proposal section 1.1.17. BigInt::bitwiseAND ( x, y )
@@ -2528,6 +2582,10 @@ BigInt* BigInt::bitAnd(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   return absoluteAndNot(cx, pos, neg1);
 }
 
+extern "C" BigInt* BigIntBitXor(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::bitXor(cx, x, y);
+}
+
 // BigInt proposal section 1.1.18. BigInt::bitwiseXOR ( x, y )
 BigInt* BigInt::bitXor(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   if (x->isZero()) {
@@ -2570,6 +2628,10 @@ BigInt* BigInt::bitXor(JSContext* cx, HandleBigInt x, HandleBigInt y) {
   }
   bool resultNegative = true;
   return absoluteAddOne(cx, result, resultNegative);
+}
+
+extern "C" BigInt* BigIntBitOr(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::bitOr(cx, x, y);
 }
 
 // BigInt proposal section 1.1.19. BigInt::bitwiseOR ( x, y )
@@ -2620,6 +2682,10 @@ BigInt* BigInt::bitOr(JSContext* cx, HandleBigInt x, HandleBigInt y) {
     return nullptr;
   }
   return absoluteAddOne(cx, result, resultNegative);
+}
+
+extern "C" BigInt* BigIntBitNot(JSContext* cx, HandleBigInt x) {
+  return BigInt::bitNot(cx, x);
 }
 
 // BigInt proposal section 1.1.2. BigInt::bitwiseNOT ( x )

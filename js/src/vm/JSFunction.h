@@ -833,8 +833,9 @@ extern JSAtom* IdToFunctionName(
     JSContext* cx, HandleId id,
     FunctionPrefixKind prefixKind = FunctionPrefixKind::None);
 
-extern bool SetFunctionName(JSContext* cx, HandleFunction fun, HandleValue name,
-                            FunctionPrefixKind prefixKind);
+extern "C" bool SetFunctionName(JSContext* cx, HandleFunction fun,
+                                HandleValue name,
+                                FunctionPrefixKind prefixKind);
 
 extern JSFunction* DefineFunction(
     JSContext* cx, HandleObject obj, HandleId id, JSNative native,

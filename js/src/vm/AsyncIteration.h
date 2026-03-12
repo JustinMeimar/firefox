@@ -527,8 +527,9 @@ class AsyncGeneratorObject : public AbstractGeneratorObject {
   void clearCachedRequest() { setFixedSlot(Slot_CachedRequest, NullValue()); }
 };
 
-JSObject* CreateAsyncFromSyncIterator(JSContext* cx, HandleObject iter,
-                                      HandleValue nextMethod);
+extern "C" JSObject* CreateAsyncFromSyncIterator(JSContext* cx,
+                                                 HandleObject iter,
+                                                 HandleValue nextMethod);
 
 class AsyncFromSyncIteratorObject : public NativeObject {
  private:

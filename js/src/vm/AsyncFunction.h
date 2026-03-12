@@ -291,15 +291,15 @@ extern const JSClass AsyncFunctionClass;
 
 // Resolve the async function's promise object with the given value and then
 // return the promise object.
-JSObject* AsyncFunctionResolve(JSContext* cx,
-                               Handle<AsyncFunctionGeneratorObject*> generator,
-                               HandleValue value);
+extern "C" JSObject* AsyncFunctionResolve(
+    JSContext* cx, Handle<AsyncFunctionGeneratorObject*> generator,
+    HandleValue value);
 
 // Reject the async function's promise object with the given value and then
 // return the promise object.
-JSObject* AsyncFunctionReject(JSContext* cx,
-                              Handle<AsyncFunctionGeneratorObject*> generator,
-                              HandleValue reason, HandleValue stack);
+extern "C" JSObject* AsyncFunctionReject(
+    JSContext* cx, Handle<AsyncFunctionGeneratorObject*> generator,
+    HandleValue reason, HandleValue stack);
 
 class AsyncFunctionGeneratorObject : public AbstractGeneratorObject {
  public:

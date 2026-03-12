@@ -1827,15 +1827,18 @@ inline bool NativeGetProperty(JSContext* cx, Handle<NativeObject*> obj,
   return NativeGetProperty(cx, obj, receiver, id, vp);
 }
 
-extern bool NativeGetElement(JSContext* cx, Handle<NativeObject*> obj,
-                             HandleValue receiver, int32_t index,
-                             MutableHandleValue vp);
+extern "C" bool NativeGetElement(JSContext* cx, Handle<NativeObject*> obj,
+                                 HandleValue receiver, int32_t index,
+                                 MutableHandleValue vp);
 
-bool GetSparseElementHelper(JSContext* cx, Handle<NativeObject*> obj,
-                            int32_t int_id, MutableHandleValue result);
+extern "C" bool GetSparseElementHelper(JSContext* cx, Handle<NativeObject*> obj,
+                                       int32_t int_id,
+                                       MutableHandleValue result);
 
-bool AddOrUpdateSparseElementHelper(JSContext* cx, Handle<NativeObject*> obj,
-                                    int32_t int_id, HandleValue v, bool strict);
+extern "C" bool AddOrUpdateSparseElementHelper(JSContext* cx,
+                                               Handle<NativeObject*> obj,
+                                               int32_t int_id, HandleValue v,
+                                               bool strict);
 
 /*
  * Indicates whether an assignment operation is qualified (`x.y = 0`) or
@@ -1914,8 +1917,10 @@ inline void InitReservedSlot(NativeObject* obj, uint32_t slot, T* ptr,
   InitReservedSlot(obj, slot, ptr, sizeof(T), use);
 }
 
-bool AddSlotAndCallAddPropHook(JSContext* cx, Handle<NativeObject*> obj,
-                               HandleValue v, Handle<Shape*> newShape);
+extern "C" bool AddSlotAndCallAddPropHook(JSContext* cx,
+                                          Handle<NativeObject*> obj,
+                                          HandleValue v,
+                                          Handle<Shape*> newShape);
 
 }  // namespace js
 

@@ -195,17 +195,19 @@ enum class UnhandledRejectionBehavior { Ignore, Report };
 
 // Start awaiting `value` in an async function (, but doesn't suspend the
 // async function's execution!). Returns the async function's result promise.
-[[nodiscard]] JSObject* AsyncFunctionAwait(
+extern "C" [[nodiscard]] JSObject* AsyncFunctionAwait(
     JSContext* cx, JS::Handle<AsyncFunctionGeneratorObject*> genObj,
     JS::Handle<JS::Value> value);
 
 // If the await operation can be skipped and the resolution value for `val` can
 // be acquired, stored the resolved value to `resolved` and `true` to
 // `*canSkip`.  Otherwise, stores `false` to `*canSkip`.
-[[nodiscard]] bool CanSkipAwait(JSContext* cx, JS::Handle<JS::Value> val,
-                                bool* canSkip);
-[[nodiscard]] bool ExtractAwaitValue(JSContext* cx, JS::Handle<JS::Value> val,
-                                     JS::MutableHandle<JS::Value> resolved);
+extern "C" [[nodiscard]] bool CanSkipAwait(JSContext* cx,
+                                           JS::Handle<JS::Value> val,
+                                           bool* canSkip);
+extern "C" [[nodiscard]] bool ExtractAwaitValue(
+    JSContext* cx, JS::Handle<JS::Value> val,
+    JS::MutableHandle<JS::Value> resolved);
 
 bool AsyncFromSyncIteratorMethod(JSContext* cx, JS::CallArgs& args,
                                  CompletionKind completionKind);
