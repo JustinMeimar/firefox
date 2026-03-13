@@ -736,6 +736,10 @@ struct JSRuntime {
   [[nodiscard]] bool createJitRuntime(JSContext* cx);
   js::jit::JitRuntime* jitRuntime() const { return jitRuntime_.ref(); }
   bool hasJitRuntime() const { return !!jitRuntime_; }
+  static size_t offsetOfJitRuntime() {
+    return offsetof(JSRuntime, jitRuntime_) +
+           decltype(jitRuntime_)::offsetOfValue();
+  }
 
  private:
   // Used to generate random keys for hash tables.

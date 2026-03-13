@@ -23,31 +23,13 @@
 namespace js::jit {
 
 // ---------------------------------------------------------------------------
-// RuntimePatch — always patches the AOT table base address
+// JitCode allocation helper
 // ---------------------------------------------------------------------------
 
-void RuntimePatch::apply(const PatchContext& pc) const {
-  uintptr_t val = uintptr_t(
-      pc.cx->runtime()->jitRuntime()->aotIndirectionTable().baseAddress());
-  uint8_t* target = pc.codeBase + targetOffset;
-#ifdef DEBUG
-  uintptr_t beforeValue = *reinterpret_cast<uintptr_t*>(target);
-  JitSpew(JitSpew_BaselineAOT,
-          "Runtime patch [AOTTableBase] @ offset %u: "
-          "before=0x%016lx after=0x%016lx",
-          targetOffset, beforeValue, val);
-#endif
-  *reinterpret_cast<uintptr_t*>(target) = val;
-}
-
-// ---------------------------------------------------------------------------
-// JitCode allocation + patching helper
-// ---------------------------------------------------------------------------
-
-JitCode* AllocateAndPatchAOTCode(JSContext* cx,
-                                 const AOTBlobDirectoryEntry* entry,
-                                 const uint8_t* containerBase,
-                                 uint32_t headerSize, CodeKind codeKind) {
+JitCode* AllocateAOTCode(JSContext* cx,
+                         const AOTBlobDirectoryEntry* entry,
+                         const uint8_t* containerBase,
+                         uint32_t headerSize, CodeKind codeKind) {
   uint32_t codeSize = entry->codeSize;
 
   mozilla::Maybe<AutoAllocInAtomsZone> az;
@@ -88,16 +70,6 @@ JitCode* AllocateAndPatchAOTCode(JSContext* cx,
     memcpy(codeStart, containerBase + entry->codeOffset, codeSize);
     JitCodeHeader::FromExecutable(codeStart)->init(code);
     code->setInstructionsSize(codeSize);
-
-    if (entry->patchesCount > 0) {
-      PatchContext patchCtx({cx, codeStart});
-      const auto* patches = reinterpret_cast<const RuntimePatch*>(
-          containerBase + entry->patchesOffset);
-      for (uint32_t i = 0; i < entry->patchesCount; i++) {
-        patches[i].apply(patchCtx);
-      }
-      JitSpew(JitSpew_BaselineAOT, "Applied %u patches.", entry->patchesCount);
-    }
   }
 
   return code;

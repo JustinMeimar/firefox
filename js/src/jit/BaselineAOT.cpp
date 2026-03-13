@@ -48,39 +48,6 @@ namespace js::jit {
 
 #ifdef ENABLE_AOT_BASELINE
 
-#ifdef DEBUG
-static void verifySentinelsPatched(const uint8_t* code, size_t codeSize,
-                                   const RuntimePatchVector& patches) {
-  constexpr size_t sentinelSize = sizeof(uintptr_t);
-  if (codeSize < sentinelSize) {
-    return;
-  }
-
-  uint8_t sentinelBytes[sentinelSize];
-  memcpy(sentinelBytes, &AOT_PATCH_SENTINEL, sentinelSize);
-
-  for (size_t i = 0; i <= codeSize - sentinelSize; i++) {
-    if (memcmp(code + i, sentinelBytes, sentinelSize) == 0) {
-      uint32_t offset = static_cast<uint32_t>(i);
-      bool found = false;
-      for (const auto& patch : patches) {
-        if (patch.targetOffset == offset) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        JitSpew(JitSpew_BaselineAOT,
-                "WARNING: Unpatched sentinel at code offset %u", offset);
-        MOZ_CRASH_UNSAFE_PRINTF(
-            "AOT sentinel at offset %u not covered by any RuntimePatch",
-            offset);
-      }
-    }
-  }
-}
-#endif
-
 static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
   for (size_t i = 0; i < len; i += 16) {
     size_t end = std::min(i + 16, len);
@@ -106,7 +73,6 @@ struct AOTBlobData {
   std::string name;
   Vector<uint8_t, 0, SystemAllocPolicy> code;
   Vector<uint8_t, 0, SystemAllocPolicy> manifest;
-  Vector<uint8_t, 0, SystemAllocPolicy> patches;
   Vector<uint8_t, 0, SystemAllocPolicy> metadata;
 
   template <typename T>
@@ -140,10 +106,6 @@ static bool writeAOTContainer(std::ostream& out,
     e.manifestOffset = cursor;
     e.manifestSize = blobs[i]->manifest.length();
     cursor += e.manifestSize;
-
-    e.patchesOffset = cursor;
-    e.patchesCount = blobs[i]->patches.length() / sizeof(RuntimePatch);
-    cursor += blobs[i]->patches.length();
 
     e.metadataOffset = cursor;
     e.metadataSize = blobs[i]->metadata.length();
@@ -202,11 +164,6 @@ static bool writeAOTContainer(std::ostream& out,
       emitAsmBytes(out, blob.manifest.begin(), blob.manifest.length());
     }
 
-    out << "bl_aot_" << label << "_patches:\n";
-    if (blob.patches.length() > 0) {
-      emitAsmBytes(out, blob.patches.begin(), blob.patches.length());
-    }
-
     out << "bl_aot_" << label << "_metadata:\n";
     if (blob.metadata.length() > 0) {
       emitAsmBytes(out, blob.metadata.begin(), blob.metadata.length());
@@ -232,15 +189,10 @@ static bool writeAOTContainer(std::ostream& out,
 static mozilla::Maybe<AOTBlobData> sSavedInterpreterBlob;
 
 bool BuildAndSaveInterpBlob(JitCode* code, const AOTInterpManifest& scalars,
-                            const RuntimePatchVector& patches,
                             const uint8_t* metadataBytes,
                             size_t metadataSize) {
   uint8_t* codeStart = code->raw();
   size_t codeSize = code->rawEnd() - codeStart;
-
-#ifdef DEBUG
-  verifySentinelsPatched(codeStart, codeSize, patches);
-#endif
 
   sSavedInterpreterBlob.reset();
   sSavedInterpreterBlob.emplace();
@@ -258,13 +210,6 @@ bool BuildAndSaveInterpBlob(JitCode* code, const AOTInterpManifest& scalars,
     return false;
   }
 
-  if (patches.length() > 0) {
-    if (!AOTBlobData::appendBytes(interpBlob.patches, patches.begin(),
-                                  patches.length())) {
-      return false;
-    }
-  }
-
   if (metadataSize > 0) {
     if (!interpBlob.metadata.append(metadataBytes, metadataSize)) {
       return false;
@@ -272,10 +217,9 @@ bool BuildAndSaveInterpBlob(JitCode* code, const AOTInterpManifest& scalars,
   }
 
   JitSpew(JitSpew_BaselineAOT,
-          "Scalars: dbgInstr=%u dbgTrap=%u coverage=%u icRet=%u patches=%u",
+          "Scalars: dbgInstr=%u dbgTrap=%u coverage=%u icRet=%u",
           scalars.DebugInstrumentationCount, scalars.DebugTrapCount,
-          scalars.CodeCoverageCount, scalars.ICReturnCount,
-          scalars.RuntimePatchCount);
+          scalars.CodeCoverageCount, scalars.ICReturnCount);
 
   // Write the single-blob container (interp only) immediately.
   const char* outPath = kAOTOutputPath;
@@ -361,15 +305,11 @@ static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
 
   BaselineScript* bs = script->baselineScript();
   JitCode* jitCode = bs->method();
-#ifdef DEBUG
-  verifySentinelsPatched(jitCode->raw(), jitCode->instructionsSize(),
-                         aotCtx.accumulator().runtimePatches);
-#endif
+
   AOTScriptManifest sm{};
   bs->fillAOTManifest(&sm, &blobOut->metadata);
   sm.codeSize = jitCode->instructionsSize();
   sm.headerSize = jitCode->headerSize();
-  sm.runtimePatchCount = aotCtx.accumulator().runtimePatches.length();
   blobOut->dirEntry.kind = AOTBlobKind::SelfHostedFunction;
   blobOut->dirEntry.nameHash = mozilla::HashString(funcName);
   blobOut->name = funcName;
@@ -381,19 +321,12 @@ static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
   if (!AOTBlobData::appendBytes(blobOut->manifest, &sm, 1)) {
     return false;
   }
-  const auto& runtimePatches = aotCtx.accumulator().runtimePatches;
-  if (runtimePatches.length() > 0) {
-    if (!AOTBlobData::appendBytes(blobOut->patches, runtimePatches.begin(),
-                                  runtimePatches.length())) {
-      return false;
-    }
-  }
 
   char padded[32];
   SprintfLiteral(padded, "'%s'", funcName);
   JitSpew(JitSpew_BaselineAOT,
-          "AOT Compiled %-24s size=%5ub  patches=%3u  callSites=%3u  osr=%u",
-          padded, sm.codeSize, sm.runtimePatchCount, sm.retAddrEntryCount,
+          "AOT Compiled %-24s size=%5ub  callSites=%3u  osr=%u",
+          padded, sm.codeSize, sm.retAddrEntryCount,
           sm.osrEntryCount);
 
   return true;
@@ -508,7 +441,7 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
             uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
                 DebugTrapHandlerKind::Compiler)->raw()));
 
-  JitCode* code = AllocateAndPatchAOTCode(
+  JitCode* code = AllocateAOTCode(
       cx, entry, containerBase, manifest.HeaderSize,
       CodeKind::Other);
   if (!code) {
@@ -578,7 +511,7 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
   uint32_t codeSize = manifest.codeSize;
 
-  JitCode* code = AllocateAndPatchAOTCode(cx, entry, containerBase,
+  JitCode* code = AllocateAOTCode(cx, entry, containerBase,
                                           manifest.headerSize,
                                           CodeKind::Baseline);
   if (!code) {
@@ -644,13 +577,13 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
   }
 
   mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
-  fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u patches=%u)\n",
+  fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u)\n",
           name->hasLatin1Chars() ? (int)name->length() : 10,
           name->hasLatin1Chars()
               ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
               : "<two-byte>",
           (long long)dTotal.ToMicroseconds(),
-          codeSize, entry->patchesCount);
+          codeSize);
 
   return true;
 }

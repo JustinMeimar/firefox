@@ -38,9 +38,9 @@ class MacroAssembler;
 // Non-AOT codegen: the table is populated at JitRuntime init time;
 // moveAOTSlot reads directly from it.
 //
-// AOT codegen: moveAOTSlot emits a patched movabs of the table base
-// followed by a slot load.  The only RuntimePatch kind is the table
-// base address.
+// AOT codegen: moveAOTSlot loads JSContext from TLS, then chases the
+// pointer chain cx->runtime->jitRuntime->aotIndirectionTable to load
+// the requested slot.  No patched immediates are needed.
 
 #define AOT_SLOTS(V)                    \
   V(JSRuntimePtr)                       \
@@ -120,23 +120,21 @@ static_assert(sizeof(AOTContainerHeader) == 16,
               "AOTContainerHeader must be 16 bytes");
 
 // An `AOTBlobDirectoryEntry` is 1:1 with a masm buffer.
-// The manfiest describes the layout of the blob as
-// composed of code, metadata and patches.
+// The manifest describes the layout of the blob as
+// composed of code and metadata.
 struct AOTBlobDirectoryEntry {
   AOTBlobKind kind;
   uint32_t nameHash;
   uint32_t codeOffset;
-  uint32_t codeSize; 
-  uint32_t patchesOffset;
-  uint32_t patchesCount;
+  uint32_t codeSize;
   uint32_t metadataOffset;
-  uint32_t metadataSize; 
+  uint32_t metadataSize;
   uint32_t manifestOffset;
   uint32_t manifestSize;
 };
 
-static_assert(sizeof(AOTBlobDirectoryEntry) == 40,
-              "AOTBlobDirectoryEntry must be 40 bytes");
+static_assert(sizeof(AOTBlobDirectoryEntry) == 32,
+              "AOTBlobDirectoryEntry must be 32 bytes");
 
 extern "C" {
   extern const uint8_t bl_aot_container_start[];
@@ -186,79 +184,36 @@ inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind,
 }
 
 
-// [SMDOC] AOT Runtime Patching
-//
-// The only value that still needs a patched movabs is the table base
-// address itself (every other value lives in the table).  RuntimePatch
-// records where each movabs sentinel lives so the loader can write
-// the real table base pointer.
-
-// Load time context required to apply patches.
-struct PatchContext {
-    JSContext* cx;
-    uint8_t* codeBase;
-};
-
-class RuntimePatch {
-  public:
-    // targetOffset: byte offset within the code blob where the sentinel
-    // immediate lives.  The patched value is always the AOT table base.
-    uint32_t targetOffset;
-    explicit RuntimePatch(uint32_t targetOffset_) :
-      targetOffset(targetOffset_) {}
-
-    void apply(const PatchContext& pc) const;
-};
-
-static constexpr uintptr_t AOT_PATCH_SENTINEL = 0x0000A070DEADBEEF;
-
-static_assert(sizeof(RuntimePatch) == 4,
-              "RuntimePatch size must be 4 bytes");
-
-using RuntimePatchVector = Vector<RuntimePatch, 0, SystemAllocPolicy>;
-
 class JitCode;
 
-[[nodiscard]] JitCode* AllocateAndPatchAOTCode(
+[[nodiscard]] JitCode* AllocateAOTCode(
     JSContext* cx, const AOTBlobDirectoryEntry* entry,
     const uint8_t* containerBase, uint32_t headerSize,
     CodeKind codeKind);
 
-// [SMDOC] AOT Accumulator and Compilation Context
+// [SMDOC] AOT Compilation Context
 //
-// AOTAccumulator collects RuntimePatch entries as codegen proceeds.
-// AOTContext bundles the accumulator with a back-pointer to the
-// MacroAssembler; it is stack-allocated by the caller and passed as a
-// non-owning pointer.  A non-null AOTContext on the MacroAssembler is
-// the single flag that switches the whole pipeline into AOT mode.
-struct AOTAccumulator {
-  RuntimePatchVector runtimePatches;
-  void registerPatch(RuntimePatch&& patch) {
-    MOZ_ALWAYS_TRUE(runtimePatches.append(std::move(patch)));
-  }
-};
-
-// Unified AOT compilation context. Stack-allocated by the caller and passed
-// to MacroAssembler as a non-owning pointer. When present (non-nullptr),
-// indicates that AOT codegen mode is active.
+// AOTContext is the single flag that switches the codegen pipeline into
+// AOT mode.  Stack-allocated by the caller and passed to MacroAssembler
+// as a non-owning pointer.  When present (non-nullptr), AOT codegen is
+// active: runtime pointers are loaded via a TLS-based pointer chain
+// instead of baked-in absolute addresses.
 class AOTContext {
  public:
   AOTContext() = default;
 
   void bindMasm(MacroAssembler& masm) { masm_ = &masm; }
 
-  AOTAccumulator& accumulator() { return accumulator_; }
-
  private:
   MacroAssembler* masm_ = nullptr;
-  AOTAccumulator accumulator_;
 };
 
 
 // A small, flat table of runtime pointers that AOT baseline code loads
-// indirectly via a patched movabs of the table base followed by a slot
-// load.  Owned inline by JitRuntime so its address is stable.
-// Indexed by AOTSlot.
+// indirectly.  AOT code reaches it via the pointer chain
+// TLS -> JSContext -> JSRuntime -> JitRuntime -> aotIndirectionTable_.
+// Owned inline by JitRuntime so
+// its address is stable.  Indexed by AOTSlot.
 class AOTIndirectionTable {
  public:
   AOTIndirectionTable() { std::memset(slots_, 0, sizeof(slots_)); }

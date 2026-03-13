@@ -9,7 +9,7 @@
 
 // Baseline-specific AOT manifests, dump/load functions, and the
 // self-hosted function list. Generic AOT infrastructure (container
-// format, patches, accumulator, context) lives in AOT.h.
+// format, context) lives in AOT.h.
 
 #include "jit/AOT.h"
 
@@ -44,7 +44,6 @@ struct AOTInterpManifest {
   uint32_t DebugTrapCount = 0;
   uint32_t CodeCoverageCount = 0;
   uint32_t ICReturnCount = 0;
-  uint32_t RuntimePatchCount = 0;
 };
 
 // [SMDOC] AOT Baseline Compilation (Self-Hosted) Manifest
@@ -60,7 +59,6 @@ struct AOTScriptManifest {
   uint32_t resumeEntryCount;
   uint32_t codeSize;
   uint32_t headerSize;
-  uint32_t runtimePatchCount;
 };
 
 // Build and save the interpreter AOT blob to the saved-blob slot.
@@ -70,7 +68,6 @@ struct AOTScriptManifest {
 // icReturns concatenated).
 [[nodiscard]] bool BuildAndSaveInterpBlob(
     JitCode* code, const AOTInterpManifest& scalars,
-    const RuntimePatchVector& patches,
     const uint8_t* metadataBytes, size_t metadataSize);
 
 // Load the AOT interpreter blob from the embedded container and

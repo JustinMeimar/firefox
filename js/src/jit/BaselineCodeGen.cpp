@@ -7318,7 +7318,6 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
   s.DebugTrapCount = debugTrapOffsets_.length();
   s.CodeCoverageCount = handler.codeCoverageOffsets().length();
   s.ICReturnCount = handler.icReturnOffsets().length();
-  s.RuntimePatchCount = aot_->accumulator().runtimePatches.length();
 
   // Pack metadata: debugInstr + debugTraps + coverage + icReturns.
   Vector<uint8_t, 0, SystemAllocPolicy> metadata;
@@ -7338,8 +7337,7 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
     return false;
   }
 
-  return BuildAndSaveInterpBlob(code, s, aot_->accumulator().runtimePatches,
-                                metadata.begin(), metadata.length());
+  return BuildAndSaveInterpBlob(code, s, metadata.begin(), metadata.length());
 }
 
 bool BaselineInterpreterGenerator::loadAOTInterp(

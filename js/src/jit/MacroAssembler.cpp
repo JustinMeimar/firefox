@@ -2682,17 +2682,33 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 #ifdef ENABLE_AOT_BASELINE
-// Emit a patched movabs of the AOT indirection table base + slot load.
-// Called from the #ifdef ENABLE_AOT_BASELINE branches in shared methods
-// (loadJSContext, handleFailure, etc.) and from AOT-only methods below.
+// Compute the FS-segment offset of TlsContext. This is a fixed property
+// of the binary layout and is the same for every invocation of the same
+// build, so it is safe to bake into AOT code at dump time.
+static int32_t GetTlsContextOffset() {
+  uintptr_t tp;
+  asm("movq %%fs:0, %0" : "=r"(tp));
+  auto offset =
+      reinterpret_cast<intptr_t>(&TlsContext) - static_cast<intptr_t>(tp);
+  MOZ_ASSERT(offset == static_cast<int32_t>(offset),
+             "TLS offset must fit in int32_t");
+  return static_cast<int32_t>(offset);
+}
+
+// Load a value from the AOT indirection table via:
+//   TlsContext (%fs:off) -> cx->runtime_ -> jitRuntime_ -> slots_[slot]
 static void EmitAOTSlotLoad(MacroAssembler& masm, AOTSlot slot,
                             Register dest) {
-  RuntimePatch patch(0);
-  CodeOffset off =
-      masm.movWithPatch(ImmPtr((void*)AOT_PATCH_SENTINEL), dest);
-  patch.targetOffset = off.offset() - sizeof(void*);
-  masm.aot().accumulator().registerPatch(std::move(patch));
-  masm.loadPtr(Address(dest, AOTIndirectionTable::offsetOfSlot(slot)), dest);
+  // Step 1: JSContext* from TLS.
+  int32_t tlsOff = GetTlsContextOffset();
+  masm.loadPtrFromTls(tlsOff, dest);
+  // Step 2-3: JSContext -> JSRuntime -> JitRuntime.
+  masm.loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
+  masm.loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
+  // Step 4: JitRuntime -> AOTIndirectionTable slot.
+  int32_t tableOff = int32_t(JitRuntime::offsetOfAOTIndirectionTable()) +
+                     int32_t(AOTIndirectionTable::offsetOfSlot(slot));
+  masm.loadPtr(Address(dest, tableOff), dest);
 }
 #endif  // ENABLE_AOT_BASELINE
 
@@ -4202,7 +4218,7 @@ void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
     // AOT mode: emit a position-independent int32 offset relative to the
-    // table base.  No runtime patch needed — the offset is baked in.
+    // table base.  No runtime patch needed; the offset is baked in.
     int32_t relOffset = int32_t(handler.offset()) - int32_t(tableOffset);
     writeInt32Data(relOffset);
     return;

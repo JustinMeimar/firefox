@@ -248,6 +248,7 @@ class JitRuntime {
   using AOTVMWrapperSlots = Vector<uintptr_t, 0, SystemAllocPolicy>;
   AOTVMWrapperSlots aotVMWrapperSlots_;
 
+
   bool generateTrampolines(JSContext* cx);
   bool generateBaselineICFallbackCode(JSContext* cx);
 
@@ -400,6 +401,9 @@ class JitRuntime {
   AOTIndirectionTable& aotIndirectionTable() { return aotIndirectionTable_; }
   const AOTIndirectionTable& aotIndirectionTable() const {
     return aotIndirectionTable_;
+  }
+  static size_t offsetOfAOTIndirectionTable() {
+    return offsetof(JitRuntime, aotIndirectionTable_);
   }
   AOTVMWrapperSlots& aotVMWrapperSlots() { return aotVMWrapperSlots_; }
 
