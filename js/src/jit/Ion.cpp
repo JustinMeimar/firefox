@@ -677,6 +677,20 @@ template JitCode* JitCode::New<NoGC>(JSContext* cx, uint8_t* code,
                                      uint32_t bufferSize, uint32_t headerSize,
                                      ExecutablePool* pool, CodeKind kind);
 
+JitCode* JitCode::NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
+                             CodeKind kind) {
+  // Static code lives in .text — no pool, no header, no memcpy.
+  JitCode* codeObj = cx->newCell<JitCode, NoGC>(
+      code, /*bufferSize=*/0, /*headerSize=*/0, /*pool=*/nullptr, kind);
+  if (!codeObj) {
+    ReportOutOfMemory(cx);
+    return nullptr;
+  }
+  codeObj->isStaticCode_ = true;
+  codeObj->insnSize_ = codeSize;
+  return codeObj;
+}
+
 void JitCode::copyFrom(MacroAssembler& masm) {
   // Store the JitCode pointer in the JitCodeHeader so we can recover the
   // gcthing from relocation tables.
@@ -695,6 +709,11 @@ void JitCode::copyFrom(MacroAssembler& masm) {
 }
 
 void JitCode::traceChildren(JSTracer* trc) {
+  // Static code has no relocation tables.
+  if (isStaticCode_) {
+    return;
+  }
+
   // Note that we cannot mark invalidated scripts, since we've basically
   // corrupted the code stream by injecting bailouts.
   if (invalidated()) {
@@ -726,6 +745,12 @@ void JitCode::finalize(JS::GCContext* gcx) {
 #ifdef MOZ_VTUNE
   vtune::UnmarkCode(this);
 #endif
+
+  // Static code lives in .text — no pool, no header, nothing to release.
+  if (isStaticCode_) {
+    setHeaderPtr(nullptr);
+    return;
+  }
 
   MOZ_ASSERT(pool_);
 

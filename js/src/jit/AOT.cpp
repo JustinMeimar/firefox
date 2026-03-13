@@ -75,4 +75,26 @@ JitCode* AllocateAOTCode(JSContext* cx,
   return code;
 }
 
+JitCode* AllocateStaticAOTCode(JSContext* cx,
+                               const AOTBlobDirectoryEntry* entry,
+                               uint8_t* textBase, CodeKind codeKind) {
+  mozilla::Maybe<AutoAllocInAtomsZone> az;
+  if (!cx->zone() || !cx->zone()->isAtomsZone()) {
+    az.emplace(cx);
+  }
+
+  if (!cx->zone()->getJitZone(cx)) {
+    ReportOutOfMemory(cx);
+    return nullptr;
+  }
+
+  uint8_t* codeStart = textBase + entry->codeOffset;
+  JitCode* code = JitCode::NewStatic(cx, codeStart, entry->codeSize, codeKind);
+  if (!code) {
+    return nullptr;
+  }
+
+  return code;
+}
+
 }  // namespace js::jit

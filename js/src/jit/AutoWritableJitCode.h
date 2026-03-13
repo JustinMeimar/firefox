@@ -12,8 +12,12 @@
 #include "mozilla/TimeStamp.h"
 
 #include <stddef.h>
+#include <stdint.h>
+#include <sys/mman.h>
 
+#include "gc/Memory.h"
 #include "jit/ExecutableAllocator.h"
+#include "jit/FlushICache.h"
 #include "jit/JitCode.h"
 #include "jit/JitOptions.h"
 #include "jit/ProcessExecutableMemory.h"
@@ -33,22 +37,48 @@ class MOZ_RAII AutoWritableJitCodeFallible {
   JSRuntime* rt_;
   void* addr_;
   size_t size_;
+  bool isStatic_;
   AutoMarkJitCodeWritableForThread writableForThread_;
+
+  // For static (.text) code, mprotect directly since the address is not in
+  // the JIT executable pool and ReprotectRegion would assert.
+  [[nodiscard]] static bool StaticMprotect(void* addr, size_t size,
+                                           bool writable) {
+    size_t pageSize = gc::SystemPageSize();
+    uintptr_t startPtr = reinterpret_cast<uintptr_t>(addr);
+    uintptr_t pageStart = startPtr & ~(pageSize - 1);
+    size_t adjustedSize = size + (startPtr - pageStart);
+    adjustedSize = (adjustedSize + pageSize - 1) & ~(pageSize - 1);
+    int prot = writable ? (PROT_READ | PROT_WRITE) : (PROT_READ | PROT_EXEC);
+    return mprotect(reinterpret_cast<void*>(pageStart), adjustedSize, prot) ==
+           0;
+  }
 
  public:
   explicit AutoWritableJitCodeFallible(JitCode* code)
       : rt_(code->runtimeFromMainThread()),
         addr_(code->allocatedMemory()),
-        size_(code->allocatedSize()) {
+        size_(code->allocatedSize()),
+        isStatic_(code->isStaticCode()) {
     rt_->toggleAutoWritableJitCodeActive(true);
   }
 
   [[nodiscard]] bool makeWritable() {
+    if (isStatic_) {
+      return StaticMprotect(addr_, size_, true);
+    }
     return ExecutableAllocator::makeWritable(addr_, size_);
   }
 
   ~AutoWritableJitCodeFallible() {
-    if (!ExecutableAllocator::makeExecutableAndFlushICache(addr_, size_)) {
+    bool ok;
+    if (isStatic_) {
+      jit::FlushICache(addr_, size_);
+      ok = StaticMprotect(addr_, size_, false);
+    } else {
+      ok = ExecutableAllocator::makeExecutableAndFlushICache(addr_, size_);
+    }
+    if (!ok) {
       MOZ_CRASH();
     }
     rt_->toggleAutoWritableJitCodeActive(false);

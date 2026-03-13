@@ -99,7 +99,7 @@ inline const char* AOTSlotName(AOTSlot slot) {
 // right entry without external metadata.
 
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
-static constexpr uint32_t AOT_CONTAINER_VERSION = 1;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 2;
 
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
@@ -139,6 +139,8 @@ static_assert(sizeof(AOTBlobDirectoryEntry) == 32,
 extern "C" {
   extern const uint8_t bl_aot_container_start[];
   extern const uint8_t bl_aot_container_end[];
+  extern uint8_t bl_aot_text_start[];
+  extern uint8_t bl_aot_text_end[];
 }
 
 inline const uint8_t* GetAOTContainer() {
@@ -147,6 +149,14 @@ inline const uint8_t* GetAOTContainer() {
 
 inline size_t GetAOTContainerSize() {
   return bl_aot_container_end - bl_aot_container_start;
+}
+
+inline uint8_t* GetAOTTextBase() {
+  return bl_aot_text_start;
+}
+
+inline size_t GetAOTTextSize() {
+  return bl_aot_text_end - bl_aot_text_start;
 }
 
 inline const AOTContainerHeader* GetAOTContainerHeader() {
@@ -190,6 +200,12 @@ class JitCode;
     JSContext* cx, const AOTBlobDirectoryEntry* entry,
     const uint8_t* containerBase, uint32_t headerSize,
     CodeKind codeKind);
+
+// Allocate a JitCode that points directly at static .text code.
+// No memcpy, no JIT pool allocation.
+[[nodiscard]] JitCode* AllocateStaticAOTCode(
+    JSContext* cx, const AOTBlobDirectoryEntry* entry,
+    uint8_t* textBase, CodeKind codeKind);
 
 // [SMDOC] AOT Compilation Context
 //
