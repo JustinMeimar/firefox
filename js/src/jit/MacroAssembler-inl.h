@@ -664,8 +664,6 @@ void MacroAssembler::branchTestClassIsFunction(Condition cond, Register clasp,
                                                Label* label) {
   MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
 
-  ScratchRegisterScope scratch(*this);
-
   if (cond == Assembler::Equal) {
     branchPtr(Assembler::Equal, clasp, ImmPtr(&FunctionClass), label);
     branchPtr(Assembler::Equal, clasp, ImmPtr(&ExtendedFunctionClass), label);
