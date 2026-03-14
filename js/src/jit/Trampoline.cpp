@@ -23,6 +23,9 @@ void JitRuntime::generateExceptionTailStub(MacroAssembler& masm,
   AutoCreatedBy acb(masm, "JitRuntime::generateExceptionTailStub");
 
   exceptionTailOffset_ = startTrampolineCode(masm);
+#ifdef JS_SPASM
+  masm.label(masm.excTailLabel());
+#endif
 
   uint32_t returnValueCheckOffset = 0;
   masm.bind(masm.failureLabel());
@@ -37,6 +40,9 @@ void JitRuntime::generateProfilerExitFrameTailStub(MacroAssembler& masm,
   AutoCreatedBy acb(masm, "JitRuntime::generateProfilerExitFrameTailStub");
 
   profilerExitFrameTailOffset_ = startTrampolineCode(masm);
+#ifdef JS_SPASM
+  masm.label("_profilerExitTail");
+#endif
   masm.bind(profilerExitTail);
 
   static constexpr size_t CallerFPOffset =

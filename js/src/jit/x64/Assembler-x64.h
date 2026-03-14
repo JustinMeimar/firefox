@@ -460,6 +460,10 @@ class Assembler : public AssemblerX86Shared {
   void movq_tls(const char* tlsSym, Register dest) {
     masm.movq_tls(tlsSym, dest.encoding());
   }
+  // Load a symbol (address) into given register.
+  void lea(const char* sym, Register dest) {
+    masm.leaq(sym, dest.encoding());
+  }
 #endif
   void movq(const Operand& src, Register dest) {
     switch (src.kind()) {

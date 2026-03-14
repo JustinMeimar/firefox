@@ -184,37 +184,22 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   generateEnterJIT(cx, masm);
   rangeRecorder.recordOffset("Trampoline: EnterJIT");
 
-#ifdef JS_SPASM
-  masm.label(masm.preBarrierLabel(MIRType::Value));
-#endif
   JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for Value");
   valuePreBarrierOffset_ = generatePreBarrier(cx, masm, MIRType::Value);
   rangeRecorder.recordOffset("Trampoline: PreBarrier Value");
 
-#ifdef JS_SPASM
-  masm.label(masm.preBarrierLabel(MIRType::String));
-#endif
   JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for String");
   stringPreBarrierOffset_ = generatePreBarrier(cx, masm, MIRType::String);
   rangeRecorder.recordOffset("Trampoline: PreBarrier String");
 
-#ifdef JS_SPASM
-  masm.label(masm.preBarrierLabel(MIRType::Object));
-#endif
   JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for Object");
   objectPreBarrierOffset_ = generatePreBarrier(cx, masm, MIRType::Object);
   rangeRecorder.recordOffset("Trampoline: PreBarrier Object");
 
-#ifdef JS_SPASM
-  masm.label(masm.preBarrierLabel(MIRType::Shape));
-#endif
   JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for Shape");
   shapePreBarrierOffset_ = generatePreBarrier(cx, masm, MIRType::Shape);
   rangeRecorder.recordOffset("Trampoline: PreBarrier Shape");
 
-#ifdef JS_SPASM
-  masm.label(masm.preBarrierLabel(MIRType::WasmAnyRef));
-#endif
   JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for WasmAnyRef");
   wasmAnyRefPreBarrierOffset_ =
       generatePreBarrier(cx, masm, MIRType::WasmAnyRef);
@@ -232,28 +217,23 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   generateDoubleToInt32ValueStub(masm);
   rangeRecorder.recordOffset("Trampoline: DoubleToInt32ValueStub");
 
-#ifdef JS_SPASM
-  masm.label("_vmWrapper");
-#endif
   JitSpew(JitSpew_Codegen, "# Emitting VM function wrappers");
   if (!generateVMWrappers(cx, masm, rangeRecorder)) {
     return false;
   }
 
-#ifdef JS_SPASM
-  masm.label("_profilerExitTail");
-#endif
   JitSpew(JitSpew_Codegen, "# Emitting profiler exit frame tail stub");
   Label profilerExitTail;
   generateProfilerExitFrameTailStub(masm, &profilerExitTail);
   rangeRecorder.recordOffset("Trampoline: ProfilerExitFrameTailStub");
 
-#ifdef JS_SPASM
-  masm.label(masm.excTailLabel());
-#endif
   JitSpew(JitSpew_Codegen, "# Emitting exception tail stub");
   generateExceptionTailStub(masm, &profilerExitTail, &bailoutTail);
   rangeRecorder.recordOffset("Trampoline: ExceptionTailStub");
+
+#ifdef JS_SPASM
+  masm.label("_KILL_AFTER");
+#endif
 
   JitSpew(JitSpew_Codegen, "# Emitting Ion generic call stub");
   generateIonGenericCallStub(masm, IonGenericCallKind::Call);

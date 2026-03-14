@@ -416,6 +416,9 @@ void JitRuntime::generateBailoutHandler(MacroAssembler& masm,
   AutoCreatedBy acb(masm, "JitRuntime::generateBailoutHandler");
 
   bailoutHandlerOffset_ = startTrampolineCode(masm);
+#ifdef JS_SPASM
+  masm.label("_bailoutHandler");
+#endif
 
   GenerateBailoutThunk(masm, bailoutTail);
 }
@@ -426,6 +429,9 @@ bool JitRuntime::generateVMWrapper(JSContext* cx, MacroAssembler& masm,
   AutoCreatedBy acb(masm, "JitRuntime::generateVMWrapper");
 
   *wrapperOffset = startTrampolineCode(masm);
+#ifdef JS_SPASM
+  masm.label(masm.vmWrapperLabel(f));
+#endif
 
   // Avoid conflicts with argument registers while discarding the result after
   // the function call.
@@ -535,6 +541,9 @@ uint32_t JitRuntime::generatePreBarrier(JSContext* cx, MacroAssembler& masm,
   AutoCreatedBy acb(masm, "JitRuntime::generatePreBarrier");
 
   uint32_t offset = startTrampolineCode(masm);
+#ifdef JS_SPASM
+  masm.label(masm.preBarrierLabel(type));
+#endif
 
   static_assert(PreBarrierReg == rdx);
   Register temp1 = rax;
@@ -564,7 +573,6 @@ uint32_t JitRuntime::generatePreBarrier(JSContext* cx, MacroAssembler& masm,
   masm.passABIArg(rcx);
   masm.passABIArg(rdx);
   masm.callWithABI(JitPreWriteBarrier(type));
-#endif
 
   masm.PopRegsInMask(regs);
   masm.ret();
@@ -583,5 +591,8 @@ void JitRuntime::generateBailoutTailStub(MacroAssembler& masm,
   AutoCreatedBy acb(masm, "JitRuntime::generateBailoutTailStub");
 
   masm.bind(bailoutTail);
+#ifdef JS_SPASM
+  masm.label("_bailoutTail");
+#endif
   masm.generateBailoutTail(rdx, r9);
 }
