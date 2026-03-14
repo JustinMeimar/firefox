@@ -36,10 +36,42 @@ inline void EmitBaselineTailCallVM(TrampolinePtr target, MacroAssembler& masm,
   masm.jump(target);
 }
 
+#ifdef JS_SPASM
+inline void EmitBaselineTailCallVM(std::string target, MacroAssembler& masm,
+                                   uint32_t argSize) {
+#  ifdef DEBUG
+  ScratchRegisterScope scratch(masm);
+
+  // We can assume during this that R0 and R1 have been pushed.
+  // Store frame size without VMFunction arguments for debug assertions.
+  masm.movq(FramePointer, scratch);
+  masm.subq(StackPointer, scratch);
+  masm.subq(Imm32(argSize), scratch);
+  Address frameSizeAddr(FramePointer,
+                        BaselineFrame::reverseOffsetOfDebugFrameSize());
+  masm.store32(scratch, frameSizeAddr);
+#  endif
+
+  // Push frame descriptor and perform the tail call.
+  masm.push(FrameDescriptor(FrameType::BaselineJS));
+  masm.push(ICTailCallReg);
+
+  // Dummy ptr value.
+  masm.jump(ImmPtr((void*)printf), target);
+}
+#endif
+
 inline void EmitBaselineCallVM(TrampolinePtr target, MacroAssembler& masm) {
   masm.push(FrameDescriptor(FrameType::BaselineStub));
   masm.call(target);
 }
+
+#ifdef JS_SPASM
+inline void EmitBaselineCallVM(std::string label, MacroAssembler& masm) {
+  masm.push(FrameDescriptor(FrameType::BaselineStub));
+  masm.call(label);
+}
+#endif
 
 inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register) {
 #ifdef DEBUG

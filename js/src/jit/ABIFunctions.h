@@ -7,6 +7,9 @@
 #ifndef jit_ABIFunctions_h
 #define jit_ABIFunctions_h
 
+#include <initializer_list>
+#include <unordered_map>
+#include <vector>
 #include "jstypes.h"  // JS_FUNC_TO_DATA_PTR
 
 struct JS_PUBLIC_API JSContext;
@@ -24,11 +27,21 @@ namespace jit {
 template <typename Sig, Sig fun>
 struct ABIFunctionData {
   static const bool registered = false;
+#ifdef JS_SPASM
+  // This is used to obtain the C++ symbol for all known targets of
+  // callWithABI. This is needed in order for spasm produced assembly to refer
+  // to the C++ functions and allow the linker to resolve the address.
+  static const char* const symbol;
+#endif
 };
 
 template <typename Sig, Sig fun>
 struct ABIFunction {
+#ifdef JS_SPASM
+  const char* name() const { return ABIFunctionData<Sig, fun>::symbol; }
+#else
   void* address() const { return JS_FUNC_TO_DATA_PTR(void*, fun); }
+#endif
 
   // If this assertion fails, you are likely in the context of a
   // `callWithABI<Sig, fn>()` call. This error indicates that ABIFunction has
@@ -42,14 +55,43 @@ struct ABIFunction {
                 "ABI function is not registered.");
 };
 
+// Helper to map function ptrs (of a particular type) to their linker symbol
+// names.
+template <typename Sig>
+class ABIFunctionSignatureMap : public std::unordered_map<void*, const char*> {
+ public:
+  constexpr ABIFunctionSignatureMap(
+      std::initializer_list<std::pair<Sig, const char*>> args) {
+    this->reserve(args.size());
+    for (const std::pair<Sig, const char*>& p : args) {
+      this->emplace(JS_DATA_TO_FUNC_PTR(void*, p.first), p.second);
+    }
+  }
+};
+
 template <typename Sig>
 struct ABIFunctionSignatureData {
   static const bool registered = false;
+#ifdef JS_SPASM
+  static const ABIFunctionSignatureMap<Sig> lookupSym;
+#endif
 };
 
 template <typename Sig>
 struct ABIFunctionSignature {
+#ifdef JS_SPASM
+  const char* name(Sig fun) const {
+    auto res = ABIFunctionSignatureData<Sig>::lookupSym.find(
+        JS_FUNC_TO_DATA_PTR(void*, fun));
+    if (res == ABIFunctionSignatureData<Sig>::lookupSym.end()) {
+      MOZ_CRASH(
+          "Dynamic function symbol not found in ABIFunctionSignatureData map");
+    }
+    return res->second;
+  }
+#else
   void* address(Sig fun) const { return JS_FUNC_TO_DATA_PTR(void*, fun); }
+#endif
 
   // If this assertion fails, you are likely in the context of a
   // `DynamicFunction<Sig>(fn)` call. This error indicates that
@@ -63,31 +105,6 @@ struct ABIFunctionSignature {
                 "ABI function signature is not registered.");
 };
 
-#ifdef JS_SPASM
-// This class is used to obtain the C++ symbol for all known targets of
-// callWithABI. This is needed in order for spasm produced assembly to refer
-// to the C++ functions and allow the linker to figure out the address to call.
-template <typename Sig, Sig fun>
-struct ABIFunctionSymbolData {
-  static const bool registered = false;
-  static const char* const symbol;
-};
-
-// This structure is meant to be used in place of 'ABIFunction' for spasm
-// generated code. Instead of referring to an address, this will refer to a
-// symbol for the assembler + linker to link with.
-template <typename Sig, Sig fun>
-struct ABIFunctionSymbol {
-  void* address() const { return JS_FUNC_TO_DATA_PTR(void*, fun); }
-  const char* name() const { return ABIFunctionSymbolData<Sig, fun>::symbol; }
-
-  // Failure of this assertion indicates a similar condition as in
-  // 'ABIFunction' (see above).
-  static_assert(ABIFunctionSymbolData<Sig, fun>::registered,
-    "ABI function symbol is not registered.");
-};
-#endif
-
 // This is a structure created to ensure that the dynamically computed
 // function pointer is well typed.
 //
@@ -95,7 +112,11 @@ struct ABIFunctionSymbol {
 // extremelly rare cases, such as VMFunctions, it might be produced as a result
 // of GetVMFunctionTarget.
 struct DynFn {
+#ifdef JS_SPASM
+  const char* symbol;
+#else
   void* address;
+#endif
 };
 
 #ifdef JS_SIMULATOR

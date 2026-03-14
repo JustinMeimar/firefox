@@ -456,7 +456,7 @@ class Assembler : public AssemblerX86Shared {
   }
 #if JS_SPASM
   // Load the thread local storage symbol into given register. (initial-exec)
-  void movq(const char* tlsSym, Register dest) {
+  void movq_tls(const char* tlsSym, Register dest) {
     masm.movq_tls(tlsSym, dest.encoding());
   }
   // Load a TLS stored ptr into given register.
@@ -1213,13 +1213,14 @@ class Assembler : public AssemblerX86Shared {
     addPendingJump(src, target, RelocationKind::HARDCODED);
   }
 #ifdef JS_SPASM
-  void call(ImmPtr target, std::string label) {
+  void call(std::string label) {
     // The actual spew should simply use the ptr to call, not a label.
     // TODO(chase): It seems that mozilla's vsprintf machinery does not print
     // the leading 0x for %p.
     masm.spew("call       %s", label.c_str());
     JmpSrc src = masm.call_nospew();
-    addPendingJump(src, target, RelocationKind::HARDCODED);
+    void* dummyAddress = (void*)printf;
+    addPendingJump(src, ImmPtr(dummyAddress), RelocationKind::HARDCODED);
   }
 #endif
 

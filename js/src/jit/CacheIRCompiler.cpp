@@ -11943,7 +11943,11 @@ void CacheIRCompiler::callVMInternal(MacroAssembler& masm, VMFunctionId id) {
 
   MOZ_ASSERT(mode_ == Mode::Baseline);
 
+#ifdef JS_SPASM
+  std::string code = masm.vmWrapperLabel(GetVMFunction(id));
+#else
   TrampolinePtr code = cx_->runtime()->jitRuntime()->getVMWrapper(id);
+#endif
 
   EmitBaselineCallVM(code, masm);
 }

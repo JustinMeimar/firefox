@@ -54,7 +54,11 @@ namespace jit {
 template <typename Sig>
 DynFn DynamicFunction(Sig fun) {
   ABIFunctionSignature<Sig> sig;
+#ifdef JS_SPASM
+  return DynFn{sig.name(fun)};
+#else
   return DynFn{sig.address(fun)};
+#endif
 }
 
 // Helper for generatePreBarrier.
@@ -103,6 +107,12 @@ CodeOffset MacroAssembler::PushWithPatch(ImmPtr imm) {
 
 void MacroAssembler::call(TrampolinePtr code) { call(ImmPtr(code.value)); }
 
+#ifdef JS_SPASM
+void MacroAssembler::call(std::string targetLabel) {
+  Assembler::call(targetLabel);
+}
+#endif
+
 CodeOffset MacroAssembler::call(const wasm::CallSiteDesc& desc,
                                 const Register reg) {
   CodeOffset l = call(reg);
@@ -143,18 +153,20 @@ void MacroAssembler::passABIArg(FloatRegister reg, ABIType type) {
 void MacroAssembler::callWithABI(DynFn fun, ABIType result,
                                  CheckUnsafeCallWithABI check) {
   AutoProfilerCallInstrumentation profiler(*this);
+#ifdef JS_SPASM
+  callWithABINoProfiler(fun.symbol, result, check);
+#else
   callWithABINoProfiler(fun.address, result, check);
+#endif
 }
 
 template <typename Sig, Sig fun>
 void MacroAssembler::callWithABI(ABIType result, CheckUnsafeCallWithABI check) {
-#ifdef JS_SPASM
-  ABIFunctionSymbol<Sig, fun> abiFunSym;
-  AutoProfilerCallInstrumentation profiler(*this);
-  callWithABINoProfiler(abiFunSym.address(), abiFunSym.name(), result, check);
-#else
   ABIFunction<Sig, fun> abiFun;
   AutoProfilerCallInstrumentation profiler(*this);
+#ifdef JS_SPASM
+  callWithABINoProfiler(abiFun.name(), result, check);
+#else
   callWithABINoProfiler(abiFun.address(), result, check);
 #endif
 }
@@ -651,6 +663,8 @@ void MacroAssembler::branchTestObjClass(Condition cond, Register obj,
 void MacroAssembler::branchTestClassIsFunction(Condition cond, Register clasp,
                                                Label* label) {
   MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+
+  ScratchRegisterScope scratch(*this);
 
   if (cond == Assembler::Equal) {
     branchPtr(Assembler::Equal, clasp, ImmPtr(&FunctionClass), label);

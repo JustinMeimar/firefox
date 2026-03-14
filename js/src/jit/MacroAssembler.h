@@ -640,6 +640,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void call(JitCode* c) PER_SHARED_ARCH;
 
   inline void call(TrampolinePtr code);
+#ifdef JS_SPASM
+  inline void call(std::string targetLabel);
+#endif
 
   inline CodeOffset call(const wasm::CallSiteDesc& desc, const Register reg);
   inline CodeOffset call(const wasm::CallSiteDesc& desc, uint32_t funcDefIndex);
@@ -861,7 +864,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void callWithABINoProfiler(void* fun, ABIType result,
                              CheckUnsafeCallWithABI check);
 #ifdef JS_SPASM
-  void callWithABINoProfiler(void* fun, const char* funSym, ABIType result,
+  void callWithABINoProfiler(const char* funSym, ABIType result,
                              CheckUnsafeCallWithABI check);
 #endif
   void callWithABINoProfiler(Register fun, ABIType result) PER_ARCH;
@@ -5220,12 +5223,17 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void storeCallResultValue(TypedOrValueRegister dest);
 
  public:
+#ifdef JS_SPASM
+  std::string vmWrapperLabel(const VMFunctionData& func) {
+    return "_vmWrapper" + std::string(func.name());
+  }
   std::string preBarrierLabel(MIRType type) const {
     return "_preBarrier" + std::string(StringFromMIRType(type));
   }
   std::string excTailLabel() const {
     return "_excTail";
   }
+#endif
 
  private:
   TrampolinePtr preBarrierTrampoline(MIRType type) {
@@ -5254,7 +5262,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
     }
 #ifdef JS_SPASM
     else {
-        Assembler::call(ImmPtr((void*)Printf0), preBarrierLabel(type));
+      Assembler::call(preBarrierLabel(type));
     }
 #endif
 

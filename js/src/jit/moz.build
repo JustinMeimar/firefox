@@ -13,6 +13,7 @@ include("../js-config.mozbuild")
 include("../js-cxxflags.mozbuild")
 
 UNIFIED_SOURCES += [
+    "ABIFunctionList.cpp",
     "AliasAnalysis.cpp",
     "AlignmentMaskAnalysis.cpp",
     "BacktrackingAllocator.cpp",

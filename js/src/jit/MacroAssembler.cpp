@@ -4410,13 +4410,13 @@ void MacroAssembler::loadZone() {
 #ifdef JS_SPASM
 #define STRINGIFY_(x) #x
 #define STRINGIFY(x) STRINGIFY_(x)
-  loadPtr(STRINGIFY(TlsContextSym), JSContext::offsetOfZone(), ZoneReg);
-#undef STRINGIFY
-#else
+  loadTlsPtr(STRINGIFY(TlsContextSym), JSContext::offsetOfZone(), ZoneReg);
+#    undef STRINGIFY
+#  else
   // Load the Zone via the ICStub field.
   Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
   loadPtr(zonePtr, ZoneReg);
-#endif
+#  endif
   // Note that the zone loading code has been emitted by now.
   zoneLoaded_ = true;
 }
@@ -5433,7 +5433,7 @@ void MacroAssembler::callWithABINoProfiler(void* fun, ABIType result,
 }
 
 #ifdef JS_SPASM
-void MacroAssembler::callWithABINoProfiler(void* fun, const char* funSym, ABIType result,
+void MacroAssembler::callWithABINoProfiler(const char* funSym, ABIType result,
                                            CheckUnsafeCallWithABI check) {
   appendSignatureType(result);
 #ifdef JS_SIMULATOR
@@ -5456,7 +5456,7 @@ void MacroAssembler::callWithABINoProfiler(void* fun, const char* funSym, ABITyp
   }
 #endif
 
-  Assembler::call(ImmPtr(fun), std::string(funSym));
+  Assembler::call(std::string(funSym));
 
   callWithABIPost(stackAdjust, result);
 

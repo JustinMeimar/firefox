@@ -563,37 +563,6 @@ uint32_t JitRuntime::generatePreBarrier(JSContext* cx, MacroAssembler& masm,
   masm.setupUnalignedABICall(rax);
   masm.passABIArg(rcx);
   masm.passABIArg(rdx);
-#ifdef JS_SPASM
-  switch (type) {
-    case MIRType::Value: {
-      using Fn = void (*)(JSRuntime* rt, Value* vp);
-      masm.callWithABI<Fn, JitValuePreWriteBarrier>();
-      break;
-    }
-    case MIRType::String: {
-      using Fn = void (*)(JSRuntime* rt, JSString** stringp);
-      masm.callWithABI<Fn, JitStringPreWriteBarrier>();
-      break;
-    }
-    case MIRType::Object: {
-      using Fn = void (*)(JSRuntime* rt, JSObject** objp);
-      masm.callWithABI<Fn, JitObjectPreWriteBarrier>();
-      break;
-    }
-    case MIRType::Shape: {
-      using Fn = void (*)(JSRuntime* rt, Shape** shapep);
-      masm.callWithABI<Fn, JitShapePreWriteBarrier>();
-      break;
-    }
-    case MIRType::WasmAnyRef: {
-      using Fn = void (*)(JSRuntime* rt, wasm::AnyRef* refp);
-      masm.callWithABI<Fn, JitWasmAnyRefPreWriteBarrier>();
-      break;
-    }
-    default:
-      MOZ_CRASH();
-  }
-#else
   masm.callWithABI(JitPreWriteBarrier(type));
 #endif
 

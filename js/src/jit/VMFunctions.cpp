@@ -389,7 +389,11 @@ const VMFunctionData& GetVMFunction(VMFunctionId id) {
 }
 
 static DynFn GetVMFunctionTarget(VMFunctionId id) {
+#ifdef JS_SPASM
+  return DynFn{vmFunctions[size_t(id)].name()};
+#else
   return DynFn{vmFunctionTargets[size_t(id)]};
+#endif
 }
 
 size_t NumVMFunctions() { return size_t(VMFunctionId::Count); }

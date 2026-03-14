@@ -585,8 +585,12 @@ static void InitMacroAssemblerForICStub(StackMacroAssembler& masm) {
 
 bool FallbackICCodeCompiler::tailCallVMInternal(MacroAssembler& masm,
                                                 VMFunctionId id) {
-  TrampolinePtr code = cx->runtime()->jitRuntime()->getVMWrapper(id);
   const VMFunctionData& fun = GetVMFunction(id);
+#ifdef JS_SPASM
+  std::string code = masm.vmWrapperLabel(fun);
+#else
+  TrampolinePtr code = cx->runtime()->jitRuntime()->getVMWrapper(id);
+#endif
   uint32_t argSize = fun.explicitStackSlots() * sizeof(void*);
   EmitBaselineTailCallVM(code, masm, argSize);
   return true;
@@ -596,7 +600,11 @@ bool FallbackICCodeCompiler::callVMInternal(MacroAssembler& masm,
                                             VMFunctionId id) {
   MOZ_ASSERT(inStubFrame_);
 
+#ifdef JS_SPASM
+  std::string code = masm.vmWrapperLabel(GetVMFunction(id));
+#else
   TrampolinePtr code = cx->runtime()->jitRuntime()->getVMWrapper(id);
+#endif
 
   EmitBaselineCallVM(code, masm);
   return true;

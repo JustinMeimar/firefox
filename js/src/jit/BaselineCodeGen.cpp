@@ -854,8 +854,12 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
   inCall_ = false;
 #endif
 
-  TrampolinePtr code = runtime->jitRuntime()->getVMWrapper(id);
   const VMFunctionData& fun = GetVMFunction(id);
+#ifdef JS_SPASM
+  std::string code = masm.vmWrapperLabel(fun);
+#else
+  TrampolinePtr code = runtime->jitRuntime()->getVMWrapper(id);
+#endif
 
   uint32_t argSize = GetVMFunctionArgSize(fun);
 
@@ -7385,7 +7389,11 @@ JitCode* JitRuntime::generateDebugTrapHandler(JSContext* cx,
 
   using Fn = bool (*)(JSContext*, BaselineFrame*, const uint8_t*);
   VMFunctionId id = VMFunctionToId<Fn, jit::HandleDebugTrap>::id;
+#ifdef JS_SPASM
+  std::string code = masm.vmWrapperLabel(GetVMFunction(id));
+#else
   TrampolinePtr code = cx->runtime()->jitRuntime()->getVMWrapper(id);
+#endif
 
   masm.push(scratch1);
   masm.push(scratch2);
