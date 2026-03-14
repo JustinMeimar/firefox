@@ -4410,7 +4410,9 @@ void MacroAssembler::loadZone() {
 #ifdef JS_SPASM
 #define STRINGIFY_(x) #x
 #define STRINGIFY(x) STRINGIFY_(x)
-  loadTlsPtr(STRINGIFY(TlsContextSym), JSContext::offsetOfZone(), ZoneReg);
+  // Load the JSContext ptr.
+  loadTlsSymbol(STRINGIFY(TlsContextSym), ZoneReg);
+  loadPtr(Address(ZoneReg, JSContext::offsetOfZone()), ZoneReg);
 #    undef STRINGIFY
 #  else
   // Load the Zone via the ICStub field.

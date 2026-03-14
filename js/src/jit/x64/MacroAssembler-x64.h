@@ -583,11 +583,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
     movq(Operand(address), dest);
   }
 #ifdef JS_SPASM
-  void loadPtr(const char* tlsSym, int32_t disp, Register dest) {
+  // Load the value stored within a TLS symbol into a register.
+  void loadTlsSymbol(const char* tlsSym, Register dest) {
     ScratchRegisterScope scratch(asMasm());
-    movq(tlsSym, scratch);
-    movq_tlsptr(scratch, dest);
-    loadPtr(Address(dest, disp), dest);
+    movq_tls(tlsSym, scratch);
   }
 #endif
   void loadPtr(const Operand& src, Register dest) { movq(src, dest); }

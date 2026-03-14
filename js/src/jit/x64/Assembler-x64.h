@@ -455,15 +455,10 @@ class Assembler : public AssemblerX86Shared {
     writeDataRelocation(ptr);
   }
 #if JS_SPASM
-  // Load the thread local storage symbol into given register. (initial-exec)
+  // Load a thread local storage symbol into given register.
+  // Access model: (initial-exec)
   void movq_tls(const char* tlsSym, Register dest) {
     masm.movq_tls(tlsSym, dest.encoding());
-  }
-  // Load a TLS stored ptr into given register.
-  // Should be used after movq_tls loads a tls symbol offset from TLS base
-  // into a register.
-  void movq_tlsptr(Register src, Register dest) {
-    masm.movq_tlsptr(src.encoding(), dest.encoding());
   }
 #endif
   void movq(const Operand& src, Register dest) {

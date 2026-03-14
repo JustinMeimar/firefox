@@ -754,11 +754,19 @@ class BaseAssemblerX64 : public BaseAssembler {
   }
 
 #if JS_SPASM
-  // Load a thread local storage symbol into given register. (initial-exec)
+  // Load the value stored at a thread local storage symbol into a register.
+  // Access model: initial-exec.
   void movq_tls(const char* tlsSym, RegisterID dst) {
 #ifdef __linux__
+    // This requires two instructions.
+    // 1. Calculate the TLS offset of the symbol.
+    // 2. Load the value at the symbol using the offset
+    //    from the TLS designated register (fs).
     spew("movq       %s@GOTTPOFF(%%rip), %s", tlsSym, GPReg64Name(dst));
-    // Dummy OP.
+    spew("movq       %%fs:(%s), %s", GPReg64Name(dst), GPReg64Name(dst));
+    // Dummy OPs.
+    m_formatter.oneByteOp64(OP_MOV_EAXIv, dst);
+    m_formatter.immediate64(0);
     m_formatter.oneByteOp64(OP_MOV_EAXIv, dst);
     m_formatter.immediate64(0);
 #else
@@ -766,18 +774,9 @@ class BaseAssemblerX64 : public BaseAssembler {
 #endif
   }
 
-  // Load a TLS stored ptr into given register.
-  // Should be used after movq_tls loads a tls symbol offset from TLS base
-  // into a register.
-  void movq_tlsptr(RegisterID src, RegisterID dst) {
-#ifdef __linux__
-    spew("movq       %%fs:(%s), %s", GPReg64Name(src), GPReg64Name(dst));
-    // Dummy OP.
-    m_formatter.oneByteOp64(OP_MOV_EAXIv, dst);
-    m_formatter.immediate64(0);
-#else
-#error "Unsupported platform for JS_SPASM: Unknown Tls access pattern"
-#endif
+  // Compute the address of a symbol (non-TLS) into a register.
+  void leaq(const char* sym, RegisterID dst) {
+    spew("leaq       %s(rip), %s", sym, GPReg64Name(dst));
   }
 #endif
 

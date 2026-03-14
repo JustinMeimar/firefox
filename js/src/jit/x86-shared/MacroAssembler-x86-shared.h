@@ -1030,6 +1030,13 @@ class MacroAssemblerX86Shared : public Assembler {
     lea(Operand(address), dest);
   }
 
+#ifdef JS_SPASM
+  // Compute the address of a symbol.
+  void computeEffectiveAddress(const char* sym, Register dest) {
+    lea(sym, dest);
+  }
+#endif
+
   void checkStackAlignment() {
     // Exists for ARM compatibility.
   }
