@@ -270,7 +270,7 @@ namespace jit {
   _(NewArrayObjectBaselineFallback, js::NewArrayObjectBaselineFallback)        \
   _(NewArrayObjectEnsureDenseInitLength,                                       \
     js::jit::NewArrayObjectEnsureDenseInitLength)                              \
-  _(NewArrayObjectOptimzedFallback, js::NewArrayObjectOptimizedFallback)       \
+  _(NewArrayObjectOptimizedFallback, js::NewArrayObjectOptimizedFallback)      \
   _(NewArrayOperation, js::NewArrayOperation)                                  \
   _(NewArrayWithShape, js::NewArrayWithShape)                                  \
   _(NewObjectOperation, js::NewObjectOperation)                                \
