@@ -34,13 +34,6 @@ class MacroAssembler;
 //
 // AOTSlot enumerates every runtime address that AOT code needs.
 // Each slot holds a single uintptr_t in the AOTIndirectionTable.
-//
-// Non-AOT codegen: the table is populated at JitRuntime init time;
-// moveAOTSlot reads directly from it.
-//
-// AOT codegen: moveAOTSlot loads JSContext from TLS, then chases the
-// pointer chain cx->runtime->jitRuntime->aotIndirectionTable to load
-// the requested slot.  No patched immediates are needed.
 
 #define AOT_SLOTS(V)                    \
   V(JSRuntimePtr)                       \
@@ -62,7 +55,7 @@ class MacroAssembler;
   V(DebugTrapInterpreter)               \
   V(DebugTrapCompiler)                  \
   V(CppFn_PostWriteBarrier)             \
-  V(CppFn_FrameIsDebuggeeCheck)        \
+  V(CppFn_FrameIsDebuggeeCheck)         \
   V(CppFn_HandleCodeCoverageAtPrologue) \
   V(CppFn_HandleCodeCoverageAtPC)       \
   V(PreBarrier_Value)                   \
@@ -90,13 +83,7 @@ inline const char* AOTSlotName(AOTSlot slot) {
   return "Unknown";
 }
 
-// [SMDOC] AOT Container Format
-//
-// The on-disk (and embedded) container is a flat binary with a fixed
-// header, a directory of blob entries, and the blob payloads (code,
-// manifest, patches, metadata).  Each blob carries its own kind tag
-// (interpreter vs. self-hosted function) so the loader can find the
-// right entry without external metadata.
+
 
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 static constexpr uint32_t AOT_CONTAINER_VERSION = 2;
@@ -109,6 +96,13 @@ enum class AOTBlobKind : uint32_t {
   /* Trampoline = 3 */
 };
 
+// [SMDOC] AOT Container Format
+//
+// The on-disk (and embedded) container is a flat binary with a fixed
+// header, a directory of blob entries, and the blob payloads (code,
+// manifest, metadata).  Each blob carries its own kind tag
+// (interpreter vs. self-hosted function, ... ) so the loader can
+// lookup the code and meta-data.
 struct AOTContainerHeader {
   uint32_t magic;
   uint32_t version;
@@ -217,19 +211,14 @@ class JitCode;
 class AOTContext {
  public:
   AOTContext() = default;
-
   void bindMasm(MacroAssembler& masm) { masm_ = &masm; }
-
  private:
   MacroAssembler* masm_ = nullptr;
 };
 
 
-// A small, flat table of runtime pointers that AOT baseline code loads
-// indirectly.  AOT code reaches it via the pointer chain
-// TLS -> JSContext -> JSRuntime -> JitRuntime -> aotIndirectionTable_.
-// Owned inline by JitRuntime so
-// its address is stable.  Indexed by AOTSlot.
+// A table of runtime pointers that AOT baseline code loads from
+// to attain position indpendence. Owned inline by JitRuntime.
 class AOTIndirectionTable {
  public:
   AOTIndirectionTable() { std::memset(slots_, 0, sizeof(slots_)); }

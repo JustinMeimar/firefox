@@ -2682,9 +2682,11 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 #ifdef ENABLE_AOT_BASELINE
-// Compute the FS-segment offset of TlsContext. This is a fixed property
-// of the binary layout and is the same for every invocation of the same
-// build, so it is safe to bake into AOT code at dump time.
+
+// NOTE(Justin): This will only work on x86 for now.
+// Compute the offset of JSContext within TLS storage by taking the
+// `&TlsContext` and subtracting the TLS base. This offset can then
+// be used to bake in TLS loads in AOT code.
 static int32_t GetTlsContextOffset() {
   uintptr_t tp;
   asm("movq %%fs:0, %0" : "=r"(tp));
@@ -2699,13 +2701,10 @@ static int32_t GetTlsContextOffset() {
 //   TlsContext (%fs:off) -> cx->runtime_ -> jitRuntime_ -> slots_[slot]
 static void EmitAOTSlotLoad(MacroAssembler& masm, AOTSlot slot,
                             Register dest) {
-  // Step 1: JSContext* from TLS.
   int32_t tlsOff = GetTlsContextOffset();
   masm.loadPtrFromTls(tlsOff, dest);
-  // Step 2-3: JSContext -> JSRuntime -> JitRuntime.
   masm.loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
   masm.loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
-  // Step 4: JitRuntime -> AOTIndirectionTable slot.
   int32_t tableOff = int32_t(JitRuntime::offsetOfAOTIndirectionTable()) +
                      int32_t(AOTIndirectionTable::offsetOfSlot(slot));
   masm.loadPtr(Address(dest, tableOff), dest);
