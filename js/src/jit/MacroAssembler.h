@@ -400,6 +400,17 @@ class MacroAssembler : public MacroAssemblerSpecific {
                           AOTContext* aotContext = nullptr);
 
  public:
+  // ==================================================================
+  // [SMDOC] AOT MacroAssembler Interface
+  //
+  // All AOT-aware codegen helpers.  Implementations live in
+  // AOTMacroAssembler.cpp.  Each method is dual-mode: in AOT mode it
+  // emits TLS-based indirection table loads; in non-AOT mode it
+  // resolves to concrete compile-time addresses.
+  //
+  // Template methods with AOT branches (guardedCallPreBarrier,
+  // unguardedCallPreBarrier) remain inline in this header below.
+
   bool isAOT() const {
 #ifdef ENABLE_AOT_BASELINE
     return aotContext_ != nullptr;
@@ -408,19 +419,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #endif
   }
 
-  // Dual-mode helpers: work in both AOT and non-AOT modes.
-  // In AOT mode, load via indirection table; otherwise use direct pointers.
-  void loadAOTVMWrapper(VMFunctionId id, Register dest);
-  void loadAOTDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
-
 #ifdef ENABLE_AOT_BASELINE
   AOTContext& aot() const {
     MOZ_ASSERT(aotContext_);
     return *aotContext_;
   }
 
-  // AOT slot helpers. In AOT mode, emit patched movabs + slot loads.
-  // In non-AOT mode, resolve the slot to a concrete address at compile time.
+  // AOT slot primitives — emit indirection table loads or resolve to
+  // concrete addresses at compile time.
   void* aotSlotAddress(AOTSlot slot);
   void moveAOTSlot(AOTSlot slot, Register dest);
   void loadAOTSlot(AOTSlot slot, Register dest);
@@ -429,11 +435,18 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void callPreBarrierAOT(MIRType type, Register scratch);
 #endif
 
+  // Dual-mode helpers: work in both AOT and non-AOT modes.
+  void loadAOTRuntime(Register reg);
+  void loadAOTVMWrapper(VMFunctionId id, Register dest);
+  void loadAOTDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
+
   // Emit a dispatch table entry.  In AOT mode, emits a PIC-friendly
   // int32 offset relative to the table base.  Otherwise emits an
   // absolute code pointer patched via CodeLabel.
   void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
                                const Label& handler);
+
+  // ==================================================================
 
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
@@ -5950,11 +5963,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #else  // !JS_CODEGEN_ARM64
   void reserveStack(uint32_t amount);
 #endif
-
- public:
-  // Load the JSRuntime pointer into the given register.
-  // Works in both AOT and non-AOT modes.
-  void loadAOTRuntime(Register reg);
 
  public:
   void enableProfilingInstrumentation() {

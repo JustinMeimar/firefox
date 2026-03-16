@@ -28,8 +28,6 @@ struct JS_PUBLIC_API JSContext;
 
 namespace js::jit {
 
-class MacroAssembler;
-
 // [SMDOC] AOT Slot Table
 //
 // AOTSlot enumerates every runtime address that AOT code needs.
@@ -211,9 +209,6 @@ class JitCode;
 class AOTContext {
  public:
   AOTContext() = default;
-  void bindMasm(MacroAssembler& masm) { masm_ = &masm; }
- private:
-  MacroAssembler* masm_ = nullptr;
 };
 
 

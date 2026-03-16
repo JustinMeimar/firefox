@@ -1439,7 +1439,6 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
       aotCtx.emplace();
     }
 #endif
-    // TODO(Justin): determine how best to pass aotCtx to smasm.  
     StackMacroAssembler masm(cx, temp, aotCtx.ptrOr(nullptr));
     BaselineInterpreterGenerator generator(cx, temp, masm);
     bool ok = generator.generate(cx, interpreter);

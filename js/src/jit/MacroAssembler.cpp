@@ -2681,40 +2681,12 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
   bind(&done);
 }
 
-#ifdef ENABLE_AOT_BASELINE
-
-// NOTE(Justin): This will only work on x86 for now.
-// Compute the offset of JSContext within TLS storage by taking the
-// `&TlsContext` and subtracting the TLS base. This offset can then
-// be used to bake in TLS loads in AOT code.
-static int32_t GetTlsContextOffset() {
-  uintptr_t tp;
-  asm("movq %%fs:0, %0" : "=r"(tp));
-  auto offset =
-      reinterpret_cast<intptr_t>(&TlsContext) - static_cast<intptr_t>(tp);
-  MOZ_ASSERT(offset == static_cast<int32_t>(offset),
-             "TLS offset must fit in int32_t");
-  return static_cast<int32_t>(offset);
-}
-
-// Load a value from the AOT indirection table via:
-//   TlsContext (%fs:off) -> cx->runtime_ -> jitRuntime_ -> slots_[slot]
-static void EmitAOTSlotLoad(MacroAssembler& masm, AOTSlot slot,
-                            Register dest) {
-  int32_t tlsOff = GetTlsContextOffset();
-  masm.loadPtrFromTls(tlsOff, dest);
-  masm.loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
-  masm.loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
-  int32_t tableOff = int32_t(JitRuntime::offsetOfAOTIndirectionTable()) +
-                     int32_t(AOTIndirectionTable::offsetOfSlot(slot));
-  masm.loadPtr(Address(dest, tableOff), dest);
-}
-#endif  // ENABLE_AOT_BASELINE
+// AOT slot load helpers and primitives are in AOTMacroAssembler.cpp.
 
 void MacroAssembler::loadJSContext(Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
-    EmitAOTSlotLoad(*this, AOTSlot::JSContextPtr, dest);
+    moveAOTSlot(AOTSlot::JSContextPtr, dest);
     return;
   }
 #endif
@@ -2731,8 +2703,7 @@ static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
 void MacroAssembler::loadGlobalObjectData(Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
-    EmitAOTSlotLoad(*this, AOTSlot::ContextRealm, dest);
-    loadPtr(Address(dest, 0), dest);
+    loadAOTSlot(AOTSlot::ContextRealm, dest);
   } else
 #endif
   {
@@ -2746,7 +2717,7 @@ void MacroAssembler::switchToRealm(Register realm, Register scratch) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
     MOZ_ASSERT(scratch != InvalidReg);
-    EmitAOTSlotLoad(*this, AOTSlot::ContextRealm, scratch);
+    moveAOTSlot(AOTSlot::ContextRealm, scratch);
     storePtr(realm, Address(scratch, 0));
     return;
   }
@@ -3826,8 +3797,7 @@ void MacroAssembler::loadJitActivation(Register dest) {
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
-    EmitAOTSlotLoad(*this, AOTSlot::ContextRealm, dest);
-    loadPtr(Address(dest, 0), dest);
+    loadAOTSlot(AOTSlot::ContextRealm, dest);
   } else
 #endif
   {
@@ -4109,132 +4079,16 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 }
 
 
-void MacroAssembler::loadAOTRuntime(Register reg) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    EmitAOTSlotLoad(*this, AOTSlot::JSRuntimePtr, reg);
-    return;
-  }
-#endif
-  movePtr(ImmPtr(runtime()), reg);
-}
-
-// ========================================================================
-// AOT codegen helpers.
-//
-// These are used only when ENABLE_AOT_BASELINE is set and the MacroAssembler
-// is in AOT mode.  Non-AOT codegen should never call these.
-
-#ifdef ENABLE_AOT_BASELINE
-
-// Non-AOT fallback: resolve the slot to a concrete runtime address at
-// compile time via the indirection table.
-void* MacroAssembler::aotSlotAddress(AOTSlot slot) {
-  return (void*)runtime()->jitRuntime()->aotIndirectionTable().get(slot);
-}
-
-void MacroAssembler::moveAOTSlot(AOTSlot slot, Register dest) {
-  if (!isAOT()) {
-    movePtr(ImmPtr(aotSlotAddress(slot)), dest);
-    return;
-  }
-  EmitAOTSlotLoad(*this, slot, dest);
-}
-
-void MacroAssembler::loadAOTSlot(AOTSlot slot, Register dest) {
-  moveAOTSlot(slot, dest);
-  loadPtr(Address(dest, 0), dest);
-}
-
-void MacroAssembler::branchAOTSlot32(Condition cond, AOTSlot slot,
-                                     Imm32 rhs, Label* label,
-                                     Register scratch) {
-  if (!isAOT()) {
-    branch32(cond, AbsoluteAddress(aotSlotAddress(slot)), rhs, label);
-    return;
-  }
-  EmitAOTSlotLoad(*this, slot, scratch);
-  branch32(cond, Address(scratch, 0), rhs, label);
-}
-
-static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
-  switch (type) {
-    case MIRType::Value:
-      return AOTSlot::PreBarrier_Value;
-    case MIRType::String:
-      return AOTSlot::PreBarrier_String;
-    case MIRType::Object:
-      return AOTSlot::PreBarrier_Object;
-    case MIRType::Shape:
-      return AOTSlot::PreBarrier_Shape;
-    case MIRType::WasmAnyRef:
-      return AOTSlot::PreBarrier_WasmAnyRef;
-    default:
-      MOZ_CRASH("Unexpected MIRType for pre-barrier");
-  }
-}
-
-void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
-  MOZ_ASSERT(isAOT());
-  MOZ_ASSERT(scratch != PreBarrierReg);
-  EmitAOTSlotLoad(*this, PreBarrierSlotForMIRType(type), scratch);
-  call(scratch);
-}
-
-#endif  // ENABLE_AOT_BASELINE
-
-void MacroAssembler::loadAOTVMWrapper(VMFunctionId id, Register dest) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    EmitAOTSlotLoad(*this, AOTSlot::VMWrapperBase, dest);
-    loadPtr(Address(dest, size_t(id) * sizeof(uintptr_t)), dest);
-    return;
-  }
-#endif
-  TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
-  movePtr(ImmPtr(ptr.value), dest);
-}
-
-void MacroAssembler::loadAOTDebugTrapHandler(DebugTrapHandlerKind dbgKind,
-                                             Register dest) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    AOTSlot slot = dbgKind == DebugTrapHandlerKind::Interpreter
-                       ? AOTSlot::DebugTrapInterpreter
-                       : AOTSlot::DebugTrapCompiler;
-    EmitAOTSlotLoad(*this, slot, dest);
-    return;
-  }
-#endif
-  JitCode* handler = runtime()->jitRuntime()->debugTrapHandler(dbgKind);
-  movePtr(ImmPtr(handler->raw()), dest);
-}
-
-void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
-                                              size_t index,
-                                              const Label& handler) {
-  MOZ_ASSERT(handler.bound());
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    // AOT mode: emit a position-independent int32 offset relative to the
-    // table base.  No runtime patch needed; the offset is baked in.
-    int32_t relOffset = int32_t(handler.offset()) - int32_t(tableOffset);
-    writeInt32Data(relOffset);
-    return;
-  }
-#endif
-  CodeLabel cl;
-  writeCodePointer(&cl);
-  cl.target()->bind(handler.offset());
-  addCodeLabel(cl);
-}
+// loadAOTRuntime, AOT slot primitives, loadAOTVMWrapper,
+// loadAOTDebugTrapHandler, writeDispatchTableEntry are in
+// AOTMacroAssembler.cpp.
 
 void MacroAssembler::handleFailure() {
   // Re-entry code is irrelevant because the exception will leave the
   // running function and never come back
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
-    EmitAOTSlotLoad(*this, AOTSlot::ExceptionTail, ScratchReg);
+    moveAOTSlot(AOTSlot::ExceptionTail, ScratchReg);
     jump(ScratchReg);
     return;
   }
@@ -4762,9 +4616,6 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
   // AOT compilation must not have access to runtime information.
   MOZ_ASSERT_IF(isAOT(), maybeRuntime_ == nullptr);
   MOZ_ASSERT_IF(isAOT(), maybeRealm == nullptr);
-  if (aotContext_) {
-    aotContext_->bindMasm(*this);
-  }
   moveResolver_.setAllocator(alloc);
 }
 

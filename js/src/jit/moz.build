@@ -16,6 +16,7 @@ UNIFIED_SOURCES += [
     "AliasAnalysis.cpp",
     "AlignmentMaskAnalysis.cpp",
     "AOT.cpp",
+    "AOTMacroAssembler.cpp",
     "BacktrackingAllocator.cpp",
     "Bailouts.cpp",
     "BaselineAOT.cpp",
