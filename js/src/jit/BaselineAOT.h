@@ -18,7 +18,7 @@ namespace js::jit {
 class BaselineInterpreter;
 
 static constexpr const char* kAOTOutputPath =
-    "js/src/jit/AOTBaselineInterpreter.S";
+    "js/src/jit/AOTBaseline.S";
 
 // [SMDOC] AOT Baseline Interpreter Manifest
 //
