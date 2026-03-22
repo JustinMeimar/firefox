@@ -679,6 +679,18 @@ void MacroAssembler::popcnt64(Register64 src64, Register64 dest64,
 
 void MacroAssembler::branch32(Condition cond, const AbsoluteAddress& lhs,
                               Register rhs, Label* label) {
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(lhs.addr));
+    if (slot) {
+      ScratchRegisterScope scratch(*this);
+      MOZ_ASSERT(rhs != scratch);
+      emitAOTSlotLoad(*slot, scratch);
+      branch32(cond, Address(scratch, 0), rhs, label);
+      return;
+    }
+  }
+#endif
   if (X86Encoding::IsAddressImmediate(lhs.addr)) {
     branch32(cond, Operand(lhs), rhs, label);
   } else {
@@ -689,6 +701,17 @@ void MacroAssembler::branch32(Condition cond, const AbsoluteAddress& lhs,
 }
 void MacroAssembler::branch32(Condition cond, const AbsoluteAddress& lhs,
                               Imm32 rhs, Label* label) {
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(lhs.addr));
+    if (slot) {
+      ScratchRegisterScope scratch(*this);
+      emitAOTSlotLoad(*slot, scratch);
+      branch32(cond, Address(scratch, 0), rhs, label);
+      return;
+    }
+  }
+#endif
   if (X86Encoding::IsAddressImmediate(lhs.addr)) {
     branch32(cond, Operand(lhs), rhs, label);
   } else {
@@ -787,6 +810,18 @@ void MacroAssembler::branch64(Condition cond, const Address& lhs,
 
 void MacroAssembler::branchPtr(Condition cond, const AbsoluteAddress& lhs,
                                Register rhs, Label* label) {
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(lhs.addr));
+    if (slot) {
+      ScratchRegisterScope scratch(*this);
+      MOZ_ASSERT(rhs != scratch);
+      emitAOTSlotLoad(*slot, scratch);
+      branchPtrImpl(cond, Operand(scratch, 0x0), rhs, label);
+      return;
+    }
+  }
+#endif
   ScratchRegisterScope scratch(*this);
   MOZ_ASSERT(rhs != scratch);
   if (X86Encoding::IsAddressImmediate(lhs.addr)) {

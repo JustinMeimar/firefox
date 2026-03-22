@@ -425,20 +425,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
     return *aotContext_;
   }
 
-  // AOT slot primitives — emit indirection table loads or resolve to
-  // concrete addresses at compile time.
-  void* aotSlotAddress(AOTSlot slot);
-  void moveAOTSlot(AOTSlot slot, Register dest);
-  void loadAOTSlot(AOTSlot slot, Register dest);
-  void branchAOTSlot32(Condition cond, AOTSlot slot, Imm32 rhs,
-                       Label* label, Register scratch);
+  void emitAOTSlotLoad(AOTSlot slot, Register dest);
   void callPreBarrierAOT(MIRType type, Register scratch);
+  void loadAOTTableBase(Register dest);
 #endif
 
   // Dual-mode helpers: work in both AOT and non-AOT modes.
-  void loadAOTRuntime(Register reg);
-  void loadAOTVMWrapper(VMFunctionId id, Register dest);
-  void loadAOTDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
+  void loadRuntime(Register reg);
+  void loadVMWrapper(VMFunctionId id, Register dest);
+  void loadDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
 
   // Emit a dispatch table entry.  In AOT mode, emits a PIC-friendly
   // int32 offset relative to the table base.  Otherwise emits an
@@ -6012,7 +6007,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Push(scratch);
   }
 
+  // AOT-aware overrides: if in AOT mode and the pointer is a known
+  // indirection table slot, emit a TLS-based load instead.
   using MacroAssemblerSpecific::movePtr;
+  void movePtr(ImmPtr imm, Register dest);
+
+  using MacroAssemblerSpecific::loadPtr;
+  void loadPtr(AbsoluteAddress addr, Register dest);
 
   void movePtr(TrampolinePtr ptr, Register dest) {
     movePtr(ImmPtr(ptr.value), dest);

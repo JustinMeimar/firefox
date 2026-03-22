@@ -332,7 +332,7 @@ static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
     return false;
   }
 
-  AOTContext aotCtx;
+  AOTContext aotCtx(&cx->runtime()->jitRuntime()->aotIndirectionTable());
 
   BaselineOptions options({BaselineOption::ForceMainThreadCompilation});
   MethodStatus result = BaselineCompile(cx, script, options, &aotCtx);

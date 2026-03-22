@@ -790,13 +790,12 @@ void MacroAssembler::branchTestNeedsIncrementalBarrierAnyZone(
   } else {
     // We are compiling the interpreter or another runtime-wide trampoline, so
     // we have to load cx->zone.
-#ifdef ENABLE_AOT_BASELINE
+    // addressOfZone() is not in the AOT slot table, so we load JSContext
+    // (intercepted by movePtr override in AOT mode) then read the zone field.
     if (isAOT()) {
-      moveAOTSlot(AOTSlot::JSContextPtr, scratch);
+      loadJSContext(scratch);
       loadPtr(Address(scratch, JSContext::offsetOfZone()), scratch);
-    } else
-#endif
-    {
+    } else {
       loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
     }
     Address needsBarrierAddr(scratch, Zone::offsetOfNeedsIncrementalBarrier());

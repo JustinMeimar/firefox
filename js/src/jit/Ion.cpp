@@ -135,8 +135,6 @@ bool JitRuntime::initialize(JSContext* cx) {
                            uintptr_t(cx->addressOfInterruptBits()));
   aotIndirectionTable_.set(AOTSlot::JitActivation,
                            uintptr_t(cx->addressOfJitActivation()));
-  aotIndirectionTable_.set(AOTSlot::RealmPtr,
-                           uintptr_t(cx->addressOfRealm()));
   aotIndirectionTable_.set(AOTSlot::ContextRealm,
                            uintptr_t(reinterpret_cast<uint8_t*>(cx) +
                                      JSContext::offsetOfRealm()));
