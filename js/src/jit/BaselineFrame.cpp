@@ -103,6 +103,14 @@ bool BaselineFrame::uninlineIsProfilerSamplingEnabled(JSContext* cx) {
   return cx->isProfilerSamplingEnabled();
 }
 
+#ifdef ENABLE_AOT_BASELINE
+void BaselineFrame::initAOTTableBase(JSContext* cx) {
+  if (JitRuntime* jrt = cx->runtime()->jitRuntime()) {
+    aotTableBase_ = jrt->aotIndirectionTable().baseAddress();
+  }
+}
+#endif
+
 bool BaselineFrame::initFunctionEnvironmentObjects(JSContext* cx) {
   return js::InitFunctionEnvironmentObjects(cx, this);
 }
@@ -154,6 +162,12 @@ bool BaselineFrame::initForOsr(InterpreterFrame* fp, uint32_t numStackValues) {
 
   JSContext* cx =
       fp->script()->runtimeFromMainThread()->mainContextFromOwnThread();
+
+#ifdef ENABLE_AOT_BASELINE
+  if (JitRuntime* jrt = cx->runtime()->jitRuntime()) {
+    aotTableBase_ = jrt->aotIndirectionTable().baseAddress();
+  }
+#endif
 
   Activation* interpActivation = cx->activation()->prev();
   jsbytecode* pc = interpActivation->asInterpreter()->regs().pc;

@@ -659,6 +659,13 @@ bool BaselineStackBuilder::buildBaselineFrame() {
   if (argsObj) {
     blFrame()->initArgsObjUnchecked(*argsObj);
   }
+
+#ifdef ENABLE_AOT_BASELINE
+  if (JitRuntime* jrt = cx_->runtime()->jitRuntime()) {
+    blFrame()->setAOTTableBase(jrt->aotIndirectionTable().baseAddress());
+  }
+#endif
+
   return true;
 }
 

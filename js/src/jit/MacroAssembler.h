@@ -428,6 +428,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
   void callPreBarrierAOT(MIRType type, Register scratch);
   void loadAOTTableBase(Register dest);
+  void storeAOTTableBaseToFrame(Register scratch);
 #endif
 
   // Dual-mode helpers: work in both AOT and non-AOT modes.

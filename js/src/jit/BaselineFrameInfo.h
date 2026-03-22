@@ -224,6 +224,12 @@ class FrameInfo {
     return Address(FramePointer,
                    BaselineFrame::reverseOffsetOfInterpreterScript());
   }
+#ifdef ENABLE_AOT_BASELINE
+  Address addressOfAOTTableBase() const {
+    return Address(FramePointer,
+                   BaselineFrame::reverseOffsetOfAOTTableBase());
+  }
+#endif
 };
 
 class CompilerFrameInfo : public FrameInfo {
