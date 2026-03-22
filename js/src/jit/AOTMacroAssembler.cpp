@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+/* -*- Mode: C++; tab-width: 8; indent-style-mode: nil; c-basic-offset: 2 -*-
  * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -23,9 +23,6 @@ using namespace js::jit;
 
 #ifdef ENABLE_AOT_BASELINE
 
-// Compute the offset of JSContext within TLS storage. This offset is
-// baked into AOT code so that it can reach the runtime without any
-// relocatable pointer.
 // NOTE(Justin): x86-64 only for now (%fs segment).
 static int32_t GetTlsContextOffset() {
   uintptr_t tp;
@@ -37,17 +34,15 @@ static int32_t GetTlsContextOffset() {
   return static_cast<int32_t>(offset);
 }
 
-// Load a value from the AOT indirection table via:
-//   TlsContext (%fs:off) -> cx->runtime_ -> jitRuntime_ -> slots_[slot]
-static void EmitAOTSlotLoad(MacroAssembler& masm, AOTSlot slot,
-                            Register dest) {
+// TlsContext (%fs:off) -> cx->runtime_ -> jitRuntime_ -> slots_[slot]
+void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   int32_t tlsOff = GetTlsContextOffset();
-  masm.loadPtrFromTls(tlsOff, dest);
-  masm.loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
-  masm.loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
+  loadPtrFromTls(tlsOff, dest);
+  MacroAssemblerSpecific::loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
+  MacroAssemblerSpecific::loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
   int32_t tableOff = int32_t(JitRuntime::offsetOfAOTIndirectionTable()) +
                      int32_t(AOTIndirectionTable::offsetOfSlot(slot));
-  masm.loadPtr(Address(dest, tableOff), dest);
+  MacroAssemblerSpecific::loadPtr(Address(dest, tableOff), dest);
 }
 
 static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
@@ -67,61 +62,71 @@ static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
   }
 }
 
-// ========================================================================
-// AOT slot primitives.
-// These are the building blocks that BaselineCodeGen.cpp calls.
-
-void* MacroAssembler::aotSlotAddress(AOTSlot slot) {
-  return (void*)runtime()->jitRuntime()->aotIndirectionTable().get(slot);
-}
-
-void MacroAssembler::moveAOTSlot(AOTSlot slot, Register dest) {
-  if (!isAOT()) {
-    movePtr(ImmPtr(aotSlotAddress(slot)), dest);
-    return;
-  }
-  EmitAOTSlotLoad(*this, slot, dest);
-}
-
-void MacroAssembler::loadAOTSlot(AOTSlot slot, Register dest) {
-  moveAOTSlot(slot, dest);
-  loadPtr(Address(dest, 0), dest);
-}
-
-void MacroAssembler::branchAOTSlot32(Condition cond, AOTSlot slot, Imm32 rhs,
-                                     Label* label, Register scratch) {
-  if (!isAOT()) {
-    branch32(cond, AbsoluteAddress(aotSlotAddress(slot)), rhs, label);
-    return;
-  }
-  EmitAOTSlotLoad(*this, slot, scratch);
-  branch32(cond, Address(scratch, 0), rhs, label);
-}
-
 void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
   MOZ_ASSERT(isAOT());
   MOZ_ASSERT(scratch != PreBarrierReg);
-  EmitAOTSlotLoad(*this, PreBarrierSlotForMIRType(type), scratch);
+  emitAOTSlotLoad(PreBarrierSlotForMIRType(type), scratch);
   call(scratch);
 }
 
-#endif
+void MacroAssembler::loadAOTTableBase(Register dest) {
+  MOZ_ASSERT(isAOT());
+  int32_t tlsOff = GetTlsContextOffset();
+  loadPtrFromTls(tlsOff, dest);
+  MacroAssemblerSpecific::loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
+  MacroAssemblerSpecific::loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
+  addPtr(Imm32(int32_t(JitRuntime::offsetOfAOTIndirectionTable())), dest);
+}
 
-void MacroAssembler::loadAOTRuntime(Register reg) {
+#endif  // ENABLE_AOT_BASELINE
+
+// ========================================================================
+// AOT-transparent overrides.
+//
+// movePtr(ImmPtr) and loadPtr(AbsoluteAddress) are overridden so that
+// in AOT mode, any pointer value that matches a known indirection table
+// slot is automatically emitted as a TLS-based load.  This makes AOT
+// codegen transparent to callers.
+
+void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
-    EmitAOTSlotLoad(*this, AOTSlot::JSRuntimePtr, reg);
-    return;
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
+    if (slot) {
+      emitAOTSlotLoad(*slot, dest);
+      return;
+    }
   }
 #endif
+  MacroAssemblerSpecific::movePtr(imm, dest);
+}
+
+void MacroAssembler::loadPtr(AbsoluteAddress addr, Register dest) {
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(addr.addr));
+    if (slot) {
+      emitAOTSlotLoad(*slot, dest);
+      MacroAssemblerSpecific::loadPtr(Address(dest, 0), dest);
+      return;
+    }
+  }
+#endif
+  MacroAssemblerSpecific::loadPtr(addr, dest);
+}
+
+// ========================================================================
+// Dual-mode helpers.
+
+void MacroAssembler::loadRuntime(Register reg) {
   movePtr(ImmPtr(runtime()), reg);
 }
 
-void MacroAssembler::loadAOTVMWrapper(VMFunctionId id, Register dest) {
+void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
-    EmitAOTSlotLoad(*this, AOTSlot::VMWrapperBase, dest);
-    loadPtr(Address(dest, size_t(id) * sizeof(uintptr_t)), dest);
+    emitAOTSlotLoad(AOTSlot::VMWrapperBase, dest);
+    MacroAssemblerSpecific::loadPtr(Address(dest, size_t(id) * sizeof(uintptr_t)), dest);
     return;
   }
 #endif
@@ -129,14 +134,14 @@ void MacroAssembler::loadAOTVMWrapper(VMFunctionId id, Register dest) {
   movePtr(ImmPtr(ptr.value), dest);
 }
 
-void MacroAssembler::loadAOTDebugTrapHandler(DebugTrapHandlerKind dbgKind,
-                                             Register dest) {
+void MacroAssembler::loadDebugTrapHandler(DebugTrapHandlerKind dbgKind,
+                                          Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
     AOTSlot slot = dbgKind == DebugTrapHandlerKind::Interpreter
                        ? AOTSlot::DebugTrapInterpreter
                        : AOTSlot::DebugTrapCompiler;
-    EmitAOTSlotLoad(*this, slot, dest);
+    emitAOTSlotLoad(slot, dest);
     return;
   }
 #endif
@@ -150,8 +155,6 @@ void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
   MOZ_ASSERT(handler.bound());
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
-    // AOT mode: emit a position-independent int32 offset relative to the
-    // table base.  No runtime patch needed; the offset is baked in.
     int32_t relOffset = int32_t(handler.offset()) - int32_t(tableOffset);
     writeInt32Data(relOffset);
     return;

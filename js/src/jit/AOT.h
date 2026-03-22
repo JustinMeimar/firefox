@@ -14,6 +14,7 @@
 // baseline-compilation-specific manifests live in BaselineAOT.h.
 
 #include "mozilla/HashFunctions.h"
+#include "mozilla/Maybe.h"
 
 #include <cstdint>
 #include <cstring>
@@ -38,7 +39,6 @@ namespace js::jit {
   V(JSContextPtr)                       \
   V(InterruptBits)                      \
   V(JitActivation)                      \
-  V(RealmPtr)                           \
   V(ContextRealm)                       \
   V(WellKnownSymbols)                   \
   V(JitRuntime)                         \
@@ -199,19 +199,6 @@ class JitCode;
     JSContext* cx, const AOTBlobDirectoryEntry* entry,
     uint8_t* textBase, CodeKind codeKind);
 
-// [SMDOC] AOT Compilation Context
-//
-// AOTContext is the single flag that switches the codegen pipeline into
-// AOT mode.  Stack-allocated by the caller and passed to MacroAssembler
-// as a non-owning pointer.  When present (non-nullptr), AOT codegen is
-// active: runtime pointers are loaded via a TLS-based pointer chain
-// instead of baked-in absolute addresses.
-class AOTContext {
- public:
-  AOTContext() = default;
-};
-
-
 // A table of runtime pointers that AOT baseline code loads from
 // to attain position indpendence. Owned inline by JitRuntime.
 class AOTIndirectionTable {
@@ -232,11 +219,39 @@ class AOTIndirectionTable {
     return uint32_t(slot) * sizeof(uintptr_t);
   }
 
+  // Reverse-lookup: find the slot that holds the given pointer value.
+  // Linear scan over ~30 slots; used only during codegen, not at runtime.
+  mozilla::Maybe<AOTSlot> findSlot(uintptr_t value) const {
+    for (uint32_t i = 0; i < uint32_t(AOTSlot::Count); i++) {
+      if (slots_[i] == value) {
+        return mozilla::Some(AOTSlot(i));
+      }
+    }
+    return mozilla::Nothing();
+  }
+
   uintptr_t* baseAddress() { return slots_; }
   const uintptr_t* baseAddress() const { return slots_; }
 
  private:
   uintptr_t slots_[uint32_t(AOTSlot::Count)];
+};
+
+// [SMDOC] AOT Compilation Context
+//
+// AOTContext is the single flag that switches the codegen pipeline into
+// AOT mode.  Stack-allocated by the caller and passed to MacroAssembler
+// as a non-owning pointer.  When present (non-nullptr), AOT codegen is
+// active: runtime pointers are loaded via a TLS-based pointer chain
+// instead of baked-in absolute addresses.
+class AOTContext {
+ public:
+  explicit AOTContext(AOTIndirectionTable* table) : table_(table) {}
+  void bindMasm(MacroAssembler& masm) { masm_ = &masm; }
+  AOTIndirectionTable* indirectionTable() const { return table_; }
+ private:
+  MacroAssembler* masm_ = nullptr;
+  [[maybe_unused]] AOTIndirectionTable* table_;
 };
 
 }  // namespace js::jit

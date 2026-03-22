@@ -2681,15 +2681,10 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
   bind(&done);
 }
 
-// AOT slot load helpers and primitives are in AOTMacroAssembler.cpp.
+// AOT slot load helpers, movePtr/loadPtr overrides, and other AOT
+// primitives are in AOTMacroAssembler.cpp.
 
 void MacroAssembler::loadJSContext(Register dest) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    moveAOTSlot(AOTSlot::JSContextPtr, dest);
-    return;
-  }
-#endif
   movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
 }
 
@@ -2701,14 +2696,7 @@ static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
 }
 
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    loadAOTSlot(AOTSlot::ContextRealm, dest);
-  } else
-#endif
-  {
-    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
-  }
+  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
@@ -2717,7 +2705,7 @@ void MacroAssembler::switchToRealm(Register realm, Register scratch) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
     MOZ_ASSERT(scratch != InvalidReg);
-    moveAOTSlot(AOTSlot::ContextRealm, scratch);
+    emitAOTSlotLoad(AOTSlot::ContextRealm, scratch);
     storePtr(realm, Address(scratch, 0));
     return;
   }
@@ -3795,14 +3783,7 @@ void MacroAssembler::loadJitActivation(Register dest) {
 }
 
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    loadAOTSlot(AOTSlot::ContextRealm, dest);
-  } else
-#endif
-  {
-    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
-  }
+  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
   computeEffectiveAddress(Address(dest, Realm::offsetOfBaselineCompileQueue()),
                           dest);
 }
@@ -4079,22 +4060,14 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 }
 
 
-// loadAOTRuntime, AOT slot primitives, loadAOTVMWrapper,
-// loadAOTDebugTrapHandler, writeDispatchTableEntry are in
-// AOTMacroAssembler.cpp.
+// loadRuntime, emitAOTSlotLoad, movePtr/loadPtr overrides, callPreBarrierAOT,
+// loadVMWrapper, loadDebugTrapHandler, loadAOTTableBase,
+// writeDispatchTableEntry are in AOTMacroAssembler.cpp.
 
 void MacroAssembler::handleFailure() {
-  // Re-entry code is irrelevant because the exception will leave the
-  // running function and never come back
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    moveAOTSlot(AOTSlot::ExceptionTail, ScratchReg);
-    jump(ScratchReg);
-    return;
-  }
-#endif
   TrampolinePtr excTail = runtime()->jitRuntime()->getExceptionTail();
-  jump(excTail);
+  movePtr(ImmPtr(excTail.value), ScratchReg);
+  jump(ScratchReg);
 }
 
 void MacroAssembler::assumeUnreachable(const char* output) {
@@ -4613,8 +4586,8 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
 #if !defined(ENABLE_AOT_BASELINE)
   MOZ_ASSERT(!isAOT());
 #endif
-  // AOT compilation must not have access to runtime information.
-  MOZ_ASSERT_IF(isAOT(), maybeRuntime_ == nullptr);
+  // AOT compilation doesn't use a realm (codegen is realm-independent),
+  // but it does need runtime() for pointer values used by findSlot().
   MOZ_ASSERT_IF(isAOT(), maybeRealm == nullptr);
   moveResolver_.setAllocator(alloc);
 }
@@ -4622,7 +4595,7 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
 StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
                                          AOTContext* aotContext)
     : MacroAssembler(
-          alloc, aotContext ? nullptr : CompileRuntime::get(cx->runtime()),
+          alloc, CompileRuntime::get(cx->runtime()),
           aotContext ? nullptr : CompileRealm::get(cx->realm()),
           aotContext) {}
 

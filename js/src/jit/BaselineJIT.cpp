@@ -1436,7 +1436,7 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     mozilla::Maybe<AOTContext> aotCtx;
 #ifdef ENABLE_AOT_BASELINE
     if (JitOptions.dumpBaselineInterp) {
-      aotCtx.emplace();
+      aotCtx.emplace(&cx->runtime()->jitRuntime()->aotIndirectionTable());
     }
 #endif
     StackMacroAssembler masm(cx, temp, aotCtx.ptrOr(nullptr));
