@@ -6501,24 +6501,6 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   masm.push(FramePointer);
   masm.moveStackPtrTo(FramePointer);
 
-  // If profiler instrumentation is on, update lastProfilingFrame on
-  // current JitActivation
-  {
-    Register scratchReg = scratch2;
-    Label skip;
-
-    masm.branch32(Assembler::Equal,
-                  AbsoluteAddress(runtime->geckoProfiler().addressOfEnabled()),
-                  Imm32(0), &skip);
-    masm.loadJSContext(scratchReg);
-    masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
-                 scratchReg);
-    masm.storePtr(
-        FramePointer,
-        Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()));
-    masm.bind(&skip);
-  }
-
   masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
   masm.assertStackAlignment(sizeof(Value), 0);
 
@@ -6544,6 +6526,25 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     masm.storeAOTTableBaseToFrame(scratch1);
   }
 #endif
+
+  // If profiler instrumentation is on, update lastProfilingFrame on
+  // current JitActivation. Must be after frame allocation and
+  // aotTableBase_ init since loadJSContext may use emitAOTSlotLoad.
+  {
+    Register scratchReg = scratch2;
+    Label skip;
+
+    masm.branch32(Assembler::Equal,
+                  AbsoluteAddress(runtime->geckoProfiler().addressOfEnabled()),
+                  Imm32(0), &skip);
+    masm.loadJSContext(scratchReg);
+    masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
+                 scratchReg);
+    masm.storePtr(
+        FramePointer,
+        Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()));
+    masm.bind(&skip);
+  }
 
   // Push locals and expression slots if needed.
   Label noStackStorage;

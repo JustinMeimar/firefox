@@ -35,16 +35,13 @@ static int32_t GetTlsContextOffset() {
   return static_cast<int32_t>(offset);
 }
 
-// TlsContext (%fs:off) -> cx->runtime_ -> jitRuntime_ -> slots_[slot]
-// NOTE: temporarily reverted to TLS chain while debugging frame size issue.
+// Load an AOT slot value via the cached table base in BaselineFrame.
+// 2 loads: FramePointer[aotTableBase_] -> slots_[slot]
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
-  int32_t tlsOff = GetTlsContextOffset();
-  loadPtrFromTls(tlsOff, dest);
-  MacroAssemblerSpecific::loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
-  MacroAssemblerSpecific::loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
-  int32_t tableOff = int32_t(JitRuntime::offsetOfAOTIndirectionTable()) +
-                     int32_t(AOTIndirectionTable::offsetOfSlot(slot));
-  MacroAssemblerSpecific::loadPtr(Address(dest, tableOff), dest);
+  MacroAssemblerSpecific::loadPtr(
+      Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
+  int32_t slotOff = int32_t(AOTIndirectionTable::offsetOfSlot(slot));
+  MacroAssemblerSpecific::loadPtr(Address(dest, slotOff), dest);
 }
 
 static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
