@@ -11,6 +11,7 @@
 // is dual-mode: it works in both AOT and non-AOT compilation, branching
 // internally on isAOT().
 
+#include "jit/BaselineFrame.h"
 #include "jit/JitRuntime.h"
 #include "jit/VMFunctions.h"
 #include "vm/JSContext.h"
@@ -35,6 +36,7 @@ static int32_t GetTlsContextOffset() {
 }
 
 // TlsContext (%fs:off) -> cx->runtime_ -> jitRuntime_ -> slots_[slot]
+// NOTE: temporarily reverted to TLS chain while debugging frame size issue.
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   int32_t tlsOff = GetTlsContextOffset();
   loadPtrFromTls(tlsOff, dest);
@@ -76,6 +78,12 @@ void MacroAssembler::loadAOTTableBase(Register dest) {
   MacroAssemblerSpecific::loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
   MacroAssemblerSpecific::loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
   addPtr(Imm32(int32_t(JitRuntime::offsetOfAOTIndirectionTable())), dest);
+}
+
+void MacroAssembler::storeAOTTableBaseToFrame(Register scratch) {
+  MOZ_ASSERT(isAOT());
+  loadAOTTableBase(scratch);
+  storePtr(scratch, Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
 }
 
 #endif  // ENABLE_AOT_BASELINE
