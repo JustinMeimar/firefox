@@ -528,7 +528,9 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
 
 bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
                        Handle<JSAtom*> name) {
+#ifdef DEBUG
   mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
+#endif
 
   JS::AutoCheckCannotGC nogc;
   uint32_t nameHash = name->hasLatin1Chars()
@@ -548,8 +550,6 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
   AOTScriptManifest manifest;
   memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
-
-  uint32_t codeSize = manifest.codeSize;
 
   JitCode* code = AllocateStaticAOTCode(
       cx, entry, GetAOTTextBase(), CodeKind::Baseline);
@@ -619,6 +619,7 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
     bs->toggleProfilerInstrumentation(true);
   }
 
+#ifdef DEBUG
   mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
   fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u)\n",
           name->hasLatin1Chars() ? (int)name->length() : 10,
@@ -626,7 +627,8 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
               ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
               : "<two-byte>",
           (long long)dTotal.ToMicroseconds(),
-          codeSize);
+          manifest.codeSize);
+#endif
 
   return true;
 }
