@@ -40,6 +40,14 @@ static int32_t GetTlsContextOffset() {
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   MacroAssemblerSpecific::loadPtr(
       Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
+#ifdef DEBUG
+  {
+    Label ok;
+    branchPtr(Assembler::NotEqual, dest, FramePointer, &ok);
+    assumeUnreachable("aotTableBase_ == FramePointer frame field corrupted");
+    bind(&ok);
+  }
+#endif
   int32_t slotOff = int32_t(AOTIndirectionTable::offsetOfSlot(slot));
   MacroAssemblerSpecific::loadPtr(Address(dest, slotOff), dest);
 }
