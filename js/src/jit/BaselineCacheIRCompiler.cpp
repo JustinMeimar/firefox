@@ -2800,6 +2800,7 @@ void js::jit::CompileAOTICs(JSContext* cx) {
       TempAllocator temp(&cx->tempLifoAlloc());
       // We may or may not need to construct a JitContext during this scope.
       JitContext jitCtx(cx);
+      AutoCompileAOT autoAOT(&jitCtx);
       BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset, true);
       if (!comp.init(stub.kind)) {
         MOZ_CRASH("Compiler initialization failed for AOT IC");

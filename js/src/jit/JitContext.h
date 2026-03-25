@@ -92,6 +92,10 @@ class MOZ_RAII JitContext {
   bool oom_ = false;
 #endif
 
+#ifdef JS_SPASM
+  bool isCompilingAOT_ = false;
+#endif
+
  public:
   // Running context when compiling on the main thread. Not available during
   // off-thread compilation.
@@ -111,6 +115,11 @@ class MOZ_RAII JitContext {
   JitContext();
 
   ~JitContext();
+
+#ifdef JS_SPASM
+  bool isCompilingAOT() { return isCompilingAOT_; }
+  void setIsCompilingAOT(bool isCompilingAOT = true) { isCompilingAOT_ = isCompilingAOT; }
+#endif
 
 #ifdef DEBUG
   bool isCompilingWasm() { return isCompilingWasm_; }
@@ -142,6 +151,18 @@ class MOZ_RAII JitContext {
     inIonBackend_ = false;
   }
 #endif
+};
+
+// Set the "AOT compiling flag" on the JitContext.
+class MOZ_RAII AutoCompileAOT {
+ public:
+  explicit AutoCompileAOT(JitContext* jctx) : mCtx(jctx) {
+    mCtx->setIsCompilingAOT();
+  }
+  ~AutoCompileAOT() { mCtx->setIsCompilingAOT(false); }
+
+ protected:
+  JitContext* mCtx;
 };
 
 // Process-wide initialization and shutdown of JIT data structures.

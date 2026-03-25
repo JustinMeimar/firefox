@@ -7,6 +7,7 @@
 #ifndef jit_shared_Assembler_shared_h
 #define jit_shared_Assembler_shared_h
 
+#include "vm/JSContext.h"
 #if JS_BITS_PER_WORD == 32
 #  include "mozilla/CheckedInt.h"
 #endif
@@ -176,52 +177,122 @@ static inline bool IsCompilingWasm() {
 }
 #endif
 
+#ifdef JS_SPASM
+static inline bool IsCompilingAOT() {
+  return GetJitContext()->isCompilingAOT();
+}
+#endif
+
 // Pointer to be embedded as an immediate in an instruction.
 struct ImmPtr {
+#ifdef JS_SPASM
+  struct Indeterminate {};
+  struct Null {};
+  struct NoCheck { void* value; };
+  struct Runtime {};
+  struct StaticClass { JSClass* cl; };
+  using SymbolicType = mozilla::Variant<Indeterminate, Null, NoCheck, Runtime>;
+  // Similar idea to wasm::SymbolicAddress.
+  SymbolicType symbolicPtr;
+#endif
   void* value;
 
   struct NoCheckToken {};
 
+#ifdef JS_SPASM
+  explicit ImmPtr(std::nullptr_t) : symbolicPtr(Null{}), value(nullptr) {
+#else
   explicit constexpr ImmPtr(std::nullptr_t) : value(nullptr) {
+#endif
     // Explicit constructor for nullptr. This ensures ImmPtr(0) can't be called.
     // Either use ImmPtr(nullptr) or ImmWord(0).
   }
 
+#ifdef JS_SPASM
+  explicit ImmPtr(void* value, NoCheckToken) : symbolicPtr(NoCheck{value}), value(value) {
+#else
   explicit ImmPtr(void* value, NoCheckToken) : value(value) {
+#endif
     // A special unchecked variant for contexts where we know it is safe to
     // use an immptr. This is assuming the caller knows what they're doing.
   }
 
+#ifdef JS_SPASM
+  static SymbolicType computeSymbolicPtr(const void* value) {
+    if (!IsCompilingAOT()) {
+      return mozilla::AsVariant(Indeterminate{});
+    }
+    JSContext* cx = TlsContext.get();
+    MOZ_ASSERT(cx);
+    // Must manually figure out what pointer it is and initialize accordingly.
+    if (value == cx->runtime()) {
+      return mozilla::AsVariant(Runtime{});
+    }
+    if (value == &FunctionClass) {
+
+    }
+    MOZ_CRASH("Unknown runtime ptr");
+  }
+#endif
+
+#ifdef JS_SPASM
+  explicit ImmPtr(const void* value) : symbolicPtr(computeSymbolicPtr(value)), value(const_cast<void*>(value)) {
+#else
   explicit ImmPtr(const void* value) : value(const_cast<void*>(value)) {
+#endif
     // To make code serialization-safe, wasm compilation should only
     // compile pointer immediates using a SymbolicAddress.
     MOZ_ASSERT(!IsCompilingWasm());
   }
 
   template <class R>
+#ifdef JS_SPASM
+  explicit ImmPtr(R (*pf)()) : symbolicPtr(Indeterminate{}), value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#else
   explicit ImmPtr(R (*pf)()) : value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#endif
     MOZ_ASSERT(!IsCompilingWasm());
+    MOZ_ASSERT(!IsCompilingAOT());
   }
 
   template <class R, class A1>
+#ifdef JS_SPASM
+  explicit ImmPtr(R (*pf)(A1)) : symbolicPtr(Indeterminate{}), value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#else
   explicit ImmPtr(R (*pf)(A1)) : value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#endif
     MOZ_ASSERT(!IsCompilingWasm());
+    MOZ_ASSERT(!IsCompilingAOT());
   }
 
   template <class R, class A1, class A2>
+#ifdef JS_SPASM
+  explicit ImmPtr(R (*pf)(A1, A2)) : symbolicPtr(Indeterminate{}), value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#else
   explicit ImmPtr(R (*pf)(A1, A2)) : value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#endif
     MOZ_ASSERT(!IsCompilingWasm());
+    MOZ_ASSERT(!IsCompilingAOT());
   }
 
   template <class R, class A1, class A2, class A3>
+#ifdef JS_SPASM
+  explicit ImmPtr(R (*pf)(A1, A2, A3)) : symbolicPtr(Indeterminate{}), value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#else
   explicit ImmPtr(R (*pf)(A1, A2, A3)) : value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#endif
     MOZ_ASSERT(!IsCompilingWasm());
+    MOZ_ASSERT(!IsCompilingAOT());
   }
 
   template <class R, class A1, class A2, class A3, class A4>
-  explicit ImmPtr(R (*pf)(A1, A2, A3, A4))
-      : value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#ifdef JS_SPASM
+  explicit ImmPtr(R (*pf)(A1, A2, A3, A4)) : symbolicPtr(Indeterminate{}), value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#else
+  explicit ImmPtr(R (*pf)(A1, A2, A3, A4)) : value(JS_FUNC_TO_DATA_PTR(void*, pf)) {
+#endif
     MOZ_ASSERT(!IsCompilingWasm());
+    MOZ_ASSERT(!IsCompilingAOT());
   }
 };
 
