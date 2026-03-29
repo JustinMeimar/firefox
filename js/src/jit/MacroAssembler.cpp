@@ -3720,15 +3720,6 @@ void MacroAssembler::computeImplicitThis(Register env, ValueOperand output,
   // Go to the slow path for possible debug environment proxies.
   branchTestClassIsProxy(true, scratch, slowPath);
 
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    // In AOT mode we cannot embed the WithEnvironmentObject::class_ pointer.
-    // Fall back to the VM call which handles all environment types correctly.
-    jump(slowPath);
-    return;
-  }
-#endif
-
   // WithEnvironmentObjects have an actual implicit |this|.
   Label nonWithEnv, done;
   branchPtr(Assembler::NotEqual, scratch,
@@ -8731,8 +8722,10 @@ void MacroAssembler::debugAssertObjectHasClass(Register obj, Register scratch,
                                                const JSClass* clasp) {
 #ifdef DEBUG
 #ifdef ENABLE_AOT_BASELINE
-  // AOT code cannot embed class pointers as immediates.
-  if (isAOT()) {
+  // In AOT mode, class pointers can only be compared if they have an
+  // indirection table slot. Raw immediates would contain dump-time
+  // addresses that are invalid at runtime. Skip for unknown classes.
+  if (isAOT() && !aot().indirectionTable()->findSlot(uintptr_t(clasp))) {
     return;
   }
 #endif
@@ -9448,10 +9441,6 @@ static void LoadNativeIterator(MacroAssembler& masm, Register obj,
 
 #ifdef DEBUG
   // Assert we have a PropertyIteratorObject.
-#ifdef ENABLE_AOT_BASELINE
-  // AOT code cannot embed class pointers as immediates.
-  if (!masm.isAOT())
-#endif
   {
     Label ok;
     masm.branchTestObjClass(Assembler::Equal, obj,

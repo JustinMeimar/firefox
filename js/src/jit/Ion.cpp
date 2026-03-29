@@ -63,7 +63,10 @@
 #include "js/UniquePtr.h"
 #include "util/Memory.h"
 #include "util/WindowsWrapper.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/HelperThreads.h"
+#include "vm/Iteration.h"
+#include "vm/JSFunction.h"
 #include "vm/Realm.h"
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
@@ -157,7 +160,7 @@ bool JitRuntime::initialize(JSContext* cx) {
         uintptr_t(cache + StringToAtomCache::offsetOfLastLookups()));
   }
 
-  // C++ function pointer slots — addresses are fixed for the process lifetime.
+  // C++ function pointer slots: addresses are fixed for the process lifetime.
   aotIndirectionTable_.set(AOTSlot::CppFn_PostWriteBarrier,
                            uintptr_t(PostWriteBarrier));
   aotIndirectionTable_.set(AOTSlot::CppFn_FrameIsDebuggeeCheck,
@@ -167,11 +170,21 @@ bool JitRuntime::initialize(JSContext* cx) {
   aotIndirectionTable_.set(AOTSlot::CppFn_HandleCodeCoverageAtPC,
                            uintptr_t(HandleCodeCoverageAtPC));
 
+  // Class pointer slots: static data, fixed for process lifetime.
+  aotIndirectionTable_.set(AOTSlot::Class_WithEnvironmentObject,
+                           uintptr_t(&WithEnvironmentObject::class_));
+  aotIndirectionTable_.set(AOTSlot::Class_PropertyIteratorObject,
+                           uintptr_t(&PropertyIteratorObject::class_));
+  aotIndirectionTable_.set(AOTSlot::Class_Function,
+                           uintptr_t(&FunctionClass));
+  aotIndirectionTable_.set(AOTSlot::Class_ExtendedFunction,
+                           uintptr_t(&ExtendedFunctionClass));
+
   if (!generateTrampolines(cx)) {
     return false;
   }
 
-  // Trampoline-dependent slots — trampolineCode_ must exist now.
+  // Trampoline-dependent slots: trampolineCode_ must exist now.
   aotIndirectionTable_.set(
       AOTSlot::ProfilerExitFrameTail,
       uintptr_t(getProfilerExitFrameTail().value));
@@ -677,7 +690,7 @@ template JitCode* JitCode::New<NoGC>(JSContext* cx, uint8_t* code,
 
 JitCode* JitCode::NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
                              CodeKind kind) {
-  // Static code lives in .text — no pool, no header, no memcpy.
+  // Static code lives in .text; no pool, no header, no memcpy.
   JitCode* codeObj = cx->newCell<JitCode, NoGC>(
       code, /*bufferSize=*/0, /*headerSize=*/0, /*pool=*/nullptr, kind);
   if (!codeObj) {
@@ -744,7 +757,7 @@ void JitCode::finalize(JS::GCContext* gcx) {
   vtune::UnmarkCode(this);
 #endif
 
-  // Static code lives in .text — no pool, no header, nothing to release.
+  // Static code lives in .text; no pool, no header, nothing to release.
   if (isStaticCode_) {
     setHeaderPtr(nullptr);
     return;
