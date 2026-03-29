@@ -332,6 +332,7 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
+  CompileZone* zone = realm()->zone();
   size_t thingSize = gc::Arena::thingSize(allocKind);
   size_t totalSize = thingSize;
   if (nDynamicSlots) {
@@ -339,8 +340,6 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
   }
   MOZ_ASSERT(totalSize < INT32_MAX);
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
-
-  CompileZone* zone = realm()->zone();
   bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::Object,
                       totalSize, allocSite);
 
@@ -361,6 +360,7 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 // Inlined version of FreeSpan::allocate. This does not fill in slots_.
 void MacroAssembler::freeListAllocate(Register result, Register temp,
                                       gc::AllocKind allocKind, Label* fail) {
+  CompileZone* zone = realm()->zone();
   int thingSize = int(gc::Arena::thingSize(allocKind));
 
   Label fallback;
@@ -368,8 +368,6 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
 
   // Load the first and last offsets of |zone|'s free list for |allocKind|.
   // If there is no room remaining in the span, fall back to get the next one.
-
-  CompileZone* zone = realm()->zone();
   gc::FreeSpan** ptrFreeList = zone->addressOfFreeList(allocKind);
   loadPtr(AbsoluteAddress(ptrFreeList), temp);
   load16ZeroExtend(Address(temp, js::gc::FreeSpan::offsetOfFirst()), result);
@@ -2681,15 +2679,10 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
   bind(&done);
 }
 
-// AOT slot load helpers, movePtr/loadPtr overrides, and other AOT
-// primitives are in AOTMacroAssembler.cpp.
-
 void MacroAssembler::loadJSContext(Register dest) {
   movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
 }
 
-// Load the current realm pointer (the value of cx->realm_).
-// Used internally by many functions below.
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
   return (static_cast<const uint8_t*>(rt->mainContextPtr()) +
           JSContext::offsetOfRealm());
@@ -2701,15 +2694,7 @@ void MacroAssembler::loadGlobalObjectData(Register dest) {
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
 
-void MacroAssembler::switchToRealm(Register realm, Register scratch) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    MOZ_ASSERT(scratch != InvalidReg);
-    emitAOTSlotLoad(AOTSlot::ContextRealm, scratch);
-    storePtr(realm, Address(scratch, 0));
-    return;
-  }
-#endif
+void MacroAssembler::switchToRealm(Register realm) {
   storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
 }
 
@@ -2738,18 +2723,18 @@ void MacroAssembler::switchToRealm(const void* realm, Register scratch) {
   switchToRealm(scratch);
 }
 
-void MacroAssembler::switchToObjectRealm(Register obj, Register scratch, Register scratchForAOT) {
+void MacroAssembler::switchToObjectRealm(Register obj, Register scratch) {
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  switchToRealm(scratch, scratchForAOT);
+  switchToRealm(scratch);
 }
 
-void MacroAssembler::switchToBaselineFrameRealm(Register scratch, Register scratchForAOT) {
+void MacroAssembler::switchToBaselineFrameRealm(Register scratch) {
   Address envChain(FramePointer,
                    BaselineFrame::reverseOffsetOfEnvironmentChain());
   loadPtr(envChain, scratch);
-  switchToObjectRealm(scratch, scratch, scratchForAOT);
+  switchToObjectRealm(scratch, scratch);
 }
 
 void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
@@ -4050,11 +4035,6 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
   subPtr(Imm32(BaselineFrame::Size()), dest);
 }
 
-
-// loadRuntime, emitAOTSlotLoad, movePtr/loadPtr overrides, callPreBarrierAOT,
-// loadVMWrapper, loadDebugTrapHandler, loadAOTTableBase,
-// writeDispatchTableEntry are in AOTMacroAssembler.cpp.
-
 void MacroAssembler::handleFailure() {
   TrampolinePtr excTail = runtime()->jitRuntime()->getExceptionTail();
   movePtr(ImmPtr(excTail.value), ScratchReg);
@@ -5040,6 +5020,7 @@ void MacroAssembler::callWithABINoProfiler(void* fun, ABIType result,
 
 #ifdef JS_CHECK_UNSAFE_CALL_WITH_ABI
   if (check == CheckUnsafeCallWithABI::Check) {
+    // Check JSContext::inUnsafeCallWithABI was cleared as expected.
     Label ok;
     push(ReturnReg);
     loadJSContext(ReturnReg);
@@ -9441,13 +9422,11 @@ static void LoadNativeIterator(MacroAssembler& masm, Register obj,
 
 #ifdef DEBUG
   // Assert we have a PropertyIteratorObject.
-  {
-    Label ok;
-    masm.branchTestObjClass(Assembler::Equal, obj,
-                            &PropertyIteratorObject::class_, dest, obj, &ok);
-    masm.assumeUnreachable("Expected PropertyIteratorObject!");
-    masm.bind(&ok);
-  }
+  Label ok;
+  masm.branchTestObjClass(Assembler::Equal, obj,
+                          &PropertyIteratorObject::class_, dest, obj, &ok);
+  masm.assumeUnreachable("Expected PropertyIteratorObject!");
+  masm.bind(&ok);
 #endif
 
   // Load NativeIterator object.

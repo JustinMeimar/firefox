@@ -2836,6 +2836,7 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
 
   masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
+
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
   frame.push(R0);
   return true;
@@ -6063,14 +6064,11 @@ bool BaselineCodeGen<Handler>::emit_SuperFun() {
   masm.unboxObject(R0, callee);
 
 #ifdef DEBUG
-  {
-    Label classCheckDone;
-    masm.branchTestObjIsFunction(Assembler::Equal, callee, scratch, callee,
-                                 &classCheckDone);
-    masm.assumeUnreachable(
-        "Unexpected non-JSFunction callee in JSOp::SuperFun");
-    masm.bind(&classCheckDone);
-  }
+  Label classCheckDone;
+  masm.branchTestObjIsFunction(Assembler::Equal, callee, scratch, callee,
+                               &classCheckDone);
+  masm.assumeUnreachable("Unexpected non-JSFunction callee in JSOp::SuperFun");
+  masm.bind(&classCheckDone);
 #endif
 
   // Load prototype of callee
@@ -6571,11 +6569,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   masm.pushValue(JSVAL_TYPE_OBJECT, genObj);
   masm.pushValue(Address(callerStackPtr, 0));
 
-  {
-    Register scratchForAOT = regs.takeAny();
-    masm.switchToObjectRealm(genObj, scratch2, scratchForAOT);
-    regs.add(scratchForAOT);
-  }
+  masm.switchToObjectRealm(genObj, scratch2);
 
   // Load script in scratch1.
   masm.unboxObject(
@@ -6619,7 +6613,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   if (!handler.realmIndependentJitcode()) {
     masm.switchToRealm(handler.maybeScript()->realm(), R2.scratchReg());
   } else {
-    masm.switchToBaselineFrameRealm(R2.scratchReg(), R1.scratchReg());
+    masm.switchToBaselineFrameRealm(R2.scratchReg());
   }
   restoreInterpreterPCReg();
   frame.popn(3);

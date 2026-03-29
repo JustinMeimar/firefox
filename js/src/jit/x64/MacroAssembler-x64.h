@@ -562,15 +562,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   void movePtr(ImmPtr imm, Register dest) { mov(imm, dest); }
   void movePtr(wasm::SymbolicAddress imm, Register dest) { mov(imm, dest); }
   void movePtr(ImmGCPtr imm, Register dest) { movq(imm, dest); }
-  void loadPtr(AbsoluteAddress address, Register dest) {
-    if (X86Encoding::IsAddressImmediate(address.addr)) {
-      movq(Operand(address), dest);
-    } else {
-      ScratchRegisterScope scratch(asMasm());
-      mov(ImmPtr(address.addr), scratch);
-      loadPtr(Address(scratch, 0x0), dest);
-    }
-  }
+  void loadPtr(AbsoluteAddress address, Register dest);
   FaultingCodeOffset loadPtr(const Address& address, Register dest) {
     FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
     movq(Operand(address), dest);
@@ -590,15 +582,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
     return fco;
   }
   void loadPrivate(const Address& src, Register dest) { loadPtr(src, dest); }
-  void load32(AbsoluteAddress address, Register dest) {
-    if (X86Encoding::IsAddressImmediate(address.addr)) {
-      movl(Operand(address), dest);
-    } else {
-      ScratchRegisterScope scratch(asMasm());
-      mov(ImmPtr(address.addr), scratch);
-      load32(Address(scratch, 0x0), dest);
-    }
-  }
+  void load32(AbsoluteAddress address, Register dest);
   void load64(const Operand& address, Register64 dest) {
     movq(address, dest.reg);
   }
@@ -653,33 +637,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
     return fco;
   }
   void storePtr(Register src, const Operand& dest) { movq(src, dest); }
-  void storePtr(Register src, AbsoluteAddress address) {
-    if (X86Encoding::IsAddressImmediate(address.addr)) {
-      movq(src, Operand(address));
-    } else {
-      ScratchRegisterScope scratch(asMasm());
-      mov(ImmPtr(address.addr), scratch);
-      storePtr(src, Address(scratch, 0x0));
-    }
-  }
-  void store32(Register src, AbsoluteAddress address) {
-    if (X86Encoding::IsAddressImmediate(address.addr)) {
-      movl(src, Operand(address));
-    } else {
-      ScratchRegisterScope scratch(asMasm());
-      mov(ImmPtr(address.addr), scratch);
-      store32(src, Address(scratch, 0x0));
-    }
-  }
-  void store16(Register src, AbsoluteAddress address) {
-    if (X86Encoding::IsAddressImmediate(address.addr)) {
-      movw(src, Operand(address));
-    } else {
-      ScratchRegisterScope scratch(asMasm());
-      mov(ImmPtr(address.addr), scratch);
-      store16(src, Address(scratch, 0x0));
-    }
-  }
+  void storePtr(Register src, AbsoluteAddress address);
+  void store32(Register src, AbsoluteAddress address);
+  void store16(Register src, AbsoluteAddress address);
   FaultingCodeOffset store64(Register64 src, Address address) {
     FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
     storePtr(src.reg, address);
