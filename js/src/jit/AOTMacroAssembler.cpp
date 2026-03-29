@@ -113,9 +113,6 @@ void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
   MacroAssemblerSpecific::movePtr(imm, dest);
 }
 
-// ========================================================================
-// Dual-mode helpers.
-
 void MacroAssembler::loadRuntime(Register reg) {
   movePtr(ImmPtr(runtime()), reg);
 }
