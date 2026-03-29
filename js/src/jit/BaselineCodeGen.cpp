@@ -2836,6 +2836,7 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
 
   masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
+
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
   frame.push(R0);
   return true;
@@ -6063,14 +6064,11 @@ bool BaselineCodeGen<Handler>::emit_SuperFun() {
   masm.unboxObject(R0, callee);
 
 #ifdef DEBUG
-  {
-    Label classCheckDone;
-    masm.branchTestObjIsFunction(Assembler::Equal, callee, scratch, callee,
-                                 &classCheckDone);
-    masm.assumeUnreachable(
-        "Unexpected non-JSFunction callee in JSOp::SuperFun");
-    masm.bind(&classCheckDone);
-  }
+  Label classCheckDone;
+  masm.branchTestObjIsFunction(Assembler::Equal, callee, scratch, callee,
+                               &classCheckDone);
+  masm.assumeUnreachable("Unexpected non-JSFunction callee in JSOp::SuperFun");
+  masm.bind(&classCheckDone);
 #endif
 
   // Load prototype of callee
