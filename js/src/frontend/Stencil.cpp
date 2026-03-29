@@ -3148,7 +3148,7 @@ bool CompilationStencil::delazifySelfHostedFunction(
 
       jit::BaselineOptions options(
           {jit::BaselineOption::ForceMainThreadCompilation});
-#ifdef DEBUG
+#ifdef JS_JIT_TIMING
       mozilla::TimeStamp tSelfHostStart = mozilla::TimeStamp::Now();
 #endif
       jit::MethodStatus result =
@@ -3156,7 +3156,7 @@ bool CompilationStencil::delazifySelfHostedFunction(
       if (result != jit::Method_Compiled) {
         return false;
       }
-#ifdef DEBUG
+#ifdef JS_JIT_TIMING
       {
         mozilla::TimeDuration dSelfHost = mozilla::TimeStamp::Now() - tSelfHostStart;
         JS::AutoCheckCannotGC nogc;

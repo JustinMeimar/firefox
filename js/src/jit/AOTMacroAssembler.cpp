@@ -162,6 +162,9 @@ void MacroAssembler::loadDebugTrapHandler(DebugTrapHandlerKind dbgKind,
   movePtr(ImmPtr(handler->raw()), dest);
 }
 
+// Rather than clutter BaselineCodeGen with a bifurcated ifdef, we abstract,
+// even though there is only one use, the logic for filling the blinterp
+// disptach table.
 void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
                                               size_t index,
                                               const Label& handler) {

@@ -1431,7 +1431,7 @@ uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
 bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
-#ifdef DEBUG
+#ifdef JS_JIT_TIMING
     mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
 #endif
     TempAllocator temp(&cx->tempLifoAlloc());
@@ -1444,7 +1444,7 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     StackMacroAssembler masm(cx, temp, aotCtx.ptrOr(nullptr));
     BaselineInterpreterGenerator generator(cx, temp, masm);
     bool ok = generator.generate(cx, interpreter);
-#ifdef DEBUG
+#ifdef JS_JIT_TIMING
     mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
     fprintf(stderr, "[JIT-timing] %s interp: total=%lldus\n",
             JitOptions.useAOTBaseline ? "AOT load" : "JIT generate",
