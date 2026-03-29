@@ -61,7 +61,11 @@ namespace js::jit {
   V(PreBarrier_Object)                  \
   V(PreBarrier_Shape)                   \
   V(PreBarrier_WasmAnyRef)              \
-  V(VMWrapperBase)
+  V(VMWrapperBase)                      \
+  V(Class_WithEnvironmentObject)        \
+  V(Class_PropertyIteratorObject)       \
+  V(Class_Function)                     \
+  V(Class_ExtendedFunction)
 
 enum class AOTSlot : uint32_t {
 #define EMIT_SLOT(name) name,

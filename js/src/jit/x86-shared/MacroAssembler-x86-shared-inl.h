@@ -597,6 +597,18 @@ void MacroAssembler::branchPtr(Condition cond, Register lhs, Imm32 rhs,
 
 void MacroAssembler::branchPtr(Condition cond, Register lhs, ImmPtr rhs,
                                Label* label) {
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(rhs.value));
+    if (slot) {
+      ScratchRegisterScope scratch(*this);
+      MOZ_ASSERT(lhs != scratch);
+      emitAOTSlotLoad(*slot, scratch);
+      branchPtr(cond, lhs, scratch, label);
+      return;
+    }
+  }
+#endif
   branchPtrImpl(cond, lhs, rhs, label);
 }
 
@@ -617,6 +629,17 @@ void MacroAssembler::branchPtr(Condition cond, const Address& lhs, Register rhs,
 
 void MacroAssembler::branchPtr(Condition cond, const Address& lhs, ImmPtr rhs,
                                Label* label) {
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(rhs.value));
+    if (slot) {
+      ScratchRegisterScope scratch(*this);
+      emitAOTSlotLoad(*slot, scratch);
+      branchPtrImpl(cond, lhs, scratch, label);
+      return;
+    }
+  }
+#endif
   branchPtrImpl(cond, lhs, rhs, label);
 }
 
