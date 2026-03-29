@@ -528,7 +528,7 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
 
 bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
                        Handle<JSAtom*> name) {
-#ifdef DEBUG
+#ifdef JS_JIT_TIMING
   mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
 #endif
 
@@ -619,7 +619,7 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
     bs->toggleProfilerInstrumentation(true);
   }
 
-#ifdef DEBUG
+#ifdef JS_JIT_TIMING
   mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
   fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u)\n",
           name->hasLatin1Chars() ? (int)name->length() : 10,

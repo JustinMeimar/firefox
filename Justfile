@@ -16,8 +16,6 @@ build-shell-release-aot:
 build-browser-release-aot:
     python3 drive.py build --build=build-browser-release-aot
 
-build-all-shells: build-shell-debug build-shell-release build-shell-debug-aot build-shell-release-aot
-
 use BUILD:
     #!/usr/bin/env bash
     target="{{BUILD}}/dist/bin/js"
@@ -54,6 +52,11 @@ debug-gen FILE:
 move-ics:
     mv $(ls | grep "IC-\d*") ./js/src/ics
 
+##~---- Diff ----~##
+
+view-rolling-diff:
+    git diff 8ded3583f3587f130f1af9 HEAD | delta --side-by-side
+
 ##~---- Benchmarks ----~##
 
 BENCH_CPU := "2"
@@ -80,13 +83,8 @@ bench-octane *FLAGS:
 bench-octane-compare *ARGS:
     BENCH_CPU={{BENCH_CPU}} python3 scripts/bench_octane.py {{ARGS}}
 
-bench-aot-interp FILE:
-    #!/usr/bin/env bash
-    echo "=== AOT load ==="
-    ./jsshell --aot-bl --blinterp-eager --no-baseline -f "{{FILE}}" 2>&1 | grep -a "\[JIT-timing\]"
-    echo ""
-    echo "=== JIT generate ==="
-    ./jsshell --blinterp-eager --no-baseline --setpref=experimental.self_hosted_cache=true -f "{{FILE}}" 2>&1 | grep -a "\[JIT-timing\]"
+bench-aot-interp *ARGS:
+    BENCH_CPU={{BENCH_CPU}} python3 scripts/bench_interp.py {{ARGS}}
 
 ##~---- Profiling ----~##
 
@@ -105,7 +103,7 @@ profile-flame FILE:
 
 ##~---- Browser ----~##
 
-BROWSER_AOT_MOZCONFIG := justfile_directory() + "/../mozconfigs/build-browser-release-aot"
+BROWSER_AOT_MOZCONFIG := justfile_directory() + "/../mozconfigs/browser-release-aot.mozconfig"
 
 jitless-collect-ics:
     #!/home/justin/.nix-profile/bin/zsh
