@@ -76,7 +76,6 @@ class BaselineCodeGen {
   bool inCall_ = false;
 #endif
 
-
   template <typename... HandlerArgs>
   explicit BaselineCodeGen(TempAllocator& alloc, MacroAssembler& masmArg,
                            CompileRuntime* runtimeArg, HandlerArgs&&... args);

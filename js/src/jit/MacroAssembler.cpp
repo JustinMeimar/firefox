@@ -340,6 +340,7 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
   }
   MOZ_ASSERT(totalSize < INT32_MAX);
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
+
   bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::Object,
                       totalSize, allocSite);
 
@@ -4036,6 +4037,8 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 }
 
 void MacroAssembler::handleFailure() {
+  // Re-entry code is irrelevant because the exception will leave the
+  // running function and never come back
   TrampolinePtr excTail = runtime()->jitRuntime()->getExceptionTail();
   movePtr(ImmPtr(excTail.value), ScratchReg);
   jump(ScratchReg);

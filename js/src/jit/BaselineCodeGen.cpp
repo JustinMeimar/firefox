@@ -1762,10 +1762,11 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     // the frame currently being OSR-ed
     {
       Label checkOk;
-      masm.branch32(Assembler::Equal,
-                    AbsoluteAddress(runtime->geckoProfiler().addressOfEnabled()),
-                    Imm32(0), &checkOk);
-      masm.loadPtr(AbsoluteAddress(runtime->addressOfJitActivation()), scratchReg);
+      AbsoluteAddress addressOfEnabled(
+          runtime->geckoProfiler().addressOfEnabled());
+      masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
+      masm.loadPtr(AbsoluteAddress(runtime->addressOfJitActivation()),
+                   scratchReg);
       masm.loadPtr(
           Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
           scratchReg);
@@ -1979,7 +1980,6 @@ bool BaselineCompiler::emitDebugTrap() {
   // Emit patchable call to debug trap handler.
   JitCode* handlerCode =
       runtime->jitRuntime()->debugTrapHandler(DebugTrapHandlerKind::Compiler);
-
   CodeOffset nativeOffset = masm.toggledCall(handlerCode, enabled);
 
   uint32_t pcOffset = script->pcToOffset(handler.pc());
@@ -7090,6 +7090,7 @@ bool BaselineInterpreterGenerator::emitDebugTrap() {
   if (!debugTrapOffsets_.append(offset.offset())) {
     return false;
   }
+
   return true;
 }
 

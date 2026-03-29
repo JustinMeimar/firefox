@@ -304,25 +304,6 @@ struct BranchWasmRefIsSubtypeRegisters {
   bool needScratch2;
 };
 
-//
-// Runtime agnostic code generation
-// ----------------------------
-// In order to support a pre-generated baseline interpreter and ahead-of-time
-// (AOT) compiled IC stubs, the MacroAssembler must be runtime agnostic when
-// generating code for the AOT IC stubs. That is, it may not bake in any
-// addresses/ptrs that rely on the runtime, since the runtime would not be
-// available at the time of compilation.
-//
-// The existing _anyZone methods will not suffice either as they load the zone
-// via the runtime.
-//
-// Instead, the address of the runtime is stored in an ICStub field. Later on,
-// this field can be loaded via an ICStubReg offset, which can then be used to
-// load the zone. Once the zone is available, other required properties may be
-// accessed using an offset from the zone itself. The _Runtime version of existing
-// methods work this way.
-
-
 // [SMDOC] Code generation invariants (incomplete)
 //
 // ## 64-bit GPRs carrying 32-bit values
