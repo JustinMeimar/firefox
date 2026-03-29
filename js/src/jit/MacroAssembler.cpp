@@ -2701,15 +2701,7 @@ void MacroAssembler::loadGlobalObjectData(Register dest) {
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
 
-void MacroAssembler::switchToRealm(Register realm, Register scratch) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    MOZ_ASSERT(scratch != InvalidReg);
-    emitAOTSlotLoad(AOTSlot::ContextRealm, scratch);
-    storePtr(realm, Address(scratch, 0));
-    return;
-  }
-#endif
+void MacroAssembler::switchToRealm(Register realm) {
   storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
 }
 
@@ -2738,18 +2730,18 @@ void MacroAssembler::switchToRealm(const void* realm, Register scratch) {
   switchToRealm(scratch);
 }
 
-void MacroAssembler::switchToObjectRealm(Register obj, Register scratch, Register scratchForAOT) {
+void MacroAssembler::switchToObjectRealm(Register obj, Register scratch) {
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  switchToRealm(scratch, scratchForAOT);
+  switchToRealm(scratch);
 }
 
-void MacroAssembler::switchToBaselineFrameRealm(Register scratch, Register scratchForAOT) {
+void MacroAssembler::switchToBaselineFrameRealm(Register scratch) {
   Address envChain(FramePointer,
                    BaselineFrame::reverseOffsetOfEnvironmentChain());
   loadPtr(envChain, scratch);
-  switchToObjectRealm(scratch, scratch, scratchForAOT);
+  switchToObjectRealm(scratch, scratch);
 }
 
 void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,

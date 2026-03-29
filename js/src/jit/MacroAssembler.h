@@ -5137,10 +5137,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail);
 
-  void switchToRealm(Register realm, Register scratch = InvalidReg);
+  void switchToRealm(Register realm);
   void switchToRealm(const void* realm, Register scratch);
-  void switchToObjectRealm(Register obj, Register scratch, Register scratchForAOT = InvalidReg);
-  void switchToBaselineFrameRealm(Register scratch, Register scratchForAOT = InvalidReg);
+  void switchToObjectRealm(Register obj, Register scratch);
+  void switchToBaselineFrameRealm(Register scratch);
   void switchToWasmInstanceRealm(Register scratch1, Register scratch2);
   void debugAssertContextRealm(const void* realm, Register scratch);
 
