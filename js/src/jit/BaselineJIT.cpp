@@ -1193,6 +1193,10 @@ void BaselineScript::toggleProfilerInstrumentation(bool enable) {
   JitSpew(JitSpew_BaselineIC, "  toggling profiling %s for BaselineScript %p",
           enable ? "on" : "off", this);
 
+  mozilla::Maybe<AutoWritableJitCode> awjc;
+  if (method_->isStaticCode()) {
+    awjc.emplace(method_);
+  }
   ToggleProfilerInstrumentation(method_, profilerEnterToggleOffset_,
                                 profilerExitToggleOffset_, enable);
 
