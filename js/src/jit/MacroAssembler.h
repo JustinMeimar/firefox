@@ -6008,13 +6008,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Push(scratch);
   }
 
-  // AOT-aware overrides: if in AOT mode and the pointer is a known
-  // indirection table slot, emit a TLS-based load instead.
   using MacroAssemblerSpecific::movePtr;
   void movePtr(ImmPtr imm, Register dest);
 
   using MacroAssemblerSpecific::loadPtr;
-  void loadPtr(AbsoluteAddress addr, Register dest);
 
   void movePtr(TrampolinePtr ptr, Register dest) {
     movePtr(ImmPtr(ptr.value), dest);
