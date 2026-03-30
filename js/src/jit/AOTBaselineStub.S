@@ -7,13 +7,19 @@
 .balign 16
 .global bl_aot_text_start
 .global bl_aot_text_end
-bl_aot_text_start:
+
+// JIT code can be written in here in .byte directives
+// from a masm buffer. 
+bl_aot_text_start:  
 bl_aot_text_end:
 
 .section .rodata
 .balign 16
 .global bl_aot_container_start
 .global bl_aot_container_end
+
+// Additional metadata needed to deserialize the AOT code
+// can be organized here.
 bl_aot_container_start:
 bl_aot_container_end:
 

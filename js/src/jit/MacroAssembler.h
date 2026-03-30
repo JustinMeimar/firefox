@@ -349,8 +349,6 @@ struct BranchWasmRefIsSubtypeRegisters {
 //
 // Also see MacroAssembler::debugAssertCanonicalInt32().
 
-enum class DebugTrapHandlerKind;
-
 // The public entrypoint for emitting assembly. Note that a MacroAssembler can
 // use cx->lifoAlloc, so take care not to interleave masm use with other
 // lifoAlloc use if one will be destroyed before the other.
@@ -412,10 +410,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void storeAOTTableBaseToFrame(Register scratch);
 #endif
 
-  // Dual-mode helpers: work in both AOT and non-AOT modes.
-  void loadRuntime(Register reg);
+  // Dual-mode helper: work in both AOT and non-AOT modes.
   void loadVMWrapper(VMFunctionId id, Register dest);
-  void loadDebugTrapHandler(DebugTrapHandlerKind dbgKind, Register dest);
 
   // Emit a dispatch table entry.  In AOT mode, emits a PIC-friendly
   // int32 offset relative to the table base.  Otherwise emits an
