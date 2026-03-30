@@ -5987,6 +5987,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   using MacroAssemblerSpecific::movePtr;
   void movePtr(ImmPtr imm, Register dest);
+  void movePtr(RelocImmPtr imm, Register dest);
 
   using MacroAssemblerSpecific::loadPtr;
 

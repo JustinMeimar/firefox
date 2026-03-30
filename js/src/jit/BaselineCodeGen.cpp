@@ -654,12 +654,12 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   masm.pushValue(R0);
 
   masm.setupUnalignedABICall(scratch);
-  masm.movePtr(ImmPtr(runtime), scratch);
+  masm.movePtr(RelocImmPtr(runtime), scratch);
   masm.passABIArg(scratch);
   masm.passABIArg(objReg);
   {
     Register fnReg = regs.takeAny();
-    masm.movePtr(ImmPtr((void*)PostWriteBarrier), fnReg);
+    masm.movePtr(RelocImmPtr((void*)PostWriteBarrier), fnReg);
     masm.callWithABI(fnReg);
   }
 
@@ -986,7 +986,7 @@ bool BaselineInterpreterCodeGen::emitIsDebuggeeCheck() {
       masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
       masm.passABIArg(R0.scratchReg());
       Register fnReg = R2.scratchReg();
-      masm.movePtr(ImmPtr((void*)FrameIsDebuggeeCheck), fnReg);
+      masm.movePtr(RelocImmPtr((void*)FrameIsDebuggeeCheck), fnReg);
       masm.callWithABI(fnReg);
     }
     restoreInterpreterPCReg();
@@ -2013,7 +2013,7 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   Label noInstrument;
   CodeOffset toggleOffset = masm.toggledJump(&noInstrument);
   Register ptrReg = R1.scratchReg();
-  masm.movePtr(runtime->jitRuntime()->getProfilerExitFrameTail(), ptrReg);
+  masm.movePtr(RelocImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value), ptrReg);
   masm.jump(ptrReg);
 
   masm.bind(&noInstrument);
@@ -2834,7 +2834,7 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   Register scratch2 = R1.scratchReg();
   LoadUint8Operand(masm, scratch1);
 
-  masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
+  masm.movePtr(RelocImmPtr(&runtime->wellKnownSymbols()), scratch2);
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
 
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
@@ -5802,7 +5802,7 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
   // Note: this stub may clobber scratch1.
   {
     Register stubReg = scratch1;
-    masm.movePtr(runtime->jitRuntime()->getDoubleToInt32ValueStub(), stubReg);
+    masm.movePtr(RelocImmPtr(runtime->jitRuntime()->getDoubleToInt32ValueStub().value), stubReg);
     masm.call(stubReg);
   }
 
@@ -7234,7 +7234,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     JitCode* handlerCode = runtime->jitRuntime()->debugTrapHandler(
         DebugTrapHandlerKind::Interpreter);
     Register ptrReg = R1.scratchReg();
-    masm.movePtr(ImmPtr(handlerCode->raw()), ptrReg);
+    masm.movePtr(RelocImmPtr(handlerCode->raw()), ptrReg);
     masm.jump(ptrReg);
   }
 
@@ -7278,7 +7278,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   masm.passABIArg(R0.scratchReg());
   {
     Register fnReg = R2.scratchReg();
-    masm.movePtr(ImmPtr((void*)HandleCodeCoverageAtPrologue), fnReg);
+    masm.movePtr(RelocImmPtr((void*)HandleCodeCoverageAtPrologue), fnReg);
     masm.callWithABI(fnReg);
   }
 
@@ -7299,7 +7299,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   {
     // R0 (rcx) and R2 (rax) are both used as ABI args; use R1 (rbx).
     Register fnReg = R1.scratchReg();
-    masm.movePtr(ImmPtr((void*)HandleCodeCoverageAtPC), fnReg);
+    masm.movePtr(RelocImmPtr((void*)HandleCodeCoverageAtPC), fnReg);
     masm.callWithABI(fnReg);
   }
 

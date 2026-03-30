@@ -104,6 +104,27 @@ void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
   MacroAssemblerSpecific::movePtr(imm, dest);
 }
 
+void MacroAssembler::movePtr(RelocImmPtr imm, Register dest) {
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
+    if (!slot) {
+      const auto* table = aot().indirectionTable();
+      fprintf(stderr, "RelocImmPtr: no AOT slot for %p\n", imm.value);
+      for (uint32_t i = 0; i < uint32_t(AOTSlot::Count); i++) {
+        fprintf(stderr, "  slot[%u] %-30s = %p\n",
+                i, AOTSlotName(AOTSlot(i)),
+                (void*)table->get(AOTSlot(i)));
+      }
+      MOZ_CRASH("RelocImmPtr: no AOT slot for pointer");
+    }
+    emitAOTSlotLoad(*slot, dest);
+    return;
+  }
+#endif
+  MacroAssemblerSpecific::movePtr(imm, dest);
+}
+
 // NOTE(Justin): There is a VM wrapper pointer for every JS OP, only
 // of which ~70 are used from baseline compilation. Rather than putting
 // each pointer in the AOT table, we only put the base pointer for now.

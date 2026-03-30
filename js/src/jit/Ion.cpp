@@ -210,6 +210,19 @@ bool JitRuntime::initialize(JSContext* cx) {
       AOTSlot::PreBarrier_WasmAnyRef,
       uintptr_t(preBarrier(MIRType::WasmAnyRef).value));
 
+  if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Interpreter)) {
+    return false;
+  }
+  if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Compiler)) {
+    return false;
+  }
+  aotIndirectionTable_.set(
+      AOTSlot::DebugTrapInterpreter,
+      uintptr_t(debugTrapHandler(DebugTrapHandlerKind::Interpreter)->raw()));
+  aotIndirectionTable_.set(
+      AOTSlot::DebugTrapCompiler,
+      uintptr_t(debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw()));
+
   // Populate VM wrapper slots and store base pointer in the indirection table.
   {
     size_t n = functionWrapperOffsets_.length();
