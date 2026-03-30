@@ -14,63 +14,6 @@
 namespace js {
 namespace jit {
 
-// ===============================================================
-// Out-of-line MacroAssemblerX64 methods that need complete MacroAssembler
-// (for asMasm().movePtr dispatch).
-
-inline void MacroAssemblerX64::loadPtr(AbsoluteAddress address, Register dest) {
-  if (X86Encoding::IsAddressImmediate(address.addr)) {
-    movq(Operand(address), dest);
-  } else {
-    ScratchRegisterScope scratch(asMasm());
-    asMasm().movePtr(ImmPtr(address.addr), scratch);
-    loadPtr(Address(scratch, 0x0), dest);
-  }
-}
-
-inline void MacroAssemblerX64::load32(AbsoluteAddress address, Register dest) {
-  if (X86Encoding::IsAddressImmediate(address.addr)) {
-    movl(Operand(address), dest);
-  } else {
-    ScratchRegisterScope scratch(asMasm());
-    asMasm().movePtr(ImmPtr(address.addr), scratch);
-    load32(Address(scratch, 0x0), dest);
-  }
-}
-
-inline void MacroAssemblerX64::storePtr(Register src,
-                                         AbsoluteAddress address) {
-  if (X86Encoding::IsAddressImmediate(address.addr)) {
-    movq(src, Operand(address));
-  } else {
-    ScratchRegisterScope scratch(asMasm());
-    asMasm().movePtr(ImmPtr(address.addr), scratch);
-    storePtr(src, Address(scratch, 0x0));
-  }
-}
-
-inline void MacroAssemblerX64::store32(Register src,
-                                        AbsoluteAddress address) {
-  if (X86Encoding::IsAddressImmediate(address.addr)) {
-    movl(src, Operand(address));
-  } else {
-    ScratchRegisterScope scratch(asMasm());
-    asMasm().movePtr(ImmPtr(address.addr), scratch);
-    store32(src, Address(scratch, 0x0));
-  }
-}
-
-inline void MacroAssemblerX64::store16(Register src,
-                                        AbsoluteAddress address) {
-  if (X86Encoding::IsAddressImmediate(address.addr)) {
-    movw(src, Operand(address));
-  } else {
-    ScratchRegisterScope scratch(asMasm());
-    asMasm().movePtr(ImmPtr(address.addr), scratch);
-    store16(src, Address(scratch, 0x0));
-  }
-}
-
 //{{{ check_macroassembler_style
 // ===============================================================
 
@@ -262,7 +205,7 @@ void MacroAssembler::addPtr(Imm32 imm, const AbsoluteAddress& dest) {
     addq(imm, Operand(dest));
   } else {
     ScratchRegisterScope scratch(*this);
-    movePtr(ImmPtr(dest.addr), scratch);
+    mov(ImmPtr(dest.addr), scratch);
     addq(imm, Operand(Address(scratch, 0)));
   }
 }
@@ -407,7 +350,7 @@ void MacroAssembler::inc64(AbsoluteAddress dest) {
     addPtr(Imm32(1), dest);
   } else {
     ScratchRegisterScope scratch(*this);
-    movePtr(ImmPtr(dest.addr), scratch);
+    mov(ImmPtr(dest.addr), scratch);
     addPtr(Imm32(1), Address(scratch, 0));
   }
 }
@@ -747,7 +690,7 @@ void MacroAssembler::branch32(Condition cond, const AbsoluteAddress& lhs,
   } else {
     ScratchRegisterScope scratch(*this);
     MOZ_ASSERT(rhs != scratch);
-    movePtr(ImmPtr(lhs.addr), scratch);
+    mov(ImmPtr(lhs.addr), scratch);
     branch32(cond, Address(scratch, 0), rhs, label);
   }
 }
@@ -757,7 +700,7 @@ void MacroAssembler::branch32(Condition cond, const AbsoluteAddress& lhs,
     branch32(cond, Operand(lhs), rhs, label);
   } else {
     ScratchRegisterScope scratch(*this);
-    movePtr(ImmPtr(lhs.addr), scratch);
+    mov(ImmPtr(lhs.addr), scratch);
     branch32(cond, Address(scratch, 0), rhs, label);
   }
 }
@@ -856,7 +799,7 @@ void MacroAssembler::branchPtr(Condition cond, const AbsoluteAddress& lhs,
   if (X86Encoding::IsAddressImmediate(lhs.addr)) {
     branchPtrImpl(cond, Operand(lhs), rhs, label);
   } else {
-    movePtr(ImmPtr(lhs.addr), scratch);
+    mov(ImmPtr(lhs.addr), scratch);
     branchPtrImpl(cond, Operand(scratch, 0x0), rhs, label);
   }
 }
@@ -867,7 +810,7 @@ void MacroAssembler::branchPtr(Condition cond, const AbsoluteAddress& lhs,
     branchPtrImpl(cond, Operand(lhs), rhs, label);
   } else {
     ScratchRegisterScope scratch(*this);
-    movePtr(ImmPtr(lhs.addr), scratch);
+    mov(ImmPtr(lhs.addr), scratch);
     branchPtrImpl(cond, Operand(scratch, 0x0), rhs, label);
   }
 }
@@ -959,7 +902,7 @@ void MacroAssembler::branchTest32(Condition cond, const AbsoluteAddress& lhs,
     test32(Operand(lhs), rhs);
   } else {
     ScratchRegisterScope scratch(*this);
-    movePtr(ImmPtr(lhs.addr), scratch);
+    mov(ImmPtr(lhs.addr), scratch);
     test32(Operand(scratch, 0), rhs);
   }
   j(cond, label);

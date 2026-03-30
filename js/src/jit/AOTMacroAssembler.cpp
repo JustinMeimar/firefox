@@ -83,27 +83,6 @@ void MacroAssembler::storeAOTTableBaseToFrame(Register scratch) {
 
 #endif  // ENABLE_AOT_BASELINE
 
-// ========================================================================
-// AOT-transparent override.
-//
-// movePtr(ImmPtr) is overridden so that in AOT mode, any pointer value
-// that matches a known indirection table slot is automatically emitted
-// as a table-relative load. All AbsoluteAddress consumers in the
-// platform backends route address materialization through movePtr,
-// so this single override is the only AOT interception point needed.
-void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
-    if (slot) {
-      emitAOTSlotLoad(*slot, dest);
-      return;
-    }
-  }
-#endif
-  MacroAssemblerSpecific::movePtr(imm, dest);
-}
-
 void MacroAssembler::movePtr(RelocImmPtr imm, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {

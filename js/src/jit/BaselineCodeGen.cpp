@@ -640,7 +640,8 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   // Check one element cache to avoid VM call.
   Label skipBarrier;
   Register ptrReg = R1.scratchReg();
-  masm.loadPtr(AbsoluteAddress(runtime->addressOfLastBufferedWholeCell()), ptrReg);
+  masm.movePtr(RelocImmPtr(runtime->addressOfLastBufferedWholeCell()), ptrReg);
+  masm.loadPtr(Address(ptrReg, 0), ptrReg);
   masm.branchPtr(Assembler::Equal, ptrReg, objReg, &skipBarrier);
 
   saveInterpreterPCReg();
@@ -1592,9 +1593,11 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
   frame.syncStack(0);
 
   Label done;
-  masm.branch32(Assembler::Equal,
-                AbsoluteAddress(runtime->addressOfInterruptBits()), Imm32(0),
-                &done);
+  {
+    Register scratch = R0.scratchReg();
+    masm.movePtr(RelocImmPtr(runtime->addressOfInterruptBits()), scratch);
+    masm.branch32(Assembler::Equal, Address(scratch, 0), Imm32(0), &done);
+  }
 
   prepareVMCall();
 
@@ -1762,11 +1765,12 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     // the frame currently being OSR-ed
     {
       Label checkOk;
-      AbsoluteAddress addressOfEnabled(
-          runtime->geckoProfiler().addressOfEnabled());
-      masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
-      masm.loadPtr(AbsoluteAddress(runtime->addressOfJitActivation()),
+      masm.movePtr(RelocImmPtr(runtime->geckoProfiler().addressOfEnabled()),
                    scratchReg);
+      masm.branch32(Assembler::Equal, Address(scratchReg, 0), Imm32(0),
+                    &checkOk);
+      masm.movePtr(RelocImmPtr(runtime->addressOfJitActivation()), scratchReg);
+      masm.loadPtr(Address(scratchReg, 0), scratchReg);
       masm.loadPtr(
           Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
           scratchReg);
@@ -6265,7 +6269,8 @@ bool BaselineInterpreterCodeGen::emitAfterYieldDebugInstrumentation(
   if (!handler.addDebugInstrumentationOffset(toggleOffset)) {
     return false;
   }
-  masm.loadPtr(AbsoluteAddress(runtime->addressOfRealm()), scratch);
+  masm.movePtr(RelocImmPtr(runtime->addressOfRealm()), scratch);
+  masm.loadPtr(Address(scratch, 0), scratch);
   masm.branchTest32(Assembler::Zero,
                     Address(scratch, Realm::offsetOfDebugModeBits()),
                     Imm32(Realm::debugModeIsDebuggeeBit()), &done);
@@ -6522,9 +6527,9 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     Register scratchReg = scratch2;
     Label skip;
 
-    masm.branch32(Assembler::Equal,
-                  AbsoluteAddress(runtime->geckoProfiler().addressOfEnabled()),
-                  Imm32(0), &skip);
+    masm.movePtr(RelocImmPtr(runtime->geckoProfiler().addressOfEnabled()),
+                 scratchReg);
+    masm.branch32(Assembler::Equal, Address(scratchReg, 0), Imm32(0), &skip);
     masm.loadJSContext(scratchReg);
     masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
                  scratchReg);
