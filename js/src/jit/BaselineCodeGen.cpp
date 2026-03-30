@@ -654,7 +654,7 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   masm.pushValue(R0);
 
   masm.setupUnalignedABICall(scratch);
-  masm.loadRuntime(scratch);
+  masm.movePtr(ImmPtr(runtime), scratch);
   masm.passABIArg(scratch);
   masm.passABIArg(objReg);
   {
@@ -7231,11 +7231,11 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   // is just a tail call to the debug trap handler trampoline code.
   {
     debugTrapHandlerOffset_ = masm.currentOffset();
-    {
-      Register ptrReg = R1.scratchReg();
-      masm.loadDebugTrapHandler(DebugTrapHandlerKind::Interpreter, ptrReg);
-      masm.jump(ptrReg);
-    }
+    JitCode* handlerCode = runtime->jitRuntime()->debugTrapHandler(
+        DebugTrapHandlerKind::Interpreter);
+    Register ptrReg = R1.scratchReg();
+    masm.movePtr(ImmPtr(handlerCode->raw()), ptrReg);
+    masm.jump(ptrReg);
   }
 
   // Emit the dispatch table.  In AOT mode entries are int32 offsets

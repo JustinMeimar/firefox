@@ -40,14 +40,6 @@ static int32_t GetTlsContextOffset() {
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   MacroAssemblerSpecific::loadPtr(
       Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
-#ifdef DEBUG
-  {
-    Label ok;
-    branchPtr(Assembler::NotEqual, dest, FramePointer, &ok);
-    assumeUnreachable("aotTableBase_ == FramePointer frame field corrupted");
-    bind(&ok);
-  }
-#endif
   int32_t slotOff = int32_t(AOTIndirectionTable::offsetOfSlot(slot));
   MacroAssemblerSpecific::loadPtr(Address(dest, slotOff), dest);
 }
@@ -99,7 +91,6 @@ void MacroAssembler::storeAOTTableBaseToFrame(Register scratch) {
 // as a table-relative load. All AbsoluteAddress consumers in the
 // platform backends route address materialization through movePtr,
 // so this single override is the only AOT interception point needed.
-
 void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
@@ -113,10 +104,11 @@ void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
   MacroAssemblerSpecific::movePtr(imm, dest);
 }
 
-void MacroAssembler::loadRuntime(Register reg) {
-  movePtr(ImmPtr(runtime()), reg);
-}
-
+// NOTE(Justin): There is a VM wrapper pointer for every JS OP, only
+// of which ~70 are used from baseline compilation. Rather than putting
+// each pointer in the AOT table, we only put the base pointer for now.
+// This routine skips the reverse lookup step and emits an extra offset
+// load from the VM base.
 void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
@@ -127,21 +119,6 @@ void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
 #endif
   TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
   movePtr(ImmPtr(ptr.value), dest);
-}
-
-void MacroAssembler::loadDebugTrapHandler(DebugTrapHandlerKind dbgKind,
-                                          Register dest) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    AOTSlot slot = dbgKind == DebugTrapHandlerKind::Interpreter
-                       ? AOTSlot::DebugTrapInterpreter
-                       : AOTSlot::DebugTrapCompiler;
-    emitAOTSlotLoad(slot, dest);
-    return;
-  }
-#endif
-  JitCode* handler = runtime()->jitRuntime()->debugTrapHandler(dbgKind);
-  movePtr(ImmPtr(handler->raw()), dest);
 }
 
 // Rather than clutter BaselineCodeGen with a bifurcated ifdef, we abstract,
