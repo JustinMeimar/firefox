@@ -85,7 +85,7 @@ void MacroAssembler::storeAOTTableBaseToFrame(Register scratch) {
 
 void MacroAssembler::movePtr(RelocImmPtr imm, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
+  if (MOZ_UNLIKELY(isAOT())) {
     AOTSlot slot = aot().indirectionTable()->findSlotOrCrash(
         uintptr_t(imm.value));
     emitAOTSlotLoad(slot, dest);
