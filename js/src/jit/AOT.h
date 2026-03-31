@@ -34,7 +34,7 @@ namespace js::jit {
 // AOTSlot enumerates every runtime address that AOT code needs.
 // Each slot holds a single uintptr_t in the AOTIndirectionTable.
 
-#define AOT_SLOTS(V)                    \
+#define AOT_CORE_SLOTS(V)               \
   V(JSRuntimePtr)                       \
   V(JSContextPtr)                       \
   V(InterruptBits)                      \
@@ -61,26 +61,38 @@ namespace js::jit {
   V(PreBarrier_Object)                  \
   V(PreBarrier_Shape)                   \
   V(PreBarrier_WasmAnyRef)              \
-  V(VMWrapperBase)                      \
   V(Class_WithEnvironmentObject)        \
   V(Class_PropertyIteratorObject)       \
   V(Class_Function)                     \
   V(Class_ExtendedFunction)
 
+static constexpr uint32_t kAOTMaxVMWrappers = 512;
+
 enum class AOTSlot : uint32_t {
 #define EMIT_SLOT(name) name,
-  AOT_SLOTS(EMIT_SLOT)
+  AOT_CORE_SLOTS(EMIT_SLOT)
 #undef EMIT_SLOT
-  Count
+  VMWrapper_Begin,
+  VMWrapper_End = VMWrapper_Begin + kAOTMaxVMWrappers,
+  Count = VMWrapper_End
 };
+
+inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
+  MOZ_ASSERT(id < kAOTMaxVMWrappers);
+  return AOTSlot(uint32_t(AOTSlot::VMWrapper_Begin) + id);
+}
 
 inline const char* AOTSlotName(AOTSlot slot) {
   switch (slot) {
 #define EMIT_CASE(name) case AOTSlot::name: return #name;
-    AOT_SLOTS(EMIT_CASE)
+    AOT_CORE_SLOTS(EMIT_CASE)
 #undef EMIT_CASE
-    case AOTSlot::Count:
+    default:
       break;
+  }
+  if (uint32_t(slot) >= uint32_t(AOTSlot::VMWrapper_Begin) &&
+      uint32_t(slot) < uint32_t(AOTSlot::VMWrapper_End)) {
+    return "VMWrapper";
   }
   return "Unknown";
 }

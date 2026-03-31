@@ -95,29 +95,17 @@ void MacroAssembler::movePtr(RelocImmPtr imm, Register dest) {
   MacroAssemblerSpecific::movePtr(imm, dest);
 }
 
-// NOTE(Justin): There is a VM wrapper pointer for every JS OP, only
-// of which ~70 are used from baseline compilation. Rather than putting
-// each pointer in the AOT table, we only put the base pointer for now.
-// This routine skips the reverse lookup step and emits an extra offset
-// load from the VM base.
 void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
-#ifdef ENABLE_AOT_BASELINE
-  if (isAOT()) {
-    emitAOTSlotLoad(AOTSlot::VMWrapperBase, dest);
-    MacroAssemblerSpecific::loadPtr(Address(dest, size_t(id) * sizeof(uintptr_t)), dest);
-    return;
-  }
-#endif
   TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
-  movePtr(ImmPtr(ptr.value), dest);
+  movePtr(RelocImmPtr(ptr.value), dest);
 }
 
 // Rather than clutter BaselineCodeGen with a bifurcated ifdef, we abstract,
 // even though there is only one use, the logic for filling the blinterp
 // disptach table.
 // NOTE(Justin): Are the absolute pointers in the dispatch table too
-// perf. sensitive to be rewritten as indirect loads from a reg which
-// holds the base of the table? Probably.
+// perf sensitive to simple be written as a rel-offset as in the AOT
+// case? Probably, but need to profile to be certain.
 void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
                                               size_t index,
                                               const Label& handler) {

@@ -167,18 +167,12 @@ bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {
       debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw());
 #undef SET
 
-  //NOTE(Justin): The VM wrapper AOT relocs are attained from a single
-  // slot, holding the base.
   size_t n = functionWrapperOffsets_.length();
-  if (!aotVMWrapperSlots_.reserve(n)) {
-    return false;
-  }
   for (size_t i = 0; i < n; i++) {
-    aotVMWrapperSlots_.infallibleAppend(
+    aotIndirectionTable_.set(
+        AOTSlotForVMWrapper(i),
         uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
   }
-  aotIndirectionTable_.set(AOTSlot::VMWrapperBase,
-                           uintptr_t(aotVMWrapperSlots_.begin()));
   return true;
 }
 

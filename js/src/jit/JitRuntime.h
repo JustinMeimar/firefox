@@ -242,13 +242,6 @@ class JitRuntime {
   // Table of runtime pointers loaded indirectly by AOT baseline code.
   AOTIndirectionTable aotIndirectionTable_;
 
-  // VM wrapper addresses for AOT code, indexed by VMFunctionId.
-  // Populated after trampolines are generated; the base address is stored
-  // in AOTSlot::VMWrapperBase so AOT code can load it.
-  using AOTVMWrapperSlots = Vector<uintptr_t, 0, SystemAllocPolicy>;
-  AOTVMWrapperSlots aotVMWrapperSlots_;
-
-
   void populateAOTIndirectionTable(JSContext* cx);
   [[nodiscard]] bool populateAOTTrampolineSlots(JSContext* cx);
 
@@ -408,8 +401,6 @@ class JitRuntime {
   static size_t offsetOfAOTIndirectionTable() {
     return offsetof(JitRuntime, aotIndirectionTable_);
   }
-  AOTVMWrapperSlots& aotVMWrapperSlots() { return aotVMWrapperSlots_; }
-
   // Return the registers from the native caller frame of the given JIT frame.
   // Nothing{} if frameStackAddress is NOT pointing at a native-to-JIT entry
   // frame, or if the information is not accessible/implemented on this
