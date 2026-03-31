@@ -97,4 +97,31 @@ JitCode* AllocateStaticAOTCode(JSContext* cx,
   return code;
 }
 
+mozilla::Maybe<AOTSlot> AOTIndirectionTable::findSlot(uintptr_t value) const {
+  for (uint32_t i = 0; i < uint32_t(AOTSlot::Count); i++) {
+    if (slots_[i] == value) {
+      return mozilla::Some(AOTSlot(i));
+    }
+  }
+  return mozilla::Nothing();
+}
+
+void AOTIndirectionTable::dump() const {
+  for (uint32_t i = 0; i < uint32_t(AOTSlot::Count); i++) {
+    JitSpew(JitSpew_BaselineAOT, "  slot[%u] %-30s = %p",
+            i, AOTSlotName(AOTSlot(i)),
+            (void*)get(AOTSlot(i)));
+  }
+}
+
+AOTSlot AOTIndirectionTable::findSlotOrCrash(uintptr_t value) const {
+  auto slot = findSlot(value);
+  if (!slot) {
+    JitSpew(JitSpew_BaselineAOT, "No AOT slot for %p", (void*)value);
+    dump();
+    MOZ_CRASH("No AOT slot for pointer");
+  }
+  return *slot;
+}
+
 }  // namespace js::jit

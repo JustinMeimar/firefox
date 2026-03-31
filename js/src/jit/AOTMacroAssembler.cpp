@@ -86,18 +86,9 @@ void MacroAssembler::storeAOTTableBaseToFrame(Register scratch) {
 void MacroAssembler::movePtr(RelocImmPtr imm, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (isAOT()) {
-    auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
-    if (!slot) {
-      const auto* table = aot().indirectionTable();
-      fprintf(stderr, "RelocImmPtr: no AOT slot for %p\n", imm.value);
-      for (uint32_t i = 0; i < uint32_t(AOTSlot::Count); i++) {
-        fprintf(stderr, "  slot[%u] %-30s = %p\n",
-                i, AOTSlotName(AOTSlot(i)),
-                (void*)table->get(AOTSlot(i)));
-      }
-      MOZ_CRASH("RelocImmPtr: no AOT slot for pointer");
-    }
-    emitAOTSlotLoad(*slot, dest);
+    AOTSlot slot = aot().indirectionTable()->findSlotOrCrash(
+        uintptr_t(imm.value));
+    emitAOTSlotLoad(slot, dest);
     return;
   }
 #endif
@@ -124,6 +115,9 @@ void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
 // Rather than clutter BaselineCodeGen with a bifurcated ifdef, we abstract,
 // even though there is only one use, the logic for filling the blinterp
 // disptach table.
+// NOTE(Justin): Are the absolute pointers in the dispatch table too
+// perf. sensitive to be rewritten as indirect loads from a reg which
+// holds the base of the table? Probably.
 void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
                                               size_t index,
                                               const Label& handler) {

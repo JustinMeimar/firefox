@@ -223,16 +223,9 @@ class AOTIndirectionTable {
     return uint32_t(slot) * sizeof(uintptr_t);
   }
 
-  // Reverse-lookup: find the slot that holds the given pointer value.
-  // Linear scan over ~30 slots; used only during codegen, not at runtime.
-  mozilla::Maybe<AOTSlot> findSlot(uintptr_t value) const {
-    for (uint32_t i = 0; i < uint32_t(AOTSlot::Count); i++) {
-      if (slots_[i] == value) {
-        return mozilla::Some(AOTSlot(i));
-      }
-    }
-    return mozilla::Nothing();
-  }
+  mozilla::Maybe<AOTSlot> findSlot(uintptr_t value) const;
+  AOTSlot findSlotOrCrash(uintptr_t value) const;
+  void dump() const;
 
   uintptr_t* baseAddress() { return slots_; }
   const uintptr_t* baseAddress() const { return slots_; }
