@@ -111,6 +111,77 @@ JitRuntime::~JitRuntime() {
   js_delete(jitHintsMap_.ref());
 }
 
+void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
+  JSRuntime* rt = cx->runtime();
+#define SET(slot, val) aotIndirectionTable_.set(AOTSlot::slot, uintptr_t(val))
+  SET(JSRuntimePtr,             rt);
+  SET(JSContextPtr,             cx);
+  SET(InterruptBits,            cx->addressOfInterruptBits());
+  SET(JitActivation,            cx->addressOfJitActivation());
+  SET(ContextRealm,             reinterpret_cast<uint8_t*>(cx) + JSContext::offsetOfRealm());
+  SET(WellKnownSymbols,         rt->wellKnownSymbols.ref());
+  SET(JitRuntime,               this);
+  SET(LastBufferedCell,         rt->gc.addressOfLastBufferedWholeCell());
+  SET(ProfilerEnabled,          rt->geckoProfiler().addressOfEnabled());
+  SET(MegamorphicCache,         &rt->caches().megamorphicCache);
+  SET(MegamorphicSetPropCache,  rt->caches().megamorphicSetPropCache.get());
+  SET(StringToAtomCache,
+      reinterpret_cast<uint8_t*>(&rt->caches().stringToAtomCache) +
+          StringToAtomCache::offsetOfLastLookups());
+  // NOTE(Justin): Cpp functions and JSClass ptrs are link time symbols.
+  // A hybrid symbolization scheme could enable these to be resolved by
+  // the linker during the bootstrap. 
+  SET(CppFn_PostWriteBarrier,             PostWriteBarrier);
+  SET(CppFn_FrameIsDebuggeeCheck,         FrameIsDebuggeeCheck);
+  SET(CppFn_HandleCodeCoverageAtPrologue, HandleCodeCoverageAtPrologue);
+  SET(CppFn_HandleCodeCoverageAtPC,       HandleCodeCoverageAtPC);
+  SET(Class_WithEnvironmentObject,        &WithEnvironmentObject::class_);
+  SET(Class_PropertyIteratorObject,       &PropertyIteratorObject::class_);
+  SET(Class_Function,                     &FunctionClass);
+  SET(Class_ExtendedFunction,             &ExtendedFunctionClass);
+#undef SET
+}
+
+bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {
+
+#define SET(slot, val) aotIndirectionTable_.set(AOTSlot::slot, uintptr_t(val))
+  SET(ProfilerExitFrameTail, getProfilerExitFrameTail().value);
+  SET(DoubleToInt32Stub,     getDoubleToInt32ValueStub().value);
+  SET(ExceptionTail,         getExceptionTail().value);
+  SET(PreBarrier_Value,      preBarrier(MIRType::Value).value);
+  SET(PreBarrier_String,     preBarrier(MIRType::String).value);
+  SET(PreBarrier_Object,     preBarrier(MIRType::Object).value);
+  SET(PreBarrier_Shape,      preBarrier(MIRType::Shape).value);
+  SET(PreBarrier_WasmAnyRef, preBarrier(MIRType::WasmAnyRef).value);
+  
+  // NOTE(Justin): Two AOT reloc kinds exist for the address of debug
+  // trap handlers. We need to ensure they exist for the reverse lookup
+  // to not find nullptr while dumping AOT code.
+  if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Interpreter) ||
+      !ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Compiler)) {
+    return false;
+  }
+  SET(DebugTrapInterpreter,
+      debugTrapHandler(DebugTrapHandlerKind::Interpreter)->raw());
+  SET(DebugTrapCompiler,
+      debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw());
+#undef SET
+
+  //NOTE(Justin): The VM wrapper AOT relocs are attained from a single
+  // slot, holding the base.
+  size_t n = functionWrapperOffsets_.length();
+  if (!aotVMWrapperSlots_.reserve(n)) {
+    return false;
+  }
+  for (size_t i = 0; i < n; i++) {
+    aotVMWrapperSlots_.infallibleAppend(
+        uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
+  }
+  aotIndirectionTable_.set(AOTSlot::VMWrapperBase,
+                           uintptr_t(aotVMWrapperSlots_.begin()));
+  return true;
+}
+
 uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
   AutoCreatedBy acb(masm, "startTrampolineCode");
 
@@ -127,114 +198,14 @@ bool JitRuntime::initialize(JSContext* cx) {
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
 
-  // Populate AOT indirection table slots that don't depend on trampolines.
-  MOZ_ASSERT(cx->runtime());
-  JSRuntime* rt = cx->runtime();
-  aotIndirectionTable_.set(AOTSlot::JSRuntimePtr,
-                           uintptr_t(rt));
-  aotIndirectionTable_.set(AOTSlot::JSContextPtr,
-                           uintptr_t(cx));
-  aotIndirectionTable_.set(AOTSlot::InterruptBits,
-                           uintptr_t(cx->addressOfInterruptBits()));
-  aotIndirectionTable_.set(AOTSlot::JitActivation,
-                           uintptr_t(cx->addressOfJitActivation()));
-  aotIndirectionTable_.set(AOTSlot::ContextRealm,
-                           uintptr_t(reinterpret_cast<uint8_t*>(cx) +
-                                     JSContext::offsetOfRealm()));
-  aotIndirectionTable_.set(AOTSlot::WellKnownSymbols,
-                           uintptr_t(rt->wellKnownSymbols.ref()));
-  aotIndirectionTable_.set(AOTSlot::JitRuntime,
-                           uintptr_t(this));
-  aotIndirectionTable_.set(AOTSlot::LastBufferedCell,
-                           uintptr_t(rt->gc.addressOfLastBufferedWholeCell()));
-  aotIndirectionTable_.set(AOTSlot::ProfilerEnabled,
-                           uintptr_t(rt->geckoProfiler().addressOfEnabled()));
-  aotIndirectionTable_.set(AOTSlot::MegamorphicCache,
-                           uintptr_t(&rt->caches().megamorphicCache));
-  aotIndirectionTable_.set(AOTSlot::MegamorphicSetPropCache,
-                           uintptr_t(rt->caches().megamorphicSetPropCache.get()));
-  {
-    auto* cache = reinterpret_cast<uint8_t*>(&rt->caches().stringToAtomCache);
-    aotIndirectionTable_.set(
-        AOTSlot::StringToAtomCache,
-        uintptr_t(cache + StringToAtomCache::offsetOfLastLookups()));
-  }
-
-  // C++ function pointer slots: addresses are fixed for the process lifetime.
-  aotIndirectionTable_.set(AOTSlot::CppFn_PostWriteBarrier,
-                           uintptr_t(PostWriteBarrier));
-  aotIndirectionTable_.set(AOTSlot::CppFn_FrameIsDebuggeeCheck,
-                           uintptr_t(FrameIsDebuggeeCheck));
-  aotIndirectionTable_.set(AOTSlot::CppFn_HandleCodeCoverageAtPrologue,
-                           uintptr_t(HandleCodeCoverageAtPrologue));
-  aotIndirectionTable_.set(AOTSlot::CppFn_HandleCodeCoverageAtPC,
-                           uintptr_t(HandleCodeCoverageAtPC));
-
-  // Class pointer slots: static data, fixed for process lifetime.
-  aotIndirectionTable_.set(AOTSlot::Class_WithEnvironmentObject,
-                           uintptr_t(&WithEnvironmentObject::class_));
-  aotIndirectionTable_.set(AOTSlot::Class_PropertyIteratorObject,
-                           uintptr_t(&PropertyIteratorObject::class_));
-  aotIndirectionTable_.set(AOTSlot::Class_Function,
-                           uintptr_t(&FunctionClass));
-  aotIndirectionTable_.set(AOTSlot::Class_ExtendedFunction,
-                           uintptr_t(&ExtendedFunctionClass));
+  populateAOTIndirectionTable(cx);
 
   if (!generateTrampolines(cx)) {
     return false;
   }
 
-  // Trampoline-dependent slots: trampolineCode_ must exist now.
-  aotIndirectionTable_.set(
-      AOTSlot::ProfilerExitFrameTail,
-      uintptr_t(getProfilerExitFrameTail().value));
-  aotIndirectionTable_.set(
-      AOTSlot::DoubleToInt32Stub,
-      uintptr_t(getDoubleToInt32ValueStub().value));
-  aotIndirectionTable_.set(
-      AOTSlot::ExceptionTail,
-      uintptr_t(getExceptionTail().value));
-  aotIndirectionTable_.set(
-      AOTSlot::PreBarrier_Value,
-      uintptr_t(preBarrier(MIRType::Value).value));
-  aotIndirectionTable_.set(
-      AOTSlot::PreBarrier_String,
-      uintptr_t(preBarrier(MIRType::String).value));
-  aotIndirectionTable_.set(
-      AOTSlot::PreBarrier_Object,
-      uintptr_t(preBarrier(MIRType::Object).value));
-  aotIndirectionTable_.set(
-      AOTSlot::PreBarrier_Shape,
-      uintptr_t(preBarrier(MIRType::Shape).value));
-  aotIndirectionTable_.set(
-      AOTSlot::PreBarrier_WasmAnyRef,
-      uintptr_t(preBarrier(MIRType::WasmAnyRef).value));
-
-  if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Interpreter)) {
+  if (!populateAOTTrampolineSlots(cx)) {
     return false;
-  }
-  if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Compiler)) {
-    return false;
-  }
-  aotIndirectionTable_.set(
-      AOTSlot::DebugTrapInterpreter,
-      uintptr_t(debugTrapHandler(DebugTrapHandlerKind::Interpreter)->raw()));
-  aotIndirectionTable_.set(
-      AOTSlot::DebugTrapCompiler,
-      uintptr_t(debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw()));
-
-  // Populate VM wrapper slots and store base pointer in the indirection table.
-  {
-    size_t n = functionWrapperOffsets_.length();
-    if (!aotVMWrapperSlots_.reserve(n)) {
-      return false;
-    }
-    for (size_t i = 0; i < n; i++) {
-      aotVMWrapperSlots_.infallibleAppend(
-          uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
-    }
-    aotIndirectionTable_.set(AOTSlot::VMWrapperBase,
-                             uintptr_t(aotVMWrapperSlots_.begin()));
   }
 
   if (!generateBaselineICFallbackCode(cx)) {

@@ -249,6 +249,9 @@ class JitRuntime {
   AOTVMWrapperSlots aotVMWrapperSlots_;
 
 
+  void populateAOTIndirectionTable(JSContext* cx);
+  [[nodiscard]] bool populateAOTTrampolineSlots(JSContext* cx);
+
   bool generateTrampolines(JSContext* cx);
   bool generateBaselineICFallbackCode(JSContext* cx);
 
