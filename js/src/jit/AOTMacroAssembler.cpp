@@ -95,11 +95,6 @@ void MacroAssembler::movePtr(RelocImmPtr imm, Register dest) {
   MacroAssemblerSpecific::movePtr(imm, dest);
 }
 
-void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
-  TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
-  movePtr(RelocImmPtr(ptr.value), dest);
-}
-
 // Rather than clutter BaselineCodeGen with a bifurcated ifdef, we abstract,
 // even though there is only one use, the logic for filling the blinterp
 // disptach table.
