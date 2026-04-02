@@ -774,24 +774,24 @@ class MOZ_RAII CacheIRCompiler {
 
   StubFieldPolicy stubFieldPolicy_;
 
-  bool isAOTFill_ = false;
+  AOTContext* aotContext_ = nullptr;
 
   CacheIRCompiler(JSContext* cx, TempAllocator& alloc,
                   const CacheIRWriter& writer, uint32_t stubDataOffset,
-                  Mode mode, StubFieldPolicy policy, bool isAOTFill = false)
+                  Mode mode, StubFieldPolicy policy, AOTContext* aotContext = nullptr)
       : enteredStubFrame_(false),
         cx_(cx),
         writer_(writer),
-        masm(cx, alloc, isAOTFill),
+        masm(cx, alloc, aotContext),
         allocator(writer_),
         liveFloatRegs_(FloatRegisterSet::All()),
         mode_(mode),
         stubDataOffset_(stubDataOffset),
         stubFieldPolicy_(policy),
-        isAOTFill_(isAOTFill) {
+        aotContext_(aotContext) {
     MOZ_ASSERT(!writer.failed());
 #ifndef ENABLE_JS_AOT_ICS
-    MOZ_ASSERT(!isAOTFill);
+    MOZ_ASSERT(!aotContext);
 #endif
   }
 
