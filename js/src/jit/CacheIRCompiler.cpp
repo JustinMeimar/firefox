@@ -5478,7 +5478,7 @@ bool CacheIRCompiler::emitGuardObjectHasSameRealm(ObjOperandId objId) {
   Register obj = allocator.useRegister(masm, objId);
   AutoScratchRegister scratch(allocator, masm);
   Maybe<AutoScratchRegister> scratchForAOT;
-  if (isAOTFill_) {
+  if (aotContext_) {
     scratchForAOT.emplace(allocator, masm);
   }
 
@@ -5781,7 +5781,7 @@ bool CacheIRCompiler::emitIsCrossRealmArrayConstructorResult(
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   Register obj = allocator.useRegister(masm, objId);
   Maybe<AutoScratchRegister> scratchForAOT;
-  if (isAOTFill_) {
+  if (aotContext_) {
     scratchForAOT.emplace(allocator, masm);
   }
 
@@ -11656,7 +11656,7 @@ bool CacheIRCompiler::emitGuardRuntimeFuse(RuntimeFuses::FuseIndex fuseIndex) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
 
   Maybe<AutoScratchRegister> scratchForAOT;
-  if (isAOTFill_) {
+  if (aotContext_) {
     scratchForAOT.emplace(allocator, masm);
   }
 

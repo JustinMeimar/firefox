@@ -744,11 +744,6 @@ struct JSRuntime {
            decltype(jitRuntime_)::offsetOfValue();
   }
 
-  static size_t offsetOfJitRuntime() {
-    return offsetof(JSRuntime, jitRuntime_) +
-           decltype(jitRuntime_)::offsetOfValue();
-  }
-
  private:
   // Used to generate random keys for hash tables.
   mozilla::Maybe<mozilla::non_crypto::XorShift128PlusRNG> randomKeyGenerator_;

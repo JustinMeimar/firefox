@@ -5246,20 +5246,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void storeCallResultValue(TypedOrValueRegister dest);
 
  private:
-  TrampolinePtr preBarrierTrampoline(MIRType type) {
-    if (isAOTFill) {
-        return trampolinePtrs_.ref().preBarrier(type);
-    }
-    return runtime()->jitRuntime()->preBarrier(type);
-  }
-
-  TrampolinePtr getExceptionTailTrampoline() const {
-    if (isAOTFill) {
-        return trampolinePtrs_.ref().exceptionTail;
-    }
-    return runtime()->jitRuntime()->getExceptionTail();
-  }
-
+  TrampolinePtr preBarrierTrampoline(MIRType type);
   template <typename T>
   void unguardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
@@ -5980,9 +5967,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
 #ifdef ENABLE_JS_AOT_ICS
  public:
-  // Load the runtime ptr from the zone, into given register.
-  // See 'Runtime agnostic code generation'.
-  void loadRuntime(Register reg);
   Register zoneReg();
   // Load the zone into zoneReg at runtime.
   // See 'Runtime agnostic code generation'.

@@ -70,6 +70,12 @@ using JS::GenericNaN;
 
 using mozilla::CheckedInt;
 
+TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
+  MOZ_ASSERT(!isAOT());
+  const JitRuntime* rt = runtime()->jitRuntime();
+  return rt->preBarrier(type);
+}
+
 #ifdef ENABLE_JS_AOT_ICS
 Register MacroAssembler::zoneReg() {
   MOZ_ASSERT(zoneLoaded_);
@@ -271,7 +277,7 @@ void MacroAssembler::checkAllocatorState(Register temp, gc::AllocKind allocKind,
 
 #ifdef JS_GC_ZEAL
   // Don't execute the inline path if gc zeal or tracing are active.
-  if (!isAOTFill) {
+  if (!isAOT()) {
     const uint32_t* ptrZealModeBits = runtime()->addressOfGCZealModeBits();
     branch32(Assembler::NotEqual, AbsoluteAddress(ptrZealModeBits), Imm32(0),
              fail);
@@ -291,7 +297,7 @@ void MacroAssembler::checkAllocatorState(Register temp, gc::AllocKind allocKind,
   // TODO (chase): Is it valid to assume that this guard won't be necessary for
   // AOT fill? The check on `hasRealmWithAllocMetadataBuilder` happens during
   // the compilation of the IC but the realm/zone in the IC is loaded at runtime..?
-  if (gc::IsObjectAllocKind(allocKind) && !isAOTFill &&
+  if (gc::IsObjectAllocKind(allocKind) && !isAOT() &&
       realm()->zone()->hasRealmWithAllocMetadataBuilder()) {
     loadJSContext(temp);
     loadPtr(Address(temp, JSContext::offsetOfRealm()), temp);
@@ -433,7 +439,7 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
 
   bind(&success);
 
-  if (!isAOTFill && runtime()->geckoProfiler().enabled()) {
+  if (!isAOT() && runtime()->geckoProfiler().enabled()) {
     CompileZone* zone = realm()->zone();
     uint32_t* countAddress = zone->addressOfTenuredAllocCount();
     movePtr(ImmPtr(countAddress), temp);
@@ -653,7 +659,7 @@ void MacroAssembler::nurseryAllocateString(Register result, Register temp,
   size_t thingSize = gc::Arena::thingSize(allocKind);
   const JS::TraceKind traceKind = JS::TraceKind::String;
 #ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill) {
+  if (isAOT()) {
     bumpPointerAllocateRuntime(result, temp, fail, traceKind,
                       thingSize);
     return;
@@ -676,7 +682,7 @@ void MacroAssembler::nurseryAllocateBigInt(Register result, Register temp,
   size_t thingSize = gc::Arena::thingSize(gc::AllocKind::BIGINT);
   const JS::TraceKind traceKind = JS::TraceKind::BigInt;
 #ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill) {
+  if (isAOT()) {
     bumpPointerAllocateRuntime(result, temp, fail, traceKind,
                       thingSize);
     return;
@@ -850,7 +856,7 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
     storePtr(temp, Address(result, -js::Nursery::nurseryCellHeaderSize()));
 
     if (traceKind != JS::TraceKind::Object ||
-        (!isAOTFill && runtime()->geckoProfiler().enabled())) {
+        (!isAOT() && runtime()->geckoProfiler().enabled())) {
       // Update the catch all allocation site, which his is used to calculate
       // nursery allocation counts so we can determine whether to disable
       // nursery allocation of strings and bigints.
@@ -962,7 +968,7 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
                                      const LiveRegisterSet& liveRegs) {
   Label done, abiCall;
 
-  if (!isAOTFill) {
+  if (!isAOT()) {
     CompileZone* zone = realm()->zone();
     loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCount()),
             scratchSuccess);
@@ -985,7 +991,7 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
 
   storePtr(wrapper, BaseIndex(scratch2, scratchSuccess, ScalePointer));
   addPtr(Imm32(1), scratchSuccess);
-  if (!isAOTFill) {
+  if (!isAOT()) {
     storePtr(scratchSuccess,
             AbsoluteAddress(realm()->zone()->zone()->addressOfPreservedWrappersCount()));
   }
@@ -2938,7 +2944,7 @@ void MacroAssembler::switchToRealm(Register realm) {
 
 void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
   // Load Realm pointer
-  if (!isAOTFill) {
+  if (!isAOT()) {
     loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
   }
 #ifdef ENABLE_JS_AOT_ICS
@@ -2952,7 +2958,7 @@ void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
 
 void MacroAssembler::loadRuntimeFuse(RuntimeFuses::FuseIndex index,
                                      Register dest) {
-  if (!isAOTFill) {
+  if (!isAOT()) {
     loadPtr(AbsoluteAddress(runtime()->addressOfRuntimeFuse(index)), dest);
   }
 #ifdef ENABLE_JS_AOT_ICS
@@ -2965,7 +2971,7 @@ void MacroAssembler::loadRuntimeFuse(RuntimeFuses::FuseIndex index,
 
 void MacroAssembler::guardRuntimeFuse(RuntimeFuses::FuseIndex index,
                                       Label* fail, Register scratch) {
-  if (!isAOTFill) {
+  if (!isAOT()) {
     AbsoluteAddress addr(runtime()->addressOfRuntimeFuse(index));
     branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
   }
@@ -2981,7 +2987,7 @@ void MacroAssembler::guardRuntimeFuse(RuntimeFuses::FuseIndex index,
 
 void MacroAssembler::switchToRealm(const void* realm, Register scratch) {
   MOZ_ASSERT(realm);
-  MOZ_ASSERT(!isAOTFill);
+  MOZ_ASSERT(!isAOT());
 
   movePtr(ImmPtr(realm), scratch);
   switchToRealm(scratch);
@@ -3010,7 +3016,7 @@ void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
 
 template <typename ValueType>
 void MacroAssembler::storeLocalAllocSite(ValueType value, Register scratch) {
-  if (!isAOTFill) {
+  if (!isAOT()) {
     loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), scratch);
   }
 #ifdef ENABLE_JS_AOT_ICS
@@ -3052,7 +3058,7 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
   loadPtr(Address(obj, JSObject::offsetOfShape()), output);
   loadPtr(Address(output, Shape::offsetOfBaseShape()), output);
   loadPtr(Address(output, BaseShape::offsetOfRealm()), output);
-  if (!isAOTFill) {
+  if (!isAOT()) {
     branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr(runtime())),
               output, &isFalse);
   }
@@ -3086,7 +3092,7 @@ void MacroAssembler::guardObjectHasSameRealm(Register obj, Register scratch,
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  if (!isAOTFill) {
+  if (!isAOT()) {
     branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
               scratch, fail);
   }
@@ -3133,7 +3139,7 @@ void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
 }
 
 void MacroAssembler::loadMegamorphicCache(Register dest) {
-  if (!isAOTFill) {
+  if (!isAOT()) {
     movePtr(ImmPtr(runtime()->addressOfMegamorphicCache()), dest);
   }
 #ifdef ENABLE_JS_AOT_ICS
@@ -3145,7 +3151,7 @@ void MacroAssembler::loadMegamorphicCache(Register dest) {
 #endif
 }
 void MacroAssembler::loadMegamorphicSetPropCache(Register dest) {
-  if (!isAOTFill) {
+  if (!isAOT()) {
     movePtr(ImmPtr(runtime()->addressOfMegamorphicSetPropCache()), dest);
   }
 #ifdef ENABLE_JS_AOT_ICS
@@ -3167,7 +3173,7 @@ void MacroAssembler::tryFastAtomize(Register str, Register scratch,
   jump(&done);
   bind(&notAtomRef);
 
-  if (!isAOTFill) {
+  if (!isAOT()) {
     uintptr_t cachePtr = uintptr_t(runtime()->addressOfStringToAtomCache());
     void* offset = (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups());
     movePtr(ImmPtr(offset), scratch);
@@ -3222,7 +3228,7 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
   Label isString, isSymbol, isNull, isUndefined, done, nonAtom, atom;
 
 #ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill) {
+  if (isAOT()) {
     // Load the runtime before the branches.
     // Each branch is visited once, outId is clobbered and it jumps to done.
     // So the runtime is only needed once but it is needed in several paths.
@@ -3241,7 +3247,7 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
     branchTestUndefined(Assembler::NotEqual, tag, cacheMiss);
   }
 
-  if (!isAOTFill) {
+  if (!isAOT()) {
     const JSAtomState& names = runtime()->names();
     movePropertyKey(NameToId(names.undefined), outId);
     move32(Imm32(names.undefined->hash()), outHash);
@@ -3258,7 +3264,7 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
   jump(&done);
 
   bind(&isNull);
-  if (!isAOTFill) {
+  if (!isAOT()) {
     const JSAtomState& names = runtime()->names();
     movePropertyKey(NameToId(names.null), outId);
     move32(Imm32(names.null->hash()), outHash);
@@ -4112,7 +4118,7 @@ void MacroAssembler::loadJitActivation(Register dest) {
 }
 
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
-  if (!isAOTFill) {
+  if (!isAOT()) {
     loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
   }
 #ifdef ENABLE_JS_AOT_ICS
@@ -4409,14 +4415,6 @@ void MacroAssembler::loadZone() {
   loadPtr(zonePtr, ZoneReg);
   // Note that the zone loading code has been emitted by now.
   zoneLoaded_ = true;
-}
-
-void MacroAssembler::loadRuntime(Register reg) {
-  Address runtimeAddr(zoneReg(), Zone::offsetOfRuntime());
-  // Load the runtime ptr stored in the zone.
-  // N.B: temp is expected to hold the runtime ptr by the flows below.
-  // Do not clobber it!
-  loadPtr(runtimeAddr, reg);
 }
 #endif
 
