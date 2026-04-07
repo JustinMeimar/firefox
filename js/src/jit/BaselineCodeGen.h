@@ -46,9 +46,11 @@ class BaselineCodeGen {
   CompileRuntime* runtime;
   MacroAssembler& masm;
 
+#ifdef ENABLE_AOT_BASELINE
   // Non-owning pointer to AOT context, cached from masm for convenience.
   // Null when not in AOT codegen mode.
   AOTContext* aot_;
+#endif
 
   typename Handler::FrameInfoT& frame;
 

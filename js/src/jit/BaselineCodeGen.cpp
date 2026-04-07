@@ -117,7 +117,9 @@ BaselineCodeGen<Handler>::BaselineCodeGen(TempAllocator& alloc,
     : handler(masmArg, std::forward<HandlerArgs>(args)...),
       runtime(runtimeArg),
       masm(masmArg),
+#ifdef ENABLE_AOT_BASELINE
       aot_(masmArg.isAOT() ? &masmArg.aot() : nullptr),
+#endif
       frame(handler.frame()) {}
 
 BaselineCompiler::BaselineCompiler(TempAllocator& alloc,
