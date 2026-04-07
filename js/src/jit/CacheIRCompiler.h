@@ -1002,6 +1002,9 @@ class MOZ_RAII CacheIRCompiler {
   void callVMInternal(MacroAssembler& masm, VMFunctionId id);
   template <typename Fn, Fn fn>
   void callVM(MacroAssembler& masm);
+
+ public:
+  void setAOTFill() { masm.setAOTFill(); }
 };
 
 // Ensures the IC's output register is available for writing.

@@ -64,7 +64,8 @@ namespace js::jit {
   V(Class_WithEnvironmentObject)        \
   V(Class_PropertyIteratorObject)       \
   V(Class_Function)                     \
-  V(Class_ExtendedFunction)
+  V(Class_ExtendedFunction)             \
+  V(DeadObjectProxySingleton)
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 

@@ -83,6 +83,10 @@ void MacroAssembler::storeAOTTableBaseToFrame(Register scratch) {
 
 #endif  // ENABLE_AOT_BASELINE
 
+void MacroAssembler::loadRuntime(Register reg) {
+  movePtr(ImmPtr(runtime()), reg);
+}
+
 void MacroAssembler::movePtr(RelocImmPtr imm, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (MOZ_UNLIKELY(isAOT())) {

@@ -8373,7 +8373,7 @@ bool CacheIRCompiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
     using Fn = JSString* (*)(JSObject* obj, JSRuntime* rt);
     masm.setupUnalignedABICall(scratch);
     masm.passABIArg(obj);
-    masm.movePtr(ImmPtr(cx_->runtime()), scratch);
+    masm.movePtr(RelocImmPtr(cx_->runtime()), scratch);
     masm.passABIArg(scratch);
     masm.callWithABI<Fn, TypeOfNameObject>();
     masm.storeCallPointerResult(scratch);
@@ -9116,7 +9116,8 @@ void CacheIRCompiler::emitPostBarrierShared(Register obj,
 
   // Check one element cache to avoid VM call.
   auto* lastCellAddr = cx_->runtime()->gc.addressOfLastBufferedWholeCell();
-  masm.branchPtr(Assembler::Equal, AbsoluteAddress(lastCellAddr), obj,
+  masm.movePtr(RelocImmPtr(lastCellAddr), scratch);
+  masm.branchPtr(Assembler::Equal, Address(scratch, 0), obj,
                  &skipBarrier);
 
   // Call one of these, depending on maybeIndex:
@@ -9127,7 +9128,7 @@ void CacheIRCompiler::emitPostBarrierShared(Register obj,
   LiveRegisterSet save = liveVolatileRegs();
   masm.PushRegsInMask(save);
   masm.setupUnalignedABICall(scratch);
-  masm.movePtr(ImmPtr(cx_->runtime()), scratch);
+  masm.movePtr(RelocImmPtr(cx_->runtime()), scratch);
   masm.passABIArg(scratch);
   masm.passABIArg(obj);
   if (maybeIndex != InvalidReg) {

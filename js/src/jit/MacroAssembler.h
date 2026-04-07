@@ -368,6 +368,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // AOT compilation context. Non-null when AOT codegen is active.
   AOTContext* aotContext_ = nullptr;
+  bool isAOTFill_ = false;
 
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
@@ -403,6 +404,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #endif
   }
 
+  bool isAOTFill() const { return isAOTFill_; }
+  void setAOTFill() { isAOTFill_ = true; }
+
 #ifdef ENABLE_AOT_BASELINE
   AOTContext& aot() const {
     MOZ_ASSERT(aotContext_);
@@ -415,7 +419,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void storeAOTTableBaseToFrame(Register scratch);
 #endif
 
-  // Dual-mode helper: work in both AOT and non-AOT modes.
+  // Dual-mode helpers: work in both AOT and non-AOT modes.
+  void loadRuntime(Register reg);
   void loadVMWrapper(VMFunctionId id, Register dest);
 
   // Emit a dispatch table entry.  In AOT mode, emits a PIC-friendly
@@ -5133,8 +5138,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void switchToRealm(Register realm);
   void switchToRealm(const void* realm, Register scratch);
-  void switchToObjectRealm(Register obj, Register scratch);
-  void switchToBaselineFrameRealm(Register scratch);
+  void switchToObjectRealm(Register obj, Register scratch,
+                           Register scratchForAOT = InvalidReg);
+  void switchToBaselineFrameRealm(Register scratch,
+                                  Register scratchForAOT = InvalidReg);
   void switchToWasmInstanceRealm(Register scratch1, Register scratch2);
   void debugAssertContextRealm(const void* realm, Register scratch);
 

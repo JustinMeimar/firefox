@@ -2534,6 +2534,9 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     AOTContext aotContext(&cx->runtime()->jitRuntime()->aotIndirectionTable());
     BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset,
         isAOTFill ? &aotContext : nullptr);
+    if (isAOTFill) {
+      comp.setAOTFill();
+    }
     if (!comp.init(kind)) {
       return false;
     }

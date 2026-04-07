@@ -61,6 +61,7 @@
 #include "jit/x64/Assembler-x64.h"
 #include "js/Printf.h"
 #include "js/UniquePtr.h"
+#include "proxy/DeadObjectProxy.h"
 #include "util/Memory.h"
 #include "util/WindowsWrapper.h"
 #include "vm/EnvironmentObject.h"
@@ -139,6 +140,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(Class_PropertyIteratorObject,       &PropertyIteratorObject::class_);
   SET(Class_Function,                     &FunctionClass);
   SET(Class_ExtendedFunction,             &ExtendedFunctionClass);
+  SET(DeadObjectProxySingleton,            &DeadObjectProxy::singleton);
 #undef SET
 }
 
