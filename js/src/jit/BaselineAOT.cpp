@@ -20,6 +20,7 @@
 #include "jit/AOT.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineJIT.h"
+#include "jit/CacheIRCompiler.h"
 #include "jit/IonTypes.h"
 #include "jit/JitCode.h"
 #include "jit/JitcodeMap.h"
@@ -68,20 +69,7 @@ static void emitAsmZeroPadding(std::ostream& out, size_t len) {
 }
 
 
-struct AOTBlobData {
-  AOTBlobDirectoryEntry dirEntry;
-  std::string name;
-  Vector<uint8_t, 0, SystemAllocPolicy> code;
-  Vector<uint8_t, 0, SystemAllocPolicy> manifest;
-  Vector<uint8_t, 0, SystemAllocPolicy> metadata;
-
-  template <typename T>
-  static bool appendBytes(Vector<uint8_t, 0, SystemAllocPolicy>& vec,
-                          const T* data, size_t count) {
-    const auto* bytes = reinterpret_cast<const uint8_t*>(data);
-    return vec.append(bytes, count * sizeof(T));
-  }
-};
+// AOTBlobData is defined in BaselineAOT.h
 
 // Write the multi-blob AOT container .S file.
 // Code blobs go into .text.aot (executable), manifests/metadata into .rodata.
@@ -417,6 +405,13 @@ bool DumpAOTContainer(JSContext* cx) {
     }
   }
 
+  auto icBlobs = GetSavedICBlobs();
+  for (const auto& icBlob : icBlobs) {
+    if (!blobPtrs.append(&icBlob)) {
+      return false;
+    }
+  }
+
   if (blobPtrs.empty()) {
     JitSpew(JitSpew_BaselineAOT, "No blobs to write, skipping container.");
     return true;
@@ -440,6 +435,7 @@ bool DumpAOTContainer(JSContext* cx) {
   JitSpew(JitSpew_BaselineAOT, "Rebuild the engine to use AOT mode.");
 
   sSavedInterpreterBlob.reset();
+  ClearSavedICBlobs();
 
   return true;
 }
@@ -631,6 +627,69 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 #endif
 
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// AOT IC stub loading (runtime)
+// ---------------------------------------------------------------------------
+
+bool LoadAOTICStubs(JSContext* cx) {
+  MOZ_ASSERT(cx->inAtomsZone());
+
+  JitZone* jitZone = cx->zone()->jitZone();
+  if (!jitZone) {
+    return false;
+  }
+
+  const uint8_t* containerBase = GetAOTContainer();
+  uint8_t* textBase = GetAOTTextBase();
+  uint32_t loadedCount = 0;
+
+  ForEachAOTBlob(AOTBlobKind::InlineCacheStub,
+      [&](const AOTBlobDirectoryEntry* entry) {
+    AOTICStubManifest manifest;
+    memcpy(&manifest, containerBase + entry->manifestOffset,
+           sizeof(manifest));
+
+    const uint8_t* meta = containerBase + entry->metadataOffset;
+    const uint8_t* cacheIRCode = meta;
+    const uint8_t* fieldTypes = meta + manifest.cacheIRCodeLength;
+
+    CacheIRStubInfo* stubInfo = CacheIRStubInfo::NewFromSerialized(
+        manifest.kind, ICStubEngine::Baseline,
+        manifest.makesGCCalls != 0,
+        manifest.stubDataOffset,
+        cacheIRCode, manifest.cacheIRCodeLength,
+        fieldTypes, manifest.numStubFields);
+    if (!stubInfo) {
+      return;
+    }
+
+    JitCode* code = AllocateStaticAOTCode(
+        cx, entry, textBase, CodeKind::Baseline);
+    if (!code) {
+      js_free(stubInfo);
+      return;
+    }
+
+    CacheIRStubKey::Lookup lookup(
+        manifest.kind, ICStubEngine::Baseline,
+        stubInfo->code(), stubInfo->codeLength());
+
+    CacheIRStubKey key(stubInfo);
+    if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {
+      return;
+    }
+
+    loadedCount++;
+  });
+
+  if (loadedCount > 0) {
+    JitSpew(JitSpew_BaselineAOT,
+            "Loaded %u AOT IC stubs from container", loadedCount);
+  }
+
+  return loadedCount > 0;
 }
 
 #endif  // ENABLE_AOT_BASELINE

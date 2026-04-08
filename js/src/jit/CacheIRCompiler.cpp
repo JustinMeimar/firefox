@@ -1566,6 +1566,30 @@ CacheIRStubInfo* CacheIRStubInfo::New(CacheKind kind, ICStubEngine engine,
                                  writer.codeLength());
 }
 
+/* static */
+CacheIRStubInfo* CacheIRStubInfo::NewFromSerialized(
+    CacheKind kind, ICStubEngine engine, bool makesGCCalls,
+    uint32_t stubDataOffset,
+    const uint8_t* cacheIRCode, uint32_t cacheIRCodeLength,
+    const uint8_t* fieldTypes, uint32_t numFields) {
+  size_t bytesNeeded =
+      sizeof(CacheIRStubInfo) + cacheIRCodeLength + (numFields + 1);
+  uint8_t* p = js_pod_malloc<uint8_t>(bytesNeeded);
+  if (!p) {
+    return nullptr;
+  }
+
+  uint8_t* codeStart = p + sizeof(CacheIRStubInfo);
+  memcpy(codeStart, cacheIRCode, cacheIRCodeLength);
+
+  uint8_t* ft = codeStart + cacheIRCodeLength;
+  memcpy(ft, fieldTypes, numFields);
+  ft[numFields] = uint8_t(StubField::Type::Limit);
+
+  return new (p) CacheIRStubInfo(kind, engine, makesGCCalls, stubDataOffset,
+                                 cacheIRCodeLength);
+}
+
 bool OperandLocation::operator==(const OperandLocation& other) const {
   if (kind_ != other.kind_) {
     return false;

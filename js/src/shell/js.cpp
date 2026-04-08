@@ -12348,13 +12348,16 @@ static int Shell(JSContext* cx, OptionParser* op) {
     JSAutoRealm ar(cx, glob);
 
 #ifdef ENABLE_AOT_BASELINE
-    // Write the final AOT container now that a realm exists.
-    // dumpAOTInterp() (called during JitRuntime init) saved the interpreter
-    // blob; this combines it with any self-hosted blobs and writes the .S.
-    if (jit::JitOptions.dumpBaselineInterp ||
-        jit::JitOptions.dumpBaselineSelfHosted) {
-      if (!jit::DumpAOTContainer(cx)) {
-        return EXIT_FAILURE;
+    {
+      bool shouldDumpContainer = jit::JitOptions.dumpBaselineInterp ||
+                                 jit::JitOptions.dumpBaselineSelfHosted;
+#ifdef ENABLE_JS_AOT_ICS
+      shouldDumpContainer = shouldDumpContainer || jit::JitOptions.dumpAOTICs;
+#endif
+      if (shouldDumpContainer) {
+        if (!jit::DumpAOTContainer(cx)) {
+          return EXIT_FAILURE;
+        }
       }
     }
 #endif
@@ -13033,6 +13036,8 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption(
           '\0', "enforce-aot-ics",
           "Enable enforcing only use of ahead-of-time-known ICs") ||
+      !op.addBoolOption('\0', "dump-aot-ics",
+                        "Dump AOT IC stubs as binary blobs into the container.") ||
 #endif
 #ifdef ENABLE_AOT_BASELINE
       !op.addBoolOption('\0', "dump-bl-interp", "Dump baseline interpreter binary for AOT patching.") ||
@@ -14026,6 +14031,10 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("enforce-aot-ics")) {
     jit::JitOptions.enableAOTICEnforce = true;
+  }
+  if (op.getBoolOption("dump-aot-ics")) {
+    jit::JitOptions.enableAOTICs = true;
+    jit::JitOptions.dumpAOTICs = true;
   }
 #endif
 

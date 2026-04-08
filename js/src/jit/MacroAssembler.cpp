@@ -4404,7 +4404,7 @@ void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
 #ifdef ENABLE_JS_AOT_ICS
 void MacroAssembler::loadZone() {
   MOZ_ASSERT(isAOT());
-  MOZ_ASSERT(zoneReg() != InvalidReg);
+  MOZ_ASSERT(ZoneReg != InvalidReg);
   MOZ_ASSERT(!zoneLoaded_);
   Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
   loadPtr(zonePtr, ZoneReg);

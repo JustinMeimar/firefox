@@ -9,6 +9,7 @@
 #include "mozilla/RandomNum.h"
 
 #include "gc/GC.h"
+#include "jit/BaselineAOT.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRAOT.h"
 #include "jit/CacheIRCloner.h"
@@ -2760,6 +2761,16 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 
 #ifdef ENABLE_JS_AOT_ICS
 
+static Vector<AOTBlobData, 0, SystemAllocPolicy> sSavedICBlobs;
+
+mozilla::Span<const AOTBlobData> js::jit::GetSavedICBlobs() {
+  return mozilla::Span(sSavedICBlobs.begin(), sSavedICBlobs.length());
+}
+
+void js::jit::ClearSavedICBlobs() {
+  sSavedICBlobs.clearAndFree();
+}
+
 void js::jit::FillAOTICs(JSContext* cx) {
   MOZ_ASSERT(cx->inAtomsZone());
   JitZone* jitZone = cx->zone()->getJitZone(cx);
@@ -2772,11 +2783,52 @@ void js::jit::FillAOTICs(JSContext* cx) {
       }
       CacheIRStubInfo* stubInfo;
       JitCode* code;
-      (void)LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
+      if (!LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
                                 "aot stub",
-                                /* isAOTFill = */ true, jitZone);
-      (void)stubInfo;
-      (void)code;
+                                /* isAOTFill = */ true, jitZone)) {
+        continue;
+      }
+
+      if (JitOptions.dumpAOTICs && code && stubInfo) {
+        AOTBlobData blob;
+        blob.dirEntry.kind = AOTBlobKind::InlineCacheStub;
+        blob.dirEntry.nameHash = 0;
+        blob.name = "IC_" + std::to_string(sSavedICBlobs.length());
+
+        if (!AOTBlobData::appendBytes(blob.code, code->raw(),
+                                      code->instructionsSize())) {
+          continue;
+        }
+
+        AOTICStubManifest manifest{};
+        manifest.kind = stubInfo->kind();
+        manifest.makesGCCalls = stubInfo->makesGCCalls() ? 1 : 0;
+        manifest.stubDataOffset = stubInfo->stubDataOffset();
+        manifest.pad = 0;
+        manifest.cacheIRCodeLength = stubInfo->codeLength();
+
+        uint32_t numFields = 0;
+        while (stubInfo->fieldType(numFields) != StubField::Type::Limit) {
+          numFields++;
+        }
+        manifest.numStubFields = numFields;
+
+        if (!AOTBlobData::appendBytes(blob.manifest, &manifest, 1)) {
+          continue;
+        }
+
+        if (!blob.metadata.append(stubInfo->code(),
+                                  stubInfo->codeLength())) {
+          continue;
+        }
+
+        const uint8_t* fieldStart = stubInfo->code() + stubInfo->codeLength();
+        if (!blob.metadata.append(fieldStart, numFields)) {
+          continue;
+        }
+
+        (void)sSavedICBlobs.append(std::move(blob));
+      }
     }
   }
 }

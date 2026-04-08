@@ -101,13 +101,12 @@ inline const char* AOTSlotName(AOTSlot slot) {
 
 
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
-static constexpr uint32_t AOT_CONTAINER_VERSION = 2;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 3;
 
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
   SelfHostedFunction = 1,
-  //TODO(Justin): Add support for additional AOT types.
-  /* InlineCacheStub = 2, */
+  InlineCacheStub = 2,
   /* Trampoline = 3 */
 };
 
@@ -185,6 +184,21 @@ inline const AOTBlobDirectoryEntry* GetAOTBlobDirectory() {
   if (!hdr) return nullptr;
   return reinterpret_cast<const AOTBlobDirectoryEntry*>(
       GetAOTContainer() + sizeof(AOTContainerHeader));
+}
+
+template <typename Fn>
+inline bool ForEachAOTBlob(AOTBlobKind kind, Fn&& fn) {
+  const auto* hdr = GetAOTContainerHeader();
+  if (!hdr) return false;
+  const auto* dir = GetAOTBlobDirectory();
+  bool found = false;
+  for (uint32_t i = 0; i < hdr->blobCount; i++) {
+    if (dir[i].kind == kind && dir[i].codeSize > 0) {
+      fn(&dir[i]);
+      found = true;
+    }
+  }
+  return found;
 }
 
 inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind,

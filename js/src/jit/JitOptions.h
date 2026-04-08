@@ -132,7 +132,7 @@ struct DefaultJitOptions {
 #ifdef ENABLE_JS_AOT_ICS
   bool enableAOTICs;
   bool enableAOTICEnforce;
-
+  bool dumpAOTICs;
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

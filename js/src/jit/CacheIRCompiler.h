@@ -1395,6 +1395,12 @@ class CacheIRStubInfo {
                               bool canMakeCalls, uint32_t stubDataOffset,
                               const CacheIRWriter& writer);
 
+  static CacheIRStubInfo* NewFromSerialized(
+      CacheKind kind, ICStubEngine engine, bool makesGCCalls,
+      uint32_t stubDataOffset,
+      const uint8_t* cacheIRCode, uint32_t cacheIRCodeLength,
+      const uint8_t* fieldTypes, uint32_t numFields);
+
   template <class Stub, StubField::Type type>
   typename MapStubFieldToType<type>::WrappedType& getStubField(
       Stub* stub, uint32_t offset) const;

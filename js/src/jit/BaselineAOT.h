@@ -11,11 +11,32 @@
 // self-hosted function list. Generic AOT infrastructure (container
 // format, context) lives in AOT.h.
 
+#include "mozilla/Span.h"
+
+#include <string>
+
 #include "jit/AOT.h"
+#include "jit/CacheIR.h"
+#include "js/Vector.h"
 
 namespace js::jit {
 
 class BaselineInterpreter;
+
+struct AOTBlobData {
+  AOTBlobDirectoryEntry dirEntry;
+  std::string name;
+  Vector<uint8_t, 0, SystemAllocPolicy> code;
+  Vector<uint8_t, 0, SystemAllocPolicy> manifest;
+  Vector<uint8_t, 0, SystemAllocPolicy> metadata;
+
+  template <typename T>
+  static bool appendBytes(Vector<uint8_t, 0, SystemAllocPolicy>& vec,
+                          const T* data, size_t count) {
+    const auto* bytes = reinterpret_cast<const uint8_t*>(data);
+    return vec.append(bytes, count * sizeof(T));
+  }
+};
 
 static constexpr const char* kAOTOutputPath =
     "js/src/jit/AOTBaseline.S";
@@ -61,6 +82,15 @@ struct AOTScriptManifest {
   uint32_t headerSize;
 };
 
+struct AOTICStubManifest {
+  CacheKind kind;
+  uint8_t makesGCCalls;
+  uint8_t stubDataOffset;
+  uint16_t pad;
+  uint32_t cacheIRCodeLength;
+  uint32_t numStubFields;
+};
+
 // Build and save the interpreter AOT blob to the saved-blob slot.
 // Called from BaselineInterpreterGenerator::dumpAOTInterp with all
 // the data extracted from the generator.  The metadata byte vectors
@@ -86,6 +116,13 @@ struct AOTScriptManifest {
 // Must be called after a realm exists. Respects dumpBaselineInterp and
 // dumpBaselineSelfHosted flags to control which blobs are included.
 [[nodiscard]] bool DumpAOTContainer(JSContext* cx);
+
+// Load pre-compiled IC stubs from the AOT container into the atoms JitZone.
+// Returns true if stubs were loaded, false if none found or on error.
+[[nodiscard]] bool LoadAOTICStubs(JSContext* cx);
+
+mozilla::Span<const AOTBlobData> GetSavedICBlobs();
+void ClearSavedICBlobs();
 
 }  // namespace js::jit
 

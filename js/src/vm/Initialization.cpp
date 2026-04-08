@@ -20,6 +20,7 @@
 #include "builtin/TestingFunctions.h"
 #include "gc/Statistics.h"
 #include "jit/Assembler.h"
+#include "jit/BaselineAOT.h"
 #include "jit/CacheIRAOT.h"
 #include "jit/Ion.h"
 #include "jit/JitOptions.h"
@@ -243,7 +244,15 @@ JS_PUBLIC_API bool JS::InitSelfHostedCode(JSContext* cx, SelfHostedCache cache,
     js::AutoAllocInAtomsZone az(cx);
     // N.B: This relies on the baseline interpreter and other trampolines
     // being generated already.
-    js::jit::FillAOTICs(cx);
+    bool loadedBinaryICs = false;
+#ifdef ENABLE_AOT_BASELINE
+    if (js::jit::JitOptions.useAOTBaseline) {
+      loadedBinaryICs = js::jit::LoadAOTICStubs(cx);
+    }
+#endif
+    if (!loadedBinaryICs) {
+      js::jit::FillAOTICs(cx);
+    }
 #endif
   }
 
