@@ -5985,7 +5985,14 @@ void MacroAssembler::loadFunctionName(Register func, Register output,
     bind(&noName);
 
     // An absent name property defaults to the empty string.
-    movePtr(emptyString, output);
+#ifdef ENABLE_AOT_BASELINE
+    if (isAOT()) {
+      emitAOTSlotLoad(AOTSlot::AtomEmpty, output);
+    } else
+#endif
+    {
+      movePtr(emptyString, output);
+    }
   }
 
   bind(&done);

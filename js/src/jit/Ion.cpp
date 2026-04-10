@@ -126,9 +126,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(ProfilerEnabled,          rt->geckoProfiler().addressOfEnabled());
   SET(MegamorphicCache,         &rt->caches().megamorphicCache);
   SET(MegamorphicSetPropCache,  rt->caches().megamorphicSetPropCache.get());
-  SET(StringToAtomCache,
-      reinterpret_cast<uint8_t*>(&rt->caches().stringToAtomCache) +
-          StringToAtomCache::offsetOfLastLookups());
+  SET(StringToAtomCache,        &rt->caches().stringToAtomCache);
   // NOTE(Justin): Cpp functions and JSClass ptrs are link time symbols.
   // A hybrid symbolization scheme could enable these to be resolved by
   // the linker during the bootstrap. 
@@ -141,6 +139,9 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(Class_Function,                     &FunctionClass);
   SET(Class_ExtendedFunction,             &ExtendedFunctionClass);
   SET(DeadObjectProxySingleton,            &DeadObjectProxy::singleton);
+  SET(AtomEmpty,                           static_cast<JSString*>(cx->names().empty_));
+  SET(AtomTrue,                            static_cast<JSString*>(cx->names().true_));
+  SET(AtomFalse,                           static_cast<JSString*>(cx->names().false_));
 #undef SET
 }
 
