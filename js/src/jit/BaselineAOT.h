@@ -23,12 +23,18 @@ namespace js::jit {
 
 class BaselineInterpreter;
 
+struct AOTCodeReloc {
+  uint32_t offset;
+  void* target;
+};
+
 struct AOTBlobData {
   AOTBlobDirectoryEntry dirEntry;
   std::string name;
   Vector<uint8_t, 0, SystemAllocPolicy> code;
   Vector<uint8_t, 0, SystemAllocPolicy> manifest;
   Vector<uint8_t, 0, SystemAllocPolicy> metadata;
+  Vector<AOTCodeReloc, 0, SystemAllocPolicy> codeRelocs;
 
   template <typename T>
   static bool appendBytes(Vector<uint8_t, 0, SystemAllocPolicy>& vec,

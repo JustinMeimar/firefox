@@ -11994,6 +11994,17 @@ void CacheIRCompiler::callVMInternal(MacroAssembler& masm, VMFunctionId id) {
 
   MOZ_ASSERT(mode_ == Mode::Baseline);
 
+#ifdef ENABLE_AOT_BASELINE
+  if (masm.isAOT()) {
+    ScratchRegisterScope scratch(masm);
+    AOTSlot slot = AOTSlotForVMWrapper(uint32_t(id));
+    masm.emitAOTSlotLoad(slot, scratch);
+    masm.push(FrameDescriptor(FrameType::BaselineStub));
+    masm.call(scratch);
+    return;
+  }
+#endif
+
   TrampolinePtr code = cx_->runtime()->jitRuntime()->getVMWrapper(id);
 
   EmitBaselineCallVM(code, masm);
