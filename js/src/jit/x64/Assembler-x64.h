@@ -348,6 +348,12 @@ class Assembler : public AssemblerX86Shared {
 
   Assembler() : extendedJumpTable_(0) {}
 
+  const PendingJumpVector& extendedJumps() const { return extendedJumps_; }
+  uint32_t extendedJumpTableOffset() const { return extendedJumpTable_; }
+  static constexpr uint32_t sizeOfJumpTableEntry() {
+    return SizeOfJumpTableEntry;
+  }
+
   static void TraceJumpRelocations(JSTracer* trc, JitCode* code,
                                    CompactBufferReader& reader);
 

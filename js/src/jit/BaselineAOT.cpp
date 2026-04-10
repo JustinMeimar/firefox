@@ -11,6 +11,7 @@
 #include "mozilla/TimeStamp.h"
 
 #include <cstdint>
+#include <dlfcn.h>
 #include <fstream>
 #include <iomanip>
 #include <string>
@@ -59,6 +60,36 @@ static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
           << (unsigned)data[j];
     }
     out << std::dec << "\n";
+  }
+}
+
+static void emitAsmBytesWithRelocs(
+    std::ostream& out, const uint8_t* data, size_t len,
+    const Vector<AOTCodeReloc, 0, SystemAllocPolicy>& relocs) {
+  size_t cursor = 0;
+  for (const auto& reloc : relocs) {
+    MOZ_ASSERT(reloc.offset + 8 <= len);
+    if (reloc.offset > cursor) {
+      emitAsmBytes(out, data + cursor, reloc.offset - cursor);
+    }
+    Dl_info info;
+    if (dladdr(reloc.target, &info) && info.dli_sname) {
+      out << "    .quad " << info.dli_sname << "\n";
+    } else {
+      Dl_info info2;
+      dladdr(reloc.target, &info2);
+      fprintf(stderr,
+              "[AOT] dladdr: no symbol for target=%p offset=%u "
+              "fname=%s fbase=%p\n",
+              reloc.target, reloc.offset,
+              info2.dli_fname ? info2.dli_fname : "(null)",
+              info2.dli_fbase);
+      emitAsmBytes(out, data + reloc.offset, 8);
+    }
+    cursor = reloc.offset + 8;
+  }
+  if (cursor < len) {
+    emitAsmBytes(out, data + cursor, len - cursor);
   }
 }
 
@@ -153,7 +184,12 @@ static bool writeAOTContainer(std::ostream& out,
     out << "// --- Code blob " << i << " " << label << " ---\n";
     out << "bl_aot_" << label << "_code:\n";
     if (blob.code.length() > 0) {
-      emitAsmBytes(out, blob.code.begin(), blob.code.length());
+      if (blob.codeRelocs.length() > 0) {
+        emitAsmBytesWithRelocs(out, blob.code.begin(), blob.code.length(),
+                               blob.codeRelocs);
+      } else {
+        emitAsmBytes(out, blob.code.begin(), blob.code.length());
+      }
     }
   }
 

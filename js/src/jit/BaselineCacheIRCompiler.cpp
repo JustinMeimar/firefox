@@ -201,6 +201,10 @@ void BaselineCacheIRCompiler::callVM(MacroAssembler& masm) {
   callVMInternal(masm, id);
 }
 
+#ifdef ENABLE_JS_AOT_ICS
+static Vector<AOTCodeReloc, 0, SystemAllocPolicy> sLastCompileRelocs;
+#endif
+
 JitCode* BaselineCacheIRCompiler::compile() {
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compile");
 
@@ -285,6 +289,19 @@ JitCode* BaselineCacheIRCompiler::compile() {
   perfSpewer_.endRecording();
 
   Linker linker(masm);
+
+#ifdef ENABLE_JS_AOT_ICS
+  sLastCompileRelocs.clear();
+  if (masm.isAOTFill()) {
+    for (size_t i = 0; i < masm.extendedJumps().length(); i++) {
+      auto& rp = masm.extendedJumps()[i];
+      uint32_t ptrOff = masm.extendedJumpTableOffset() +
+                         i * Assembler::sizeOfJumpTableEntry() + 8;
+      (void)sLastCompileRelocs.append(AOTCodeReloc{ptrOff, rp.target});
+    }
+  }
+#endif
+
   JitCode* newStubCode = linker.newCode(cx_, CodeKind::Baseline);
   if (!newStubCode) {
     cx_->recoverFromOutOfMemory();
@@ -2826,6 +2843,10 @@ void js::jit::FillAOTICs(JSContext* cx) {
         const uint8_t* fieldStart = stubInfo->code() + stubInfo->codeLength();
         if (!blob.metadata.append(fieldStart, numFields)) {
           continue;
+        }
+
+        for (auto& r : sLastCompileRelocs) {
+          (void)blob.codeRelocs.append(r);
         }
 
         (void)sSavedICBlobs.append(std::move(blob));
