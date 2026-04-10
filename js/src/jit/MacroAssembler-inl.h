@@ -803,15 +803,6 @@ void MacroAssembler::branchTestNeedsIncrementalBarrierAnyZone(
   }
 }
 
-#ifdef ENABLE_JS_AOT_ICS
-void MacroAssembler::branchTestNeedsIncrementalBarrierRuntime(Condition cond,
-                                                              Label* label) {
-  MOZ_ASSERT(cond == Zero || cond == NonZero);
-
-  Address needsBarrierAddr(zoneReg(), Zone::offsetOfNeedsIncrementalBarrier());
-  branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
-}
-#endif
 
 void MacroAssembler::branchTestMagicValue(Condition cond,
                                           const ValueOperand& val,

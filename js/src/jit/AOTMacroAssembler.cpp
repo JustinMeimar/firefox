@@ -81,6 +81,13 @@ void MacroAssembler::storeAOTTableBaseToFrame(Register scratch) {
   storePtr(scratch, Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
 }
 
+void MacroAssembler::loadZoneForAOT(Register dest) {
+  MOZ_ASSERT(isAOT());
+  loadJSContext(dest);
+  MacroAssemblerSpecific::loadPtr(Address(dest, JSContext::offsetOfZone()),
+                                  dest);
+}
+
 #endif  // ENABLE_AOT_BASELINE
 
 void MacroAssembler::loadRuntime(Register reg) {

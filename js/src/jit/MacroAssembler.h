@@ -373,10 +373,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
 
-  // Indicator to track whether or not the code for loading the zone into
-  // zoneReg_ has been emitted.
-  bool zoneLoaded_ = false;
-
  protected:
   // Constructor is protected. Use one of the derived classes!
   explicit MacroAssembler(TempAllocator& alloc,
@@ -417,6 +413,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void callPreBarrierAOT(MIRType type, Register scratch);
   void loadAOTTableBase(Register dest);
   void storeAOTTableBaseToFrame(Register scratch);
+  void loadZoneForAOT(Register dest);
 #endif
 
   // Dual-mode helpers: work in both AOT and non-AOT modes.
@@ -1967,12 +1964,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void branchTestNeedsIncrementalBarrierAnyZone(Condition cond,
                                                        Label* label,
                                                        Register scratch);
-#ifdef ENABLE_JS_AOT_ICS
-  // Version of `branchTestNeedsIncrementalBarrier` that loads the zone at runtime.
-  // See 'Runtime agnostic code generation'.
-  inline void branchTestNeedsIncrementalBarrierRuntime(Condition cond,
-                                                       Label* label);
-#endif
 
   // Perform a type-test on a tag of a Value (32bits boxing), or the tagged
   // value (64bits boxing).
@@ -5656,13 +5647,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void updateAllocSite(Register temp, Register result, CompileZone* zone,
                        Register site);
 #ifdef ENABLE_JS_AOT_ICS
-  // Version of `bumpPointerAllocate` that loads the zone at runtime.
-  // See 'Runtime agnostic code generation'.
   void bumpPointerAllocateRuntime(Register result, Register temp, Label* fail,
                                   JS::TraceKind traceKind, uint32_t size,
                            const AllocSiteInput& allocSite = AllocSiteInput());
-  // Version of `updateAllocSite` that loads the zone at runtime.
-  // See 'Runtime agnostic code generation'.
   void updateAllocSiteRuntime(Register temp, Register site);
 #endif
 
@@ -5972,13 +5959,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void reserveStack(uint32_t amount);
 #endif
 
-#ifdef ENABLE_JS_AOT_ICS
- public:
-  Register zoneReg();
-  // Load the zone into zoneReg at runtime.
-  // See 'Runtime agnostic code generation'.
-  void loadZone();
-#endif
 
  public:
   void enableProfilingInstrumentation() {

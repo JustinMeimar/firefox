@@ -157,18 +157,8 @@ class ICStub {
   // Whether this is an ICFallbackStub or an ICCacheIRStub.
   bool isFallback_;
 
-#ifdef ENABLE_JS_AOT_ICS
-  // Runtime pointer to the zone stored within the ICStub itself.
-  // This is to allow
-  CompileZone const* zone_;
-#endif
-
-  ICStub(uint8_t* stubCode, bool isFallback, CompileZone const* zone = nullptr)
-      : stubCode_(stubCode), isFallback_(isFallback)
-#ifdef ENABLE_JS_AOT_ICS
-      , zone_(zone)
-#endif
-      {
+  ICStub(uint8_t* stubCode, bool isFallback)
+      : stubCode_(stubCode), isFallback_(isFallback) {
 #ifndef ENABLE_PORTABLE_BASELINE_INTERP
     MOZ_ASSERT(stubCode != nullptr);
 #endif  // !ENABLE_PORTABLE_BASELINE_INTERP
@@ -227,11 +217,6 @@ class ICStub {
   static constexpr size_t offsetOfEnteredCount() {
     return offsetof(ICStub, enteredCount_);
   }
-#ifdef ENABLE_JS_AOT_ICS
-  static constexpr size_t offsetOfZone() {
-    return offsetof(ICStub, zone_);
-  }
-#endif
 };
 
 class ICFallbackStub final : public ICStub {
@@ -296,8 +281,8 @@ class ICCacheIRStub final : public ICStub {
 #endif
 
  public:
-  ICCacheIRStub(JitCode* stubCode, const CacheIRStubInfo* stubInfo, CompileZone const* zone = nullptr)
-      : ICStub(stubCode ? stubCode->raw() : nullptr, /* isFallback = */ false, zone),
+  ICCacheIRStub(JitCode* stubCode, const CacheIRStubInfo* stubInfo)
+      : ICStub(stubCode ? stubCode->raw() : nullptr, /* isFallback = */ false),
         stubInfo_(stubInfo) {
     MOZ_ASSERT_IF(!IsPortableBaselineInterpreterEnabled(), stubCode);
   }
@@ -328,22 +313,12 @@ class ICCacheIRStub final : public ICStub {
   TypeData typeData() const { return typeData_; }
 };
 
-#ifdef ENABLE_JS_AOT_ICS
-  #ifdef JS_64BIT
-static const size_t fallbackStubSize = 4;
-static const size_t cacheIRStubSize = 5;
-  #else
-static const size_t fallbackStubSize = 6;
-static const size_t cacheIRStubSize = 7;
-  #endif
-#else
-  #ifdef JS_64BIT
+#ifdef JS_64BIT
 static const size_t fallbackStubSize = 3;
 static const size_t cacheIRStubSize = 4;
-  #else
+#else
 static const size_t fallbackStubSize = 5;
 static const size_t cacheIRStubSize = 6;
-  #endif
 #endif
 
 // Assert stub size is what we expect to catch regressions.
