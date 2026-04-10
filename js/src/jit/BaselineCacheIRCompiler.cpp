@@ -210,6 +210,9 @@ JitCode* BaselineCacheIRCompiler::compile() {
 #ifdef JS_CODEGEN_ARM
   AutoNonDefaultSecondScratchRegister andssr(masm, BaselineSecondScratchReg);
 #endif
+#ifdef ENABLE_JS_AOT_ICS
+  MOZ_ASSERT_IF(aotContext_, !JitOptions.enableICFramePointers);
+#endif
   if (JitOptions.enableICFramePointers) {
     /* [SMDOC] Baseline IC Frame Pointers
      *
@@ -244,15 +247,6 @@ JitCode* BaselineCacheIRCompiler::compile() {
 
   perfSpewer_.startRecording();
 
-#ifdef ENABLE_JS_AOT_ICS
-  if (aotContext_) {
-    // Load the zone into the dedicated zone register in case of AOT IC
-    // compilation.
-    // The dedicated register should have been set up in
-    // BaselineCacheIRCompiler::init.
-    masm.loadZone();
-  }
-#endif
 
   CacheIRReader reader(writer_);
   do {
@@ -2742,7 +2736,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
       break;
   }
 
-  auto newStub = new (newStubMem) ICCacheIRStub(code, stubInfo, CompileZone::get(cx->realm()->zone()));
+  auto newStub = new (newStubMem) ICCacheIRStub(code, stubInfo);
   writer.copyStubData(newStub->stubDataStart());
   newStub->setTypeData(writer.typeData());
 
@@ -3698,12 +3692,6 @@ void BaselineCacheIRCompiler::createThis(Register argcReg, Register calleeReg,
   // discarded JIT code.
   Address stubAddr(FramePointer, BaselineStubFrameLayout::ICStubOffsetFromFP);
   masm.loadPtr(stubAddr, ICStubReg);
-#ifdef ENABLE_JS_AOT_ICS
-  if (aotContext_) {
-    // Reload the zone as well.
-    masm.loadZone();
-  }
-#endif
 
   // Save |this| value back into pushed arguments on stack.
   MOZ_ASSERT(!liveNonGCRegs.aliases(JSReturnOperand));

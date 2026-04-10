@@ -76,12 +76,6 @@ TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
   return rt->preBarrier(type);
 }
 
-#ifdef ENABLE_JS_AOT_ICS
-Register MacroAssembler::zoneReg() {
-  MOZ_ASSERT(zoneLoaded_);
-  return ZoneReg;
-}
-#endif
 
 template <typename T>
 void MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType,
@@ -405,8 +399,8 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
       }
 #ifdef ENABLE_JS_AOT_ICS
       else {
-        Address freeListAddr(zoneReg(), Zone::offsetOfFreeList(allocKind));
-        loadPtr(freeListAddr, target);
+        loadZoneForAOT(target);
+        loadPtr(Address(target, Zone::offsetOfFreeList(allocKind)), target);
       }
 #endif
   };
@@ -720,24 +714,20 @@ static inline constexpr int32_t offsetOfNurseryFlag(JS::TraceKind kind) {
   }
 }
 
-// Equivalent of IsNurseryAllocEnabled above, but performs the check
-// dynamically.
-// See: 'Runtime agnostic code generation'.
-static void failIfNurseryAllocDisabledRuntime(MacroAssembler* masm, JS::TraceKind kind,
-                                                       Label* fail) {
-  Address allocNurseryFlag(masm->zoneReg(), offsetOfNurseryFlag(kind));
+static void failIfNurseryAllocDisabledRuntime(MacroAssembler* masm,
+                                              Register zoneReg,
+                                              JS::TraceKind kind, Label* fail) {
+  Address allocNurseryFlag(zoneReg, offsetOfNurseryFlag(kind));
   masm->branch8(Assembler::Equal, allocNurseryFlag, Imm32(0), fail);
 }
 
-// Equivalent of gc::NurseryCellHeader::MakeValue that constructs the cell
-// header dynamically.
-// See: 'Runtime agnostic code generation'.
-static void makeNurseryCellHeaderValueRuntime(
-    MacroAssembler* masm, Register headerWordResult, JS::TraceKind kind,
-    int32_t offsetOfAllocSiteFromZone) {
-  // TODO (chase): Missing assertions. See: gc::NurseryCellHeader::MakeValue
-  masm->computeEffectiveAddress(
-      Address(masm->zoneReg(), offsetOfAllocSiteFromZone), headerWordResult);
+static void makeNurseryCellHeaderValueRuntime(MacroAssembler* masm,
+                                              Register zoneReg,
+                                              Register headerWordResult,
+                                              JS::TraceKind kind,
+                                              int32_t offsetOfAllocSiteFromZone) {
+  masm->computeEffectiveAddress(Address(zoneReg, offsetOfAllocSiteFromZone),
+                                headerWordResult);
   masm->orPtr(Imm32(int32_t(kind)), headerWordResult);
 }
 #endif
@@ -821,17 +811,13 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   MOZ_ASSERT(totalSize < INT32_MAX, "Nursery allocation too large");
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
-  // We'll have to perform the nursery allocation check at runtime for AOT code.
-  // TODO (chase): It may be wise to perform this check at IC attachment time.
-  // This would prevent the need for this code from being emitted at all.
-  failIfNurseryAllocDisabledRuntime(this, traceKind, fail);
+  // Load zone into temp to check nursery allocation flag.
+  loadZoneForAOT(temp);
+  failIfNurseryAllocDisabledRuntime(this, temp, traceKind, fail);
 
-  // Load the runtime ptr stored in the zone.
+  // Load the runtime for nursery position.
   loadRuntime(temp);
-  // Load the nursery position via the zone's runtime.
   Address positionAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition());
-  // Use a relative 32 bit offset to the Nursery position_ to currentEnd_ to
-  // avoid 64-bit immediate loads.
   int32_t endOffset = Nursery::offsetOfCurrentEndFromPosition();
   Address positionEndAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition() + endOffset);
 
@@ -842,36 +828,26 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
   subPtr(Imm32(size), result);
 
   if (allocSite.is<gc::CatchAllAllocSite>()) {
-    // No allocation site supplied.
-    // This is the when called from: e.g: EmitAllocateBigInt.
     gc::CatchAllAllocSite siteKind = allocSite.as<gc::CatchAllAllocSite>();
-    // Only the Unknown CatchAllAllocSite should be used by Baseline ICs.
     MOZ_ASSERT(siteKind == gc::CatchAllAllocSite::Unknown);
 
+    // Reload zone for header construction.
+    loadZoneForAOT(temp);
     int32_t siteOffset = Zone::offsetOfUnknownAllocSite(traceKind);
-    makeNurseryCellHeaderValueRuntime(this, temp, traceKind, siteOffset);
-    // N.B: At this point, temp has been clobberred and now stores the
-    // headerWord.
+    makeNurseryCellHeaderValueRuntime(this, temp, temp, traceKind, siteOffset);
 
     storePtr(temp, Address(result, -js::Nursery::nurseryCellHeaderSize()));
 
-    if (traceKind != JS::TraceKind::Object ||
-        (!isAOTFill() && runtime()->geckoProfiler().enabled())) {
-      // Update the catch all allocation site, which his is used to calculate
-      // nursery allocation counts so we can determine whether to disable
-      // nursery allocation of strings and bigints.
+    if (traceKind != JS::TraceKind::Object) {
+      // Reload zone for alloc count update.
+      loadZoneForAOT(temp);
       int32_t allocCountOffset =
-          /* siteOffset */ +gc::AllocSite::offsetOfNurseryAllocCount();
-      Address countAddress(zoneReg(), allocCountOffset);
-
-      add32(Imm32(1), Address(zoneReg(), allocCountOffset));
+          siteOffset + gc::AllocSite::offsetOfNurseryAllocCount();
+      add32(Imm32(1), Address(temp, allocCountOffset));
     }
   } else {
-    // Update allocation site and store pointer in the nursery cell header. This
-    // is only used from baseline.
     Register site = allocSite.as<Register>();
     updateAllocSiteRuntime(temp, site);
-    // See NurseryCellHeader::MakeValue.
     orPtr(Imm32(int32_t(traceKind)), site);
     storePtr(site, Address(result, -js::Nursery::nurseryCellHeaderSize()));
   }
@@ -980,11 +956,12 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
   }
 #ifdef ENABLE_JS_AOT_ICS
   else {
-    loadPtr(Address(zoneReg(), Zone::offsetOfPreservedWrappersCount()), scratchSuccess);
+    loadZoneForAOT(scratch2);
+    loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappersCount()), scratchSuccess);
     branchPtr(Assembler::Equal,
-              Address(zoneReg(), Zone::offsetOfPreservedWrappersCapacity()),
+              Address(scratch2, Zone::offsetOfPreservedWrappersCapacity()),
               scratchSuccess, &abiCall);
-    loadPtr(Address(zoneReg(), Zone::offsetOfPreservedWrappers()),
+    loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappers()),
             scratch2);
   }
 #endif
@@ -997,8 +974,9 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
   }
 #ifdef ENABLE_JS_AOT_ICS
   else {
+    loadZoneForAOT(scratch2);
     storePtr(scratchSuccess,
-            Address(zoneReg(), Zone::offsetOfPreservedWrappersCount()));
+            Address(scratch2, Zone::offsetOfPreservedWrappersCount()));
   }
 #endif
   move32(Imm32(1), scratchSuccess);
@@ -2887,15 +2865,7 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 void MacroAssembler::loadJSContext(Register dest) {
-  if (!isAOTFill()) {
-    movePtr(RelocImmPtr(runtime()->mainContextPtr()), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    loadRuntime(dest);
-    loadPtr(Address(dest, JSRuntime::offsetOfMainContext()), dest);
-  }
-#endif
+  movePtr(RelocImmPtr(runtime()->mainContextPtr()), dest);
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
@@ -3134,28 +3104,10 @@ void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
 }
 
 void MacroAssembler::loadMegamorphicCache(Register dest) {
-  if (!isAOTFill()) {
-    movePtr(ImmPtr(runtime()->addressOfMegamorphicCache()), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    loadRuntime(dest);
-    computeEffectiveAddress(
-        Address(dest, JSRuntime::offsetOfMegamorphicCache()), dest);
-  }
-#endif
+  movePtr(RelocImmPtr(runtime()->addressOfMegamorphicCache()), dest);
 }
 void MacroAssembler::loadMegamorphicSetPropCache(Register dest) {
-  if (!isAOTFill()) {
-    movePtr(ImmPtr(runtime()->addressOfMegamorphicSetPropCache()), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    loadRuntime(dest);
-    loadPtr(Address(dest, JSRuntime::offsetOfMegamorphicSetPropCachePtr()),
-            dest);
-  }
-#endif
+  movePtr(RelocImmPtr(runtime()->addressOfMegamorphicSetPropCache()), dest);
 }
 
 void MacroAssembler::tryFastAtomize(Register str, Register scratch,
@@ -3168,20 +3120,9 @@ void MacroAssembler::tryFastAtomize(Register str, Register scratch,
   jump(&done);
   bind(&notAtomRef);
 
-  if (!isAOTFill()) {
-    uintptr_t cachePtr = uintptr_t(runtime()->addressOfStringToAtomCache());
-    void* offset = (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups());
-    movePtr(ImmPtr(offset), scratch);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    loadRuntime(scratch);
-    Address lastLookupAddr(scratch,
-                           JSRuntime::offsetOfStringToAtomCache() +
-                               StringToAtomCache::offsetOfLastLookups());
-    computeEffectiveAddress(lastLookupAddr, scratch);
-  }
-#endif
+  movePtr(RelocImmPtr(runtime()->addressOfStringToAtomCache()), scratch);
+  computeEffectiveAddress(
+      Address(scratch, StringToAtomCache::offsetOfLastLookups()), scratch);
 
   static_assert(StringToAtomCache::NumLastLookups == 2);
   size_t stringOffset = StringToAtomCache::LastLookup::offsetOfString();
@@ -4401,16 +4342,6 @@ void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
   movePtr(RelocImmPtr(ptr.value), dest);
 }
 
-#ifdef ENABLE_JS_AOT_ICS
-void MacroAssembler::loadZone() {
-  MOZ_ASSERT(isAOT());
-  MOZ_ASSERT(ZoneReg != InvalidReg);
-  MOZ_ASSERT(!zoneLoaded_);
-  Address zonePtr(ICStubReg, ICCacheIRStub::offsetOfZone());
-  loadPtr(zonePtr, ZoneReg);
-  zoneLoaded_ = true;
-}
-#endif
 
 void MacroAssembler::handleFailure() {
   // Re-entry code is irrelevant because the exception will leave the
