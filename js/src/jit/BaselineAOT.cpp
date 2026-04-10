@@ -372,7 +372,11 @@ static const char* const kAOTSelfHostedFunctions[] = {
 
 bool DumpAOTContainer(JSContext* cx) {
   MOZ_ASSERT(JitOptions.dumpBaselineInterp ||
-             JitOptions.dumpBaselineSelfHosted);
+             JitOptions.dumpBaselineSelfHosted
+#ifdef ENABLE_JS_AOT_ICS
+             || JitOptions.dumpAOTICs
+#endif
+  );
 
   const char* outPath = kAOTOutputPath;
 
@@ -675,6 +679,12 @@ bool LoadAOTICStubs(JSContext* cx) {
     CacheIRStubKey::Lookup lookup(
         manifest.kind, ICStubEngine::Baseline,
         stubInfo->code(), stubInfo->codeLength());
+
+    CacheIRStubInfo* existing = nullptr;
+    if (jitZone->getBaselineCacheIRStubCode(lookup, &existing)) {
+      js_free(stubInfo);
+      return;
+    }
 
     CacheIRStubKey key(stubInfo);
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {

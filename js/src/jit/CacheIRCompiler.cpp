@@ -352,6 +352,11 @@ Register CacheRegisterAllocator::useRegister(MacroAssembler& masm,
     case OperandLocation::Constant: {
       Value v = loc.constant();
       Register reg = allocateRegister(masm);
+#ifdef ENABLE_AOT_BASELINE
+      if (masm.isAOT()) {
+        MOZ_CRASH("ImmGCPtr constant operand in AOT IC stub — needs indirection slot");
+      }
+#endif
       if (v.isString()) {
         masm.movePtr(ImmGCPtr(v.toString()), reg);
       } else if (v.isSymbol()) {
@@ -7517,7 +7522,14 @@ bool CacheIRCompiler::emitArrayJoinResult(ObjOperandId objId,
   {
     Label arrayNotEmpty;
     masm.branch32(Assembler::NotEqual, lengthAddr, Imm32(0), &arrayNotEmpty);
-    masm.movePtr(ImmGCPtr(cx_->names().empty_), scratch);
+#ifdef ENABLE_AOT_BASELINE
+    if (masm.isAOT()) {
+      masm.emitAOTSlotLoad(AOTSlot::AtomEmpty, scratch);
+    } else
+#endif
+    {
+      masm.movePtr(ImmGCPtr(cx_->names().empty_), scratch);
+    }
     masm.tagValue(JSVAL_TYPE_STRING, scratch, callvm.outputValueReg());
     masm.jump(&finished);
     masm.bind(&arrayNotEmpty);
@@ -10154,12 +10166,26 @@ bool CacheIRCompiler::emitBooleanToString(BooleanOperandId inputId,
   masm.branchTest32(Assembler::NonZero, boolean, boolean, &true_);
 
   // False case
-  masm.movePtr(ImmGCPtr(names.false_), result);
+#ifdef ENABLE_AOT_BASELINE
+  if (masm.isAOT()) {
+    masm.emitAOTSlotLoad(AOTSlot::AtomFalse, result);
+  } else
+#endif
+  {
+    masm.movePtr(ImmGCPtr(names.false_), result);
+  }
   masm.jump(&done);
 
   // True case
   masm.bind(&true_);
-  masm.movePtr(ImmGCPtr(names.true_), result);
+#ifdef ENABLE_AOT_BASELINE
+  if (masm.isAOT()) {
+    masm.emitAOTSlotLoad(AOTSlot::AtomTrue, result);
+  } else
+#endif
+  {
+    masm.movePtr(ImmGCPtr(names.true_), result);
+  }
   masm.bind(&done);
 
   return true;
