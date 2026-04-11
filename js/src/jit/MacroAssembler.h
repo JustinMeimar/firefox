@@ -369,6 +369,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // AOT compilation context. Non-null when AOT codegen is active.
   AOTContext* aotContext_ = nullptr;
   bool isAOTFill_ = false;
+  bool inAOTStubFrame_ = false;
 
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
@@ -412,6 +413,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
   void callPreBarrierAOT(MIRType type, Register scratch);
   void loadAOTTableBase(Register dest);
+  void enterAOTStubFrame() { inAOTStubFrame_ = true; }
+  void leaveAOTStubFrame() { inAOTStubFrame_ = false; }
   void storeAOTTableBaseToFrame(Register scratch);
   void loadZoneForAOT(Register dest);
 #endif

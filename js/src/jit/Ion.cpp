@@ -143,6 +143,23 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AtomTrue,                            static_cast<JSString*>(cx->names().true_));
   SET(AtomFalse,                           static_cast<JSString*>(cx->names().false_));
 #undef SET
+
+  {
+    uint32_t idx = 0;
+#define SET_ABI_FN(fp) \
+    aotIndirectionTable_.set( \
+        AOTSlotForABIFn(idx++), \
+        uintptr_t(JS_FUNC_TO_DATA_PTR(void*, fp)));
+    ABIFUNCTION_LIST(SET_ABI_FN)
+#undef SET_ABI_FN
+#define SET_ABI_FN_TYPED(fp, ...) \
+    aotIndirectionTable_.set( \
+        AOTSlotForABIFn(idx++), \
+        uintptr_t(JS_FUNC_TO_DATA_PTR(void*, static_cast<__VA_ARGS__>(fp))));
+    ABIFUNCTION_AND_TYPE_LIST(SET_ABI_FN_TYPED)
+#undef SET_ABI_FN_TYPED
+    MOZ_ASSERT(idx <= kAOTMaxABIFunctions);
+  }
 }
 
 bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {

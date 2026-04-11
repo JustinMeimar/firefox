@@ -36,10 +36,17 @@ static int32_t GetTlsContextOffset() {
 }
 
 // Load an AOT slot value via the cached table base in BaselineFrame.
-// 2 loads: FramePointer[aotTableBase_] -> slots_[slot]
+// Normal: 2 loads  — FramePointer[aotTableBase_] -> slots_[slot]
+// Stub frame: 3 loads — [FramePointer] -> BaselineFrame, then as above
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
-  MacroAssemblerSpecific::loadPtr(
-      Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
+  if (inAOTStubFrame_) {
+    MacroAssemblerSpecific::loadPtr(Address(FramePointer, 0), dest);
+    MacroAssemblerSpecific::loadPtr(
+        Address(dest, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
+  } else {
+    MacroAssemblerSpecific::loadPtr(
+        Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
+  }
   int32_t slotOff = int32_t(AOTIndirectionTable::offsetOfSlot(slot));
   MacroAssemblerSpecific::loadPtr(Address(dest, slotOff), dest);
 }

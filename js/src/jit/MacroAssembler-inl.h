@@ -150,6 +150,16 @@ template <typename Sig, Sig fun>
 void MacroAssembler::callWithABI(ABIType result, CheckUnsafeCallWithABI check) {
   ABIFunction<Sig, fun> abiFun;
   AutoProfilerCallInstrumentation profiler(*this);
+#ifdef ENABLE_AOT_BASELINE
+  if (MOZ_UNLIKELY(isAOT())) {
+    void* addr = abiFun.address();
+    AOTSlot slot = aot().indirectionTable()->findSlotOrCrash(
+        uintptr_t(addr));
+    emitAOTSlotLoad(slot, r10);
+    callWithABINoProfiler(r10, result);
+    return;
+  }
+#endif
   callWithABINoProfiler(abiFun.address(), result, check);
 }
 

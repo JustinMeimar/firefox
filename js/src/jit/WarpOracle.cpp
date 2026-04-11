@@ -11,6 +11,7 @@
 
 #include <algorithm>
 
+#include "jit/AOT.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRReader.h"
@@ -1050,6 +1051,16 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
   }
 
   ICCacheIRStub* stub = firstStub->toCacheIRStub();
+
+#ifdef ENABLE_AOT_BASELINE
+  {
+    uint8_t* code = stub->stubCodeRaw();
+    if (code >= GetAOTTextBase() &&
+        code < GetAOTTextBase() + GetAOTTextSize()) {
+      return Ok();
+    }
+  }
+#endif
 
   // Don't transpile if this IC ever encountered a case where it had
   // no stub to attach.
