@@ -71,6 +71,7 @@ namespace js::jit {
   V(AtomFalse)
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
+static constexpr uint32_t kAOTMaxABIFunctions = 256;
 
 enum class AOTSlot : uint32_t {
 #define EMIT_SLOT(name) name,
@@ -78,8 +79,15 @@ enum class AOTSlot : uint32_t {
 #undef EMIT_SLOT
   VMWrapper_Begin,
   VMWrapper_End = VMWrapper_Begin + kAOTMaxVMWrappers,
-  Count = VMWrapper_End
+  ABIFn_Begin = VMWrapper_End,
+  ABIFn_End = ABIFn_Begin + kAOTMaxABIFunctions,
+  Count = ABIFn_End
 };
+
+inline AOTSlot AOTSlotForABIFn(uint32_t idx) {
+  MOZ_ASSERT(idx < kAOTMaxABIFunctions);
+  return AOTSlot(uint32_t(AOTSlot::ABIFn_Begin) + idx);
+}
 
 inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
   MOZ_ASSERT(id < kAOTMaxVMWrappers);

@@ -130,6 +130,11 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
 
   MOZ_ASSERT(!compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = true;
+#ifdef ENABLE_AOT_BASELINE
+  if (masm.isAOT()) {
+    masm.enterAOTStubFrame();
+  }
+#endif
 
   // All current uses of this are to call VM functions that can GC.
   compiler.makesGCCalls_ = true;
@@ -137,6 +142,11 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
 void AutoStubFrame::leave(MacroAssembler& masm) {
   MOZ_ASSERT(compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = false;
+#ifdef ENABLE_AOT_BASELINE
+  if (masm.isAOT()) {
+    masm.leaveAOTStubFrame();
+  }
+#endif
 
 #ifdef DEBUG
   masm.setFramePushed(framePushedAtEnterStubFrame_);
