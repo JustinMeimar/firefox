@@ -211,6 +211,8 @@ class ICStub {
   inline void incrementEnteredCount() { enteredCount_++; }
   void resetEnteredCount() { enteredCount_ = 0; }
 
+  bool isStaticCode() const;
+
   uint8_t* stubCodeRaw() const { return stubCode_; }
 
   static constexpr size_t offsetOfStubCode() {
