@@ -12,6 +12,7 @@
 #include "jstypes.h"
 
 #include "builtin/Eval.h"
+#include "jit/AOT.h"
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/CacheIRGenerator.h"
 #include "jit/CacheIRHealth.h"
@@ -52,6 +53,15 @@ using mozilla::DebugOnly;
 
 namespace js {
 namespace jit {
+
+bool ICStub::isStaticCode() const {
+#ifdef ENABLE_AOT_BASELINE
+  uint8_t* base = GetAOTTextBase();
+  return stubCode_ >= base && stubCode_ < base + GetAOTTextSize();
+#else
+  return false;
+#endif
+}
 
 // Class used to emit all Baseline IC fallback code when initializing the
 // JitRuntime.
@@ -458,7 +468,7 @@ static void MaybeNotifyWarp(JSScript* script, ICFallbackStub* stub) {
 }
 
 void ICCacheIRStub::trace(JSTracer* trc) {
-  if (hasJitCode()) {
+  if (hasJitCode() && !isStaticCode()) {
     JitCode* stubJitCode = jitCode();
     TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
   }
