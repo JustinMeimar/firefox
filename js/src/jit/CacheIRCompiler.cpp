@@ -8390,15 +8390,39 @@ bool CacheIRCompiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
                     &isUndefined);
 
   masm.bind(&isCallable);
-  masm.moveValue(StringValue(cx_->names().function), output.valueReg());
+#ifdef ENABLE_AOT_BASELINE
+  if (masm.isAOT()) {
+    masm.emitAOTSlotLoad(AOTSlot::AtomFunction, scratch);
+    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
+  } else
+#endif
+  {
+    masm.moveValue(StringValue(cx_->names().function), output.valueReg());
+  }
   masm.jump(&done);
 
   masm.bind(&isUndefined);
-  masm.moveValue(StringValue(cx_->names().undefined), output.valueReg());
+#ifdef ENABLE_AOT_BASELINE
+  if (masm.isAOT()) {
+    masm.emitAOTSlotLoad(AOTSlot::AtomUndefined, scratch);
+    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
+  } else
+#endif
+  {
+    masm.moveValue(StringValue(cx_->names().undefined), output.valueReg());
+  }
   masm.jump(&done);
 
   masm.bind(&isObject);
-  masm.moveValue(StringValue(cx_->names().object), output.valueReg());
+#ifdef ENABLE_AOT_BASELINE
+  if (masm.isAOT()) {
+    masm.emitAOTSlotLoad(AOTSlot::AtomObject, scratch);
+    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
+  } else
+#endif
+  {
+    masm.moveValue(StringValue(cx_->names().object), output.valueReg());
+  }
   masm.jump(&done);
 
   {
