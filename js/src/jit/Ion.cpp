@@ -142,6 +142,10 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AtomEmpty,                           static_cast<JSString*>(cx->names().empty_));
   SET(AtomTrue,                            static_cast<JSString*>(cx->names().true_));
   SET(AtomFalse,                           static_cast<JSString*>(cx->names().false_));
+  SET(StaticStringsUnitTable,              &cx->staticStrings().unitStaticTable);
+  SET(StaticStringsLength2Table,           &cx->staticStrings().length2StaticTable);
+  SET(StaticStringsIntTable,               &cx->staticStrings().intStaticTable);
+  SET(StaticStringsToSmallCharTable,       &StaticStrings::toSmallCharTable.storage);
 #undef SET
 
   {
