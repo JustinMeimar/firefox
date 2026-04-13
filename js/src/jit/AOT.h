@@ -68,7 +68,11 @@ namespace js::jit {
   V(DeadObjectProxySingleton)           \
   V(AtomEmpty)                          \
   V(AtomTrue)                           \
-  V(AtomFalse)
+  V(AtomFalse)                          \
+  V(StaticStringsUnitTable)             \
+  V(StaticStringsLength2Table)          \
+  V(StaticStringsIntTable)              \
+  V(StaticStringsToSmallCharTable)
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;

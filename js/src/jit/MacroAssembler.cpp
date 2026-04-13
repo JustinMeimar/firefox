@@ -2048,7 +2048,7 @@ void MacroAssembler::branchSurrogate(Assembler::Condition cond, Register src,
 
 void MacroAssembler::loadStringFromUnit(Register unit, Register dest,
                                         const StaticStrings& staticStrings) {
-  movePtr(ImmPtr(&staticStrings.unitStaticTable), dest);
+  movePtr(RelocImmPtr(&staticStrings.unitStaticTable), dest);
   loadPtr(BaseIndex(dest, unit, ScalePointer), dest);
 }
 
@@ -2059,7 +2059,7 @@ void MacroAssembler::loadLengthTwoString(Register c1, Register c2,
   // to obtain the index into `StaticStrings::length2StaticTable`.
   static_assert(sizeof(StaticStrings::SmallChar) == 1);
 
-  movePtr(ImmPtr(&StaticStrings::toSmallCharTable.storage), dest);
+  movePtr(RelocImmPtr(&StaticStrings::toSmallCharTable.storage), dest);
   load8ZeroExtend(BaseIndex(dest, c1, Scale::TimesOne), c1);
   load8ZeroExtend(BaseIndex(dest, c2, Scale::TimesOne), c2);
 
@@ -2067,7 +2067,7 @@ void MacroAssembler::loadLengthTwoString(Register c1, Register c2,
   add32(c2, c1);
 
   // Look up the string from the computed index.
-  movePtr(ImmPtr(&staticStrings.length2StaticTable), dest);
+  movePtr(RelocImmPtr(&staticStrings.length2StaticTable), dest);
   loadPtr(BaseIndex(dest, c1, ScalePointer), dest);
 }
 
@@ -2075,7 +2075,7 @@ void MacroAssembler::lookupStaticString(Register ch, Register dest,
                                         const StaticStrings& staticStrings) {
   MOZ_ASSERT(ch != dest);
 
-  movePtr(ImmPtr(&staticStrings.unitStaticTable), dest);
+  movePtr(RelocImmPtr(&staticStrings.unitStaticTable), dest);
   loadPtr(BaseIndex(dest, ch, ScalePointer), dest);
 }
 
@@ -2085,7 +2085,7 @@ void MacroAssembler::lookupStaticString(Register ch, Register dest,
   MOZ_ASSERT(ch != dest);
 
   boundsCheck32PowerOfTwo(ch, StaticStrings::UNIT_STATIC_LIMIT, fail);
-  movePtr(ImmPtr(&staticStrings.unitStaticTable), dest);
+  movePtr(RelocImmPtr(&staticStrings.unitStaticTable), dest);
   loadPtr(BaseIndex(dest, ch, ScalePointer), dest);
 }
 
@@ -4715,6 +4715,11 @@ void MacroAssembler::clampValueToUint8(ValueOperand value,
 void MacroAssembler::finish() {
   if (failureLabel_.used()) {
     bind(&failureLabel_);
+#ifdef ENABLE_AOT_BASELINE
+    if (isAOT()) {
+      enterAOTStubFrame();
+    }
+#endif
     handleFailure();
   }
 
