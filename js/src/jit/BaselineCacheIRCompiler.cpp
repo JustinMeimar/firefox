@@ -2859,9 +2859,29 @@ void js::jit::FillAOTICs(JSContext* cx) {
           (void)blob.codeRelocs.append(r);
         }
 
+        fprintf(stdout,
+                "[BaselineAOT] AOT IC #%-3zu  kind=%-20s  size=%5ub"
+                "  cacheIR=%3ub  fields=%u%s\n",
+                sSavedICBlobs.length(),
+                CacheKindNames[uint8_t(stubInfo->kind())],
+                unsigned(code->instructionsSize()),
+                unsigned(stubInfo->codeLength()),
+                numFields,
+                manifest.makesGCCalls ? "  [gc]" : "");
+
         (void)sSavedICBlobs.append(std::move(blob));
       }
     }
+  }
+
+  if (JitOptions.dumpAOTICs) {
+    size_t totalBytes = 0;
+    for (auto& b : sSavedICBlobs) {
+      totalBytes += b.code.length();
+    }
+    fprintf(stdout,
+            "[BaselineAOT] Dumped %zu AOT IC stubs (%zu bytes total)\n",
+            sSavedICBlobs.length(), totalBytes);
   }
 }
 #endif
