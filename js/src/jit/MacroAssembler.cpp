@@ -2101,7 +2101,7 @@ void MacroAssembler::lookupStaticString(Register ch1, Register ch2,
   branch32(Assembler::AboveOrEqual, ch2,
            Imm32(StaticStrings::SMALL_CHAR_TABLE_SIZE), fail);
 
-  movePtr(ImmPtr(&StaticStrings::toSmallCharTable.storage), dest);
+  movePtr(RelocImmPtr(&StaticStrings::toSmallCharTable.storage), dest);
   load8ZeroExtend(BaseIndex(dest, ch1, Scale::TimesOne), ch1);
   load8ZeroExtend(BaseIndex(dest, ch2, Scale::TimesOne), ch2);
 
@@ -2114,7 +2114,7 @@ void MacroAssembler::lookupStaticString(Register ch1, Register ch2,
   add32(ch2, ch1);
 
   // Look up the string from the computed index.
-  movePtr(ImmPtr(&staticStrings.length2StaticTable), dest);
+  movePtr(RelocImmPtr(&staticStrings.length2StaticTable), dest);
   loadPtr(BaseIndex(dest, ch1, ScalePointer), dest);
 }
 
@@ -2125,7 +2125,7 @@ void MacroAssembler::lookupStaticIntString(Register integer, Register dest,
   MOZ_ASSERT(integer != scratch);
 
   boundsCheck32PowerOfTwo(integer, StaticStrings::INT_STATIC_LIMIT, fail);
-  movePtr(ImmPtr(&staticStrings.intStaticTable), scratch);
+  movePtr(RelocImmPtr(&staticStrings.intStaticTable), scratch);
   loadPtr(BaseIndex(scratch, integer, ScalePointer), dest);
 }
 
