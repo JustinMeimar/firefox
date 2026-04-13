@@ -143,6 +143,15 @@ void MacroAssembler::passABIArg(FloatRegister reg, ABIType type) {
 void MacroAssembler::callWithABI(DynFn fun, ABIType result,
                                  CheckUnsafeCallWithABI check) {
   AutoProfilerCallInstrumentation profiler(*this);
+#ifdef ENABLE_AOT_BASELINE
+  if (MOZ_UNLIKELY(isAOT())) {
+    AOTSlot slot = aot().indirectionTable()->findSlotOrCrash(
+        uintptr_t(fun.address));
+    emitAOTSlotLoad(slot, r10);
+    callWithABINoProfiler(r10, result);
+    return;
+  }
+#endif
   callWithABINoProfiler(fun.address, result, check);
 }
 
@@ -655,6 +664,26 @@ void MacroAssembler::branchTestObjClass(Condition cond, Register obj,
 void MacroAssembler::branchTestClassIsFunction(Condition cond, Register clasp,
                                                Label* label) {
   MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
+
+#ifdef ENABLE_AOT_BASELINE
+  if (MOZ_UNLIKELY(isAOT())) {
+    ScratchRegisterScope scratch(*this);
+    if (cond == Assembler::Equal) {
+      emitAOTSlotLoad(AOTSlot::Class_Function, scratch);
+      branchPtr(Assembler::Equal, clasp, scratch, label);
+      emitAOTSlotLoad(AOTSlot::Class_ExtendedFunction, scratch);
+      branchPtr(Assembler::Equal, clasp, scratch, label);
+      return;
+    }
+    Label isClass;
+    emitAOTSlotLoad(AOTSlot::Class_Function, scratch);
+    branchPtr(Assembler::Equal, clasp, scratch, &isClass);
+    emitAOTSlotLoad(AOTSlot::Class_ExtendedFunction, scratch);
+    branchPtr(Assembler::NotEqual, clasp, scratch, label);
+    bind(&isClass);
+    return;
+  }
+#endif
 
   if (cond == Assembler::Equal) {
     branchPtr(Assembler::Equal, clasp, ImmPtr(&FunctionClass), label);

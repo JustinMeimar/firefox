@@ -13,6 +13,8 @@
 
 #include <fstream>
 
+#include "jsmath.h"
+
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #include "jit/AliasAnalysis.h"
@@ -142,6 +144,9 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AtomEmpty,                           static_cast<JSString*>(cx->names().empty_));
   SET(AtomTrue,                            static_cast<JSString*>(cx->names().true_));
   SET(AtomFalse,                           static_cast<JSString*>(cx->names().false_));
+  SET(AtomFunction,                        static_cast<JSString*>(cx->names().function));
+  SET(AtomUndefined,                       static_cast<JSString*>(cx->names().undefined));
+  SET(AtomObject,                          static_cast<JSString*>(cx->names().object));
   SET(StaticStringsUnitTable,              &cx->staticStrings().unitStaticTable);
   SET(StaticStringsLength2Table,           &cx->staticStrings().length2StaticTable);
   SET(StaticStringsIntTable,               &cx->staticStrings().intStaticTable);
@@ -162,6 +167,27 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
         uintptr_t(JS_FUNC_TO_DATA_PTR(void*, static_cast<__VA_ARGS__>(fp))));
     ABIFUNCTION_AND_TYPE_LIST(SET_ABI_FN_TYPED)
 #undef SET_ABI_FN_TYPED
+
+#define SET_DYN(fp) \
+    aotIndirectionTable_.set( \
+        AOTSlotForABIFn(idx++), \
+        uintptr_t(JS_FUNC_TO_DATA_PTR(void*, fp)));
+    for (uint8_t i = uint8_t(UnaryMathFunction::SinNative);
+         i <= uint8_t(UnaryMathFunction::Round); i++) {
+      SET_DYN(GetUnaryMathFunctionPtr(UnaryMathFunction(i)))
+    }
+    constexpr Scalar::Type atomicTypes[] = {
+        Scalar::Int8, Scalar::Uint8, Scalar::Int16,
+        Scalar::Uint16, Scalar::Int32, Scalar::Uint32};
+    for (auto ty : atomicTypes) { SET_DYN(AtomicsCompareExchange(ty)) }
+    for (auto ty : atomicTypes) { SET_DYN(AtomicsExchange(ty)) }
+    for (auto ty : atomicTypes) { SET_DYN(AtomicsAdd(ty)) }
+    for (auto ty : atomicTypes) { SET_DYN(AtomicsSub(ty)) }
+    for (auto ty : atomicTypes) { SET_DYN(AtomicsAnd(ty)) }
+    for (auto ty : atomicTypes) { SET_DYN(AtomicsOr(ty)) }
+    for (auto ty : atomicTypes) { SET_DYN(AtomicsXor(ty)) }
+#undef SET_DYN
+
     MOZ_ASSERT(idx <= kAOTMaxABIFunctions);
   }
 }

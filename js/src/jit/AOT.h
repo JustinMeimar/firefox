@@ -69,6 +69,9 @@ namespace js::jit {
   V(AtomEmpty)                          \
   V(AtomTrue)                           \
   V(AtomFalse)                          \
+  V(AtomFunction)                       \
+  V(AtomUndefined)                      \
+  V(AtomObject)                         \
   V(StaticStringsUnitTable)             \
   V(StaticStringsLength2Table)          \
   V(StaticStringsIntTable)              \
