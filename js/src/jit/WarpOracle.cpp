@@ -1052,15 +1052,9 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
 
   ICCacheIRStub* stub = firstStub->toCacheIRStub();
 
-#ifdef ENABLE_AOT_BASELINE
-  {
-    uint8_t* code = stub->stubCodeRaw();
-    if (code >= GetAOTTextBase() &&
-        code < GetAOTTextBase() + GetAOTTextSize()) {
-      return Ok();
-    }
-  }
-#endif
+  // Note: AOT static stubs (code in .text) are handled transparently here.
+  // ICCacheIRStub stores JitCode* directly, so stub->jitCode() works for
+  // both JIT-pool and static code without JitCode::FromExecutable.
 
   // Don't transpile if this IC ever encountered a case where it had
   // no stub to attach.
