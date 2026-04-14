@@ -279,6 +279,11 @@ class ICCacheIRStub final : public ICStub {
 
   const CacheIRStubInfo* stubInfo_;
 
+  // JitCode object for this stub's native code. Stored explicitly so that
+  // static AOT stubs (code in .text with no JitCodeHeader) can return their
+  // JitCode without JitCode::FromExecutable reverse pointer arithmetic.
+  JitCode* jitCode_;
+
 #ifndef JS_64BIT
   // Ensure stub data is 8-byte aligned on 32-bit.
   uintptr_t padding_ = 0;
@@ -287,9 +292,12 @@ class ICCacheIRStub final : public ICStub {
  public:
   ICCacheIRStub(JitCode* stubCode, const CacheIRStubInfo* stubInfo)
       : ICStub(stubCode ? stubCode->raw() : nullptr, /* isFallback = */ false),
-        stubInfo_(stubInfo) {
+        stubInfo_(stubInfo),
+        jitCode_(stubCode) {
     MOZ_ASSERT_IF(!IsPortableBaselineInterpreterEnabled(), stubCode);
   }
+
+  JitCode* jitCode() const { return jitCode_; }
 
   ICStub* next() const { return next_; }
   void setNext(ICStub* stub) { next_ = stub; }
@@ -319,10 +327,10 @@ class ICCacheIRStub final : public ICStub {
 
 #ifdef JS_64BIT
 static const size_t fallbackStubSize = 3;
-static const size_t cacheIRStubSize = 4;
+static const size_t cacheIRStubSize = 5;
 #else
 static const size_t fallbackStubSize = 5;
-static const size_t cacheIRStubSize = 6;
+static const size_t cacheIRStubSize = 7;
 #endif
 
 // Assert stub size is what we expect to catch regressions.
