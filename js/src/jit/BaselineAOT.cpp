@@ -63,6 +63,8 @@ static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
   }
 }
 
+// NOTE(Justin): pretty certain we can remove this (and all reloc related
+// output)
 static void emitAsmBytesWithRelocs(
     std::ostream& out, const uint8_t* data, size_t len,
     const Vector<AOTCodeReloc, 0, SystemAllocPolicy>& relocs) {
