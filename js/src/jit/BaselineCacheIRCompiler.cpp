@@ -301,8 +301,8 @@ JitCode* BaselineCacheIRCompiler::compile() {
   Linker linker(masm);
 
 #ifdef ENABLE_JS_AOT_ICS
-  sLastCompileRelocs.clear();
   if (masm.isAOTFill()) {
+    sLastCompileRelocs.clear();
     for (size_t i = 0; i < masm.extendedJumps().length(); i++) {
       auto& rp = masm.extendedJumps()[i];
       uint32_t ptrOff = masm.extendedJumpTableOffset() +
