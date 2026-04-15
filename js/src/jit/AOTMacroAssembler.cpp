@@ -98,6 +98,12 @@ void MacroAssembler::loadZoneForAOT(Register dest) {
 #endif  // ENABLE_AOT_BASELINE
 
 void MacroAssembler::loadRuntime(Register reg) {
+#ifdef ENABLE_JS_AOT_ICS
+  if (isAOTFill()) {
+    emitAOTSlotLoad(AOTSlot::JSRuntimePtr, reg);
+    return;
+  }
+#endif
   movePtr(ImmPtr(runtime()), reg);
 }
 

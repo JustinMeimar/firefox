@@ -15,6 +15,10 @@
 
 #include "jsmath.h"
 
+#include "builtin/DataViewObject.h"
+#include "builtin/MapObject.h"
+#include "builtin/WeakMapObject.h"
+#include "builtin/WeakSetObject.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #include "jit/AliasAnalysis.h"
@@ -66,11 +70,20 @@
 #include "proxy/DeadObjectProxy.h"
 #include "util/Memory.h"
 #include "util/WindowsWrapper.h"
+#include "vm/ArgumentsObject.h"
+#include "vm/ArrayBufferObject.h"
+#include "vm/ArrayObject.h"
+#include "vm/BoundFunctionObject.h"
+#include "vm/DateObject.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/GeneratorObject.h"
 #include "vm/HelperThreads.h"
 #include "vm/Iteration.h"
 #include "vm/JSFunction.h"
+#include "vm/NativeObject.h"
+#include "vm/PlainObject.h"
 #include "vm/Realm.h"
+#include "vm/SharedArrayObject.h"
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
 #endif
@@ -140,6 +153,26 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(Class_PropertyIteratorObject,       &PropertyIteratorObject::class_);
   SET(Class_Function,                     &FunctionClass);
   SET(Class_ExtendedFunction,             &ExtendedFunctionClass);
+  SET(Class_Array,                        &ArrayObject::class_);
+  SET(Class_PlainObject,                  &PlainObject::class_);
+  SET(Class_FixedLengthArrayBuffer,       &FixedLengthArrayBufferObject::class_);
+  SET(Class_ImmutableArrayBuffer,         &ImmutableArrayBufferObject::class_);
+  SET(Class_ResizableArrayBuffer,         &ResizableArrayBufferObject::class_);
+  SET(Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_);
+  SET(Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_);
+  SET(Class_FixedLengthDataView,          &FixedLengthDataViewObject::class_);
+  SET(Class_ImmutableDataView,            &ImmutableDataViewObject::class_);
+  SET(Class_ResizableDataView,            &ResizableDataViewObject::class_);
+  SET(Class_MappedArguments,              &MappedArgumentsObject::class_);
+  SET(Class_UnmappedArguments,            &UnmappedArgumentsObject::class_);
+  SET(Class_WindowProxy,                  rt->maybeWindowProxyClass());
+  SET(Class_BoundFunction,               &BoundFunctionObject::class_);
+  SET(Class_Set,                          &SetObject::class_);
+  SET(Class_Map,                          &MapObject::class_);
+  SET(Class_Date,                         &DateObject::class_);
+  SET(Class_WeakMap,                      &WeakMapObject::class_);
+  SET(Class_WeakSet,                      &WeakSetObject::class_);
+  SET(Class_GeneratorObject,              &GeneratorObject::class_);
   SET(DeadObjectProxySingleton,            &DeadObjectProxy::singleton);
   SET(AtomEmpty,                           static_cast<JSString*>(cx->names().empty_));
   SET(AtomTrue,                            static_cast<JSString*>(cx->names().true_));
@@ -151,6 +184,8 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(StaticStringsLength2Table,           &cx->staticStrings().length2StaticTable);
   SET(StaticStringsIntTable,               &cx->staticStrings().intStaticTable);
   SET(StaticStringsToSmallCharTable,       &StaticStrings::toSmallCharTable.storage);
+  SET(EmptyObjectSlots,                    emptyObjectSlots);
+  SET(EmptyObjectElements,                 emptyObjectElements);
 #undef SET
 
   {

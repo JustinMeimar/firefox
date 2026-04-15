@@ -345,7 +345,6 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
   // with the nursery's end will always fail in such cases.
-  CompileZone* zone = realm()->zone();
   size_t thingSize = gc::Arena::thingSize(allocKind);
   size_t totalSize = thingSize;
   if (nDynamicSlots) {
@@ -356,6 +355,7 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 
   const JS::TraceKind traceKind = JS::TraceKind::Object;
   if (!isAOTFill()) {
+    CompileZone* zone = realm()->zone();
     bumpPointerAllocate(result, temp, fail, zone, traceKind,
                         totalSize, allocSite);
   }
@@ -382,7 +382,6 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 // Inlined version of FreeSpan::allocate. This does not fill in slots_.
 void MacroAssembler::freeListAllocate(Register result, Register temp,
                                       gc::AllocKind allocKind, Label* fail) {
-  CompileZone* zone = realm()->zone();
   int thingSize = int(gc::Arena::thingSize(allocKind));
 
   Label fallback;
@@ -391,6 +390,7 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   // Load the first and last offsets of |zone|'s free list for |allocKind|.
   // If there is no room remaining in the span, fall back to get the next one.
 
+  CompileZone* zone = isAOTFill() ? nullptr : realm()->zone();
   auto loadFreeList =
     [this, zone, allocKind](Register target) {
       if (!isAOTFill()) {
@@ -505,13 +505,29 @@ void MacroAssembler::createPlainGCObject(
   // If the object has dynamic slots, allocateObject will initialize
   // the slots field. If not, we must initialize it now.
   if (numDynamicSlots == 0) {
-    storePtr(ImmPtr(emptyObjectSlots),
-             Address(result, NativeObject::offsetOfSlots()));
+#ifdef ENABLE_JS_AOT_ICS
+    if (isAOTFill()) {
+      emitAOTSlotLoad(AOTSlot::EmptyObjectSlots, temp);
+      storePtr(temp, Address(result, NativeObject::offsetOfSlots()));
+    } else
+#endif
+    {
+      storePtr(ImmPtr(emptyObjectSlots),
+               Address(result, NativeObject::offsetOfSlots()));
+    }
   }
 
   // Initialize elements field.
-  storePtr(ImmPtr(emptyObjectElements),
-           Address(result, NativeObject::offsetOfElements()));
+#ifdef ENABLE_JS_AOT_ICS
+  if (isAOTFill()) {
+    emitAOTSlotLoad(AOTSlot::EmptyObjectElements, temp);
+    storePtr(temp, Address(result, NativeObject::offsetOfElements()));
+  } else
+#endif
+  {
+    storePtr(ImmPtr(emptyObjectElements),
+             Address(result, NativeObject::offsetOfElements()));
+  }
 
   // Initialize fixed slots.
   if (initContents) {
@@ -553,8 +569,16 @@ void MacroAssembler::createArrayWithFixedElements(
   // If the object has dynamic slots, allocateObject will initialize
   // the slots field. If not, we must initialize it now.
   if (numDynamicSlots == 0) {
-    storePtr(ImmPtr(emptyObjectSlots),
-             Address(result, NativeObject::offsetOfSlots()));
+#ifdef ENABLE_JS_AOT_ICS
+    if (isAOTFill()) {
+      emitAOTSlotLoad(AOTSlot::EmptyObjectSlots, temp);
+      storePtr(temp, Address(result, NativeObject::offsetOfSlots()));
+    } else
+#endif
+    {
+      storePtr(ImmPtr(emptyObjectSlots),
+               Address(result, NativeObject::offsetOfSlots()));
+    }
   }
 
   // Initialize elements pointer for fixed (inline) elements.
@@ -599,10 +623,20 @@ void MacroAssembler::createFunctionClone(Register result, Register canonical,
   storePtr(temp, Address(result, JSObject::offsetOfShape()));
 
   // Initialize dynamic slots and elements pointers.
-  storePtr(ImmPtr(emptyObjectSlots),
-           Address(result, NativeObject::offsetOfSlots()));
-  storePtr(ImmPtr(emptyObjectElements),
-           Address(result, NativeObject::offsetOfElements()));
+#ifdef ENABLE_JS_AOT_ICS
+  if (isAOTFill()) {
+    emitAOTSlotLoad(AOTSlot::EmptyObjectSlots, temp);
+    storePtr(temp, Address(result, NativeObject::offsetOfSlots()));
+    emitAOTSlotLoad(AOTSlot::EmptyObjectElements, temp);
+    storePtr(temp, Address(result, NativeObject::offsetOfElements()));
+  } else
+#endif
+  {
+    storePtr(ImmPtr(emptyObjectSlots),
+             Address(result, NativeObject::offsetOfSlots()));
+    storePtr(ImmPtr(emptyObjectElements),
+             Address(result, NativeObject::offsetOfElements()));
+  }
 
   // Initialize FlagsAndArgCountSlot.
   storeValue(Address(canonical, JSFunction::offsetOfFlagsAndArgCount()),
