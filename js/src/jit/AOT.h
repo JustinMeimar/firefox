@@ -97,7 +97,8 @@ namespace js::jit {
   V(StaticStringsIntTable)              \
   V(StaticStringsToSmallCharTable)      \
   V(EmptyObjectSlots)                   \
-  V(EmptyObjectElements)
+  V(EmptyObjectElements)               \
+  V(WrapperFamily)
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;

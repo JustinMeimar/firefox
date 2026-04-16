@@ -863,6 +863,7 @@ void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
 
   if (allocSite.is<gc::CatchAllAllocSite>()) {
     gc::CatchAllAllocSite siteKind = allocSite.as<gc::CatchAllAllocSite>();
+    (void)siteKind;
     MOZ_ASSERT(siteKind == gc::CatchAllAllocSite::Unknown);
 
     // Reload zone for header construction.

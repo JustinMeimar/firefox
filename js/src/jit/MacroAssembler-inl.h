@@ -820,6 +820,16 @@ void MacroAssembler::branchTestProxyHandlerFamily(Condition cond,
   Address handlerAddr(proxy, ProxyObject::offsetOfHandler());
   loadPtr(handlerAddr, scratch);
   Address familyAddr(scratch, BaseProxyHandler::offsetOfFamily());
+
+#ifdef ENABLE_AOT_BASELINE
+  if (MOZ_UNLIKELY(isAOT()) && handlerp == &Wrapper::family) {
+    ScratchRegisterScope temp(*this);
+    emitAOTSlotLoad(AOTSlot::WrapperFamily, temp);
+    branchPtr(cond, familyAddr, temp, label);
+    return;
+  }
+#endif
+
   branchPtr(cond, familyAddr, ImmPtr(handlerp), label);
 }
 

@@ -67,6 +67,7 @@
 #include "jit/x64/Assembler-x64.h"
 #include "js/Printf.h"
 #include "js/UniquePtr.h"
+#include "js/Wrapper.h"
 #include "proxy/DeadObjectProxy.h"
 #include "util/Memory.h"
 #include "util/WindowsWrapper.h"
@@ -186,6 +187,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(StaticStringsToSmallCharTable,       &StaticStrings::toSmallCharTable.storage);
   SET(EmptyObjectSlots,                    emptyObjectSlots);
   SET(EmptyObjectElements,                 emptyObjectElements);
+  SET(WrapperFamily,                       &js::Wrapper::family);
 #undef SET
 
   {
