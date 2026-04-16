@@ -78,6 +78,7 @@
 #include "vm/DateObject.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/GeneratorObject.h"
+#include "vm/GlobalObject.h"
 #include "vm/HelperThreads.h"
 #include "vm/Iteration.h"
 #include "vm/JSFunction.h"
@@ -223,6 +224,31 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   for (auto ty : atomicTypes) { setABI(AtomicsOr(ty)); }
   for (auto ty : atomicTypes) { setABI(AtomicsXor(ty)); }
   MOZ_ASSERT(abiIdx <= kAOTMaxABIFunctions);
+}
+
+void JitRuntime::populateAOTGCSlots(JSContext* cx) {
+  if (!cx->realm()) {
+    return;
+  }
+  GlobalObject* global = cx->global();
+  if (!global) {
+    return;
+  }
+
+  auto SET = [&](AOTSlot slot, JSObject* obj) {
+    aotIndirectionTable_.setGCSlot(slot, obj);
+  };
+
+  SET(AOTSlot::GC_ObjectProto,   &global->getPrototype(JSProto_Object));
+  SET(AOTSlot::GC_ArrayProto,    &global->getPrototype(JSProto_Array));
+  SET(AOTSlot::GC_FunctionProto, &global->getPrototype(JSProto_Function));
+  SET(AOTSlot::GC_StringProto,   &global->getPrototype(JSProto_String));
+  SET(AOTSlot::GC_NumberProto,   &global->getPrototype(JSProto_Number));
+  SET(AOTSlot::GC_BooleanProto,  &global->getPrototype(JSProto_Boolean));
+  SET(AOTSlot::GC_RegExpProto,   &global->getPrototype(JSProto_RegExp));
+  SET(AOTSlot::GC_IteratorProto, &global->getPrototype(JSProto_Iterator));
+  SET(AOTSlot::GC_ObjectCtor,    &global->getConstructor(JSProto_Object));
+  SET(AOTSlot::GC_ArrayCtor,     &global->getConstructor(JSProto_Array));
 }
 
 bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {

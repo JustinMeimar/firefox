@@ -398,6 +398,7 @@ class JitRuntime {
   const AOTIndirectionTable& aotIndirectionTable() const {
     return aotIndirectionTable_;
   }
+  void populateAOTGCSlots(JSContext* cx);
   static size_t offsetOfAOTIndirectionTable() {
     return offsetof(JitRuntime, aotIndirectionTable_);
   }

@@ -11,6 +11,8 @@
 
 #include <cstdint>
 
+#include "gc/Cell.h"
+#include "gc/Tracer.h"
 #include "gc/Zone.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/JitCode.h"
@@ -19,6 +21,7 @@
 #include "jit/JitZone.h"
 #include "jit/ProcessExecutableMemory.h"
 #include "vm/JSContext.h"
+#include "vm/JSObject.h"
 
 namespace js::jit {
 
@@ -98,6 +101,7 @@ JitCode* AllocateStaticAOTCode(JSContext* cx,
 }
 
 mozilla::Maybe<AOTSlot> AOTIndirectionTable::findSlot(uintptr_t value) const {
+  if (value == 0) return mozilla::Nothing();
   for (uint32_t i = 0; i < uint32_t(AOTSlot::Count); i++) {
     if (slots_[i] == value) {
       return mozilla::Some(AOTSlot(i));
@@ -122,6 +126,28 @@ AOTSlot AOTIndirectionTable::findSlotOrCrash(uintptr_t value) const {
     MOZ_CRASH("No AOT slot for pointer");
   }
   return *slot;
+}
+
+void AOTIndirectionTable::traceGCSlots(JSTracer* trc) {
+  for (uint32_t i = uint32_t(AOTSlot::GCSlot_Begin) + 1;
+       i < uint32_t(AOTSlot::GCSlot_End); i++) {
+    if (slots_[i]) {
+      TraceManuallyBarrieredEdge(
+          trc, reinterpret_cast<JSObject**>(&slots_[i]), "aot-gc-slot");
+    }
+  }
+}
+
+void AOTIndirectionTable::setGCSlot(AOTSlot slot, JSObject* obj) {
+  MOZ_ASSERT(uint32_t(slot) > uint32_t(AOTSlot::GCSlot_Begin));
+  MOZ_ASSERT(uint32_t(slot) < uint32_t(AOTSlot::GCSlot_End));
+
+  uint32_t idx = uint32_t(slot);
+  JSObject* old = reinterpret_cast<JSObject*>(slots_[idx]);
+  if (old) {
+    gc::PreWriteBarrier(old);
+  }
+  slots_[idx] = uintptr_t(obj);
 }
 
 }  // namespace js::jit

@@ -1112,7 +1112,21 @@ void BaselineCodeGen<Handler>::pushScriptArg() {
 
 template <>
 void BaselineCompilerCodeGen::pushBytecodePCArg() {
-  pushArg(ImmPtr(handler.pc()));
+  if (handler.realmIndependentJitcode()) {
+    uint32_t pcOffset = handler.script()->pcToOffset(handler.pc());
+    ScratchRegisterScope scratch(masm);
+    loadScript(scratch);
+    masm.loadPtr(Address(scratch, JSScript::offsetOfSharedData()), scratch);
+    masm.loadPtr(Address(scratch, SharedImmutableScriptData::offsetOfISD()),
+                 scratch);
+    masm.computeEffectiveAddress(
+        Address(scratch,
+                int32_t(ImmutableScriptData::offsetOfCode() + pcOffset)),
+        scratch);
+    pushArg(scratch);
+  } else {
+    pushArg(ImmPtr(handler.pc()));
+  }
 }
 
 template <>

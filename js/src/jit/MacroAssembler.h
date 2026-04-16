@@ -6013,6 +6013,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   using MacroAssemblerSpecific::movePtr;
   void movePtr(ImmPtr imm, Register dest);
+  void movePtr(ImmGCPtr imm, Register dest);
 
   using MacroAssemblerSpecific::storePtr;
   void storePtr(ImmPtr imm, const Address& address);

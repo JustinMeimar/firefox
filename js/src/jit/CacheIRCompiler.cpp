@@ -352,11 +352,6 @@ Register CacheRegisterAllocator::useRegister(MacroAssembler& masm,
     case OperandLocation::Constant: {
       Value v = loc.constant();
       Register reg = allocateRegister(masm);
-#ifdef ENABLE_AOT_BASELINE
-      if (masm.isAOT()) {
-        MOZ_CRASH("ImmGCPtr constant operand in AOT IC stub — needs indirection slot");
-      }
-#endif
       if (v.isString()) {
         masm.movePtr(ImmGCPtr(v.toString()), reg);
       } else if (v.isSymbol()) {

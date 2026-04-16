@@ -104,21 +104,43 @@ namespace js::jit {
   V(StaticStringsIntTable)                \
   V(StaticStringsToSmallCharTable)
 
+#define AOT_GC_SLOTS(V)                     \
+  V(GC_ObjectProto)                        \
+  V(GC_ArrayProto)                         \
+  V(GC_FunctionProto)                      \
+  V(GC_StringProto)                        \
+  V(GC_NumberProto)                        \
+  V(GC_BooleanProto)                       \
+  V(GC_RegExpProto)                        \
+  V(GC_IteratorProto)                      \
+  V(GC_ObjectCtor)                         \
+  V(GC_ArrayCtor)
+
 #define AOT_CORE_SLOTS(V)  \
   AOT_RUNTIME_SLOTS(V)     \
   AOT_PREBARRIER_SLOTS(V)  \
   AOT_CLASS_SLOTS(V)       \
   AOT_ATOM_SLOTS(V)        \
-  AOT_STATIC_DATA_SLOTS(V)
+  AOT_STATIC_DATA_SLOTS(V) \
+  AOT_GC_SLOTS(V)
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 
 enum class AOTSlot : uint32_t {
 #define EMIT_SLOT(name) name,
-  AOT_CORE_SLOTS(EMIT_SLOT)
+  AOT_RUNTIME_SLOTS(EMIT_SLOT)
+  AOT_PREBARRIER_SLOTS(EMIT_SLOT)
+  AOT_CLASS_SLOTS(EMIT_SLOT)
+  AOT_ATOM_SLOTS(EMIT_SLOT)
+  AOT_STATIC_DATA_SLOTS(EMIT_SLOT)
+  GCSlot_Begin,
+#define EMIT_GC_SLOT(name) name,
+  AOT_GC_SLOTS(EMIT_GC_SLOT)
+#undef EMIT_GC_SLOT
+  GCSlot_End,
 #undef EMIT_SLOT
-  VMWrapper_Begin,
+  VMWrapper_Begin = GCSlot_End,
   VMWrapper_End = VMWrapper_Begin + kAOTMaxVMWrappers,
   ABIFn_Begin = VMWrapper_End,
   ABIFn_End = ABIFn_Begin + kAOTMaxABIFunctions,
@@ -138,7 +160,12 @@ inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
 inline const char* AOTSlotName(AOTSlot slot) {
   switch (slot) {
 #define EMIT_CASE(name) case AOTSlot::name: return #name;
-    AOT_CORE_SLOTS(EMIT_CASE)
+    AOT_RUNTIME_SLOTS(EMIT_CASE)
+    AOT_PREBARRIER_SLOTS(EMIT_CASE)
+    AOT_CLASS_SLOTS(EMIT_CASE)
+    AOT_ATOM_SLOTS(EMIT_CASE)
+    AOT_STATIC_DATA_SLOTS(EMIT_CASE)
+    AOT_GC_SLOTS(EMIT_CASE)
 #undef EMIT_CASE
     default:
       break;
@@ -305,6 +332,9 @@ class AOTIndirectionTable {
   mozilla::Maybe<AOTSlot> findSlot(uintptr_t value) const;
   AOTSlot findSlotOrCrash(uintptr_t value) const;
   void dump() const;
+
+  void traceGCSlots(JSTracer* trc);
+  void setGCSlot(AOTSlot slot, JSObject* obj);
 
   uintptr_t* baseAddress() { return slots_; }
   const uintptr_t* baseAddress() const { return slots_; }
