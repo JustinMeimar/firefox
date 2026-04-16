@@ -11,7 +11,6 @@
 #include "mozilla/TimeStamp.h"
 
 #include <cstdint>
-#include <dlfcn.h>
 #include <fstream>
 #include <iomanip>
 #include <string>
@@ -60,38 +59,6 @@ static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
           << (unsigned)data[j];
     }
     out << std::dec << "\n";
-  }
-}
-
-// NOTE(Justin): pretty certain we can remove this (and all reloc related
-// output)
-static void emitAsmBytesWithRelocs(
-    std::ostream& out, const uint8_t* data, size_t len,
-    const Vector<AOTCodeReloc, 0, SystemAllocPolicy>& relocs) {
-  size_t cursor = 0;
-  for (const auto& reloc : relocs) {
-    MOZ_ASSERT(reloc.offset + 8 <= len);
-    if (reloc.offset > cursor) {
-      emitAsmBytes(out, data + cursor, reloc.offset - cursor);
-    }
-    Dl_info info;
-    if (dladdr(reloc.target, &info) && info.dli_sname) {
-      out << "    .quad " << info.dli_sname << "\n";
-    } else {
-      Dl_info info2;
-      dladdr(reloc.target, &info2);
-      fprintf(stderr,
-              "[AOT] dladdr: no symbol for target=%p offset=%u "
-              "fname=%s fbase=%p\n",
-              reloc.target, reloc.offset,
-              info2.dli_fname ? info2.dli_fname : "(null)",
-              info2.dli_fbase);
-      emitAsmBytes(out, data + reloc.offset, 8);
-    }
-    cursor = reloc.offset + 8;
-  }
-  if (cursor < len) {
-    emitAsmBytes(out, data + cursor, len - cursor);
   }
 }
 
@@ -186,12 +153,7 @@ static bool writeAOTContainer(std::ostream& out,
     out << "// --- Code blob " << i << " " << label << " ---\n";
     out << "bl_aot_" << label << "_code:\n";
     if (blob.code.length() > 0) {
-      if (blob.codeRelocs.length() > 0) {
-        emitAsmBytesWithRelocs(out, blob.code.begin(), blob.code.length(),
-                               blob.codeRelocs);
-      } else {
-        emitAsmBytes(out, blob.code.begin(), blob.code.length());
-      }
+      emitAsmBytes(out, blob.code.begin(), blob.code.length());
     }
   }
 
@@ -315,40 +277,37 @@ bool BuildAndSaveInterpBlob(JitCode* code, const AOTInterpManifest& scalars,
 // Self-hosted function AOT compilation
 // ---------------------------------------------------------------------------
 
-static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
+static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
                                  AOTBlobData* blobOut) {
-  JSAtom* atom = AtomizeUTF8Chars(cx, funcName, strlen(funcName));
-  if (!atom) {
-    JitSpew(JitSpew_BaselineAOT, "Failed to atomize '%s'", funcName);
-    return false;
-  }
-
   Rooted<PropertyName*> name(cx, atom->asPropertyName());
   auto indexRange = cx->runtime()->getSelfHostedScriptIndexRange(name);
   if (!indexRange) {
-    JitSpew(JitSpew_BaselineAOT, "Self-hosted function '%s' not found",
-            funcName);
     return false;
   }
   AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
+
+  UniqueChars nameStr = AtomToPrintableString(cx, atom);
+  if (!nameStr) {
+    return false;
+  }
 
   RootedFunction fun(
       cx, cx->runtime()->selfHostStencil().instantiateSelfHostedLazyFunction(
               cx, cx->runtime()->selfHostStencilInput().atomCache,
               indexRange->start, name));
   if (!fun) {
-    JitSpew(JitSpew_BaselineAOT,
-            "Failed to instantiate self-hosted function '%s'", funcName);
     return false;
   }
   if (!cx->runtime()->delazifySelfHostedFunction(cx, name, fun)) {
-    JitSpew(JitSpew_BaselineAOT, "Failed to delazify self-hosted function '%s'",
-            funcName);
     return false;
   }
 
   Rooted<JSScript*> script(cx, fun->nonLazyScript());
   MOZ_ASSERT(script);
+
+  if (!CanBaselineInterpretScript(script)) {
+    return false;
+  }
 
   if (!cx->zone()->ensureJitZoneExists(cx)) {
     return false;
@@ -363,9 +322,6 @@ static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
   BaselineOptions options({BaselineOption::ForceMainThreadCompilation});
   MethodStatus result = BaselineCompile(cx, script, options, &aotCtx);
   if (result != Method_Compiled) {
-    JitSpew(JitSpew_BaselineAOT,
-            "Failed to baseline-compile self-hosted function '%s' (status=%d)",
-            funcName, (int)result);
     return false;
   }
   MOZ_ASSERT(script->hasBaselineScript());
@@ -378,8 +334,8 @@ static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
   sm.codeSize = jitCode->instructionsSize();
   sm.headerSize = jitCode->headerSize();
   blobOut->dirEntry.kind = AOTBlobKind::SelfHostedFunction;
-  blobOut->dirEntry.nameHash = mozilla::HashString(funcName);
-  blobOut->name = funcName;
+  blobOut->dirEntry.nameHash = mozilla::HashString(nameStr.get());
+  blobOut->name = nameStr.get();
 
   if (!AOTBlobData::appendBytes(blobOut->code, jitCode->raw(),
                                 jitCode->instructionsSize())) {
@@ -389,24 +345,13 @@ static bool compileAOTSelfHosted(JSContext* cx, const char* funcName,
     return false;
   }
 
-  char padded[32];
-  SprintfLiteral(padded, "'%s'", funcName);
   JitSpew(JitSpew_BaselineAOT,
-          "AOT Compiled %-24s size=%5ub  callSites=%3u  osr=%u",
-          padded, sm.codeSize, sm.retAddrEntryCount,
+          "AOT Compiled '%-22s' size=%5ub  callSites=%3u  osr=%u",
+          nameStr.get(), sm.codeSize, sm.retAddrEntryCount,
           sm.osrEntryCount);
 
   return true;
 }
-
-static const char* const kAOTSelfHostedFunctions[] = {
-    "ArrayIteratorNext",  "ArrayMap",         "ArrayFilter",
-    "ArrayReduce",        "ArrayForEach",     "ArrayEvery",
-    "ArraySome",          "ArrayFind",        "ArrayFindIndex",
-    "StringIteratorNext", "MapForEach",       "MapIteratorNext",
-    "SetForEach",         "SetIteratorNext",  "TypedArrayForEach",
-    "TypedArrayMap",      "TypedArrayFilter", "Promise_finally",
-};
 
 bool DumpAOTContainer(JSContext* cx) {
   MOZ_ASSERT(JitOptions.dumpBaselineInterp ||
@@ -428,18 +373,23 @@ bool DumpAOTContainer(JSContext* cx) {
   }
 
   if (JitOptions.dumpBaselineSelfHosted) {
-    for (const char* funcName : kAOTSelfHostedFunctions) {
+    uint32_t compiled = 0;
+    uint32_t skipped = 0;
+    for (auto iter = cx->runtime()->selfHostScriptMap.ref().iter();
+         !iter.done(); iter.next()) {
+      Rooted<JSAtom*> atom(cx, iter.get().key());
       AOTBlobData blob;
-      if (!compileAOTSelfHosted(cx, funcName, &blob)) {
-        JitSpew(JitSpew_BaselineAOT,
-                "WARNING: Failed to compile AOT self-hosted '%s', skipping",
-                funcName);
+      if (!compileAOTSelfHosted(cx, atom, &blob)) {
+        skipped++;
         continue;
       }
+      compiled++;
       if (!funcBlobs.append(std::move(blob))) {
         return false;
       }
     }
+    JitSpew(JitSpew_BaselineAOT,
+            "Self-hosted AOT: compiled %u, skipped %u", compiled, skipped);
     for (const auto& blob : funcBlobs) {
       if (!blobPtrs.append(&blob)) {
         return false;

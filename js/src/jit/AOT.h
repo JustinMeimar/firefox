@@ -34,72 +34,82 @@ namespace js::jit {
 // AOTSlot enumerates every runtime address that AOT code needs.
 // Each slot holds a single uintptr_t in the AOTIndirectionTable.
 
-// Note(Justin): Move manual CppFn's into the pre-allocated table.
-#define AOT_CORE_SLOTS(V)               \
-  V(JSRuntimePtr)                       \
-  V(JSContextPtr)                       \
-  V(InterruptBits)                      \
-  V(JitActivation)                      \
-  V(ContextRealm)                       \
-  V(WellKnownSymbols)                   \
-  V(JitRuntime)                         \
-  V(LastBufferedCell)                    \
-  V(ProfilerEnabled)                    \
-  V(ProfilerExitFrameTail)              \
-  V(DoubleToInt32Stub)                  \
-  V(MegamorphicCache)                   \
-  V(MegamorphicSetPropCache)            \
-  V(StringToAtomCache)                  \
-  V(ExceptionTail)                      \
-  V(DebugTrapInterpreter)               \
-  V(DebugTrapCompiler)                  \
-  V(CppFn_PostWriteBarrier)             \
-  V(CppFn_FrameIsDebuggeeCheck)         \
-  V(CppFn_HandleCodeCoverageAtPrologue) \
-  V(CppFn_HandleCodeCoverageAtPC)       \
-  V(PreBarrier_Value)                   \
-  V(PreBarrier_String)                  \
-  V(PreBarrier_Object)                  \
-  V(PreBarrier_Shape)                   \
-  V(PreBarrier_WasmAnyRef)              \
-  V(Class_WithEnvironmentObject)        \
-  V(Class_PropertyIteratorObject)       \
-  V(Class_Function)                     \
-  V(Class_ExtendedFunction)             \
-  V(Class_Array)                         \
-  V(Class_PlainObject)                   \
-  V(Class_FixedLengthArrayBuffer)        \
-  V(Class_ImmutableArrayBuffer)          \
-  V(Class_ResizableArrayBuffer)          \
-  V(Class_FixedLengthSharedArrayBuffer)  \
-  V(Class_GrowableSharedArrayBuffer)     \
-  V(Class_FixedLengthDataView)           \
-  V(Class_ImmutableDataView)             \
-  V(Class_ResizableDataView)             \
-  V(Class_MappedArguments)               \
-  V(Class_UnmappedArguments)             \
-  V(Class_WindowProxy)                   \
-  V(Class_BoundFunction)                 \
-  V(Class_Set)                           \
-  V(Class_Map)                           \
-  V(Class_Date)                          \
-  V(Class_WeakMap)                       \
-  V(Class_WeakSet)                       \
-  V(Class_GeneratorObject)               \
-  V(DeadObjectProxySingleton)           \
-  V(AtomEmpty)                          \
-  V(AtomTrue)                           \
-  V(AtomFalse)                          \
-  V(AtomFunction)                       \
-  V(AtomUndefined)                      \
-  V(AtomObject)                         \
-  V(StaticStringsUnitTable)             \
-  V(StaticStringsLength2Table)          \
-  V(StaticStringsIntTable)              \
-  V(StaticStringsToSmallCharTable)      \
-  V(EmptyObjectSlots)                   \
-  V(EmptyObjectElements)               \
-  V(WrapperFamily)
+#define AOT_RUNTIME_SLOTS(V)                \
+  V(JSRuntimePtr)                         \
+  V(JSContextPtr)                         \
+  V(InterruptBits)                        \
+  V(JitActivation)                        \
+  V(ContextRealm)                         \
+  V(WellKnownSymbols)                     \
+  V(JitRuntime)                           \
+  V(LastBufferedCell)                      \
+  V(ProfilerEnabled)                      \
+  V(ProfilerExitFrameTail)                \
+  V(DoubleToInt32Stub)                    \
+  V(MegamorphicCache)                     \
+  V(MegamorphicSetPropCache)              \
+  V(StringToAtomCache)                    \
+  V(ExceptionTail)                        \
+  V(DebugTrapInterpreter)                 \
+  V(DebugTrapCompiler)
+
+#define AOT_PREBARRIER_SLOTS(V)             \
+  V(PreBarrier_Value)                     \
+  V(PreBarrier_String)                    \
+  V(PreBarrier_Object)                    \
+  V(PreBarrier_Shape)                     \
+  V(PreBarrier_WasmAnyRef)
+
+#define AOT_CLASS_SLOTS(V)                  \
+  V(Class_WithEnvironmentObject)          \
+  V(Class_PropertyIteratorObject)         \
+  V(Class_Function)                       \
+  V(Class_ExtendedFunction)               \
+  V(Class_Array)                          \
+  V(Class_PlainObject)                    \
+  V(Class_FixedLengthArrayBuffer)         \
+  V(Class_ImmutableArrayBuffer)           \
+  V(Class_ResizableArrayBuffer)           \
+  V(Class_FixedLengthSharedArrayBuffer)   \
+  V(Class_GrowableSharedArrayBuffer)      \
+  V(Class_FixedLengthDataView)            \
+  V(Class_ImmutableDataView)              \
+  V(Class_ResizableDataView)              \
+  V(Class_MappedArguments)                \
+  V(Class_UnmappedArguments)              \
+  V(Class_WindowProxy)                    \
+  V(Class_BoundFunction)                  \
+  V(Class_Set)                            \
+  V(Class_Map)                            \
+  V(Class_Date)                           \
+  V(Class_WeakMap)                        \
+  V(Class_WeakSet)                        \
+  V(Class_GeneratorObject)
+
+#define AOT_ATOM_SLOTS(V)                   \
+  V(AtomEmpty)                            \
+  V(AtomTrue)                             \
+  V(AtomFalse)                            \
+  V(AtomFunction)                         \
+  V(AtomUndefined)                        \
+  V(AtomObject)
+
+#define AOT_STATIC_DATA_SLOTS(V)            \
+  V(DeadObjectProxySingleton)             \
+  V(WrapperFamily)                        \
+  V(EmptyObjectSlots)                     \
+  V(EmptyObjectElements)                  \
+  V(StaticStringsUnitTable)               \
+  V(StaticStringsLength2Table)            \
+  V(StaticStringsIntTable)                \
+  V(StaticStringsToSmallCharTable)
+
+#define AOT_CORE_SLOTS(V)  \
+  AOT_RUNTIME_SLOTS(V)     \
+  AOT_PREBARRIER_SLOTS(V)  \
+  AOT_CLASS_SLOTS(V)       \
+  AOT_ATOM_SLOTS(V)        \
+  AOT_STATIC_DATA_SLOTS(V)
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;

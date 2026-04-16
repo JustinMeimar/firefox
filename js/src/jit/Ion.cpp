@@ -130,103 +130,99 @@ JitRuntime::~JitRuntime() {
 
 void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   JSRuntime* rt = cx->runtime();
-#define SET(slot, val) aotIndirectionTable_.set(AOTSlot::slot, uintptr_t(val))
-  SET(JSRuntimePtr,             rt);
-  SET(JSContextPtr,             cx);
-  SET(InterruptBits,            cx->addressOfInterruptBits());
-  SET(JitActivation,            cx->addressOfJitActivation());
-  SET(ContextRealm,             reinterpret_cast<uint8_t*>(cx) + JSContext::offsetOfRealm());
-  SET(WellKnownSymbols,         rt->wellKnownSymbols.ref());
-  SET(JitRuntime,               this);
-  SET(LastBufferedCell,         rt->gc.addressOfLastBufferedWholeCell());
-  SET(ProfilerEnabled,          rt->geckoProfiler().addressOfEnabled());
-  SET(MegamorphicCache,         &rt->caches().megamorphicCache);
-  SET(MegamorphicSetPropCache,  rt->caches().megamorphicSetPropCache.get());
-  SET(StringToAtomCache,        &rt->caches().stringToAtomCache);
-  // NOTE(Justin): Cpp functions and JSClass ptrs are link time symbols.
-  // A hybrid symbolization scheme could enable these to be resolved by
-  // the linker during the bootstrap. 
-  SET(CppFn_PostWriteBarrier,             PostWriteBarrier);
-  SET(CppFn_FrameIsDebuggeeCheck,         FrameIsDebuggeeCheck);
-  SET(CppFn_HandleCodeCoverageAtPrologue, HandleCodeCoverageAtPrologue);
-  SET(CppFn_HandleCodeCoverageAtPC,       HandleCodeCoverageAtPC);
-  SET(Class_WithEnvironmentObject,        &WithEnvironmentObject::class_);
-  SET(Class_PropertyIteratorObject,       &PropertyIteratorObject::class_);
-  SET(Class_Function,                     &FunctionClass);
-  SET(Class_ExtendedFunction,             &ExtendedFunctionClass);
-  SET(Class_Array,                        &ArrayObject::class_);
-  SET(Class_PlainObject,                  &PlainObject::class_);
-  SET(Class_FixedLengthArrayBuffer,       &FixedLengthArrayBufferObject::class_);
-  SET(Class_ImmutableArrayBuffer,         &ImmutableArrayBufferObject::class_);
-  SET(Class_ResizableArrayBuffer,         &ResizableArrayBufferObject::class_);
-  SET(Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_);
-  SET(Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_);
-  SET(Class_FixedLengthDataView,          &FixedLengthDataViewObject::class_);
-  SET(Class_ImmutableDataView,            &ImmutableDataViewObject::class_);
-  SET(Class_ResizableDataView,            &ResizableDataViewObject::class_);
-  SET(Class_MappedArguments,              &MappedArgumentsObject::class_);
-  SET(Class_UnmappedArguments,            &UnmappedArgumentsObject::class_);
-  SET(Class_WindowProxy,                  rt->maybeWindowProxyClass());
-  SET(Class_BoundFunction,               &BoundFunctionObject::class_);
-  SET(Class_Set,                          &SetObject::class_);
-  SET(Class_Map,                          &MapObject::class_);
-  SET(Class_Date,                         &DateObject::class_);
-  SET(Class_WeakMap,                      &WeakMapObject::class_);
-  SET(Class_WeakSet,                      &WeakSetObject::class_);
-  SET(Class_GeneratorObject,              &GeneratorObject::class_);
-  SET(DeadObjectProxySingleton,            &DeadObjectProxy::singleton);
-  SET(AtomEmpty,                           static_cast<JSString*>(cx->names().empty_));
-  SET(AtomTrue,                            static_cast<JSString*>(cx->names().true_));
-  SET(AtomFalse,                           static_cast<JSString*>(cx->names().false_));
-  SET(AtomFunction,                        static_cast<JSString*>(cx->names().function));
-  SET(AtomUndefined,                       static_cast<JSString*>(cx->names().undefined));
-  SET(AtomObject,                          static_cast<JSString*>(cx->names().object));
-  SET(StaticStringsUnitTable,              &cx->staticStrings().unitStaticTable);
-  SET(StaticStringsLength2Table,           &cx->staticStrings().length2StaticTable);
-  SET(StaticStringsIntTable,               &cx->staticStrings().intStaticTable);
-  SET(StaticStringsToSmallCharTable,       &StaticStrings::toSmallCharTable.storage);
-  SET(EmptyObjectSlots,                    emptyObjectSlots);
-  SET(EmptyObjectElements,                 emptyObjectElements);
-  SET(WrapperFamily,                       &js::Wrapper::family);
-#undef SET
 
-  {
-    uint32_t idx = 0;
-#define SET_ABI_FN(fp) \
-    aotIndirectionTable_.set( \
-        AOTSlotForABIFn(idx++), \
+  auto SET = [&](AOTSlot slot, auto val) {
+    aotIndirectionTable_.set(slot, uintptr_t(val));
+  };
+
+  // --- Runtime / context pointers (per-process, change each run) ---
+  SET(AOTSlot::JSRuntimePtr,        rt);
+  SET(AOTSlot::JSContextPtr,        cx);
+  SET(AOTSlot::InterruptBits,       cx->addressOfInterruptBits());
+  SET(AOTSlot::JitActivation,       cx->addressOfJitActivation());
+  SET(AOTSlot::ContextRealm,        reinterpret_cast<uint8_t*>(cx) + JSContext::offsetOfRealm());
+  SET(AOTSlot::WellKnownSymbols,    rt->wellKnownSymbols.ref());
+  SET(AOTSlot::JitRuntime,          this);
+  SET(AOTSlot::LastBufferedCell,    rt->gc.addressOfLastBufferedWholeCell());
+  SET(AOTSlot::ProfilerEnabled,     rt->geckoProfiler().addressOfEnabled());
+  SET(AOTSlot::MegamorphicCache,    &rt->caches().megamorphicCache);
+  SET(AOTSlot::MegamorphicSetPropCache, rt->caches().megamorphicSetPropCache.get());
+  SET(AOTSlot::StringToAtomCache,   &rt->caches().stringToAtomCache);
+
+  // --- JSClass pointers (link-time constants) ---
+  SET(AOTSlot::Class_WithEnvironmentObject,        &WithEnvironmentObject::class_);
+  SET(AOTSlot::Class_PropertyIteratorObject,       &PropertyIteratorObject::class_);
+  SET(AOTSlot::Class_Function,                     &FunctionClass);
+  SET(AOTSlot::Class_ExtendedFunction,             &ExtendedFunctionClass);
+  SET(AOTSlot::Class_Array,                        &ArrayObject::class_);
+  SET(AOTSlot::Class_PlainObject,                  &PlainObject::class_);
+  SET(AOTSlot::Class_FixedLengthArrayBuffer,       &FixedLengthArrayBufferObject::class_);
+  SET(AOTSlot::Class_ImmutableArrayBuffer,         &ImmutableArrayBufferObject::class_);
+  SET(AOTSlot::Class_ResizableArrayBuffer,         &ResizableArrayBufferObject::class_);
+  SET(AOTSlot::Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_);
+  SET(AOTSlot::Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_);
+  SET(AOTSlot::Class_FixedLengthDataView,          &FixedLengthDataViewObject::class_);
+  SET(AOTSlot::Class_ImmutableDataView,            &ImmutableDataViewObject::class_);
+  SET(AOTSlot::Class_ResizableDataView,            &ResizableDataViewObject::class_);
+  SET(AOTSlot::Class_MappedArguments,              &MappedArgumentsObject::class_);
+  SET(AOTSlot::Class_UnmappedArguments,            &UnmappedArgumentsObject::class_);
+  SET(AOTSlot::Class_WindowProxy,                  rt->maybeWindowProxyClass());
+  SET(AOTSlot::Class_BoundFunction,                &BoundFunctionObject::class_);
+  SET(AOTSlot::Class_Set,                          &SetObject::class_);
+  SET(AOTSlot::Class_Map,                          &MapObject::class_);
+  SET(AOTSlot::Class_Date,                         &DateObject::class_);
+  SET(AOTSlot::Class_WeakMap,                      &WeakMapObject::class_);
+  SET(AOTSlot::Class_WeakSet,                      &WeakSetObject::class_);
+  SET(AOTSlot::Class_GeneratorObject,              &GeneratorObject::class_);
+
+  // --- Well-known atoms (GC pointers, stable within a runtime) ---
+  SET(AOTSlot::AtomEmpty,       static_cast<JSString*>(cx->names().empty_));
+  SET(AOTSlot::AtomTrue,        static_cast<JSString*>(cx->names().true_));
+  SET(AOTSlot::AtomFalse,       static_cast<JSString*>(cx->names().false_));
+  SET(AOTSlot::AtomFunction,    static_cast<JSString*>(cx->names().function));
+  SET(AOTSlot::AtomUndefined,   static_cast<JSString*>(cx->names().undefined));
+  SET(AOTSlot::AtomObject,      static_cast<JSString*>(cx->names().object));
+
+  // --- Static data (link-time constants, singletons, sentinel values) ---
+  SET(AOTSlot::DeadObjectProxySingleton,   &DeadObjectProxy::singleton);
+  SET(AOTSlot::WrapperFamily,              &js::Wrapper::family);
+  SET(AOTSlot::EmptyObjectSlots,           emptyObjectSlots);
+  SET(AOTSlot::EmptyObjectElements,        emptyObjectElements);
+  SET(AOTSlot::StaticStringsUnitTable,     &cx->staticStrings().unitStaticTable);
+  SET(AOTSlot::StaticStringsLength2Table,  &cx->staticStrings().length2StaticTable);
+  SET(AOTSlot::StaticStringsIntTable,      &cx->staticStrings().intStaticTable);
+  SET(AOTSlot::StaticStringsToSmallCharTable, &StaticStrings::toSmallCharTable.storage);
+
+  // --- ABI functions (computed from ABIFUNCTION_LIST) ---
+  uint32_t abiIdx = 0;
+  auto setABI = [&](auto fp) {
+    aotIndirectionTable_.set(
+        AOTSlotForABIFn(abiIdx++),
         uintptr_t(JS_FUNC_TO_DATA_PTR(void*, fp)));
-    ABIFUNCTION_LIST(SET_ABI_FN)
-#undef SET_ABI_FN
-#define SET_ABI_FN_TYPED(fp, ...) \
-    aotIndirectionTable_.set( \
-        AOTSlotForABIFn(idx++), \
-        uintptr_t(JS_FUNC_TO_DATA_PTR(void*, static_cast<__VA_ARGS__>(fp))));
-    ABIFUNCTION_AND_TYPE_LIST(SET_ABI_FN_TYPED)
-#undef SET_ABI_FN_TYPED
+  };
 
-#define SET_DYN(fp) \
-    aotIndirectionTable_.set( \
-        AOTSlotForABIFn(idx++), \
-        uintptr_t(JS_FUNC_TO_DATA_PTR(void*, fp)));
-    for (uint8_t i = uint8_t(UnaryMathFunction::SinNative);
-         i <= uint8_t(UnaryMathFunction::Round); i++) {
-      SET_DYN(GetUnaryMathFunctionPtr(UnaryMathFunction(i)))
-    }
-    constexpr Scalar::Type atomicTypes[] = {
-        Scalar::Int8, Scalar::Uint8, Scalar::Int16,
-        Scalar::Uint16, Scalar::Int32, Scalar::Uint32};
-    for (auto ty : atomicTypes) { SET_DYN(AtomicsCompareExchange(ty)) }
-    for (auto ty : atomicTypes) { SET_DYN(AtomicsExchange(ty)) }
-    for (auto ty : atomicTypes) { SET_DYN(AtomicsAdd(ty)) }
-    for (auto ty : atomicTypes) { SET_DYN(AtomicsSub(ty)) }
-    for (auto ty : atomicTypes) { SET_DYN(AtomicsAnd(ty)) }
-    for (auto ty : atomicTypes) { SET_DYN(AtomicsOr(ty)) }
-    for (auto ty : atomicTypes) { SET_DYN(AtomicsXor(ty)) }
-#undef SET_DYN
+#define EMIT_ABI(fp) setABI(fp);
+  ABIFUNCTION_LIST(EMIT_ABI)
+#undef EMIT_ABI
+#define EMIT_ABI_TYPED(fp, ...) setABI(static_cast<__VA_ARGS__>(fp));
+  ABIFUNCTION_AND_TYPE_LIST(EMIT_ABI_TYPED)
+#undef EMIT_ABI_TYPED
 
-    MOZ_ASSERT(idx <= kAOTMaxABIFunctions);
+  for (uint8_t i = uint8_t(UnaryMathFunction::SinNative);
+       i <= uint8_t(UnaryMathFunction::Round); i++) {
+    setABI(GetUnaryMathFunctionPtr(UnaryMathFunction(i)));
   }
+  constexpr Scalar::Type atomicTypes[] = {
+      Scalar::Int8, Scalar::Uint8, Scalar::Int16,
+      Scalar::Uint16, Scalar::Int32, Scalar::Uint32};
+  for (auto ty : atomicTypes) { setABI(AtomicsCompareExchange(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsExchange(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsAdd(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsSub(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsAnd(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsOr(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsXor(ty)); }
+  MOZ_ASSERT(abiIdx <= kAOTMaxABIFunctions);
 }
 
 bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {
