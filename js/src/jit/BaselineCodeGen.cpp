@@ -1088,8 +1088,16 @@ void BaselineCodeGen<Handler>::pushGlobalLexicalEnvironmentValue(
 
 template <>
 void BaselineCompilerCodeGen::loadGlobalThisValue(ValueOperand dest) {
-  JSObject* thisObj = handler.globalThis();
-  masm.moveValue(ObjectValue(*thisObj), dest);
+  if (handler.realmIndependentJitcode()) {
+    Register scratch = dest.scratchReg();
+    loadGlobalLexicalEnvironment(scratch);
+    static constexpr size_t SlotOffset =
+        GlobalLexicalEnvironmentObject::offsetOfThisValueSlot();
+    masm.loadValue(Address(scratch, SlotOffset), dest);
+  } else {
+    JSObject* thisObj = handler.globalThis();
+    masm.moveValue(ObjectValue(*thisObj), dest);
+  }
 }
 
 template <>
@@ -2843,8 +2851,18 @@ bool BaselineCodeGen<Handler>::emit_String() {
 template <>
 bool BaselineCompilerCodeGen::emit_Symbol() {
   unsigned which = GET_UINT8(handler.pc());
-  JS::Symbol* sym = runtime->wellKnownSymbols().get(which);
-  frame.push(SymbolValue(sym));
+  if (handler.realmIndependentJitcode()) {
+    frame.syncStack(0);
+    Register scratch1 = R0.scratchReg();
+    Register scratch2 = R1.scratchReg();
+    masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
+    masm.loadPtr(Address(scratch2, which * sizeof(JS::Symbol*)), scratch1);
+    masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
+    frame.push(R0);
+  } else {
+    JS::Symbol* sym = runtime->wellKnownSymbols().get(which);
+    frame.push(SymbolValue(sym));
+  }
   return true;
 }
 

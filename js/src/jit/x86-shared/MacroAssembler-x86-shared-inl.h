@@ -614,6 +614,10 @@ void MacroAssembler::branchPtr(Condition cond, Register lhs, ImmPtr rhs,
 
 void MacroAssembler::branchPtr(Condition cond, Register lhs, ImmGCPtr rhs,
                                Label* label) {
+#ifdef ENABLE_AOT_BASELINE
+  MOZ_ASSERT(!isAOT(),
+             "branchPtr(Reg, ImmGCPtr) not intercepted in AOT mode");
+#endif
   branchPtrImpl(cond, lhs, rhs, label);
 }
 
@@ -645,6 +649,10 @@ void MacroAssembler::branchPtr(Condition cond, const Address& lhs, ImmPtr rhs,
 
 void MacroAssembler::branchPtr(Condition cond, const Address& lhs, ImmGCPtr rhs,
                                Label* label) {
+#ifdef ENABLE_AOT_BASELINE
+  MOZ_ASSERT(!isAOT(),
+             "branchPtr(Addr, ImmGCPtr) not intercepted in AOT mode");
+#endif
   branchPtrImpl(cond, lhs, rhs, label);
 }
 

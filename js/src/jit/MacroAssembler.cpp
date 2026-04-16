@@ -9341,6 +9341,61 @@ void MacroAssembler::typedArrayElementSize(Register obj, Register output) {
 
   loadObjClassUnsafe(obj, output);
 
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    {
+      ScratchRegisterScope scratch(*this);
+      emitAOTSlotLoad(AOTSlot::TypedArrayFixedLengthClassesBase, scratch);
+      subPtr(scratch, output);
+    }
+
+    constexpr int32_t szClass = int32_t(sizeof(JSClass));
+    constexpr int32_t endFixed = int32_t(diffFirstImmutableToFirstFixedLength) * szClass;
+    constexpr int32_t endImmut = endFixed + int32_t(diffFirstResizableToFirstImmutable) * szClass;
+    constexpr int32_t diffToFixed_Immut = int32_t(diffFirstImmutableToFirstFixedLength) * szClass;
+    constexpr int32_t diffToFixed_Resiz = int32_t(diffFirstResizableToFirstFixedLength) * szClass;
+
+    Label fixedLength, immutable;
+    branch32(Assembler::Below, output, Imm32(endFixed), &fixedLength);
+    branch32(Assembler::Below, output, Imm32(endImmut), &immutable);
+    sub32(Imm32(diffToFixed_Resiz), output);
+    jump(&fixedLength);
+    bind(&immutable);
+    sub32(Imm32(diffToFixed_Immut), output);
+    bind(&fixedLength);
+
+    Label one, two, four, eight, done;
+
+    static_assert(ValidateSizeRange(Scalar::Int8, Scalar::Int16));
+    branch32(Assembler::Below, output, Imm32(int32_t(Scalar::Int16) * szClass), &one);
+
+    static_assert(ValidateSizeRange(Scalar::Int16, Scalar::Int32));
+    branch32(Assembler::Below, output, Imm32(int32_t(Scalar::Int32) * szClass), &two);
+
+    static_assert(ValidateSizeRange(Scalar::Int32, Scalar::Float64));
+    branch32(Assembler::Below, output, Imm32(int32_t(Scalar::Float64) * szClass), &four);
+
+    static_assert(ValidateSizeRange(Scalar::Float64, Scalar::Uint8Clamped));
+    branch32(Assembler::Below, output, Imm32(int32_t(Scalar::Uint8Clamped) * szClass), &eight);
+
+    static_assert(ValidateSizeRange(Scalar::Uint8Clamped, Scalar::BigInt64));
+    branch32(Assembler::Below, output, Imm32(int32_t(Scalar::BigInt64) * szClass), &one);
+
+    static_assert(ValidateSizeRange(Scalar::BigInt64, Scalar::Float16));
+    branch32(Assembler::Below, output, Imm32(int32_t(Scalar::Float16) * szClass), &eight);
+
+    static_assert(ValidateSizeRange(Scalar::Float16, Scalar::MaxTypedArrayViewType));
+    jump(&two);
+
+    bind(&eight); move32(Imm32(8), output); jump(&done);
+    bind(&four); move32(Imm32(4), output); jump(&done);
+    bind(&two); move32(Imm32(2), output); jump(&done);
+    bind(&one); move32(Imm32(1), output);
+    bind(&done);
+    return;
+  }
+#endif
+
   // Map immutable and resizable to fixed-length TypedArray classes.
   Label fixedLength, immutable;
   branchPtr(Assembler::Below, output,
@@ -9446,6 +9501,43 @@ void MacroAssembler::resizableTypedArrayElementShiftBy(Register obj,
                                                        Register scratch) {
   loadObjClassUnsafe(obj, scratch);
 
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    {
+      ScratchRegisterScope tmp(*this);
+      constexpr int32_t resizableOff = int32_t(
+          2 * Scalar::MaxTypedArrayViewType * sizeof(JSClass));
+      emitAOTSlotLoad(AOTSlot::TypedArrayFixedLengthClassesBase, tmp);
+      addPtr(Imm32(resizableOff), tmp);
+      subPtr(tmp, scratch);
+    }
+
+    constexpr int32_t szClass = int32_t(sizeof(JSClass));
+    Label zero, one, two, three;
+
+    static_assert(ValidateSizeRange(Scalar::Int8, Scalar::Int16));
+    branch32(Assembler::Below, scratch, Imm32(int32_t(Scalar::Int16) * szClass), &zero);
+    static_assert(ValidateSizeRange(Scalar::Int16, Scalar::Int32));
+    branch32(Assembler::Below, scratch, Imm32(int32_t(Scalar::Int32) * szClass), &one);
+    static_assert(ValidateSizeRange(Scalar::Int32, Scalar::Float64));
+    branch32(Assembler::Below, scratch, Imm32(int32_t(Scalar::Float64) * szClass), &two);
+    static_assert(ValidateSizeRange(Scalar::Float64, Scalar::Uint8Clamped));
+    branch32(Assembler::Below, scratch, Imm32(int32_t(Scalar::Uint8Clamped) * szClass), &three);
+    static_assert(ValidateSizeRange(Scalar::Uint8Clamped, Scalar::BigInt64));
+    branch32(Assembler::Below, scratch, Imm32(int32_t(Scalar::BigInt64) * szClass), &zero);
+    static_assert(ValidateSizeRange(Scalar::BigInt64, Scalar::Float16));
+    branch32(Assembler::Below, scratch, Imm32(int32_t(Scalar::Float16) * szClass), &three);
+    static_assert(ValidateSizeRange(Scalar::Float16, Scalar::MaxTypedArrayViewType));
+    jump(&one);
+
+    bind(&three); rshiftPtr(Imm32(3), output); jump(&zero);
+    bind(&two); rshiftPtr(Imm32(2), output); jump(&zero);
+    bind(&one); rshiftPtr(Imm32(1), output);
+    bind(&zero);
+    return;
+  }
+#endif
+
 #ifdef DEBUG
   Label invalidClass, validClass;
   branchPtr(Assembler::Below, scratch,
@@ -9518,15 +9610,27 @@ void MacroAssembler::branchIfClassIsNotTypedArray(Register clasp,
                                                   Label* notTypedArray) {
   // Inline implementation of IsTypedArrayClass().
 
-  const auto* firstTypedArrayClass =
-      std::begin(TypedArrayObject::fixedLengthClasses);
-  const auto* lastTypedArrayClass =
-      std::prev(std::end(TypedArrayObject::resizableClasses));
   MOZ_ASSERT(std::end(TypedArrayObject::fixedLengthClasses) ==
                      std::begin(TypedArrayObject::immutableClasses) &&
                  std::end(TypedArrayObject::immutableClasses) ==
                      std::begin(TypedArrayObject::resizableClasses),
              "TypedArray classes are in contiguous memory");
+
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    ScratchRegisterScope scratch(*this);
+    emitAOTSlotLoad(AOTSlot::TypedArrayFixedLengthClassesBase, scratch);
+    branchPtr(Assembler::Below, clasp, scratch, notTypedArray);
+    emitAOTSlotLoad(AOTSlot::TypedArrayResizableClassesEnd, scratch);
+    branchPtr(Assembler::AboveOrEqual, clasp, scratch, notTypedArray);
+    return;
+  }
+#endif
+
+  const auto* firstTypedArrayClass =
+      std::begin(TypedArrayObject::fixedLengthClasses);
+  const auto* lastTypedArrayClass =
+      std::prev(std::end(TypedArrayObject::resizableClasses));
 
   branchPtr(Assembler::Below, clasp, ImmPtr(firstTypedArrayClass),
             notTypedArray);
@@ -9539,13 +9643,28 @@ void MacroAssembler::branchIfClassIsNotNonResizableTypedArray(
   // Inline implementation of IsFixedLengthTypedArrayClass() and
   // IsImmutableTypedArrayClass().
 
+  MOZ_ASSERT(std::end(TypedArrayObject::fixedLengthClasses) ==
+                 std::begin(TypedArrayObject::immutableClasses),
+             "TypedArray classes are in contiguous memory");
+
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    ScratchRegisterScope scratch(*this);
+    emitAOTSlotLoad(AOTSlot::TypedArrayFixedLengthClassesBase, scratch);
+    branchPtr(Assembler::Below, clasp, scratch, notTypedArray);
+    constexpr int32_t endImmut = int32_t(
+        2 * Scalar::MaxTypedArrayViewType * sizeof(JSClass));
+    addPtr(Imm32(endImmut), scratch);
+    subPtr(Imm32(int32_t(sizeof(JSClass))), scratch);
+    branchPtr(Assembler::Above, clasp, scratch, notTypedArray);
+    return;
+  }
+#endif
+
   const auto* firstTypedArrayClass =
       std::begin(TypedArrayObject::fixedLengthClasses);
   const auto* lastTypedArrayClass =
       std::prev(std::end(TypedArrayObject::immutableClasses));
-  MOZ_ASSERT(std::end(TypedArrayObject::fixedLengthClasses) ==
-                 std::begin(TypedArrayObject::immutableClasses),
-             "TypedArray classes are in contiguous memory");
 
   branchPtr(Assembler::Below, clasp, ImmPtr(firstTypedArrayClass),
             notTypedArray);
@@ -9556,6 +9675,21 @@ void MacroAssembler::branchIfClassIsNotNonResizableTypedArray(
 void MacroAssembler::branchIfClassIsNotResizableTypedArray(
     Register clasp, Label* notTypedArray) {
   // Inline implementation of IsResizableTypedArrayClass().
+
+#ifdef ENABLE_AOT_BASELINE
+  if (isAOT()) {
+    ScratchRegisterScope scratch(*this);
+    constexpr int32_t resizableOff = int32_t(
+        2 * Scalar::MaxTypedArrayViewType * sizeof(JSClass));
+    emitAOTSlotLoad(AOTSlot::TypedArrayFixedLengthClassesBase, scratch);
+    addPtr(Imm32(resizableOff), scratch);
+    branchPtr(Assembler::Below, clasp, scratch, notTypedArray);
+    emitAOTSlotLoad(AOTSlot::TypedArrayResizableClassesEnd, scratch);
+    subPtr(Imm32(int32_t(sizeof(JSClass))), scratch);
+    branchPtr(Assembler::Above, clasp, scratch, notTypedArray);
+    return;
+  }
+#endif
 
   const auto* firstTypedArrayClass =
       std::begin(TypedArrayObject::resizableClasses);

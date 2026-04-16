@@ -86,6 +86,7 @@
 #include "vm/PlainObject.h"
 #include "vm/Realm.h"
 #include "vm/SharedArrayObject.h"
+#include "vm/TypedArrayObject.h"
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
 #endif
@@ -193,6 +194,8 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::StaticStringsLength2Table,  &cx->staticStrings().length2StaticTable);
   SET(AOTSlot::StaticStringsIntTable,      &cx->staticStrings().intStaticTable);
   SET(AOTSlot::StaticStringsToSmallCharTable, &StaticStrings::toSmallCharTable.storage);
+  SET(AOTSlot::TypedArrayFixedLengthClassesBase, std::begin(TypedArrayObject::fixedLengthClasses));
+  SET(AOTSlot::TypedArrayResizableClassesEnd, std::end(TypedArrayObject::resizableClasses));
 
   // --- ABI functions (computed from ABIFUNCTION_LIST) ---
   uint32_t abiIdx = 0;

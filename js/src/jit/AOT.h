@@ -102,7 +102,9 @@ namespace js::jit {
   V(StaticStringsUnitTable)               \
   V(StaticStringsLength2Table)            \
   V(StaticStringsIntTable)                \
-  V(StaticStringsToSmallCharTable)
+  V(StaticStringsToSmallCharTable)        \
+  V(TypedArrayFixedLengthClassesBase)     \
+  V(TypedArrayResizableClassesEnd)
 
 #define AOT_GC_SLOTS(V)                     \
   V(GC_ObjectProto)                        \
