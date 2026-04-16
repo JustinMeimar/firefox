@@ -675,26 +675,6 @@ void MacroAssembler::branchTestClassIsFunction(Condition cond, Register clasp,
                                                Label* label) {
   MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
 
-#ifdef ENABLE_AOT_BASELINE
-  if (MOZ_UNLIKELY(isAOT())) {
-    ScratchRegisterScope scratch(*this);
-    if (cond == Assembler::Equal) {
-      emitAOTSlotLoad(AOTSlot::Class_Function, scratch);
-      branchPtr(Assembler::Equal, clasp, scratch, label);
-      emitAOTSlotLoad(AOTSlot::Class_ExtendedFunction, scratch);
-      branchPtr(Assembler::Equal, clasp, scratch, label);
-      return;
-    }
-    Label isClass;
-    emitAOTSlotLoad(AOTSlot::Class_Function, scratch);
-    branchPtr(Assembler::Equal, clasp, scratch, &isClass);
-    emitAOTSlotLoad(AOTSlot::Class_ExtendedFunction, scratch);
-    branchPtr(Assembler::NotEqual, clasp, scratch, label);
-    bind(&isClass);
-    return;
-  }
-#endif
-
   if (cond == Assembler::Equal) {
     branchPtr(Assembler::Equal, clasp, ImmPtr(&FunctionClass), label);
     branchPtr(Assembler::Equal, clasp, ImmPtr(&ExtendedFunctionClass), label);
@@ -820,16 +800,6 @@ void MacroAssembler::branchTestProxyHandlerFamily(Condition cond,
   Address handlerAddr(proxy, ProxyObject::offsetOfHandler());
   loadPtr(handlerAddr, scratch);
   Address familyAddr(scratch, BaseProxyHandler::offsetOfFamily());
-
-#ifdef ENABLE_AOT_BASELINE
-  if (MOZ_UNLIKELY(isAOT()) && handlerp == &Wrapper::family) {
-    ScratchRegisterScope temp(*this);
-    emitAOTSlotLoad(AOTSlot::WrapperFamily, temp);
-    branchPtr(cond, familyAddr, temp, label);
-    return;
-  }
-#endif
-
   branchPtr(cond, familyAddr, ImmPtr(handlerp), label);
 }
 

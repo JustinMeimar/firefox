@@ -6012,7 +6012,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   using MacroAssemblerSpecific::movePtr;
-  void movePtr(RelocImmPtr imm, Register dest);
+  void movePtr(ImmPtr imm, Register dest);
+
+  using MacroAssemblerSpecific::storePtr;
+  void storePtr(ImmPtr imm, const Address& address);
 
  private:
   void handleFailure();

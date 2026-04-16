@@ -98,25 +98,35 @@ void MacroAssembler::loadZoneForAOT(Register dest) {
 #endif  // ENABLE_AOT_BASELINE
 
 void MacroAssembler::loadRuntime(Register reg) {
-#ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill()) {
-    emitAOTSlotLoad(AOTSlot::JSRuntimePtr, reg);
-    return;
-  }
-#endif
   movePtr(ImmPtr(runtime()), reg);
 }
 
-void MacroAssembler::movePtr(RelocImmPtr imm, Register dest) {
+void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (MOZ_UNLIKELY(isAOT())) {
-    AOTSlot slot = aot().indirectionTable()->findSlotOrCrash(
-        uintptr_t(imm.value));
-    emitAOTSlotLoad(slot, dest);
-    return;
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
+    if (slot) {
+      emitAOTSlotLoad(*slot, dest);
+      return;
+    }
   }
 #endif
   MacroAssemblerSpecific::movePtr(imm, dest);
+}
+
+void MacroAssembler::storePtr(ImmPtr imm, const Address& address) {
+#ifdef ENABLE_AOT_BASELINE
+  if (MOZ_UNLIKELY(isAOT())) {
+    auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
+    if (slot) {
+      ScratchRegisterScope scratch(*this);
+      emitAOTSlotLoad(*slot, scratch);
+      MacroAssemblerSpecific::storePtr(scratch, address);
+      return;
+    }
+  }
+#endif
+  MacroAssemblerSpecific::storePtr(imm, address);
 }
 
 // Rather than clutter BaselineCodeGen with a bifurcated ifdef, we abstract,

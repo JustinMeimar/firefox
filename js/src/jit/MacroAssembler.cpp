@@ -505,29 +505,13 @@ void MacroAssembler::createPlainGCObject(
   // If the object has dynamic slots, allocateObject will initialize
   // the slots field. If not, we must initialize it now.
   if (numDynamicSlots == 0) {
-#ifdef ENABLE_JS_AOT_ICS
-    if (isAOTFill()) {
-      emitAOTSlotLoad(AOTSlot::EmptyObjectSlots, temp);
-      storePtr(temp, Address(result, NativeObject::offsetOfSlots()));
-    } else
-#endif
-    {
-      storePtr(ImmPtr(emptyObjectSlots),
-               Address(result, NativeObject::offsetOfSlots()));
-    }
+    storePtr(ImmPtr(emptyObjectSlots),
+             Address(result, NativeObject::offsetOfSlots()));
   }
 
   // Initialize elements field.
-#ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill()) {
-    emitAOTSlotLoad(AOTSlot::EmptyObjectElements, temp);
-    storePtr(temp, Address(result, NativeObject::offsetOfElements()));
-  } else
-#endif
-  {
-    storePtr(ImmPtr(emptyObjectElements),
-             Address(result, NativeObject::offsetOfElements()));
-  }
+  storePtr(ImmPtr(emptyObjectElements),
+           Address(result, NativeObject::offsetOfElements()));
 
   // Initialize fixed slots.
   if (initContents) {
@@ -569,16 +553,8 @@ void MacroAssembler::createArrayWithFixedElements(
   // If the object has dynamic slots, allocateObject will initialize
   // the slots field. If not, we must initialize it now.
   if (numDynamicSlots == 0) {
-#ifdef ENABLE_JS_AOT_ICS
-    if (isAOTFill()) {
-      emitAOTSlotLoad(AOTSlot::EmptyObjectSlots, temp);
-      storePtr(temp, Address(result, NativeObject::offsetOfSlots()));
-    } else
-#endif
-    {
-      storePtr(ImmPtr(emptyObjectSlots),
-               Address(result, NativeObject::offsetOfSlots()));
-    }
+    storePtr(ImmPtr(emptyObjectSlots),
+             Address(result, NativeObject::offsetOfSlots()));
   }
 
   // Initialize elements pointer for fixed (inline) elements.
@@ -623,20 +599,10 @@ void MacroAssembler::createFunctionClone(Register result, Register canonical,
   storePtr(temp, Address(result, JSObject::offsetOfShape()));
 
   // Initialize dynamic slots and elements pointers.
-#ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill()) {
-    emitAOTSlotLoad(AOTSlot::EmptyObjectSlots, temp);
-    storePtr(temp, Address(result, NativeObject::offsetOfSlots()));
-    emitAOTSlotLoad(AOTSlot::EmptyObjectElements, temp);
-    storePtr(temp, Address(result, NativeObject::offsetOfElements()));
-  } else
-#endif
-  {
-    storePtr(ImmPtr(emptyObjectSlots),
-             Address(result, NativeObject::offsetOfSlots()));
-    storePtr(ImmPtr(emptyObjectElements),
-             Address(result, NativeObject::offsetOfElements()));
-  }
+  storePtr(ImmPtr(emptyObjectSlots),
+           Address(result, NativeObject::offsetOfSlots()));
+  storePtr(ImmPtr(emptyObjectElements),
+           Address(result, NativeObject::offsetOfElements()));
 
   // Initialize FlagsAndArgCountSlot.
   storeValue(Address(canonical, JSFunction::offsetOfFlagsAndArgCount()),

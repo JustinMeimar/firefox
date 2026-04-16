@@ -34,6 +34,7 @@ namespace js::jit {
 // AOTSlot enumerates every runtime address that AOT code needs.
 // Each slot holds a single uintptr_t in the AOTIndirectionTable.
 
+// Note(Justin): Move manual CppFn's into the pre-allocated table.
 #define AOT_CORE_SLOTS(V)               \
   V(JSRuntimePtr)                       \
   V(JSContextPtr)                       \

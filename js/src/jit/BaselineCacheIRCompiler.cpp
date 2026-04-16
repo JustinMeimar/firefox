@@ -388,17 +388,8 @@ bool BaselineCacheIRCompiler::emitGuardCompartment(ObjOperandId objId,
   Address globalWrapper(stubAddress(globalOffset));
   masm.loadPtr(globalWrapper, scratch);
   Address handlerAddr(scratch, ProxyObject::offsetOfHandler());
-#ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT()) {
-    AutoScratchRegister scratch2(allocator, masm);
-    masm.emitAOTSlotLoad(AOTSlot::DeadObjectProxySingleton, scratch2);
-    masm.branchPtr(Assembler::Equal, handlerAddr, scratch2, failure->label());
-  } else
-#endif
-  {
-    masm.branchPtr(Assembler::Equal, handlerAddr,
-                   ImmPtr(&DeadObjectProxy::singleton), failure->label());
-  }
+  masm.branchPtr(Assembler::Equal, handlerAddr,
+                 ImmPtr(&DeadObjectProxy::singleton), failure->label());
 
   Address addr(stubAddress(compartmentOffset));
   masm.branchTestObjCompartment(Assembler::NotEqual, obj, addr, scratch,
