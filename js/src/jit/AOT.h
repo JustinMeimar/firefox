@@ -104,7 +104,10 @@ namespace js::jit {
   V(StaticStringsIntTable)                \
   V(StaticStringsToSmallCharTable)        \
   V(TypedArrayFixedLengthClassesBase)     \
-  V(TypedArrayResizableClassesEnd)
+  V(TypedArrayResizableClassesEnd)        \
+  V(MathRandomScaleInv)
+
+extern const double MathRandomScaleInv;
 
 #define AOT_GC_SLOTS(V)                     \
   V(GC_ObjectProto)                        \

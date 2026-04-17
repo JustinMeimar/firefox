@@ -196,6 +196,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::StaticStringsToSmallCharTable, &StaticStrings::toSmallCharTable.storage);
   SET(AOTSlot::TypedArrayFixedLengthClassesBase, std::begin(TypedArrayObject::fixedLengthClasses));
   SET(AOTSlot::TypedArrayResizableClassesEnd, std::end(TypedArrayObject::resizableClasses));
+  SET(AOTSlot::MathRandomScaleInv, &MathRandomScaleInv);
 
   // --- ABI functions (computed from ABIFUNCTION_LIST) ---
   uint32_t abiIdx = 0;

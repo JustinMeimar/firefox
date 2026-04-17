@@ -70,6 +70,11 @@ using JS::GenericNaN;
 
 using mozilla::CheckedInt;
 
+static constexpr int kMathRandomMantissaBits =
+    mozilla::FloatingPoint<double>::kExponentShift + 1;
+const double js::jit::MathRandomScaleInv =
+    double(1) / (1ULL << kMathRandomMantissaBits);
+
 TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
   MOZ_ASSERT(!isAOT());
   const JitRuntime* rt = runtime()->jitRuntime();
@@ -5645,7 +5650,6 @@ void MacroAssembler::randomDouble(Register rng, FloatRegister dest,
   // See comment in XorShift128PlusRNG::nextDouble().
   static constexpr int MantissaBits =
       mozilla::FloatingPoint<double>::kExponentShift + 1;
-  static constexpr double ScaleInv = double(1) / (1ULL << MantissaBits);
 
   and64(Imm64((1ULL << MantissaBits) - 1), s1Reg);
 
@@ -5654,7 +5658,7 @@ void MacroAssembler::randomDouble(Register rng, FloatRegister dest,
   convertInt64ToDouble(s1Reg, dest);
 
   // dest *= ScaleInv
-  mulDoublePtr(ImmPtr(&ScaleInv), s0Reg.scratchReg(), dest);
+  mulDoublePtr(ImmPtr(&MathRandomScaleInv), s0Reg.scratchReg(), dest);
 }
 
 void MacroAssembler::roundFloat32(FloatRegister src, FloatRegister dest) {
