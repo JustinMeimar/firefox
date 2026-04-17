@@ -104,7 +104,9 @@ namespace js::jit {
   V(StaticStringsIntTable)                \
   V(StaticStringsToSmallCharTable)        \
   V(TypedArrayFixedLengthClassesBase)     \
-  V(TypedArrayResizableClassesEnd)        \
+  V(TypedArrayImmutableClassesLast)       \
+  V(TypedArrayResizableClassesBase)       \
+  V(TypedArrayResizableClassesLast)       \
   V(MathRandomScaleInv)
 
 extern const double MathRandomScaleInv;
