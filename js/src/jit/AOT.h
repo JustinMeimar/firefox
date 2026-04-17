@@ -41,7 +41,6 @@ namespace js::jit {
   V(JitActivation)                        \
   V(ContextRealm)                         \
   V(WellKnownSymbols)                     \
-  V(JitRuntime)                           \
   V(LastBufferedCell)                      \
   V(ProfilerEnabled)                      \
   V(ProfilerExitFrameTail)                \
@@ -62,29 +61,15 @@ namespace js::jit {
 
 #define AOT_CLASS_SLOTS(V)                  \
   V(Class_WithEnvironmentObject)          \
-  V(Class_PropertyIteratorObject)         \
   V(Class_Function)                       \
   V(Class_ExtendedFunction)               \
   V(Class_Array)                          \
-  V(Class_PlainObject)                    \
   V(Class_FixedLengthArrayBuffer)         \
   V(Class_ImmutableArrayBuffer)           \
   V(Class_ResizableArrayBuffer)           \
   V(Class_FixedLengthSharedArrayBuffer)   \
   V(Class_GrowableSharedArrayBuffer)      \
-  V(Class_FixedLengthDataView)            \
-  V(Class_ImmutableDataView)              \
-  V(Class_ResizableDataView)              \
-  V(Class_MappedArguments)                \
-  V(Class_UnmappedArguments)              \
-  V(Class_WindowProxy)                    \
-  V(Class_BoundFunction)                  \
-  V(Class_Set)                            \
-  V(Class_Map)                            \
-  V(Class_Date)                           \
-  V(Class_WeakMap)                        \
-  V(Class_WeakSet)                        \
-  V(Class_GeneratorObject)
+  V(Class_BoundFunction)
 
 #define AOT_ATOM_SLOTS(V)                   \
   V(AtomEmpty)                            \
@@ -111,25 +96,12 @@ namespace js::jit {
 
 extern const double MathRandomScaleInv;
 
-#define AOT_GC_SLOTS(V)                     \
-  V(GC_ObjectProto)                        \
-  V(GC_ArrayProto)                         \
-  V(GC_FunctionProto)                      \
-  V(GC_StringProto)                        \
-  V(GC_NumberProto)                        \
-  V(GC_BooleanProto)                       \
-  V(GC_RegExpProto)                        \
-  V(GC_IteratorProto)                      \
-  V(GC_ObjectCtor)                         \
-  V(GC_ArrayCtor)
-
 #define AOT_CORE_SLOTS(V)  \
   AOT_RUNTIME_SLOTS(V)     \
   AOT_PREBARRIER_SLOTS(V)  \
   AOT_CLASS_SLOTS(V)       \
   AOT_ATOM_SLOTS(V)        \
-  AOT_STATIC_DATA_SLOTS(V) \
-  AOT_GC_SLOTS(V)
+  AOT_STATIC_DATA_SLOTS(V)
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
@@ -141,13 +113,9 @@ enum class AOTSlot : uint32_t {
   AOT_CLASS_SLOTS(EMIT_SLOT)
   AOT_ATOM_SLOTS(EMIT_SLOT)
   AOT_STATIC_DATA_SLOTS(EMIT_SLOT)
-  GCSlot_Begin,
-#define EMIT_GC_SLOT(name) name,
-  AOT_GC_SLOTS(EMIT_GC_SLOT)
-#undef EMIT_GC_SLOT
-  GCSlot_End,
 #undef EMIT_SLOT
-  VMWrapper_Begin = GCSlot_End,
+  CoreSlot_End,
+  VMWrapper_Begin = CoreSlot_End,
   VMWrapper_End = VMWrapper_Begin + kAOTMaxVMWrappers,
   ABIFn_Begin = VMWrapper_End,
   ABIFn_End = ABIFn_Begin + kAOTMaxABIFunctions,
@@ -167,12 +135,7 @@ inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
 inline const char* AOTSlotName(AOTSlot slot) {
   switch (slot) {
 #define EMIT_CASE(name) case AOTSlot::name: return #name;
-    AOT_RUNTIME_SLOTS(EMIT_CASE)
-    AOT_PREBARRIER_SLOTS(EMIT_CASE)
-    AOT_CLASS_SLOTS(EMIT_CASE)
-    AOT_ATOM_SLOTS(EMIT_CASE)
-    AOT_STATIC_DATA_SLOTS(EMIT_CASE)
-    AOT_GC_SLOTS(EMIT_CASE)
+    AOT_CORE_SLOTS(EMIT_CASE)
 #undef EMIT_CASE
     default:
       break;
@@ -339,9 +302,6 @@ class AOTIndirectionTable {
   mozilla::Maybe<AOTSlot> findSlot(uintptr_t value) const;
   AOTSlot findSlotOrCrash(uintptr_t value) const;
   void dump() const;
-
-  void traceGCSlots(JSTracer* trc);
-  void setGCSlot(AOTSlot slot, JSObject* obj);
 
   uintptr_t* baseAddress() { return slots_; }
   const uintptr_t* baseAddress() const { return slots_; }

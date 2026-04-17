@@ -144,7 +144,6 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::JitActivation,       cx->addressOfJitActivation());
   SET(AOTSlot::ContextRealm,        reinterpret_cast<uint8_t*>(cx) + JSContext::offsetOfRealm());
   SET(AOTSlot::WellKnownSymbols,    rt->wellKnownSymbols.ref());
-  SET(AOTSlot::JitRuntime,          this);
   SET(AOTSlot::LastBufferedCell,    rt->gc.addressOfLastBufferedWholeCell());
   SET(AOTSlot::ProfilerEnabled,     rt->geckoProfiler().addressOfEnabled());
   SET(AOTSlot::MegamorphicCache,    &rt->caches().megamorphicCache);
@@ -153,29 +152,15 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
 
   // --- JSClass pointers (link-time constants) ---
   SET(AOTSlot::Class_WithEnvironmentObject,        &WithEnvironmentObject::class_);
-  SET(AOTSlot::Class_PropertyIteratorObject,       &PropertyIteratorObject::class_);
   SET(AOTSlot::Class_Function,                     &FunctionClass);
   SET(AOTSlot::Class_ExtendedFunction,             &ExtendedFunctionClass);
   SET(AOTSlot::Class_Array,                        &ArrayObject::class_);
-  SET(AOTSlot::Class_PlainObject,                  &PlainObject::class_);
   SET(AOTSlot::Class_FixedLengthArrayBuffer,       &FixedLengthArrayBufferObject::class_);
   SET(AOTSlot::Class_ImmutableArrayBuffer,         &ImmutableArrayBufferObject::class_);
   SET(AOTSlot::Class_ResizableArrayBuffer,         &ResizableArrayBufferObject::class_);
   SET(AOTSlot::Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_);
   SET(AOTSlot::Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_);
-  SET(AOTSlot::Class_FixedLengthDataView,          &FixedLengthDataViewObject::class_);
-  SET(AOTSlot::Class_ImmutableDataView,            &ImmutableDataViewObject::class_);
-  SET(AOTSlot::Class_ResizableDataView,            &ResizableDataViewObject::class_);
-  SET(AOTSlot::Class_MappedArguments,              &MappedArgumentsObject::class_);
-  SET(AOTSlot::Class_UnmappedArguments,            &UnmappedArgumentsObject::class_);
-  SET(AOTSlot::Class_WindowProxy,                  rt->maybeWindowProxyClass());
   SET(AOTSlot::Class_BoundFunction,                &BoundFunctionObject::class_);
-  SET(AOTSlot::Class_Set,                          &SetObject::class_);
-  SET(AOTSlot::Class_Map,                          &MapObject::class_);
-  SET(AOTSlot::Class_Date,                         &DateObject::class_);
-  SET(AOTSlot::Class_WeakMap,                      &WeakMapObject::class_);
-  SET(AOTSlot::Class_WeakSet,                      &WeakSetObject::class_);
-  SET(AOTSlot::Class_GeneratorObject,              &GeneratorObject::class_);
 
   // --- Well-known atoms (GC pointers, stable within a runtime) ---
   SET(AOTSlot::AtomEmpty,       static_cast<JSString*>(cx->names().empty_));
@@ -232,30 +217,6 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   MOZ_ASSERT(abiIdx <= kAOTMaxABIFunctions);
 }
 
-void JitRuntime::populateAOTGCSlots(JSContext* cx) {
-  if (!cx->realm()) {
-    return;
-  }
-  GlobalObject* global = cx->global();
-  if (!global) {
-    return;
-  }
-
-  auto SET = [&](AOTSlot slot, JSObject* obj) {
-    aotIndirectionTable_.setGCSlot(slot, obj);
-  };
-
-  SET(AOTSlot::GC_ObjectProto,   &global->getPrototype(JSProto_Object));
-  SET(AOTSlot::GC_ArrayProto,    &global->getPrototype(JSProto_Array));
-  SET(AOTSlot::GC_FunctionProto, &global->getPrototype(JSProto_Function));
-  SET(AOTSlot::GC_StringProto,   &global->getPrototype(JSProto_String));
-  SET(AOTSlot::GC_NumberProto,   &global->getPrototype(JSProto_Number));
-  SET(AOTSlot::GC_BooleanProto,  &global->getPrototype(JSProto_Boolean));
-  SET(AOTSlot::GC_RegExpProto,   &global->getPrototype(JSProto_RegExp));
-  SET(AOTSlot::GC_IteratorProto, &global->getPrototype(JSProto_Iterator));
-  SET(AOTSlot::GC_ObjectCtor,    &global->getConstructor(JSProto_Object));
-  SET(AOTSlot::GC_ArrayCtor,     &global->getConstructor(JSProto_Array));
-}
 
 bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {
 

@@ -128,26 +128,5 @@ AOTSlot AOTIndirectionTable::findSlotOrCrash(uintptr_t value) const {
   return *slot;
 }
 
-void AOTIndirectionTable::traceGCSlots(JSTracer* trc) {
-  for (uint32_t i = uint32_t(AOTSlot::GCSlot_Begin) + 1;
-       i < uint32_t(AOTSlot::GCSlot_End); i++) {
-    if (slots_[i]) {
-      TraceManuallyBarrieredEdge(
-          trc, reinterpret_cast<JSObject**>(&slots_[i]), "aot-gc-slot");
-    }
-  }
-}
-
-void AOTIndirectionTable::setGCSlot(AOTSlot slot, JSObject* obj) {
-  MOZ_ASSERT(uint32_t(slot) > uint32_t(AOTSlot::GCSlot_Begin));
-  MOZ_ASSERT(uint32_t(slot) < uint32_t(AOTSlot::GCSlot_End));
-
-  uint32_t idx = uint32_t(slot);
-  JSObject* old = reinterpret_cast<JSObject*>(slots_[idx]);
-  if (old) {
-    gc::PreWriteBarrier(old);
-  }
-  slots_[idx] = uintptr_t(obj);
-}
 
 }  // namespace js::jit
