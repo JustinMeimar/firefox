@@ -109,9 +109,12 @@ void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
-    JitSpew(JitSpew_BaselineAOT,
-            "AOT: no indirection slot for ImmPtr %p — baking absolute address",
-            imm.value);
+    if (uintptr_t(imm.value) > UINT32_MAX) {
+      MOZ_CRASH_UNSAFE_PRINTF(
+          "AOT: no indirection slot for ImmPtr %p — would produce stale "
+          "movabs. Add this address to the AOT indirection table.",
+          imm.value);
+    }
   }
 #endif
   MacroAssemblerSpecific::movePtr(imm, dest);

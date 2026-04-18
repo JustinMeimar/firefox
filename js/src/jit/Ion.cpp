@@ -15,6 +15,7 @@
 
 #include "jsmath.h"
 
+#include "builtin/Array.h"
 #include "builtin/DataViewObject.h"
 #include "builtin/MapObject.h"
 #include "builtin/WeakMapObject.h"
@@ -156,13 +157,28 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::Class_Function,                     &FunctionClass);
   SET(AOTSlot::Class_ExtendedFunction,             &ExtendedFunctionClass);
   SET(AOTSlot::Class_Array,                        &ArrayObject::class_);
+  SET(AOTSlot::Class_PlainObject,                  &PlainObject::class_);
   SET(AOTSlot::Class_FixedLengthArrayBuffer,       &FixedLengthArrayBufferObject::class_);
   SET(AOTSlot::Class_ImmutableArrayBuffer,         &ImmutableArrayBufferObject::class_);
   SET(AOTSlot::Class_ResizableArrayBuffer,         &ResizableArrayBufferObject::class_);
   SET(AOTSlot::Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_);
   SET(AOTSlot::Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_);
+  SET(AOTSlot::Class_FixedLengthDataView,          &FixedLengthDataViewObject::class_);
+  SET(AOTSlot::Class_ImmutableDataView,            &ImmutableDataViewObject::class_);
+  SET(AOTSlot::Class_ResizableDataView,            &ResizableDataViewObject::class_);
+  SET(AOTSlot::Class_MappedArguments,              &MappedArgumentsObject::class_);
+  SET(AOTSlot::Class_UnmappedArguments,            &UnmappedArgumentsObject::class_);
   SET(AOTSlot::Class_BoundFunction,                &BoundFunctionObject::class_);
   SET(AOTSlot::Class_PropertyIteratorObject,       &PropertyIteratorObject::class_);
+  SET(AOTSlot::Class_Set,                          &SetObject::class_);
+  SET(AOTSlot::Class_Map,                          &MapObject::class_);
+  SET(AOTSlot::Class_Date,                         &DateObject::class_);
+  SET(AOTSlot::Class_WeakMap,                      &WeakMapObject::class_);
+  SET(AOTSlot::Class_WeakSet,                      &WeakSetObject::class_);
+  SET(AOTSlot::Class_GeneratorObject,              &GeneratorObject::class_);
+  if (auto* wpc = rt->maybeWindowProxyClass()) {
+    SET(AOTSlot::WindowProxyClass, wpc);
+  }
 
   // --- Well-known atoms (GC pointers, stable within a runtime) ---
   SET(AOTSlot::AtomEmpty,       static_cast<JSString*>(cx->names().empty_));
@@ -217,6 +233,12 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   for (auto ty : atomicTypes) { setABI(AtomicsAnd(ty)); }
   for (auto ty : atomicTypes) { setABI(AtomicsOr(ty)); }
   for (auto ty : atomicTypes) { setABI(AtomicsXor(ty)); }
+
+  setABI(ArrayConstructor);
+#define EMIT_TA_CTOR(_, T, N) setABI(TypedArrayConstructorNative(Scalar::N));
+  JS_FOR_EACH_TYPED_ARRAY(EMIT_TA_CTOR)
+#undef EMIT_TA_CTOR
+
   MOZ_ASSERT(abiIdx <= kAOTMaxABIFunctions);
 }
 

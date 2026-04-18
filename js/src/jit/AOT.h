@@ -64,13 +64,26 @@ namespace js::jit {
   V(Class_Function)                       \
   V(Class_ExtendedFunction)               \
   V(Class_Array)                          \
+  V(Class_PlainObject)                    \
   V(Class_FixedLengthArrayBuffer)         \
   V(Class_ImmutableArrayBuffer)           \
   V(Class_ResizableArrayBuffer)           \
   V(Class_FixedLengthSharedArrayBuffer)   \
   V(Class_GrowableSharedArrayBuffer)      \
+  V(Class_FixedLengthDataView)            \
+  V(Class_ImmutableDataView)              \
+  V(Class_ResizableDataView)              \
+  V(Class_MappedArguments)                \
+  V(Class_UnmappedArguments)              \
   V(Class_BoundFunction)                  \
-  V(Class_PropertyIteratorObject)
+  V(Class_PropertyIteratorObject)         \
+  V(Class_Set)                            \
+  V(Class_Map)                            \
+  V(Class_Date)                           \
+  V(Class_WeakMap)                        \
+  V(Class_WeakSet)                        \
+  V(Class_GeneratorObject)                \
+  V(WindowProxyClass)
 
 #define AOT_ATOM_SLOTS(V)                   \
   V(AtomEmpty)                            \
