@@ -162,6 +162,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_);
   SET(AOTSlot::Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_);
   SET(AOTSlot::Class_BoundFunction,                &BoundFunctionObject::class_);
+  SET(AOTSlot::Class_PropertyIteratorObject,       &PropertyIteratorObject::class_);
 
   // --- Well-known atoms (GC pointers, stable within a runtime) ---
   SET(AOTSlot::AtomEmpty,       static_cast<JSString*>(cx->names().empty_));

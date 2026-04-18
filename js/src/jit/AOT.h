@@ -69,7 +69,8 @@ namespace js::jit {
   V(Class_ResizableArrayBuffer)           \
   V(Class_FixedLengthSharedArrayBuffer)   \
   V(Class_GrowableSharedArrayBuffer)      \
-  V(Class_BoundFunction)
+  V(Class_BoundFunction)                  \
+  V(Class_PropertyIteratorObject)
 
 #define AOT_ATOM_SLOTS(V)                   \
   V(AtomEmpty)                            \
