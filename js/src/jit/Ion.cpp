@@ -76,6 +76,7 @@
 #include "vm/ArrayObject.h"
 #include "vm/BoundFunctionObject.h"
 #include "vm/DateObject.h"
+#include "vm/DateTime.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/GeneratorObject.h"
 #include "vm/GlobalObject.h"
@@ -184,6 +185,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::TypedArrayResizableClassesBase, std::begin(TypedArrayObject::resizableClasses));
   SET(AOTSlot::TypedArrayResizableClassesLast, std::prev(std::end(TypedArrayObject::resizableClasses)));
   SET(AOTSlot::MathRandomScaleInv, &MathRandomScaleInv);
+  SET(AOTSlot::DateTimeUTCToLocalOffset, DateTimeInfo::addressOfUTCToLocalOffsetSeconds());
 
   // --- ABI functions (computed from ABIFUNCTION_LIST) ---
   uint32_t abiIdx = 0;
