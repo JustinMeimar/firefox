@@ -2964,6 +2964,7 @@ void MacroAssembler::switchToRealm(const void* realm, Register scratch) {
 
 void MacroAssembler::switchToObjectRealm(Register obj, Register scratch,
                                          Register scratchForAOT) {
+  // NOTE(Justin): Do we need `scratchForAOT`?
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);

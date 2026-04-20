@@ -2817,6 +2817,7 @@ void js::jit::FillAOTICs(JSContext* cx) {
         manifest.kind = stubInfo->kind();
         manifest.makesGCCalls = stubInfo->makesGCCalls() ? 1 : 0;
         manifest.stubDataOffset = stubInfo->stubDataOffset();
+        manifest.localTracingSlots = code->localTracingSlots();
         manifest.pad = 0;
         manifest.cacheIRCodeLength = stubInfo->codeLength();
 

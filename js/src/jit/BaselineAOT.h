@@ -86,7 +86,8 @@ struct AOTICStubManifest {
   CacheKind kind;
   uint8_t makesGCCalls;
   uint8_t stubDataOffset;
-  uint16_t pad;
+  uint8_t localTracingSlots;
+  uint8_t pad;
   uint32_t cacheIRCodeLength;
   uint32_t numStubFields;
 };

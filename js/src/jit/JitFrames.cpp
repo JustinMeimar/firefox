@@ -1188,11 +1188,9 @@ static void TraceBaselineStubFrame(JSTracer* trc, const JSJitFrameIter& frame) {
       stub->toCacheIRStub()->trace(trc);
 
 #ifndef ENABLE_PORTABLE_BASELINE_INTERP
-      if (!stub->isStaticCode()) {
-        for (int i = 0; i < stub->jitCode()->localTracingSlots(); ++i) {
-          TraceRoot(trc, layout->locallyTracedValuePtr(i),
-                    "baseline-local-tracing-slot");
-        }
+      for (int i = 0; i < stub->toCacheIRStub()->jitCode()->localTracingSlots(); ++i) {
+        TraceRoot(trc, layout->locallyTracedValuePtr(i),
+                  "baseline-local-tracing-slot");
       }
 #endif
     }

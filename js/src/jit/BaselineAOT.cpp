@@ -664,6 +664,8 @@ bool LoadAOTICStubs(JSContext* cx) {
       return;
     }
 
+    code->setLocalTracingSlots(manifest.localTracingSlots);
+
     CacheIRStubKey::Lookup lookup(
         manifest.kind, ICStubEngine::Baseline,
         stubInfo->code(), stubInfo->codeLength());
