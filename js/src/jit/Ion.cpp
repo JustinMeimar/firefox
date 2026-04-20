@@ -70,6 +70,7 @@
 #include "js/UniquePtr.h"
 #include "js/Wrapper.h"
 #include "proxy/DeadObjectProxy.h"
+#include "proxy/DOMProxy.h"
 #include "util/Memory.h"
 #include "util/WindowsWrapper.h"
 #include "vm/ArgumentsObject.h"
@@ -203,6 +204,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::TypedArrayResizableClassesLast, std::prev(std::end(TypedArrayObject::resizableClasses)));
   SET(AOTSlot::MathRandomScaleInv, &MathRandomScaleInv);
   SET(AOTSlot::DateTimeUTCToLocalOffset, DateTimeInfo::addressOfUTCToLocalOffsetSeconds());
+  SET(AOTSlot::DOMProxyHandlerFamily, GetDOMProxyHandlerFamily());
 
   // --- ABI functions (computed from ABIFUNCTION_LIST) ---
   uint32_t abiIdx = 0;

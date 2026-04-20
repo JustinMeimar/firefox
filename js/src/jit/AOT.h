@@ -107,7 +107,8 @@ namespace js::jit {
   V(TypedArrayResizableClassesBase)       \
   V(TypedArrayResizableClassesLast)       \
   V(MathRandomScaleInv)                   \
-  V(DateTimeUTCToLocalOffset)
+  V(DateTimeUTCToLocalOffset)             \
+  V(DOMProxyHandlerFamily)
 
 extern const double MathRandomScaleInv;
 

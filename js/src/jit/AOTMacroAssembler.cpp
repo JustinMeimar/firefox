@@ -128,6 +128,7 @@ void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
+    MOZ_ASSERT(false, "AOT: movePtr(ImmGCPtr) with no indirection slot");
   }
 #endif
   MacroAssemblerSpecific::movePtr(imm, dest);
