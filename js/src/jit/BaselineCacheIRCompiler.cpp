@@ -613,11 +613,6 @@ bool BaselineCacheIRCompiler::emitCallScriptedGetterShared(
 
   AutoScratchRegister code(allocator, masm);
   AutoScratchRegister scratch(allocator, masm);
-  Maybe<AutoScratchRegister> scratchForAOT;
-  if (aotContext_) {
-    scratchForAOT.emplace(allocator, masm);
-  }
-
 
   bool isInlined = icScriptOffset.isSome();
 
@@ -634,7 +629,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedGetterShared(
   stubFrame.enter(masm, scratch);
 
   if (!sameRealm) {
-    masm.switchToObjectRealm(callee, scratch, scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToObjectRealm(callee, scratch);
   }
 
   if (isInlined) {
@@ -674,7 +669,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedGetterShared(
   stubFrame.leave(masm);
 
   if (!sameRealm) {
-    masm.switchToBaselineFrameRealm(R1.scratchReg(), scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToBaselineFrameRealm(R1.scratchReg());
   }
 
   return true;
@@ -1574,10 +1569,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedSetterShared(
 #else
   AutoScratchRegister code(allocator, masm);
 #endif
-  Maybe<AutoScratchRegister> scratchForAOT;
-  if (aotContext_) {
-    scratchForAOT.emplace(allocator, masm);
-  }
+
 
   Register receiver = allocator.useRegister(masm, receiverId);
   Register callee = allocator.useRegister(masm, calleeId);
@@ -1591,7 +1583,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedSetterShared(
   stubFrame.enter(masm, scratch);
 
   if (!sameRealm) {
-    masm.switchToObjectRealm(callee, scratch, scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToObjectRealm(callee, scratch);
   }
 
   if (isInlined) {
@@ -1642,7 +1634,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedSetterShared(
   stubFrame.leave(masm);
 
   if (!sameRealm) {
-    masm.switchToBaselineFrameRealm(R1.scratchReg(), scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToBaselineFrameRealm(R1.scratchReg());
   }
 
   return true;
@@ -3419,10 +3411,7 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(
   AutoOutputRegister output(*this);
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
-  Maybe<AutoScratchRegister> scratchForAOT;
-  if (aotContext_) {
-    scratchForAOT.emplace(allocator, masm);
-  }
+
 
   Register calleeReg = allocator.useRegister(masm, calleeId);
   Register argcReg = allocator.useRegister(masm, argcId);
@@ -3442,7 +3431,7 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(
   stubFrame.enter(masm, scratch);
 
   if (!isSameRealm) {
-    masm.switchToObjectRealm(calleeReg, scratch, scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToObjectRealm(calleeReg, scratch);
   }
 
   pushArguments(argcReg, calleeReg, scratch, scratch2, flags, argcFixed,
@@ -3514,7 +3503,7 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(
   stubFrame.leave(masm);
 
   if (!isSameRealm) {
-    masm.switchToBaselineFrameRealm(scratch2, scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToBaselineFrameRealm(scratch2);
   }
 
   // We will also unilaterally clear this on exception handling.
@@ -3778,10 +3767,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedFunctionShared(
   AutoOutputRegister output(*this);
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
-  Maybe<AutoScratchRegister> scratchForAOT;
-  if (aotContext_) {
-    scratchForAOT.emplace(allocator, masm);
-  }
+
 
   Register calleeReg = allocator.useRegister(masm, calleeId);
   Register argcReg = allocator.useRegister(masm, argcId);
@@ -3802,7 +3788,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedFunctionShared(
   stubFrame.enter(masm, scratch);
 
   if (!isSameRealm) {
-    masm.switchToObjectRealm(calleeReg, scratch, scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToObjectRealm(calleeReg, scratch);
   }
   if (isInlined) {
     stubFrame.pushInlinedICScript(masm, stubAddress(*icScriptOffset));
@@ -3841,7 +3827,7 @@ bool BaselineCacheIRCompiler::emitCallScriptedFunctionShared(
   stubFrame.leave(masm);
 
   if (!isSameRealm) {
-    masm.switchToBaselineFrameRealm(scratch2, scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToBaselineFrameRealm(scratch2);
   }
 
   return true;
@@ -4000,10 +3986,7 @@ bool BaselineCacheIRCompiler::emitCallBoundScriptedFunction(
   AutoOutputRegister output(*this);
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
-  Maybe<AutoScratchRegister> scratchForAOT;
-  if (aotContext_) {
-    scratchForAOT.emplace(allocator, masm);
-  }
+
 
   Register calleeReg = allocator.useRegister(masm, calleeId);
   Register argcReg = allocator.useRegister(masm, argcId);
@@ -4025,7 +4008,7 @@ bool BaselineCacheIRCompiler::emitCallBoundScriptedFunction(
   if (isConstructing) {
     if (!isSameRealm) {
       masm.unboxObject(boundTarget, scratch);
-      masm.switchToObjectRealm(scratch, scratch, scratchForAOT.refOrConvertible(InvalidReg));
+      masm.switchToObjectRealm(scratch, scratch);
     }
     createThis(argcReg, calleeReg, scratch, flags,
                /* isBoundFunction = */ true);
@@ -4039,7 +4022,7 @@ bool BaselineCacheIRCompiler::emitCallBoundScriptedFunction(
   masm.unboxObject(boundTarget, calleeReg);
 
   if (!isConstructing && !isSameRealm) {
-    masm.switchToObjectRealm(calleeReg, scratch, scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToObjectRealm(calleeReg, scratch);
   }
 
   // Update argc.
@@ -4063,7 +4046,7 @@ bool BaselineCacheIRCompiler::emitCallBoundScriptedFunction(
   stubFrame.leave(masm);
 
   if (!isSameRealm) {
-    masm.switchToBaselineFrameRealm(scratch2, scratchForAOT.refOrConvertible(InvalidReg));
+    masm.switchToBaselineFrameRealm(scratch2);
   }
 
   return true;

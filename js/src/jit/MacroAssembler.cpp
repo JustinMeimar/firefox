@@ -2962,21 +2962,18 @@ void MacroAssembler::switchToRealm(const void* realm, Register scratch) {
   switchToRealm(scratch);
 }
 
-void MacroAssembler::switchToObjectRealm(Register obj, Register scratch,
-                                         Register scratchForAOT) {
-  // NOTE(Justin): Do we need `scratchForAOT`?
+void MacroAssembler::switchToObjectRealm(Register obj, Register scratch) {
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
   switchToRealm(scratch);
 }
 
-void MacroAssembler::switchToBaselineFrameRealm(Register scratch,
-                                                Register scratchForAOT) {
+void MacroAssembler::switchToBaselineFrameRealm(Register scratch) {
   Address envChain(FramePointer,
                    BaselineFrame::reverseOffsetOfEnvironmentChain());
   loadPtr(envChain, scratch);
-  switchToObjectRealm(scratch, scratch, scratchForAOT);
+  switchToObjectRealm(scratch, scratch);
 }
 
 void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
