@@ -7517,14 +7517,7 @@ bool CacheIRCompiler::emitArrayJoinResult(ObjOperandId objId,
   {
     Label arrayNotEmpty;
     masm.branch32(Assembler::NotEqual, lengthAddr, Imm32(0), &arrayNotEmpty);
-#ifdef ENABLE_AOT_BASELINE
-    if (masm.isAOT()) {
-      masm.emitAOTSlotLoad(AOTSlot::AtomEmpty, scratch);
-    } else
-#endif
-    {
-      masm.movePtr(ImmGCPtr(cx_->names().empty_), scratch);
-    }
+    masm.moveAtomPtr(AOTSlot::AtomEmpty, cx_->names().empty_, scratch);
     masm.tagValue(JSVAL_TYPE_STRING, scratch, callvm.outputValueReg());
     masm.jump(&finished);
     masm.bind(&arrayNotEmpty);
@@ -8385,39 +8378,18 @@ bool CacheIRCompiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
                     &isUndefined);
 
   masm.bind(&isCallable);
-#ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT()) {
-    masm.emitAOTSlotLoad(AOTSlot::AtomFunction, scratch);
-    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
-  } else
-#endif
-  {
-    masm.moveValue(StringValue(cx_->names().function), output.valueReg());
-  }
+  masm.moveAtomPtr(AOTSlot::AtomFunction, cx_->names().function, scratch);
+  masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   masm.jump(&done);
 
   masm.bind(&isUndefined);
-#ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT()) {
-    masm.emitAOTSlotLoad(AOTSlot::AtomUndefined, scratch);
-    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
-  } else
-#endif
-  {
-    masm.moveValue(StringValue(cx_->names().undefined), output.valueReg());
-  }
+  masm.moveAtomPtr(AOTSlot::AtomUndefined, cx_->names().undefined, scratch);
+  masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   masm.jump(&done);
 
   masm.bind(&isObject);
-#ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT()) {
-    masm.emitAOTSlotLoad(AOTSlot::AtomObject, scratch);
-    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
-  } else
-#endif
-  {
-    masm.moveValue(StringValue(cx_->names().object), output.valueReg());
-  }
+  masm.moveAtomPtr(AOTSlot::AtomObject, cx_->names().object, scratch);
+  masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   masm.jump(&done);
 
   {
@@ -10185,26 +10157,12 @@ bool CacheIRCompiler::emitBooleanToString(BooleanOperandId inputId,
   masm.branchTest32(Assembler::NonZero, boolean, boolean, &true_);
 
   // False case
-#ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT()) {
-    masm.emitAOTSlotLoad(AOTSlot::AtomFalse, result);
-  } else
-#endif
-  {
-    masm.movePtr(ImmGCPtr(names.false_), result);
-  }
+  masm.moveAtomPtr(AOTSlot::AtomFalse, names.false_, result);
   masm.jump(&done);
 
   // True case
   masm.bind(&true_);
-#ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT()) {
-    masm.emitAOTSlotLoad(AOTSlot::AtomTrue, result);
-  } else
-#endif
-  {
-    masm.movePtr(ImmGCPtr(names.true_), result);
-  }
+  masm.moveAtomPtr(AOTSlot::AtomTrue, names.true_, result);
   masm.bind(&done);
 
   return true;

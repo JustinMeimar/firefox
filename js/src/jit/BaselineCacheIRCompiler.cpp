@@ -1570,7 +1570,6 @@ bool BaselineCacheIRCompiler::emitCallScriptedSetterShared(
   AutoScratchRegister code(allocator, masm);
 #endif
 
-
   Register receiver = allocator.useRegister(masm, receiverId);
   Register callee = allocator.useRegister(masm, calleeId);
   ValueOperand val = allocator.useValueRegister(masm, rhsId);
@@ -3412,7 +3411,6 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
 
-
   Register calleeReg = allocator.useRegister(masm, calleeId);
   Register argcReg = allocator.useRegister(masm, argcId);
 
@@ -3768,7 +3766,6 @@ bool BaselineCacheIRCompiler::emitCallScriptedFunctionShared(
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
 
-
   Register calleeReg = allocator.useRegister(masm, calleeId);
   Register argcReg = allocator.useRegister(masm, argcId);
 
@@ -3986,7 +3983,6 @@ bool BaselineCacheIRCompiler::emitCallBoundScriptedFunction(
   AutoOutputRegister output(*this);
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
-
 
   Register calleeReg = allocator.useRegister(masm, calleeId);
   Register argcReg = allocator.useRegister(masm, argcId);
