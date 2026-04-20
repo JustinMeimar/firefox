@@ -279,10 +279,11 @@ class ICCacheIRStub final : public ICStub {
 
   const CacheIRStubInfo* stubInfo_;
 
-  // JitCode object for this stub's native code. Stored explicitly so that
-  // static AOT stubs (code in .text with no JitCodeHeader) can return their
-  // JitCode without JitCode::FromExecutable reverse pointer arithmetic.
+#ifdef ENABLE_AOT_BASELINE
+  // Stored explicitly so that static AOT stubs (code in .text with no
+  // JitCodeHeader) can return their JitCode without FromExecutable.
   JitCode* jitCode_;
+#endif
 
 #ifndef JS_64BIT
   // Ensure stub data is 8-byte aligned on 32-bit.
@@ -292,12 +293,21 @@ class ICCacheIRStub final : public ICStub {
  public:
   ICCacheIRStub(JitCode* stubCode, const CacheIRStubInfo* stubInfo)
       : ICStub(stubCode ? stubCode->raw() : nullptr, /* isFallback = */ false),
-        stubInfo_(stubInfo),
-        jitCode_(stubCode) {
+        stubInfo_(stubInfo)
+#ifdef ENABLE_AOT_BASELINE
+        , jitCode_(stubCode)
+#endif
+  {
     MOZ_ASSERT_IF(!IsPortableBaselineInterpreterEnabled(), stubCode);
   }
 
-  JitCode* jitCode() const { return jitCode_; }
+  JitCode* jitCode() const {
+#ifdef ENABLE_AOT_BASELINE
+    return jitCode_;
+#else
+    return JitCode::FromExecutable(stubCode_);
+#endif
+  }
 
   ICStub* next() const { return next_; }
   void setNext(ICStub* stub) { next_ = stub; }
@@ -325,21 +335,21 @@ class ICCacheIRStub final : public ICStub {
   TypeData typeData() const { return typeData_; }
 };
 
-#ifdef JS_64BIT
-static const size_t fallbackStubSize = 3;
-static const size_t cacheIRStubSize = 5;
-#else
-static const size_t fallbackStubSize = 5;
-static const size_t cacheIRStubSize = 7;
-#endif
-
 // Assert stub size is what we expect to catch regressions.
 #ifdef JS_64BIT
-static_assert(sizeof(ICFallbackStub) == fallbackStubSize * sizeof(uintptr_t));
-static_assert(sizeof(ICCacheIRStub) == cacheIRStubSize * sizeof(uintptr_t));
+static_assert(sizeof(ICFallbackStub) == 3 * sizeof(uintptr_t));
+#  ifdef ENABLE_AOT_BASELINE
+static_assert(sizeof(ICCacheIRStub) == 5 * sizeof(uintptr_t));
+#  else
+static_assert(sizeof(ICCacheIRStub) == 4 * sizeof(uintptr_t));
+#  endif
 #else
-static_assert(sizeof(ICFallbackStub) == fallbackStubSize * sizeof(uintptr_t));
-static_assert(sizeof(ICCacheIRStub) == cacheIRStubSize * sizeof(uintptr_t));
+static_assert(sizeof(ICFallbackStub) == 5 * sizeof(uintptr_t));
+#  ifdef ENABLE_AOT_BASELINE
+static_assert(sizeof(ICCacheIRStub) == 7 * sizeof(uintptr_t));
+#  else
+static_assert(sizeof(ICCacheIRStub) == 6 * sizeof(uintptr_t));
+#  endif
 #endif
 
 inline ICStub* ICStub::maybeNext() const {
