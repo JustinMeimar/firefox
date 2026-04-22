@@ -373,11 +373,68 @@ bool DumpAOTContainer(JSContext* cx) {
   }
 
   if (JitOptions.dumpBaselineSelfHosted) {
+    // TODO: temporary whitelist of common self-hosted builtins that compile
+    // reliably. Remove once all self-hosted fns are AOT-safe.
+    static const char* const kSelfHostedWhitelist[] = {
+        "ArrayMap",
+        "ArrayFilter",
+        "ArrayReduce",
+        "ArrayReduceRight",
+        "ArrayForEach",
+        "ArrayFind",
+        "ArrayFindIndex",
+        "ArraySome",
+        "ArrayEvery",
+        "ArrayIncludes",
+        "ArrayFrom",
+        "ArrayFlat",
+        "ArrayFlatMap",
+        "ArraySort",
+        "ArrayOf",
+        "ArraySlice",
+        "ArrayKeys",
+        "ArrayValues",
+        "ArrayEntries",
+        "StringReplace",
+        "StringSplit",
+        "StringStartsWith",
+        "StringEndsWith",
+        "StringIncludes",
+        "StringTrim",
+        "StringPadStart",
+        "StringPadEnd",
+        "ObjectKeys",
+        "ObjectValues",
+        "ObjectEntries",
+        "ObjectAssign",
+        "PromiseThen",
+        "NumberToLocaleString",
+        "DateToLocaleString",
+        "RegExpPrototypeExec",
+        "TypedArraySort",
+    };
+
     uint32_t compiled = 0;
     uint32_t skipped = 0;
     for (auto iter = cx->runtime()->selfHostScriptMap.ref().iter();
          !iter.done(); iter.next()) {
       Rooted<JSAtom*> atom(cx, iter.get().key());
+
+      UniqueChars atomStr = AtomToPrintableString(cx, atom);
+      bool allowed = false;
+      if (atomStr) {
+        for (const char* name : kSelfHostedWhitelist) {
+          if (strcmp(atomStr.get(), name) == 0) {
+            allowed = true;
+            break;
+          }
+        }
+      }
+      if (!allowed) {
+        skipped++;
+        continue;
+      }
+
       AOTBlobData blob;
       if (!compileAOTSelfHosted(cx, atom, &blob)) {
         skipped++;
