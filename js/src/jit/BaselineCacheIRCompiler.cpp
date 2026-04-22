@@ -2525,9 +2525,8 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #ifdef ENABLE_JS_AOT_ICS
   if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
       !jitZone->isIncompleteAOTICs()) {
-    // In debug builds, crash so we can identify missing AOT IC stubs.
-    // In release builds, silently skip — the IC will enter Generic mode
-    // and fall back to VM calls, avoiding any runtime codegen.
+    // Debug: crash so we can identify missing AOT IC stubs.
+    // Release: skip, the IC enters Generic mode and falls back to VM.
     MOZ_ASSERT(false, "Missing AOT IC stub");
     return true;
   }
@@ -2652,6 +2651,14 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
                            /* isAOTFill = */ false, cx->zone()->jitZone())) {
     return ICAttachResult::OOM;
   }
+
+#ifdef ENABLE_JS_AOT_ICS
+  // enforce-aot-ics: LookupOrCompileStub returned true but with no stub.
+  // Skip attachment, the IC will fall back to VM calls.
+  if (!stubInfo) {
+    return ICAttachResult::TooLarge;
+  }
+#endif
 
   ICEntry* icEntry = icScript->icEntryForStub(stub);
 
