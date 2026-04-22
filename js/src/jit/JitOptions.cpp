@@ -200,15 +200,18 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(enableAOTICs, false);
   SET_DEFAULT(enableAOTICEnforce, false);
   SET_DEFAULT(dumpAOTICs, false);
-#endif
 
-#ifdef ENABLE_JS_AOT_ICS_FORCE
-  SET_DEFAULT(enableAOTICs, true);
-#endif
-
-#ifdef ENABLE_JS_AOT_ICS_ENFORCE
-  SET_DEFAULT(enableAOTICs, true);
-  SET_DEFAULT(enableAOTICEnforce, true);
+  if (getenv("JS_AOT_ICS")) {
+    enableAOTICs = true;
+  }
+  if (getenv("JS_AOT_ICS_ENFORCE")) {
+    enableAOTICs = true;
+    enableAOTICEnforce = true;
+  }
+  if (getenv("JS_AOT_ICS_DUMP")) {
+    enableAOTICs = true;
+    dumpAOTICs = true;
+  }
 #endif
 
   // How many invocations or loop iterations are needed before functions

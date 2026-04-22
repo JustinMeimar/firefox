@@ -2479,18 +2479,16 @@ void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
   }
   fflush(f);
   fclose(f);
-  fprintf(stderr, "UNEXPECTED NEW IC BODY\n");
-
-  fprintf(stderr,
-          "Please add the file '%s' to the ahead-of-time known IC bodies in "
-          "js/src/ics/.\n"
-          "\n"
-          "To keep running and dump all new ICs (useful for updating with "
-          "test-suites),\n"
-          "set the environment variable AOT_ICS_KEEP_GOING=1 and rerun.\n",
-          filename);
-
   if (!getenv("AOT_ICS_KEEP_GOING")) {
+    fprintf(stderr, "UNEXPECTED NEW IC BODY\n");
+    fprintf(stderr,
+            "Please add the file '%s' to the ahead-of-time known IC bodies in "
+            "js/src/ics/.\n"
+            "\n"
+            "To keep running and dump all new ICs (useful for updating with "
+            "test-suites),\n"
+            "set the environment variable AOT_ICS_KEEP_GOING=1 and rerun.\n",
+            filename);
     abort();
   }
 }
@@ -2527,7 +2525,11 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #ifdef ENABLE_JS_AOT_ICS
   if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
       !jitZone->isIncompleteAOTICs()) {
-    DumpNonAOTICStubAndQuit(kind, writer);
+    // In debug builds, crash so we can identify missing AOT IC stubs.
+    // In release builds, silently skip — the IC will enter Generic mode
+    // and fall back to VM calls, avoiding any runtime codegen.
+    MOZ_ASSERT(false, "Missing AOT IC stub");
+    return true;
   }
 #endif
 
