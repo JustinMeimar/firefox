@@ -7397,7 +7397,7 @@ bool BaselineInterpreterGenerator::loadAOTInterp(
 bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
 #ifdef ENABLE_AOT_BASELINE
-  if (JitOptions.useAOTBaseline) {
+  if (JitOptions.useAOTInterp) {
     if (loadAOTInterp(cx, interpreter)) {
       return true;
     }

@@ -19,12 +19,12 @@ pause() {
     echo ""
 }
 
-# run vm-only            --no-jit-backend
-# pause
-# run aot-blinterp       --no-ion --blinterp-eager --aot-bl --cache-ir-stubs=off
-# pause
-run aot-blinterp-ics   --no-ion --blinterp-eager --aot-bl --enforce-aot-ics
+run vm-only            --no-jit-backend
 pause
-run aot-selfhosted     --no-ion --blinterp-eager --aot-bl --cache-ir-stubs=off
+run aot-interp         --no-ion --no-baseline --blinterp-eager --aot-interp --cache-ir-stubs=off
 pause
-run aot-selfhosted-ics --no-ion --blinterp-eager --aot-bl --enforce-aot-ics
+run aot-interp-ics     --no-ion --no-baseline --blinterp-eager --aot-interp --aot-ics --enforce-aot-ics
+pause
+run aot-interp-sh      --no-ion --no-baseline --blinterp-eager --aot-interp --aot-selfhosted --cache-ir-stubs=off
+pause
+run aot-interp-sh-ics  --no-ion --no-baseline --blinterp-eager --aot-bl --enforce-aot-ics

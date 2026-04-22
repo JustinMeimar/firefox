@@ -246,7 +246,7 @@ JS_PUBLIC_API bool JS::InitSelfHostedCode(JSContext* cx, SelfHostedCache cache,
     // being generated already.
     bool loadedBinaryICs = false;
 #ifdef ENABLE_AOT_BASELINE
-    if (js::jit::JitOptions.useAOTBaseline) {
+    if (js::jit::JitOptions.useAOTBaseline || js::jit::JitOptions.enableAOTICs) {
       loadedBinaryICs = js::jit::LoadAOTICStubs(cx);
     }
 #endif

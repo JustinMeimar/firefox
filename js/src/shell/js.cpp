@@ -13042,7 +13042,9 @@ bool InitOptionParser(OptionParser& op) {
 #ifdef ENABLE_AOT_BASELINE
       !op.addBoolOption('\0', "dump-bl-interp", "Dump baseline interpreter binary for AOT patching.") ||
       !op.addBoolOption('\0', "dump-bl-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
-      !op.addBoolOption('\0', "aot-bl", "Use AOT compiled Baseline Interpreter.") ||
+      !op.addBoolOption('\0', "aot-bl", "Use all AOT compiled components.") ||
+      !op.addBoolOption('\0', "aot-interp", "Use AOT compiled Baseline Interpreter.") ||
+      !op.addBoolOption('\0', "aot-selfhosted", "Use AOT compiled self-hosted functions.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14030,6 +14032,7 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
     jit::JitOptions.enableAOTICs = true;
   }
   if (op.getBoolOption("enforce-aot-ics")) {
+    jit::JitOptions.enableAOTICs = true;
     jit::JitOptions.enableAOTICEnforce = true;
   }
   if (op.getBoolOption("dump-aot-ics")) {
@@ -14079,6 +14082,14 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("aot-bl")) {
     jit::JitOptions.useAOTBaseline = true;
+    jit::JitOptions.useAOTInterp = true;
+    jit::JitOptions.useAOTSelfHosted = true;
+  }
+  if (op.getBoolOption("aot-interp")) {
+    jit::JitOptions.useAOTInterp = true;
+  }
+  if (op.getBoolOption("aot-selfhosted")) {
+    jit::JitOptions.useAOTSelfHosted = true;
   }
 #endif
   if (op.getBoolOption("no-ion")) {

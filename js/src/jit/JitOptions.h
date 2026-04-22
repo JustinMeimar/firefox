@@ -75,6 +75,8 @@ struct DefaultJitOptions {
 #endif
   bool dumpBaselineInterp;
   bool dumpBaselineSelfHosted;
+  bool useAOTInterp;
+  bool useAOTSelfHosted;
   bool useAOTBaseline;
   bool baselineInterpreter;
   bool baselineJit;

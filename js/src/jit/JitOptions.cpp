@@ -138,7 +138,8 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether to dump AOT-compiled self-hosted functions.
   SET_DEFAULT(dumpBaselineSelfHosted, false);
 
-  // Whether to use the AOT compiled Baseline Interpreter instead of generating at runtime.
+  SET_DEFAULT(useAOTInterp, false);
+  SET_DEFAULT(useAOTSelfHosted, false);
   SET_DEFAULT(useAOTBaseline, false);
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
