@@ -2525,9 +2525,9 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #ifdef ENABLE_JS_AOT_ICS
   if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
       !jitZone->isIncompleteAOTICs()) {
-    // Debug: crash so we can identify missing AOT IC stubs.
-    // Release: skip, the IC enters Generic mode and falls back to VM.
-    MOZ_ASSERT(false, "Missing AOT IC stub");
+#ifdef DEBUG
+    DumpNonAOTICStubAndQuit(kind, writer);
+#endif
     return true;
   }
 #endif
