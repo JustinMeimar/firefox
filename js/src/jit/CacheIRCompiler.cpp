@@ -5512,7 +5512,7 @@ bool CacheIRCompiler::emitGuardObjectHasSameRealm(ObjOperandId objId) {
   }
 
   masm.guardObjectHasSameRealm(obj, scratch, failure->label(),
-                               scratchForAOT.refOrConvertible(InvalidReg));
+                               scratchForAOT.isSome() ? scratchForAOT.ref() : InvalidReg);
   return true;
 }
 
@@ -5810,7 +5810,7 @@ bool CacheIRCompiler::emitIsCrossRealmArrayConstructorResult(
   }
 
   masm.setIsCrossRealmArrayConstructor(obj, scratch,
-                                       scratchForAOT.refOrConvertible(InvalidReg));
+                                       scratchForAOT.isSome() ? scratchForAOT.ref() : InvalidReg);
   masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch, output.valueReg());
   return true;
 }
@@ -7517,7 +7517,7 @@ bool CacheIRCompiler::emitArrayJoinResult(ObjOperandId objId,
   {
     Label arrayNotEmpty;
     masm.branch32(Assembler::NotEqual, lengthAddr, Imm32(0), &arrayNotEmpty);
-    masm.moveAtomPtr(AOTSlot::AtomEmpty, cx_->names().empty_, scratch);
+    masm.movePtr(ImmGCPtr(cx_->names().empty_), scratch);
     masm.tagValue(JSVAL_TYPE_STRING, scratch, callvm.outputValueReg());
     masm.jump(&finished);
     masm.bind(&arrayNotEmpty);
@@ -8378,17 +8378,17 @@ bool CacheIRCompiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
                     &isUndefined);
 
   masm.bind(&isCallable);
-  masm.moveAtomPtr(AOTSlot::AtomFunction, cx_->names().function, scratch);
+  masm.movePtr(ImmGCPtr(cx_->names().function), scratch);
   masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   masm.jump(&done);
 
   masm.bind(&isUndefined);
-  masm.moveAtomPtr(AOTSlot::AtomUndefined, cx_->names().undefined, scratch);
+  masm.movePtr(ImmGCPtr(cx_->names().undefined), scratch);
   masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   masm.jump(&done);
 
   masm.bind(&isObject);
-  masm.moveAtomPtr(AOTSlot::AtomObject, cx_->names().object, scratch);
+  masm.movePtr(ImmGCPtr(cx_->names().object), scratch);
   masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   masm.jump(&done);
 
@@ -8400,7 +8400,7 @@ bool CacheIRCompiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
     using Fn = JSString* (*)(JSObject* obj, JSRuntime* rt);
     masm.setupUnalignedABICall(scratch);
     masm.passABIArg(obj);
-    masm.movePtr(RelocImmPtr(cx_->runtime()), scratch);
+    masm.movePtr(ImmPtr(cx_->runtime()), scratch);
     masm.passABIArg(scratch);
     masm.callWithABI<Fn, TypeOfNameObject>();
     masm.storeCallPointerResult(scratch);
@@ -9143,8 +9143,7 @@ void CacheIRCompiler::emitPostBarrierShared(Register obj,
 
   // Check one element cache to avoid VM call.
   auto* lastCellAddr = cx_->runtime()->gc.addressOfLastBufferedWholeCell();
-  masm.movePtr(RelocImmPtr(lastCellAddr), scratch);
-  masm.branchPtr(Assembler::Equal, Address(scratch, 0), obj,
+  masm.branchPtr(Assembler::Equal, AbsoluteAddress(lastCellAddr), obj,
                  &skipBarrier);
 
   // Call one of these, depending on maybeIndex:
@@ -9155,7 +9154,7 @@ void CacheIRCompiler::emitPostBarrierShared(Register obj,
   LiveRegisterSet save = liveVolatileRegs();
   masm.PushRegsInMask(save);
   masm.setupUnalignedABICall(scratch);
-  masm.movePtr(RelocImmPtr(cx_->runtime()), scratch);
+  masm.movePtr(ImmPtr(cx_->runtime()), scratch);
   masm.passABIArg(scratch);
   masm.passABIArg(obj);
   if (maybeIndex != InvalidReg) {
@@ -10157,12 +10156,12 @@ bool CacheIRCompiler::emitBooleanToString(BooleanOperandId inputId,
   masm.branchTest32(Assembler::NonZero, boolean, boolean, &true_);
 
   // False case
-  masm.moveAtomPtr(AOTSlot::AtomFalse, names.false_, result);
+  masm.movePtr(ImmGCPtr(names.false_), result);
   masm.jump(&done);
 
   // True case
   masm.bind(&true_);
-  masm.moveAtomPtr(AOTSlot::AtomTrue, names.true_, result);
+  masm.movePtr(ImmGCPtr(names.true_), result);
   masm.bind(&done);
 
   return true;
@@ -11694,7 +11693,7 @@ bool CacheIRCompiler::emitGuardRuntimeFuse(RuntimeFuses::FuseIndex fuseIndex) {
   }
 
   masm.guardRuntimeFuse(fuseIndex, failure->label(),
-                        scratchForAOT.refOrConvertible(InvalidReg));
+                        scratchForAOT.isSome() ? scratchForAOT.ref() : InvalidReg);
   return true;
 }
 

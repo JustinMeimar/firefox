@@ -2054,7 +2054,7 @@ void MacroAssembler::branchSurrogate(Assembler::Condition cond, Register src,
 
 void MacroAssembler::loadStringFromUnit(Register unit, Register dest,
                                         const StaticStrings& staticStrings) {
-  movePtr(RelocImmPtr(&staticStrings.unitStaticTable), dest);
+  movePtr(ImmPtr(&staticStrings.unitStaticTable), dest);
   loadPtr(BaseIndex(dest, unit, ScalePointer), dest);
 }
 
@@ -2065,7 +2065,7 @@ void MacroAssembler::loadLengthTwoString(Register c1, Register c2,
   // to obtain the index into `StaticStrings::length2StaticTable`.
   static_assert(sizeof(StaticStrings::SmallChar) == 1);
 
-  movePtr(RelocImmPtr(&StaticStrings::toSmallCharTable.storage), dest);
+  movePtr(ImmPtr(&StaticStrings::toSmallCharTable.storage), dest);
   load8ZeroExtend(BaseIndex(dest, c1, Scale::TimesOne), c1);
   load8ZeroExtend(BaseIndex(dest, c2, Scale::TimesOne), c2);
 
@@ -2073,7 +2073,7 @@ void MacroAssembler::loadLengthTwoString(Register c1, Register c2,
   add32(c2, c1);
 
   // Look up the string from the computed index.
-  movePtr(RelocImmPtr(&staticStrings.length2StaticTable), dest);
+  movePtr(ImmPtr(&staticStrings.length2StaticTable), dest);
   loadPtr(BaseIndex(dest, c1, ScalePointer), dest);
 }
 
@@ -2081,7 +2081,7 @@ void MacroAssembler::lookupStaticString(Register ch, Register dest,
                                         const StaticStrings& staticStrings) {
   MOZ_ASSERT(ch != dest);
 
-  movePtr(RelocImmPtr(&staticStrings.unitStaticTable), dest);
+  movePtr(ImmPtr(&staticStrings.unitStaticTable), dest);
   loadPtr(BaseIndex(dest, ch, ScalePointer), dest);
 }
 
@@ -2091,7 +2091,7 @@ void MacroAssembler::lookupStaticString(Register ch, Register dest,
   MOZ_ASSERT(ch != dest);
 
   boundsCheck32PowerOfTwo(ch, StaticStrings::UNIT_STATIC_LIMIT, fail);
-  movePtr(RelocImmPtr(&staticStrings.unitStaticTable), dest);
+  movePtr(ImmPtr(&staticStrings.unitStaticTable), dest);
   loadPtr(BaseIndex(dest, ch, ScalePointer), dest);
 }
 
@@ -2107,7 +2107,7 @@ void MacroAssembler::lookupStaticString(Register ch1, Register ch2,
   branch32(Assembler::AboveOrEqual, ch2,
            Imm32(StaticStrings::SMALL_CHAR_TABLE_SIZE), fail);
 
-  movePtr(RelocImmPtr(&StaticStrings::toSmallCharTable.storage), dest);
+  movePtr(ImmPtr(&StaticStrings::toSmallCharTable.storage), dest);
   load8ZeroExtend(BaseIndex(dest, ch1, Scale::TimesOne), ch1);
   load8ZeroExtend(BaseIndex(dest, ch2, Scale::TimesOne), ch2);
 
@@ -2120,7 +2120,7 @@ void MacroAssembler::lookupStaticString(Register ch1, Register ch2,
   add32(ch2, ch1);
 
   // Look up the string from the computed index.
-  movePtr(RelocImmPtr(&staticStrings.length2StaticTable), dest);
+  movePtr(ImmPtr(&staticStrings.length2StaticTable), dest);
   loadPtr(BaseIndex(dest, ch1, ScalePointer), dest);
 }
 
@@ -2131,7 +2131,7 @@ void MacroAssembler::lookupStaticIntString(Register integer, Register dest,
   MOZ_ASSERT(integer != scratch);
 
   boundsCheck32PowerOfTwo(integer, StaticStrings::INT_STATIC_LIMIT, fail);
-  movePtr(RelocImmPtr(&staticStrings.intStaticTable), scratch);
+  movePtr(ImmPtr(&staticStrings.intStaticTable), scratch);
   loadPtr(BaseIndex(scratch, integer, ScalePointer), dest);
 }
 
@@ -3108,10 +3108,10 @@ void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
 }
 
 void MacroAssembler::loadMegamorphicCache(Register dest) {
-  movePtr(RelocImmPtr(runtime()->addressOfMegamorphicCache()), dest);
+  movePtr(ImmPtr(runtime()->addressOfMegamorphicCache()), dest);
 }
 void MacroAssembler::loadMegamorphicSetPropCache(Register dest) {
-  movePtr(RelocImmPtr(runtime()->addressOfMegamorphicSetPropCache()), dest);
+  movePtr(ImmPtr(runtime()->addressOfMegamorphicSetPropCache()), dest);
 }
 
 void MacroAssembler::tryFastAtomize(Register str, Register scratch,
@@ -3124,7 +3124,7 @@ void MacroAssembler::tryFastAtomize(Register str, Register scratch,
   jump(&done);
   bind(&notAtomRef);
 
-  movePtr(RelocImmPtr(runtime()->addressOfStringToAtomCache()), scratch);
+  movePtr(ImmPtr(runtime()->addressOfStringToAtomCache()), scratch);
   computeEffectiveAddress(
       Address(scratch, StringToAtomCache::offsetOfLastLookups()), scratch);
 
@@ -5993,14 +5993,7 @@ void MacroAssembler::loadFunctionName(Register func, Register output,
     bind(&noName);
 
     // An absent name property defaults to the empty string.
-#ifdef ENABLE_AOT_BASELINE
-    if (isAOT()) {
-      emitAOTSlotLoad(AOTSlot::AtomEmpty, output);
-    } else
-#endif
-    {
-      movePtr(emptyString, output);
-    }
+    movePtr(emptyString, output);
   }
 
   bind(&done);

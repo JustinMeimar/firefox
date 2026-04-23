@@ -411,13 +411,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
-  void moveAtomPtr(AOTSlot slot, gc::Cell* atom, Register dest) {
-    if (isAOT()) {
-      emitAOTSlotLoad(slot, dest);
-      return;
-    }
-    movePtr(ImmGCPtr(atom), dest);
-  }
   void callPreBarrierAOT(MIRType type, Register scratch);
   void loadAOTTableBase(Register dest);
   void enterAOTStubFrame() { inAOTStubFrame_ = true; }

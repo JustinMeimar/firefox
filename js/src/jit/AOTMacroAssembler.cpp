@@ -122,13 +122,14 @@ void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 
 void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
-  if (MOZ_UNLIKELY(isAOT() && inAOTStubFrame_)) {
+  if (MOZ_UNLIKELY(isAOT())) {
     auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
     if (slot) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
-    MOZ_ASSERT(false, "AOT: movePtr(ImmGCPtr) with no indirection slot");
+    // GC pointers not in the table (e.g., script-specific atoms in the
+    // interpreter codegen) fall through to emit a normal relocatable move.
   }
 #endif
   MacroAssemblerSpecific::movePtr(imm, dest);

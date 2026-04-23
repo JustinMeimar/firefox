@@ -1191,14 +1191,7 @@ bool BaselineCacheIRCompiler::emitLoadStringCharResult(
 
     if (outOfBounds == StringCharOutOfBounds::EmptyString) {
       // Return the empty string for out-of-bounds access.
-#ifdef ENABLE_AOT_BASELINE
-      if (masm.isAOT()) {
-        masm.emitAOTSlotLoad(AOTSlot::AtomEmpty, scratch1);
-      } else
-#endif
-      {
-        masm.movePtr(ImmGCPtr(cx_->names().empty_), scratch1);
-      }
+      masm.movePtr(ImmGCPtr(cx_->names().empty_), scratch1);
     } else {
       // Return |undefined| for out-of-bounds access.
       masm.moveValue(UndefinedValue(), output.valueReg());
