@@ -9,6 +9,7 @@
 #include "mozilla/RandomNum.h"
 
 #include "gc/GC.h"
+#include "jit/AOTInstrumentation.h"
 #include "jit/BaselineAOT.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRAOT.h"
@@ -2757,6 +2758,11 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 #endif
 
   stub->addNewStub(icEntry, newStub);
+
+  AOT_INSTR("ic-attach kind=%s code=%u aot=%d\n",
+            CacheKindNames[uint8_t(kind)],
+            unsigned(code->instructionsSize()),
+            int(newStub->isStaticCode()));
 
   JSScript* owningScript = icScript->isInlined()
                                ? icScript->inliningRoot()->owningScript()

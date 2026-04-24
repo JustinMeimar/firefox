@@ -8,7 +8,6 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/TimeStamp.h"
 
 #include <cstdint>
 #include <fstream>
@@ -547,10 +546,6 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
 
 bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
                        Handle<JSAtom*> name) {
-#ifdef JS_JIT_TIMING
-  mozilla::TimeStamp tStart = mozilla::TimeStamp::Now();
-#endif
-
   JS::AutoCheckCannotGC nogc;
   uint32_t nameHash = name->hasLatin1Chars()
       ? mozilla::HashStringKnownLength(name->latin1Chars(nogc), name->length())
@@ -637,17 +632,6 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
           cx->runtime())) {
     bs->toggleProfilerInstrumentation(true);
   }
-
-#ifdef JS_JIT_TIMING
-  mozilla::TimeDuration dTotal = mozilla::TimeStamp::Now() - tStart;
-  fprintf(stderr, "[JIT-timing] AOT self-hosted '%.*s': total=%lldus (codeSize=%u)\n",
-          name->hasLatin1Chars() ? (int)name->length() : 10,
-          name->hasLatin1Chars()
-              ? reinterpret_cast<const char*>(name->latin1Chars(nogc))
-              : "<two-byte>",
-          (long long)dTotal.ToMicroseconds(),
-          manifest.codeSize);
-#endif
 
   return true;
 }

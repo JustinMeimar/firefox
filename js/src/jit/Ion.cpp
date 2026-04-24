@@ -24,6 +24,7 @@
 #include "gc/PublicIterators.h"
 #include "jit/AliasAnalysis.h"
 #include "jit/AlignmentMaskAnalysis.h"
+#include "jit/AOTInstrumentation.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BacktrackingAllocator.h"
 #include "jit/BaselineFrame.h"
@@ -299,6 +300,8 @@ uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
 
 bool JitRuntime::initialize(JSContext* cx) {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
+
+  gAOTInstr.init();
 
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
