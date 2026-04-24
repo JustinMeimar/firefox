@@ -13,6 +13,7 @@
 
 #include "builtin/Eval.h"
 #include "jit/AOT.h"
+#include "jit/AOTInstrumentation.h"
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/CacheIRGenerator.h"
 #include "jit/CacheIRHealth.h"
@@ -539,6 +540,10 @@ static void TryAttachStub(const char* name, JSContext* cx, BaselineFrame* frame,
 
 void ICFallbackStub::unlinkStub(Zone* zone, ICEntry* icEntry,
                                 ICCacheIRStub* prev, ICCacheIRStub* stub) {
+  AOT_INSTR("ic-detach kind=%s code=%u\n",
+            CacheKindNames[uint8_t(stub->stubInfo()->kind())],
+            unsigned(stub->stubInfo()->codeLength()));
+
   // We are removing edges from ICStub to gcthings. Perform a barrier to let the
   // GC know about those edges.
   PreWriteBarrier(zone, stub);
