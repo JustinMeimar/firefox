@@ -59,32 +59,7 @@ namespace js::jit {
   V(PreBarrier_Shape)                     \
   V(PreBarrier_WasmAnyRef)
 
-#define AOT_CLASS_SLOTS(V)                  \
-  V(Class_WithEnvironmentObject)          \
-  V(Class_Function)                       \
-  V(Class_ExtendedFunction)               \
-  V(Class_Array)                          \
-  V(Class_PlainObject)                    \
-  V(Class_FixedLengthArrayBuffer)         \
-  V(Class_ImmutableArrayBuffer)           \
-  V(Class_ResizableArrayBuffer)           \
-  V(Class_FixedLengthSharedArrayBuffer)   \
-  V(Class_GrowableSharedArrayBuffer)      \
-  V(Class_FixedLengthDataView)            \
-  V(Class_ImmutableDataView)              \
-  V(Class_ResizableDataView)              \
-  V(Class_MappedArguments)                \
-  V(Class_UnmappedArguments)              \
-  V(Class_BoundFunction)                  \
-  V(Class_PropertyIteratorObject)         \
-  V(Class_Set)                            \
-  V(Class_Map)                            \
-  V(Class_Date)                           \
-  V(Class_WeakMap)                        \
-  V(Class_WeakSet)                        \
-  V(Class_GeneratorObject)                \
-  V(WindowProxyClass)
-
+// Atom slots need names because movePtr(ImmGCPtr) matches them via findSlot.
 #define AOT_ATOM_SLOTS(V)                   \
   V(AtomEmpty)                            \
   V(AtomTrue)                             \
@@ -93,31 +68,19 @@ namespace js::jit {
   V(AtomUndefined)                        \
   V(AtomObject)
 
-#define AOT_STATIC_DATA_SLOTS(V)            \
-  V(DeadObjectProxySingleton)             \
-  V(WrapperFamily)                        \
-  V(EmptyObjectSlots)                     \
-  V(EmptyObjectElements)                  \
-  V(StaticStringsUnitTable)               \
-  V(StaticStringsLength2Table)            \
-  V(StaticStringsIntTable)                \
-  V(StaticStringsToSmallCharTable)        \
-  V(TypedArrayFixedLengthClassesBase)     \
-  V(TypedArrayImmutableClassesLast)       \
-  V(TypedArrayResizableClassesBase)       \
-  V(TypedArrayResizableClassesLast)       \
-  V(MathRandomScaleInv)                   \
-  V(DateTimeUTCToLocalOffset)             \
-  V(DOMProxyHandlerFamily)
-
 extern const double MathRandomScaleInv;
 
+// All named slots that codegen references explicitly.
 #define AOT_CORE_SLOTS(V)  \
   AOT_RUNTIME_SLOTS(V)     \
   AOT_PREBARRIER_SLOTS(V)  \
-  AOT_CLASS_SLOTS(V)       \
-  AOT_ATOM_SLOTS(V)        \
-  AOT_STATIC_DATA_SLOTS(V)
+  AOT_ATOM_SLOTS(V)
+
+// Extra pointer slots: JSClass pointers, static data, etc.
+// Populated by value in populateAOTIndirectionTable; matched by findSlot().
+// No named enum entries needed -- codegen accesses them transparently
+// through movePtr(ImmPtr) / movePtr(ImmGCPtr) interception.
+static constexpr uint32_t kAOTMaxImplicitPtrs = 64;
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
@@ -126,17 +89,22 @@ enum class AOTSlot : uint32_t {
 #define EMIT_SLOT(name) name,
   AOT_RUNTIME_SLOTS(EMIT_SLOT)
   AOT_PREBARRIER_SLOTS(EMIT_SLOT)
-  AOT_CLASS_SLOTS(EMIT_SLOT)
   AOT_ATOM_SLOTS(EMIT_SLOT)
-  AOT_STATIC_DATA_SLOTS(EMIT_SLOT)
 #undef EMIT_SLOT
   CoreSlot_End,
-  VMWrapper_Begin = CoreSlot_End,
+  Implicit_Begin = CoreSlot_End,
+  Implicit_End = Implicit_Begin + kAOTMaxImplicitPtrs,
+  VMWrapper_Begin = Implicit_End,
   VMWrapper_End = VMWrapper_Begin + kAOTMaxVMWrappers,
   ABIFn_Begin = VMWrapper_End,
   ABIFn_End = ABIFn_Begin + kAOTMaxABIFunctions,
   Count = ABIFn_End
 };
+
+inline AOTSlot AOTSlotForImplicit(uint32_t idx) {
+  MOZ_ASSERT(idx < kAOTMaxImplicitPtrs);
+  return AOTSlot(uint32_t(AOTSlot::Implicit_Begin) + idx);
+}
 
 inline AOTSlot AOTSlotForABIFn(uint32_t idx) {
   MOZ_ASSERT(idx < kAOTMaxABIFunctions);
@@ -156,8 +124,13 @@ inline const char* AOTSlotName(AOTSlot slot) {
     default:
       break;
   }
-  if (uint32_t(slot) >= uint32_t(AOTSlot::VMWrapper_Begin) &&
-      uint32_t(slot) < uint32_t(AOTSlot::VMWrapper_End)) {
+  uint32_t s = uint32_t(slot);
+  if (s >= uint32_t(AOTSlot::Implicit_Begin) &&
+      s < uint32_t(AOTSlot::Implicit_End)) {
+    return "Implicit";
+  }
+  if (s >= uint32_t(AOTSlot::VMWrapper_Begin) &&
+      s < uint32_t(AOTSlot::VMWrapper_End)) {
     return "VMWrapper";
   }
   return "Unknown";

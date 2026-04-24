@@ -5120,6 +5120,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                     Label* notSameDigit);
 
   void loadJSContext(Register dest);
+  void loadCurrentRealm(Register dest);
 
   void loadGlobalObjectData(Register dest);
 

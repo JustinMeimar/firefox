@@ -153,34 +153,6 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::MegamorphicSetPropCache, rt->caches().megamorphicSetPropCache.get());
   SET(AOTSlot::StringToAtomCache,   &rt->caches().stringToAtomCache);
 
-  // --- JSClass pointers (link-time constants) ---
-  SET(AOTSlot::Class_WithEnvironmentObject,        &WithEnvironmentObject::class_);
-  SET(AOTSlot::Class_Function,                     &FunctionClass);
-  SET(AOTSlot::Class_ExtendedFunction,             &ExtendedFunctionClass);
-  SET(AOTSlot::Class_Array,                        &ArrayObject::class_);
-  SET(AOTSlot::Class_PlainObject,                  &PlainObject::class_);
-  SET(AOTSlot::Class_FixedLengthArrayBuffer,       &FixedLengthArrayBufferObject::class_);
-  SET(AOTSlot::Class_ImmutableArrayBuffer,         &ImmutableArrayBufferObject::class_);
-  SET(AOTSlot::Class_ResizableArrayBuffer,         &ResizableArrayBufferObject::class_);
-  SET(AOTSlot::Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_);
-  SET(AOTSlot::Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_);
-  SET(AOTSlot::Class_FixedLengthDataView,          &FixedLengthDataViewObject::class_);
-  SET(AOTSlot::Class_ImmutableDataView,            &ImmutableDataViewObject::class_);
-  SET(AOTSlot::Class_ResizableDataView,            &ResizableDataViewObject::class_);
-  SET(AOTSlot::Class_MappedArguments,              &MappedArgumentsObject::class_);
-  SET(AOTSlot::Class_UnmappedArguments,            &UnmappedArgumentsObject::class_);
-  SET(AOTSlot::Class_BoundFunction,                &BoundFunctionObject::class_);
-  SET(AOTSlot::Class_PropertyIteratorObject,       &PropertyIteratorObject::class_);
-  SET(AOTSlot::Class_Set,                          &SetObject::class_);
-  SET(AOTSlot::Class_Map,                          &MapObject::class_);
-  SET(AOTSlot::Class_Date,                         &DateObject::class_);
-  SET(AOTSlot::Class_WeakMap,                      &WeakMapObject::class_);
-  SET(AOTSlot::Class_WeakSet,                      &WeakSetObject::class_);
-  SET(AOTSlot::Class_GeneratorObject,              &GeneratorObject::class_);
-  if (auto* wpc = rt->maybeWindowProxyClass()) {
-    SET(AOTSlot::WindowProxyClass, wpc);
-  }
-
   // --- Well-known atoms (GC pointers, stable within a runtime) ---
   SET(AOTSlot::AtomEmpty,       static_cast<JSString*>(cx->names().empty_));
   SET(AOTSlot::AtomTrue,        static_cast<JSString*>(cx->names().true_));
@@ -189,22 +161,58 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::AtomUndefined,   static_cast<JSString*>(cx->names().undefined));
   SET(AOTSlot::AtomObject,      static_cast<JSString*>(cx->names().object));
 
-  // --- Static data (link-time constants, singletons, sentinel values) ---
-  SET(AOTSlot::DeadObjectProxySingleton,   &DeadObjectProxy::singleton);
-  SET(AOTSlot::WrapperFamily,              &js::Wrapper::family);
-  SET(AOTSlot::EmptyObjectSlots,           emptyObjectSlots);
-  SET(AOTSlot::EmptyObjectElements,        emptyObjectElements);
-  SET(AOTSlot::StaticStringsUnitTable,     &cx->staticStrings().unitStaticTable);
-  SET(AOTSlot::StaticStringsLength2Table,  &cx->staticStrings().length2StaticTable);
-  SET(AOTSlot::StaticStringsIntTable,      &cx->staticStrings().intStaticTable);
-  SET(AOTSlot::StaticStringsToSmallCharTable, &StaticStrings::toSmallCharTable.storage);
-  SET(AOTSlot::TypedArrayFixedLengthClassesBase, std::begin(TypedArrayObject::fixedLengthClasses));
-  SET(AOTSlot::TypedArrayImmutableClassesLast, std::prev(std::end(TypedArrayObject::immutableClasses)));
-  SET(AOTSlot::TypedArrayResizableClassesBase, std::begin(TypedArrayObject::resizableClasses));
-  SET(AOTSlot::TypedArrayResizableClassesLast, std::prev(std::end(TypedArrayObject::resizableClasses)));
-  SET(AOTSlot::MathRandomScaleInv, &MathRandomScaleInv);
-  SET(AOTSlot::DateTimeUTCToLocalOffset, DateTimeInfo::addressOfUTCToLocalOffsetSeconds());
-  SET(AOTSlot::DOMProxyHandlerFamily, GetDOMProxyHandlerFamily());
+  // --- Implicit pointers (JSClass*, static data, singletons) ---
+  // No named enum entries; codegen accesses them transparently
+  // through movePtr(ImmPtr) / movePtr(ImmGCPtr) -> findSlot().
+  uint32_t implicitIdx_ = 0;
+#define SET_IMPLICIT(val) \
+  aotIndirectionTable_.set(AOTSlotForImplicit(implicitIdx_++), uintptr_t(val))
+
+  SET_IMPLICIT(&WithEnvironmentObject::class_);
+  SET_IMPLICIT(&FunctionClass);
+  SET_IMPLICIT(&ExtendedFunctionClass);
+  SET_IMPLICIT(&ArrayObject::class_);
+  SET_IMPLICIT(&PlainObject::class_);
+  SET_IMPLICIT(&FixedLengthArrayBufferObject::class_);
+  SET_IMPLICIT(&ImmutableArrayBufferObject::class_);
+  SET_IMPLICIT(&ResizableArrayBufferObject::class_);
+  SET_IMPLICIT(&FixedLengthSharedArrayBufferObject::class_);
+  SET_IMPLICIT(&GrowableSharedArrayBufferObject::class_);
+  SET_IMPLICIT(&FixedLengthDataViewObject::class_);
+  SET_IMPLICIT(&ImmutableDataViewObject::class_);
+  SET_IMPLICIT(&ResizableDataViewObject::class_);
+  SET_IMPLICIT(&MappedArgumentsObject::class_);
+  SET_IMPLICIT(&UnmappedArgumentsObject::class_);
+  SET_IMPLICIT(&BoundFunctionObject::class_);
+  SET_IMPLICIT(&PropertyIteratorObject::class_);
+  SET_IMPLICIT(&SetObject::class_);
+  SET_IMPLICIT(&MapObject::class_);
+  SET_IMPLICIT(&DateObject::class_);
+  SET_IMPLICIT(&WeakMapObject::class_);
+  SET_IMPLICIT(&WeakSetObject::class_);
+  SET_IMPLICIT(&GeneratorObject::class_);
+  if (auto* wpc = rt->maybeWindowProxyClass()) {
+    SET_IMPLICIT(wpc);
+  }
+
+  SET_IMPLICIT(&DeadObjectProxy::singleton);
+  SET_IMPLICIT(&js::Wrapper::family);
+  SET_IMPLICIT(emptyObjectSlots);
+  SET_IMPLICIT(emptyObjectElements);
+  SET_IMPLICIT(&cx->staticStrings().unitStaticTable);
+  SET_IMPLICIT(&cx->staticStrings().length2StaticTable);
+  SET_IMPLICIT(&cx->staticStrings().intStaticTable);
+  SET_IMPLICIT(&StaticStrings::toSmallCharTable.storage);
+  SET_IMPLICIT(std::begin(TypedArrayObject::fixedLengthClasses));
+  SET_IMPLICIT(std::prev(std::end(TypedArrayObject::immutableClasses)));
+  SET_IMPLICIT(std::begin(TypedArrayObject::resizableClasses));
+  SET_IMPLICIT(std::prev(std::end(TypedArrayObject::resizableClasses)));
+  SET_IMPLICIT(&MathRandomScaleInv);
+  SET_IMPLICIT(DateTimeInfo::addressOfUTCToLocalOffsetSeconds());
+  SET_IMPLICIT(GetDOMProxyHandlerFamily());
+
+  MOZ_ASSERT(implicitIdx_ <= kAOTMaxImplicitPtrs);
+#undef SET_IMPLICIT
 
   // --- ABI functions (computed from ABIFUNCTION_LIST) ---
   uint32_t abiIdx = 0;

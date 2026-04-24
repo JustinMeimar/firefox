@@ -2879,28 +2879,23 @@ static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
           JSContext::offsetOfRealm());
 }
 
+void MacroAssembler::loadCurrentRealm(Register dest) {
 #ifdef ENABLE_JS_AOT_ICS
-static void ContextRealmLoadRuntime(MacroAssembler* masm,
-                                    Register scratch) {
-  masm->loadRuntime(scratch);
-  masm->loadPtr(Address(scratch, JSRuntime::offsetOfMainContext()),
-                scratch);
-  Address realmAddr(scratch, JSContext::offsetOfRealm());
-  masm->loadPtr(realmAddr, scratch);
+  if (isAOTFill()) {
+    loadRuntime(dest);
+    loadPtr(Address(dest, JSRuntime::offsetOfMainContext()), dest);
+    loadPtr(Address(dest, JSContext::offsetOfRealm()), dest);
+    return;
+  }
+#endif
+  // Use movePtr (not AbsoluteAddress/loadPtr) so the AOT movePtr(ImmPtr)
+  // interception can redirect through the indirection table.
+  movePtr(ImmPtr(ContextRealmPtr(runtime())), dest);
+  loadPtr(Address(dest, 0), dest);
 }
 
-#endif
-
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-  if (!isAOTFill()) {
-    movePtr(RelocImmPtr(ContextRealmPtr(runtime())), dest);
-    loadPtr(Address(dest, 0), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    ContextRealmLoadRuntime(this, dest);
-  }
-#endif
+  loadCurrentRealm(dest);
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
@@ -2912,15 +2907,7 @@ void MacroAssembler::switchToRealm(Register realm) {
 }
 
 void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
-  // Load Realm pointer
-  if (!isAOTFill()) {
-    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    ContextRealmLoadRuntime(this, dest);
-  }
-#endif
+  loadCurrentRealm(dest);
   loadPtr(Address(dest, RealmFuses::offsetOfFuseWordRelativeToRealm(index)),
           dest);
 }
@@ -2985,14 +2972,7 @@ void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
 
 template <typename ValueType>
 void MacroAssembler::storeLocalAllocSite(ValueType value, Register scratch) {
-  if (!isAOTFill()) {
-    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), scratch);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    ContextRealmLoadRuntime(this, scratch);
-  }
-#endif
+  loadCurrentRealm(scratch);
   storePtr(value, Address(scratch, JS::Realm::offsetOfLocalAllocSite()));
 }
 
@@ -3030,14 +3010,11 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
   if (!isAOTFill()) {
     branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr(runtime())),
               output, &isFalse);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     MOZ_ASSERT(scratch != InvalidReg);
-    ContextRealmLoadRuntime(this, scratch);
+    loadCurrentRealm(scratch);
     branchPtr(Assembler::Equal, scratch, output, &isFalse);
   }
-#endif
 
   // The object must be a function.
   branchTestObjIsFunction(Assembler::NotEqual, obj, output, obj, &isFalse);
@@ -3064,14 +3041,11 @@ void MacroAssembler::guardObjectHasSameRealm(Register obj, Register scratch,
   if (!isAOTFill()) {
     branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
               scratch, fail);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
+  } else {
     MOZ_ASSERT(scratch2 != InvalidReg);
-    ContextRealmLoadRuntime(this, scratch2);
+    loadCurrentRealm(scratch2);
     branchPtr(Assembler::NotEqual, scratch2, scratch, fail);
   }
-#endif
 }
 
 void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
@@ -4058,14 +4032,7 @@ void MacroAssembler::loadJitActivation(Register dest) {
 }
 
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
-  if (!isAOTFill()) {
-    loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    ContextRealmLoadRuntime(this, dest);
-  }
-#endif
+  loadCurrentRealm(dest);
   computeEffectiveAddress(Address(dest, Realm::offsetOfBaselineCompileQueue()),
                           dest);
 }
