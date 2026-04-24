@@ -609,7 +609,7 @@ void MacroAssembler::branchPtr(Condition cond, Register lhs, ImmPtr rhs,
     }
     if (uintptr_t(rhs.value) > UINT32_MAX) {
       MOZ_CRASH_UNSAFE_PRINTF(
-          "AOT: branchPtr(Reg, ImmPtr %p) — no indirection slot", rhs.value);
+          "AOT: branchPtr(Reg, ImmPtr %p) no indirection slot", rhs.value);
     }
   }
 #endif
@@ -648,7 +648,7 @@ void MacroAssembler::branchPtr(Condition cond, const Address& lhs, ImmPtr rhs,
     }
     if (uintptr_t(rhs.value) > UINT32_MAX) {
       MOZ_CRASH_UNSAFE_PRINTF(
-          "AOT: branchPtr(Addr, ImmPtr %p) — no indirection slot", rhs.value);
+          "AOT: branchPtr(Addr, ImmPtr %p) no indirection slot", rhs.value);
     }
   }
 #endif

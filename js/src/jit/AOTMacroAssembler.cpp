@@ -35,9 +35,8 @@ static int32_t GetTlsContextOffset() {
   return static_cast<int32_t>(offset);
 }
 
-// Load an AOT slot value via the cached table base in BaselineFrame.
-// Normal: 2 loads  — FramePointer[aotTableBase_] -> slots_[slot]
-// Stub frame: 3 loads — [FramePointer] -> BaselineFrame, then as above
+// Load AOT slot via cached table base in BaselineFrame.
+// Stub frame adds an extra dereference through FramePointer.
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   if (inAOTStubFrame_) {
     MacroAssemblerSpecific::loadPtr(Address(FramePointer, 0), dest);
@@ -111,7 +110,7 @@ void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
     }
     if (uintptr_t(imm.value) > UINT32_MAX) {
       MOZ_CRASH_UNSAFE_PRINTF(
-          "AOT: no indirection slot for ImmPtr %p — would produce stale "
+          "AOT: no indirection slot for ImmPtr %p - would produce stale "
           "movabs. Add this address to the AOT indirection table.",
           imm.value);
     }

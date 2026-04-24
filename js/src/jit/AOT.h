@@ -257,14 +257,8 @@ inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind,
 
 class JitCode;
 
+// Allocate a JitCode that points directly at static .text AOT code.
 [[nodiscard]] JitCode* AllocateAOTCode(
-    JSContext* cx, const AOTBlobDirectoryEntry* entry,
-    const uint8_t* containerBase, uint32_t headerSize,
-    CodeKind codeKind);
-
-// Allocate a JitCode that points directly at static .text code.
-// No memcpy, no JIT pool allocation.
-[[nodiscard]] JitCode* AllocateStaticAOTCode(
     JSContext* cx, const AOTBlobDirectoryEntry* entry,
     uint8_t* textBase, CodeKind codeKind);
 

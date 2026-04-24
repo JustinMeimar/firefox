@@ -376,41 +376,15 @@ bool DumpAOTContainer(JSContext* cx) {
     // TODO: temporary whitelist of common self-hosted builtins that compile
     // reliably. Remove once all self-hosted fns are AOT-safe.
     static const char* const kSelfHostedWhitelist[] = {
-        "ArrayMap",
-        "ArrayFilter",
-        "ArrayReduce",
-        "ArrayReduceRight",
-        "ArrayForEach",
-        "ArrayFind",
-        "ArrayFindIndex",
-        "ArraySome",
-        "ArrayEvery",
-        "ArrayIncludes",
-        "ArrayFrom",
-        "ArrayFlat",
-        "ArrayFlatMap",
-        "ArraySort",
-        "ArrayOf",
-        "ArraySlice",
-        "ArrayKeys",
-        "ArrayValues",
-        "ArrayEntries",
-        "StringReplace",
-        "StringSplit",
-        "StringStartsWith",
-        "StringEndsWith",
-        "StringIncludes",
-        "StringTrim",
-        "StringPadStart",
-        "StringPadEnd",
-        "ObjectKeys",
-        "ObjectValues",
-        "ObjectEntries",
-        "ObjectAssign",
-        "PromiseThen",
-        "NumberToLocaleString",
-        "DateToLocaleString",
-        "RegExpPrototypeExec",
+        "ArrayMap", "ArrayFilter", "ArrayReduce", "ArrayReduceRight",
+        "ArrayForEach", "ArrayFind", "ArrayFindIndex", "ArraySome",
+        "ArrayEvery", "ArrayIncludes", "ArrayFrom", "ArrayFlat",
+        "ArrayFlatMap", "ArraySort", "ArrayOf", "ArraySlice",
+        "ArrayKeys", "ArrayValues", "ArrayEntries", "StringReplace",
+        "StringSplit", "StringStartsWith", "StringEndsWith", "StringIncludes",
+        "StringTrim", "StringPadStart", "StringPadEnd", "ObjectKeys",
+        "ObjectValues", "ObjectEntries", "ObjectAssign", "PromiseThen",
+        "NumberToLocaleString", "DateToLocaleString", "RegExpPrototypeExec",
         "TypedArraySort",
     };
 
@@ -527,7 +501,7 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
             uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
                 DebugTrapHandlerKind::Compiler)->raw()));
 
-  JitCode* code = AllocateStaticAOTCode(
+  JitCode* code = AllocateAOTCode(
       cx, entry, GetAOTTextBase(), CodeKind::Other);
   if (!code) {
     return false;
@@ -596,7 +570,7 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
   AOTScriptManifest manifest;
   memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
 
-  JitCode* code = AllocateStaticAOTCode(
+  JitCode* code = AllocateAOTCode(
       cx, entry, GetAOTTextBase(), CodeKind::Baseline);
   if (!code) {
     return false;
@@ -714,7 +688,7 @@ bool LoadAOTICStubs(JSContext* cx) {
       return;
     }
 
-    JitCode* code = AllocateStaticAOTCode(
+    JitCode* code = AllocateAOTCode(
         cx, entry, textBase, CodeKind::Baseline);
     if (!code) {
       js_free(stubInfo);

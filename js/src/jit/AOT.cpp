@@ -30,55 +30,6 @@ namespace js::jit {
 // ---------------------------------------------------------------------------
 
 JitCode* AllocateAOTCode(JSContext* cx,
-                         const AOTBlobDirectoryEntry* entry,
-                         const uint8_t* containerBase,
-                         uint32_t headerSize, CodeKind codeKind) {
-  uint32_t codeSize = entry->codeSize;
-
-  mozilla::Maybe<AutoAllocInAtomsZone> az;
-  if (!cx->zone() || !cx->zone()->isAtomsZone()) {
-    az.emplace(cx);
-  }
-
-  JitZone* jitZone = cx->zone()->getJitZone(cx);
-  if (!jitZone) {
-    ReportOutOfMemory(cx);
-    return nullptr;
-  }
-
-  size_t bytesNeeded = js::AlignBytes(codeSize + headerSize, sizeof(void*));
-  ExecutablePool* pool;
-  auto* result = (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool,
-                                                       codeKind);
-  if (!result) {
-    ReportOutOfMemory(cx);
-    return nullptr;
-  }
-
-  uint8_t* codeStart = result + headerSize;
-  JitCode* code =
-      JitCode::New<NoGC>(cx, codeStart, bytesNeeded, headerSize, pool,
-                          codeKind);
-  if (!code) {
-    ReportOutOfMemory(cx);
-    return nullptr;
-  }
-
-  {
-    AutoWritableJitCodeFallible writable(code);
-    if (!writable.makeWritable()) {
-      ReportOutOfMemory(cx);
-      return nullptr;
-    }
-    memcpy(codeStart, containerBase + entry->codeOffset, codeSize);
-    JitCodeHeader::FromExecutable(codeStart)->init(code);
-    code->setInstructionsSize(codeSize);
-  }
-
-  return code;
-}
-
-JitCode* AllocateStaticAOTCode(JSContext* cx,
                                const AOTBlobDirectoryEntry* entry,
                                uint8_t* textBase, CodeKind codeKind) {
   mozilla::Maybe<AutoAllocInAtomsZone> az;

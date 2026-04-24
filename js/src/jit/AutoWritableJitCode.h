@@ -40,18 +40,16 @@ class MOZ_RAII AutoWritableJitCodeFallible {
   bool isStatic_;
   AutoMarkJitCodeWritableForThread writableForThread_;
 
-  // For static (.text) code, mprotect directly since the address is not in
-  // the JIT executable pool and ReprotectRegion would assert.
+  // mprotect for static (.text) code that lives outside the JIT executable
+  // pool (where ReprotectRegion would assert).
   [[nodiscard]] static bool StaticMprotect(void* addr, size_t size,
                                            bool writable) {
-    size_t pageSize = gc::SystemPageSize();
-    uintptr_t startPtr = reinterpret_cast<uintptr_t>(addr);
-    uintptr_t pageStart = startPtr & ~(pageSize - 1);
-    size_t adjustedSize = size + (startPtr - pageStart);
-    adjustedSize = (adjustedSize + pageSize - 1) & ~(pageSize - 1);
+    size_t page = gc::SystemPageSize();
+    uintptr_t start = reinterpret_cast<uintptr_t>(addr);
+    uintptr_t aligned = start & ~(page - 1);
+    size_t len = ((size + (start - aligned)) + page - 1) & ~(page - 1);
     int prot = writable ? (PROT_READ | PROT_WRITE) : (PROT_READ | PROT_EXEC);
-    return mprotect(reinterpret_cast<void*>(pageStart), adjustedSize, prot) ==
-           0;
+    return mprotect(reinterpret_cast<void*>(aligned), len, prot) == 0;
   }
 
  public:
