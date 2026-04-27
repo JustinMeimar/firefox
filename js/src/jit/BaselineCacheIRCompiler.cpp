@@ -2460,9 +2460,15 @@ static bool AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
 #ifdef ENABLE_JS_AOT_ICS
 void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
   // Generate a random filename (unlikely to conflict with others).
-  char filename[64];
-  snprintf(filename, sizeof(filename), "IC-%" PRIu64,
-           mozilla::RandomUint64OrDie());
+  const char* dir = getenv("AOT_ICS_DIR");
+  char filename[256];
+  if (dir) {
+    snprintf(filename, sizeof(filename), "%s/IC-%" PRIu64, dir,
+             mozilla::RandomUint64OrDie());
+  } else {
+    snprintf(filename, sizeof(filename), "IC-%" PRIu64,
+             mozilla::RandomUint64OrDie());
+  }
   FILE* f = fopen(filename, "w");
   MOZ_RELEASE_ASSERT(f);
 
@@ -2519,10 +2525,9 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #ifdef ENABLE_JS_AOT_ICS
   if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
       !jitZone->isIncompleteAOTICs()) {
-#ifdef DEBUG
     DumpNonAOTICStubAndQuit(kind, writer);
-#endif
-    return true;
+    // Fall through to compile the stub normally so it enters the cache
+    // and doesn't get dumped again on every subsequent encounter.
   }
 #endif
 

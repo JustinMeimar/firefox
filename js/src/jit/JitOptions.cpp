@@ -213,6 +213,9 @@ DefaultJitOptions::DefaultJitOptions() {
     enableAOTICs = true;
     dumpAOTICs = true;
   }
+  if (dumpAOTICs) {
+    enableAOTICs = true;
+  }
 #endif
 
   // How many invocations or loop iterations are needed before functions

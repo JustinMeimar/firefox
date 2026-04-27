@@ -372,6 +372,14 @@ bool DumpAOTContainer(JSContext* cx) {
   }
 
   if (JitOptions.dumpBaselineSelfHosted) {
+    // Self-hosted compilation needs a realm (instantiateSelfHostedLazyFunction
+    // accesses cx->global()). Skip if no realm is available -- the caller must
+    // ensure a realm exists (the shell does this naturally via JSAutoRealm).
+    if (!cx->realm()) {
+      JitSpew(JitSpew_BaselineAOT,
+              "Skipping self-hosted dump: no realm available");
+    } else {
+
     // TODO: temporary whitelist of common self-hosted builtins that compile
     // reliably. Remove once all self-hosted fns are AOT-safe.
     static const char* const kSelfHostedWhitelist[] = {
@@ -425,6 +433,7 @@ bool DumpAOTContainer(JSContext* cx) {
         return false;
       }
     }
+    } // else (has realm)
   }
 
   auto icBlobs = GetSavedICBlobs();

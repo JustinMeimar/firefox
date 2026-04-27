@@ -1435,14 +1435,26 @@ uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
 bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
-    TempAllocator temp(&cx->tempLifoAlloc());
-    mozilla::Maybe<AOTContext> aotCtx;
 #ifdef ENABLE_AOT_BASELINE
+    // When dumping, first generate in AOT mode to capture the blob, then
+    // regenerate in normal mode for runtime use.  AOT mode emits TLS-based
+    // indirection which may not work in shared-library contexts (libxul).
     if (JitOptions.dumpBaselineInterp) {
-      aotCtx.emplace(&cx->runtime()->jitRuntime()->aotIndirectionTable());
+      TempAllocator dumpTemp(&cx->tempLifoAlloc());
+      AOTContext aotCtx(&cx->runtime()->jitRuntime()->aotIndirectionTable());
+      StackMacroAssembler dumpMasm(cx, dumpTemp, &aotCtx);
+      BaselineInterpreterGenerator dumpGen(cx, dumpTemp, dumpMasm);
+      BaselineInterpreter dumpInterp;
+      if (!dumpGen.generate(cx, dumpInterp)) {
+        return false;
+      }
+      // The blob is saved by dumpAOTInterp inside generate().
+      // Now fall through to generate the normal interpreter for runtime use.
+      JitOptions.dumpBaselineInterp = false;
     }
 #endif
-    StackMacroAssembler masm(cx, temp, aotCtx.ptrOr(nullptr));
+    TempAllocator temp(&cx->tempLifoAlloc());
+    StackMacroAssembler masm(cx, temp);
     BaselineInterpreterGenerator generator(cx, temp, masm);
     return generator.generate(cx, interpreter);
   }
