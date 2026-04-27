@@ -1383,7 +1383,9 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   masm.bind(&done);
 
 #ifdef ENABLE_AOT_BASELINE
-  masm.storeAOTTableBaseToFrame(scratch);
+  if (JitOptions.useAOTBaseline) {
+    masm.storeAOTTableBaseToFrame(scratch);
+  }
 #endif
 }
 
@@ -1460,7 +1462,9 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   }
 
 #ifdef ENABLE_AOT_BASELINE
-  masm.storeAOTTableBaseToFrame(scratch2);
+  if (JitOptions.useAOTBaseline) {
+    masm.storeAOTTableBaseToFrame(scratch2);
+  }
 #endif
 }
 
@@ -6551,7 +6555,9 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   masm.bind(&noArgsObj);
 
 #ifdef ENABLE_AOT_BASELINE
-  masm.storeAOTTableBaseToFrame(scratch1);
+  if (JitOptions.useAOTBaseline) {
+    masm.storeAOTTableBaseToFrame(scratch1);
+  }
 #endif
 
   // If profiler instrumentation is on, update lastProfilingFrame on
