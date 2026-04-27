@@ -469,9 +469,16 @@ static void MaybeNotifyWarp(JSScript* script, ICFallbackStub* stub) {
 }
 
 void ICCacheIRStub::trace(JSTracer* trc) {
+#ifdef ENABLE_AOT_BASELINE
   if (jitCode_) {
     TraceManuallyBarrieredEdge(trc, &jitCode_, "baseline-ic-stub-code");
   }
+#else
+  if (hasJitCode()) {
+    JitCode* stubJitCode = jitCode();
+    TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
+  }
+#endif
 
   TraceCacheIRStub(trc, this, stubInfo());
 }
