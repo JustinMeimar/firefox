@@ -1462,7 +1462,7 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   }
 
 #ifdef ENABLE_AOT_BASELINE
-  if (JitOptions.useAOTBaseline) {
+  if (masm.isAOT()) {
     masm.storeAOTTableBaseToFrame(scratch2);
   }
 #endif
@@ -6555,7 +6555,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   masm.bind(&noArgsObj);
 
 #ifdef ENABLE_AOT_BASELINE
-  if (JitOptions.useAOTBaseline) {
+  if (masm.isAOT() || JitOptions.useAOTBaseline) {
     masm.storeAOTTableBaseToFrame(scratch1);
   }
 #endif
