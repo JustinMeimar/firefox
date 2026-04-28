@@ -7,39 +7,52 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace js::jit {
 
-/// NOTE: This file is purely for research purposes. To be
-/// deleted eventually, along with the Instrumentation spew
-/// channel.
+enum AOTInstrCh : uint32_t {
+  AOTInstr_IC        = 1 << 0,
+  AOTInstr_Lifecycle = 1 << 1,
+  AOTInstr_All       = 0xFFFFFFFF,
+};
+
 struct AOTInstrumentation {
-  bool enabled = false;
+  uint32_t channels = 0;
   FILE* out = nullptr;
 
   void init() {
-    if (getenv("JS_AOT_INSTR")) {
-      enabled = true;
-      out = stderr;
+    const char* env = getenv("JS_AOT_INSTR");
+    if (!env) return;
+    out = stderr;
+    if (strcmp(env, "1") == 0 || strcmp(env, "all") == 0) {
+      channels = AOTInstr_All;
+    } else {
+      channels = 0;
+      if (strstr(env, "ic")) channels |= AOTInstr_IC;
+      if (strstr(env, "lifecycle")) channels |= AOTInstr_Lifecycle;
+      if (!channels) channels = AOTInstr_All;
     }
   }
+
+  bool enabled(uint32_t ch) const { return (channels & ch) != 0; }
 
   void close() {
     if (out && out != stderr && out != stdout) {
       fclose(out);
     }
     out = nullptr;
-    enabled = false;
+    channels = 0;
   }
 };
 
 inline AOTInstrumentation gAOTInstr;
 
-#define AOT_INSTR(fmt, ...)                                    \
-  do {                                                         \
-    if (MOZ_UNLIKELY(::js::jit::gAOTInstr.enabled)) {         \
-      fprintf(::js::jit::gAOTInstr.out, fmt, ##__VA_ARGS__);  \
-    }                                                          \
+#define AOT_INSTR(ch, fmt, ...)                                  \
+  do {                                                           \
+    if (MOZ_UNLIKELY(::js::jit::gAOTInstr.enabled(ch))) {       \
+      fprintf(::js::jit::gAOTInstr.out, fmt, ##__VA_ARGS__);    \
+    }                                                            \
   } while (0)
 
 }  // namespace js::jit

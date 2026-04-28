@@ -2764,7 +2764,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 
   stub->addNewStub(icEntry, newStub);
 
-  AOT_INSTR("ic-attach kind=%s code=%u aot=%d\n",
+  AOT_INSTR(AOTInstr_IC, "ic-attach kind=%s code=%u aot=%d\n",
             CacheKindNames[uint8_t(kind)],
             unsigned(code->instructionsSize()),
             int(newStub->isStaticCode()));

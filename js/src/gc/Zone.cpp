@@ -416,7 +416,7 @@ void Zone::forceDiscardJitCode(JS::GCContext* gcx,
 
 #ifdef ENABLE_AOT_BASELINE
         if (jitScript->hasIonScript()) {
-          AOT_INSTR("jit-discard tier=ion bytes=%zu script=%s:%u\n",
+          AOT_INSTR(jit::AOTInstr_Lifecycle, "jit-discard tier=ion bytes=%zu script=%s:%u\n",
                     jitScript->ionScript()->allocBytes(),
                     script->filename() ? script->filename() : "<null>",
                     unsigned(script->lineno()));
@@ -429,7 +429,7 @@ void Zone::forceDiscardJitCode(JS::GCContext* gcx,
         if (jitScript->hasBaselineScript() &&
             !jitScript->icScript()->active()) {
 #ifdef ENABLE_AOT_BASELINE
-          AOT_INSTR("jit-discard tier=baseline bytes=%zu script=%s:%u\n",
+          AOT_INSTR(jit::AOTInstr_Lifecycle, "jit-discard tier=baseline bytes=%zu script=%s:%u\n",
                     jitScript->baselineScript()->allocBytes(),
                     script->filename() ? script->filename() : "<null>",
                     unsigned(script->lineno()));
