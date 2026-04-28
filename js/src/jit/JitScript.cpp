@@ -11,6 +11,9 @@
 
 #include <utility>
 
+#ifdef ENABLE_AOT_BASELINE
+#  include "jit/AOTInstrumentation.h"
+#endif
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BytecodeAnalysis.h"
@@ -653,6 +656,12 @@ void JitScript::setBaselineScriptImpl(JS::GCContext* gcx, JSScript* script,
   if (hasBaselineScript()) {
     AddCellMemory(script, baselineScript_->allocBytes(),
                   MemoryUse::BaselineScript);
+#ifdef ENABLE_AOT_BASELINE
+    AOT_INSTR("jit-compile tier=baseline bytes=%zu script=%s:%u\n",
+              baselineScript_->allocBytes(),
+              script->filename() ? script->filename() : "<null>",
+              unsigned(script->lineno()));
+#endif
   }
 
   script->resetWarmUpResetCounter();
@@ -680,6 +689,12 @@ void JitScript::setIonScriptImpl(JS::GCContext* gcx, JSScript* script,
   MOZ_ASSERT_IF(hasIonScript(), hasBaselineScript());
   if (hasIonScript()) {
     AddCellMemory(script, ionScript_->allocBytes(), MemoryUse::IonScript);
+#ifdef ENABLE_AOT_BASELINE
+    AOT_INSTR("jit-compile tier=ion bytes=%zu script=%s:%u\n",
+              ionScript_->allocBytes(),
+              script->filename() ? script->filename() : "<null>",
+              unsigned(script->lineno()));
+#endif
   }
 
   script->updateJitCodeRaw(gcx->runtime());

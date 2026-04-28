@@ -75,7 +75,6 @@ void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
 }
 
 void MacroAssembler::loadAOTTableBase(Register dest) {
-  MOZ_ASSERT(isAOT());
   int32_t tlsOff = GetTlsContextOffset();
   loadPtrFromTls(tlsOff, dest);
   MacroAssemblerSpecific::loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);

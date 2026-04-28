@@ -15,6 +15,10 @@
 #include "gc/FinalizationObservers.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
+#ifdef ENABLE_AOT_BASELINE
+#  include "jit/AOTInstrumentation.h"
+#  include "jit/IonScript.h"
+#endif
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Invalidation.h"
@@ -409,11 +413,27 @@ void Zone::forceDiscardJitCode(JS::GCContext* gcx,
   jitZone()->forEachJitScript<jit::IncludeDyingScripts>(
       [&](jit::JitScript* jitScript) {
         JSScript* script = jitScript->owningScript();
+
+#ifdef ENABLE_AOT_BASELINE
+        if (jitScript->hasIonScript()) {
+          AOT_INSTR("jit-discard tier=ion bytes=%zu script=%s:%u\n",
+                    jitScript->ionScript()->allocBytes(),
+                    script->filename() ? script->filename() : "<null>",
+                    unsigned(script->lineno()));
+        }
+#endif
+
         jit::FinishInvalidation(gcx, script);
 
         // Discard baseline script if it's not marked as active.
         if (jitScript->hasBaselineScript() &&
             !jitScript->icScript()->active()) {
+#ifdef ENABLE_AOT_BASELINE
+          AOT_INSTR("jit-discard tier=baseline bytes=%zu script=%s:%u\n",
+                    jitScript->baselineScript()->allocBytes(),
+                    script->filename() ? script->filename() : "<null>",
+                    unsigned(script->lineno()));
+#endif
           jit::FinishDiscardBaselineScript(gcx, script);
         }
 
