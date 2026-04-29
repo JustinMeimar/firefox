@@ -7397,10 +7397,11 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 #ifdef ENABLE_AOT_BASELINE
   if (JitOptions.useAOTInterp) {
     if (loadAOTInterp(cx, interpreter)) {
+      MOZ_ASSERT(interpreter.loadedFromAOT());
+      fprintf(stderr, "[AOT] Baseline interpreter loaded from AOT container.\n");
       return true;
     }
-    JitSpew(JitSpew_BaselineAOT,
-            "AOT interp load failed; falling back to normal codegen");
+    MOZ_CRASH("AOT interp load failed but --aot-bl was requested");
   }
 #endif
 

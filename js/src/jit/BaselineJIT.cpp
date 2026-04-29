@@ -1387,6 +1387,7 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code,
     return false;
   }
 
+  loadedFromAOT_ = true;
   return true;
 }
 

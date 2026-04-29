@@ -256,27 +256,6 @@ JS_PUBLIC_API bool JS::InitSelfHostedCode(JSContext* cx, SelfHostedCache cache,
 #endif
   }
 
-#ifdef ENABLE_AOT_BASELINE
-  {
-    bool shouldDump = js::jit::JitOptions.dumpBaselineInterp ||
-                      js::jit::JitOptions.dumpBaselineSelfHosted;
-#ifdef ENABLE_JS_AOT_ICS
-    shouldDump = shouldDump || js::jit::JitOptions.dumpAOTICs;
-#endif
-    if (shouldDump) {
-      if (!js::jit::DumpAOTContainer(cx)) {
-        return false;
-      }
-      // Clear dump env vars so content processes don't inherit them.
-      // Content processes would generate AOT-mode interpreters with TLS
-      // loads that crash in shared-library contexts.
-      unsetenv("JIT_OPTION_dumpBaselineInterp");
-      unsetenv("JIT_OPTION_dumpBaselineSelfHosted");
-      unsetenv("JIT_OPTION_dumpAOTICs");
-    }
-  }
-#endif
-
   return true;
 }
 

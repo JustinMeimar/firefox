@@ -539,6 +539,10 @@ class BaselineInterpreter {
   // Offsets of some callVMs for BaselineDebugModeOSR.
   CallVMOffsets callVMOffsets_;
 
+#ifdef ENABLE_AOT_BASELINE
+  bool loadedFromAOT_ = false;
+#endif
+
   uint8_t* codeAtOffset(uint32_t offset) const {
     MOZ_ASSERT(offset > 0);
     MOZ_ASSERT(offset < code_->instructionsSize());
@@ -565,6 +569,7 @@ class BaselineInterpreter {
   [[nodiscard]] bool initFromAOT(JSContext* cx, JitCode* code,
                                   const AOTBlobDirectoryEntry* entry,
                                   const uint8_t* containerBase);
+  bool loadedFromAOT() const { return loadedFromAOT_; }
 #endif
 
   uint8_t* codeRaw() const { return code_->raw(); }
