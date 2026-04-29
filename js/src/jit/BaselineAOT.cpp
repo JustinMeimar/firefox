@@ -474,9 +474,6 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
     return false;
   }
 
-  AOTInterpManifest manifest;
-  memcpy(&manifest, containerBase + entry->manifestOffset, sizeof(manifest));
-
   // Ensure debug trap handlers exist before allocating writable code.
   if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
           cx, DebugTrapHandlerKind::Interpreter)) {
@@ -604,6 +601,9 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
   bs->computeResumeNativeOffsets(script, ResumeOffsetEntryVector());
 
+  // Attach to script before fallible profiler registration so bs is not leaked.
+  script->jitScript()->setBaselineScript(script, bs);
+
   {
     // Static AOT code shares .text addresses across realms. Only register
     // the jitcode map entry once per unique address range.
@@ -629,8 +629,6 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
       code->setHasBytecodeMap();
     }
   }
-
-  script->jitScript()->setBaselineScript(script, bs);
 
   if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
           cx->runtime())) {
