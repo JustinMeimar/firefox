@@ -1131,24 +1131,6 @@ struct JSRuntime {
     }
   }
 
-  static size_t offsetOfMegamorphicCache() {
-    return offsetof(JSRuntime, caches_) + decltype(caches_)::offsetOfValue() +
-           offsetof(js::RuntimeCaches, megamorphicCache);
-  }
-
-  // N.B: This is the offset where the _pointer_ to the MegamorphicSetPropCache
-  // **resides**. This relative address must be loaded in order to obtain the
-  // _pointer_ itself.
-  static size_t offsetOfMegamorphicSetPropCachePtr() {
-    return offsetof(JSRuntime, caches_) + decltype(caches_)::offsetOfValue() +
-           offsetof(js::RuntimeCaches, megamorphicSetPropCache);
-  }
-
-  static size_t offsetOfStringToAtomCache() {
-    return offsetof(JSRuntime, caches_) + decltype(caches_)::offsetOfValue() +
-           offsetof(js::RuntimeCaches, stringToAtomCache);
-  }
-
  public:
 #if defined(NIGHTLY_BUILD)
   // Support for informing the embedding of any error thrown.

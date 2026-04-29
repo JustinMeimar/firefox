@@ -921,9 +921,6 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
 
  public:
   void* addressOfInterruptBits() { return &interruptBits_; }
-  static size_t offsetOfInterruptBits() {
-    return offsetof(JSContext, interruptBits_);
-  }
   void* addressOfJitStackLimit() { return &jitStackLimit; }
   void* addressOfJitStackLimitNoInterrupt() {
     return &jitStackLimitNoInterrupt;

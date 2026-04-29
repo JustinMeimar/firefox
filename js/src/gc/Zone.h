@@ -838,20 +838,8 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
     return offsetof(Zone, allocNurseryBigInts_);
   }
 
-  static constexpr size_t offsetOfAllocGetterSetters() {
-    return offsetof(Zone, allocNurseryGetterSetters_);
-  }
-
   static constexpr size_t offsetOfUnknownAllocSite(JS::TraceKind kind) {
     return offsetof(Zone, pretenuring.unknownAllocSites[size_t(kind)]);
-  }
-
-  static constexpr size_t offsetOfRuntime() {
-    return offsetof(Zone, runtime_);
-  }
-
-  static constexpr size_t offsetOfArenas() {
-    return offsetof(Zone, arenas);
   }
 
   static constexpr size_t offsetOfFreeList(js::gc::AllocKind thingKind) {

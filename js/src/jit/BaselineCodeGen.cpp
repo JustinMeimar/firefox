@@ -7162,8 +7162,14 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
       return false;
     }
 #ifdef ENABLE_AOT_BASELINE
+    // Bifurcate opcode dispatch for AOT since the branch to computed
+    // address involves using an absolute pointer which is ephemeral.
+    // The AOT path pays for:
+    //  1) Computing the offset from the jump table.
+    //  2) Adding the offset to the table base
+    //  3) Jumping to the opcode
+    // All separately, whereas the JIT case does it in one instruction.
     if (masm.isAOT()) {
-      // Table entries are int32 offsets relative to the table base.
       BaseIndex entry(scratch2, opcodeReg, TimesFour);
       masm.load32SignExtendToPtr(entry, opcodeReg);
       masm.addPtr(scratch2, opcodeReg);
