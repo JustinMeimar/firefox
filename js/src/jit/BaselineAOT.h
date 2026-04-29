@@ -55,42 +55,51 @@ struct AOTInterpManifest {
   uint32_t ProfilerEnterToggle = 0;
   uint32_t ProfilerExitToggle = 0;
   uint32_t DebugTrapHandler = 0;
-  uint32_t DispatchTableOffset = 0;
   uint32_t CallVMDebugPrologue = 0;
   uint32_t CallVMDebugEpilogue = 0;
   uint32_t CallVMDebugAfterYield = 0;
-  uint32_t HeaderSize = 0;
-  uint32_t PrologueEndOffset = 0;
   uint32_t DebugInstrumentationCount = 0;
   uint32_t DebugTrapCount = 0;
   uint32_t CodeCoverageCount = 0;
   uint32_t ICReturnCount = 0;
 };
 
+static_assert(sizeof(AOTInterpManifest) == 52,
+              "AOTInterpManifest layout changed; bump AOT_CONTAINER_MAGIC or "
+              "add migration logic");
+
 // [SMDOC] AOT Baseline Compilation (Self-Hosted) Manifest
 //
 // Per-script manifest for AOT-compiled self-hosted functions.
 struct AOTScriptManifest {
-  uint32_t warmUpCheckPrologueOffset;
-  uint32_t profilerEnterToggleOffset;
-  uint32_t profilerExitToggleOffset;
-  uint32_t retAddrEntryCount;
-  uint32_t osrEntryCount;
-  uint32_t debugTrapEntryCount;
-  uint32_t resumeEntryCount;
-  uint32_t codeSize;
-  uint32_t headerSize;
+  uint32_t warmUpCheckPrologueOffset = 0;
+  uint32_t profilerEnterToggleOffset = 0;
+  uint32_t profilerExitToggleOffset = 0;
+  uint32_t retAddrEntryCount = 0;
+  uint32_t osrEntryCount = 0;
+  uint32_t debugTrapEntryCount = 0;
+  uint32_t resumeEntryCount = 0;
+  uint32_t codeSize = 0;
+  uint32_t headerSize = 0;
 };
 
+static_assert(sizeof(AOTScriptManifest) == 36,
+              "AOTScriptManifest layout changed; bump AOT_CONTAINER_MAGIC or "
+              "add migration logic");
+
 struct AOTICStubManifest {
-  CacheKind kind;
-  uint8_t makesGCCalls;
-  uint8_t stubDataOffset;
-  uint8_t localTracingSlots;
-  uint8_t pad;
-  uint32_t cacheIRCodeLength;
-  uint32_t numStubFields;
+  CacheKind kind = {};
+  uint8_t makesGCCalls = 0;
+  uint8_t stubDataOffset = 0;
+  uint8_t localTracingSlots = 0;
+  uint8_t pad = 0;
+  uint32_t cacheIRCodeLength = 0;
+  uint32_t numStubFields = 0;
 };
+
+static_assert(sizeof(AOTICStubManifest) == 16,
+              "AOTICStubManifest layout changed; bump AOT_CONTAINER_MAGIC or "
+              "add migration logic");
 
 // Build and save the interpreter AOT blob to the saved-blob slot.
 // Called from BaselineInterpreterGenerator::dumpAOTInterp with all

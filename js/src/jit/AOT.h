@@ -137,7 +137,6 @@ inline const char* AOTSlotName(AOTSlot slot) {
 }
 
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
-static constexpr uint32_t AOT_CONTAINER_VERSION = 3;
 
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
@@ -208,8 +207,7 @@ inline const AOTContainerHeader* GetAOTContainerHeader() {
     return nullptr;
   }
   const auto* hdr = reinterpret_cast<const AOTContainerHeader*>(GetAOTContainer());
-  if (hdr->magic != AOT_CONTAINER_MAGIC ||
-      hdr->version != AOT_CONTAINER_VERSION) {
+  if (hdr->magic != AOT_CONTAINER_MAGIC) {
     return nullptr;
   }
   return hdr;

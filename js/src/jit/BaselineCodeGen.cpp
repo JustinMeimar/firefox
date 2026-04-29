@@ -7345,12 +7345,9 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
   s.ProfilerEnterToggle = profilerEnterFrameToggleOffset_.offset();
   s.ProfilerExitToggle = profilerExitFrameToggleOffset_.offset();
   s.DebugTrapHandler = debugTrapHandlerOffset_;
-  s.DispatchTableOffset = tableOffset_;
   s.CallVMDebugPrologue = handler.callVMOffsets().debugPrologueOffset;
   s.CallVMDebugEpilogue = handler.callVMOffsets().debugEpilogueOffset;
   s.CallVMDebugAfterYield = handler.callVMOffsets().debugAfterYieldOffset;
-  s.HeaderSize = code->headerSize();
-  s.PrologueEndOffset = warmUpCheckPrologueOffset_.offset();
   s.DebugInstrumentationCount = handler.debugInstrumentationOffsets().length();
   s.DebugTrapCount = debugTrapOffsets_.length();
   s.CodeCoverageCount = handler.codeCoverageOffsets().length();
