@@ -6546,6 +6546,12 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
 
 #ifdef ENABLE_AOT_BASELINE
   if (masm.isAOT() || JitOptions.useAOTBaseline) {
+    // We emit code to store the &AOTIndirectionTable in two scenarios:
+    //  1) (simple case) when we are generating code in an AOT blob,
+    //     like a self-hosted builtin, or the blinterp.
+    //  2) In runtime generated baseline compilations because the ICs may
+    //     still be AOT, and will need the parent BaselineFrame to have
+    //     the AOT table base pointer set.
     masm.storeAOTTableBaseToFrame(scratch1);
   }
 #endif
