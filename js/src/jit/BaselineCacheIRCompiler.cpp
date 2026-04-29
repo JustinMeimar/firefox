@@ -3519,7 +3519,6 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(
 
   // We will also unilaterally clear this on exception handling.
   if (clearLocalAllocSite == ClearLocalAllocSite::Yes) {
-    // NOTE(Justin): Eventually we will whitelist the nullptr.
     masm.storeLocalAllocSite(ImmPtr(nullptr), scratch2);
   }
 

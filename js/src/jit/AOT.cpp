@@ -79,5 +79,4 @@ AOTSlot AOTIndirectionTable::findSlotOrCrash(uintptr_t value) const {
   return *slot;
 }
 
-
 }  // namespace js::jit

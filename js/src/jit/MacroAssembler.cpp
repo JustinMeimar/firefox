@@ -2871,7 +2871,7 @@ void MacroAssembler::isCallableOrConstructor(bool isCallable, Register obj,
 }
 
 void MacroAssembler::loadJSContext(Register dest) {
-  movePtr(RelocImmPtr(runtime()->mainContextPtr()), dest);
+  movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
 }
 
 static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
@@ -2902,7 +2902,7 @@ void MacroAssembler::loadGlobalObjectData(Register dest) {
 
 void MacroAssembler::switchToRealm(Register realm) {
   MOZ_ASSERT(realm != ScratchReg);
-  movePtr(RelocImmPtr(ContextRealmPtr(runtime())), ScratchReg);
+  movePtr(ImmPtr(ContextRealmPtr(runtime())), ScratchReg);
   storePtr(realm, Address(ScratchReg, 0));
 }
 
@@ -4310,7 +4310,7 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 
 void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
   TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
-  movePtr(RelocImmPtr(ptr.value), dest);
+  movePtr(ImmPtr(ptr.value), dest);
 }
 
 
@@ -4318,7 +4318,7 @@ void MacroAssembler::handleFailure() {
   // Re-entry code is irrelevant because the exception will leave the
   // running function and never come back
   TrampolinePtr excTail = runtime()->jitRuntime()->getExceptionTail();
-  movePtr(RelocImmPtr(excTail.value), ScratchReg);
+  movePtr(ImmPtr(excTail.value), ScratchReg);
   jump(ScratchReg);
 }
 

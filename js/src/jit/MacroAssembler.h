@@ -356,14 +356,13 @@ struct BranchWasmRefIsSubtypeRegisters {
 class MacroAssembler : public MacroAssemblerSpecific {
  private:
   // Information about the current JSRuntime. This is nullptr for Wasm
-  // compilations as well as AOT IC compilation.
+  // compilations and AOT IC compilation.
   CompileRuntime* maybeRuntime_ = nullptr;
 
-  // Information about the current Realm. This is nullptr for Wasm compilations
-  // and when compiling runtime-wide jitcode that will live in the Atom zone:
-  // for example, trampolines, the baseline interpreter, and (if
-  // self_hosted_cache is enabled) self-hosted baseline code.
-  // Furthermore, this is also nullptr for AOT IC compilations.
+  // Information about the current Realm. This is nullptr for Wasm compilations,
+  // AOT IC compilations, and when compiling runtime-wide jitcode that will live
+  // in the Atom zone: for example, trampolines, the baseline interpreter, and
+  // (if self_hosted_cache is enabled) self-hosted baseline code.
   CompileRealm* maybeRealm_ = nullptr;
 
   // AOT compilation context. Non-null when AOT codegen is active.

@@ -136,8 +136,6 @@ inline const char* AOTSlotName(AOTSlot slot) {
   return "Unknown";
 }
 
-
-
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 static constexpr uint32_t AOT_CONTAINER_VERSION = 3;
 
@@ -263,7 +261,7 @@ class JitCode;
     uint8_t* textBase, CodeKind codeKind);
 
 // A table of runtime pointers that AOT baseline code loads from
-// to attain position indpendence. Owned inline by JitRuntime.
+// to attain position independence. Owned inline by JitRuntime.
 class AOTIndirectionTable {
  public:
   AOTIndirectionTable() { std::memset(slots_, 0, sizeof(slots_)); }

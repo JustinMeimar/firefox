@@ -435,7 +435,7 @@ class BaselineCompilerHandler {
   }
 
   bool realmIndependentJitcode() const {
-    // NOTE: We probably shouldn't pollute this condition with AOT state.
+    // NOTE(Justin): We probably shouldn't pollute this condition with AOT state.
     return (JS::Prefs::experimental_self_hosted_cache() || isAOT_) &&
            script()->selfHosted();
   }

@@ -35,10 +35,10 @@ static int32_t GetTlsContextOffset() {
   return static_cast<int32_t>(offset);
 }
 
-// Load AOT slot via cached table base in BaselineFrame.
-// Stub frame adds an extra dereference through FramePointer.
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   if (inAOTStubFrame_) {
+    // In IC code the frame-pointer is set to the ICFrame, rather than
+    // the baseline frame. We pay an extra load to reach the BaselineFrame.
     MacroAssemblerSpecific::loadPtr(Address(FramePointer, 0), dest);
     MacroAssemblerSpecific::loadPtr(
         Address(dest, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
@@ -103,15 +103,19 @@ void MacroAssembler::loadRuntime(Register reg) {
 void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 #ifdef ENABLE_AOT_BASELINE
   if (MOZ_UNLIKELY(isAOT())) {
-    auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
+    uintptr_t val = uintptr_t(imm.value);
+    auto slot = aot().indirectionTable()->findSlot(val);
     if (slot) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
-    if (uintptr_t(imm.value) > UINT32_MAX) {
+    // Whitelisted values that are safe to bake into AOT code:
+    //  - nullptr (always zero)
+    //  - values fitting in 32 bits (encoded as imm32, position-independent)
+    if (val != 0 && val > UINT32_MAX) {
       MOZ_CRASH_UNSAFE_PRINTF(
-          "AOT: no indirection slot for ImmPtr %p - would produce stale "
-          "movabs. Add this address to the AOT indirection table.",
+          "AOT: no indirection slot for ImmPtr %p -- add this address to "
+          "the AOT indirection table.",
           imm.value);
     }
   }
@@ -137,12 +141,19 @@ void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
 void MacroAssembler::storePtr(ImmPtr imm, const Address& address) {
 #ifdef ENABLE_AOT_BASELINE
   if (MOZ_UNLIKELY(isAOT())) {
-    auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
+    uintptr_t val = uintptr_t(imm.value);
+    auto slot = aot().indirectionTable()->findSlot(val);
     if (slot) {
       ScratchRegisterScope scratch(*this);
       emitAOTSlotLoad(*slot, scratch);
       MacroAssemblerSpecific::storePtr(scratch, address);
       return;
+    }
+    if (val != 0 && val > UINT32_MAX) {
+      MOZ_CRASH_UNSAFE_PRINTF(
+          "AOT: no indirection slot for ImmPtr %p in storePtr -- add this "
+          "address to the AOT indirection table.",
+          imm.value);
     }
   }
 #endif
@@ -151,7 +162,7 @@ void MacroAssembler::storePtr(ImmPtr imm, const Address& address) {
 
 // Rather than clutter BaselineCodeGen with a bifurcated ifdef, we abstract,
 // even though there is only one use, the logic for filling the blinterp
-// disptach table.
+// dispatch table.
 // NOTE(Justin): Are the absolute pointers in the dispatch table too
 // perf sensitive to simple be written as a rel-offset as in the AOT
 // case? Probably, but need to profile to be certain.

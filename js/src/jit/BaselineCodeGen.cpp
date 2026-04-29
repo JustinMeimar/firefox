@@ -642,7 +642,7 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
   // Check one element cache to avoid VM call.
   Label skipBarrier;
   Register ptrReg = R1.scratchReg();
-  masm.movePtr(RelocImmPtr(runtime->addressOfLastBufferedWholeCell()), ptrReg);
+  masm.movePtr(ImmPtr(runtime->addressOfLastBufferedWholeCell()), ptrReg);
   masm.loadPtr(Address(ptrReg, 0), ptrReg);
   masm.branchPtr(Assembler::Equal, ptrReg, objReg, &skipBarrier);
 
@@ -656,15 +656,12 @@ void BaselineCodeGen<Handler>::emitOutOfLinePostBarrierSlot() {
 
   masm.pushValue(R0);
 
+  using Fn = void (*)(JSRuntime* rt, js::gc::Cell* cell);
   masm.setupUnalignedABICall(scratch);
-  masm.movePtr(RelocImmPtr(runtime), scratch);
+  masm.movePtr(ImmPtr(runtime), scratch);
   masm.passABIArg(scratch);
   masm.passABIArg(objReg);
-  {
-    Register fnReg = regs.takeAny();
-    masm.movePtr(RelocImmPtr((void*)PostWriteBarrier), fnReg);
-    masm.callWithABI(fnReg);
-  }
+  masm.callWithABI<Fn, PostWriteBarrier>();
 
   restoreInterpreterPCReg();
 
@@ -984,14 +981,7 @@ bool BaselineInterpreterCodeGen::emitIsDebuggeeCheck() {
   CodeOffset toggleOffset = masm.toggledJump(&skipCheck);
   {
     saveInterpreterPCReg();
-    {
-      masm.setupUnalignedABICall(R0.scratchReg());
-      masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
-      masm.passABIArg(R0.scratchReg());
-      Register fnReg = R2.scratchReg();
-      masm.movePtr(RelocImmPtr((void*)FrameIsDebuggeeCheck), fnReg);
-      masm.callWithABI(fnReg);
-    }
+    EmitCallFrameIsDebuggeeCheck(masm);
     restoreInterpreterPCReg();
   }
   masm.bind(&skipCheck);
@@ -1623,7 +1613,7 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
   Label done;
   {
     Register scratch = R0.scratchReg();
-    masm.movePtr(RelocImmPtr(runtime->addressOfInterruptBits()), scratch);
+    masm.movePtr(ImmPtr(runtime->addressOfInterruptBits()), scratch);
     masm.branch32(Assembler::Equal, Address(scratch, 0), Imm32(0), &done);
   }
 
@@ -1793,11 +1783,11 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     // the frame currently being OSR-ed
     {
       Label checkOk;
-      masm.movePtr(RelocImmPtr(runtime->geckoProfiler().addressOfEnabled()),
+      masm.movePtr(ImmPtr(runtime->geckoProfiler().addressOfEnabled()),
                    scratchReg);
       masm.branch32(Assembler::Equal, Address(scratchReg, 0), Imm32(0),
                     &checkOk);
-      masm.movePtr(RelocImmPtr(runtime->addressOfJitActivation()), scratchReg);
+      masm.movePtr(ImmPtr(runtime->addressOfJitActivation()), scratchReg);
       masm.loadPtr(Address(scratchReg, 0), scratchReg);
       masm.loadPtr(
           Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
@@ -2045,7 +2035,7 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   Label noInstrument;
   CodeOffset toggleOffset = masm.toggledJump(&noInstrument);
   Register ptrReg = R1.scratchReg();
-  masm.movePtr(RelocImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value), ptrReg);
+  masm.movePtr(ImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value), ptrReg);
   masm.jump(ptrReg);
 
   masm.bind(&noInstrument);
@@ -2876,7 +2866,7 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
   Register scratch2 = R1.scratchReg();
   LoadUint8Operand(masm, scratch1);
 
-  masm.movePtr(RelocImmPtr(&runtime->wellKnownSymbols()), scratch2);
+  masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch1);
 
   masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
@@ -5844,7 +5834,7 @@ bool BaselineCodeGen<Handler>::emit_TableSwitch() {
   // Note: this stub may clobber scratch1.
   {
     Register stubReg = scratch1;
-    masm.movePtr(RelocImmPtr(runtime->jitRuntime()->getDoubleToInt32ValueStub().value), stubReg);
+    masm.movePtr(ImmPtr(runtime->jitRuntime()->getDoubleToInt32ValueStub().value), stubReg);
     masm.call(stubReg);
   }
 
@@ -6307,7 +6297,7 @@ bool BaselineInterpreterCodeGen::emitAfterYieldDebugInstrumentation(
   if (!handler.addDebugInstrumentationOffset(toggleOffset)) {
     return false;
   }
-  masm.movePtr(RelocImmPtr(runtime->addressOfRealm()), scratch);
+  masm.movePtr(ImmPtr(runtime->addressOfRealm()), scratch);
   masm.loadPtr(Address(scratch, 0), scratch);
   masm.branchTest32(Assembler::Zero,
                     Address(scratch, Realm::offsetOfDebugModeBits()),
@@ -6567,7 +6557,7 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     Register scratchReg = scratch2;
     Label skip;
 
-    masm.movePtr(RelocImmPtr(runtime->geckoProfiler().addressOfEnabled()),
+    masm.movePtr(ImmPtr(runtime->geckoProfiler().addressOfEnabled()),
                  scratchReg);
     masm.branch32(Assembler::Equal, Address(scratchReg, 0), Imm32(0), &skip);
     masm.loadJSContext(scratchReg);
@@ -7279,7 +7269,7 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     JitCode* handlerCode = runtime->jitRuntime()->debugTrapHandler(
         DebugTrapHandlerKind::Interpreter);
     Register ptrReg = R1.scratchReg();
-    masm.movePtr(RelocImmPtr(handlerCode->raw()), ptrReg);
+    masm.movePtr(ImmPtr(handlerCode->raw()), ptrReg);
     masm.jump(ptrReg);
   }
 
@@ -7318,14 +7308,11 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 
   saveInterpreterPCReg();
 
+  using Fn1 = void (*)(BaselineFrame* frame);
   masm.setupUnalignedABICall(R0.scratchReg());
   masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
   masm.passABIArg(R0.scratchReg());
-  {
-    Register fnReg = R2.scratchReg();
-    masm.movePtr(RelocImmPtr((void*)HandleCodeCoverageAtPrologue), fnReg);
-    masm.callWithABI(fnReg);
-  }
+  masm.callWithABI<Fn1, HandleCodeCoverageAtPrologue>();
 
   restoreInterpreterPCReg();
   masm.ret();
@@ -7336,17 +7323,13 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 #endif
 
   saveInterpreterPCReg();
+  using Fn2 = void (*)(BaselineFrame* frame, jsbytecode* pc);
   masm.setupUnalignedABICall(R0.scratchReg());
   masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
   masm.passABIArg(R0.scratchReg());
   Register pcReg = LoadBytecodePC(masm, R2.scratchReg());
   masm.passABIArg(pcReg);
-  {
-    // R0 (rcx) and R2 (rax) are both used as ABI args; use R1 (rbx).
-    Register fnReg = R1.scratchReg();
-    masm.movePtr(RelocImmPtr((void*)HandleCodeCoverageAtPC), fnReg);
-    masm.callWithABI(fnReg);
-  }
+  masm.callWithABI<Fn2, HandleCodeCoverageAtPC>();
 
   restoreInterpreterPCReg();
   masm.ret();

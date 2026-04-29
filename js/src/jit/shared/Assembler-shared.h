@@ -225,10 +225,6 @@ struct ImmPtr {
   }
 };
 
-struct RelocImmPtr : public ImmPtr {
-  explicit RelocImmPtr(const void* value) : ImmPtr(value) {}
-};
-
 // The same as ImmPtr except that the intention is to patch this
 // instruction. The initial value of the immediate is 'addr' and this value is
 // either clobbered or used in the patching process.
