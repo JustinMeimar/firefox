@@ -3,6 +3,12 @@
 // this file provides the required symbols with zero-length sections.
 // The runtime detects the empty container and falls back to normal codegen.
 
+.section .data
+.balign 8
+.global aot_tls_js_context_offset
+aot_tls_js_context_offset:
+    .quad 0
+
 .section .text.aot,"ax",@progbits
 .balign 16
 .global bl_aot_text_start

@@ -184,7 +184,10 @@ extern "C" {
   extern const uint8_t bl_aot_container_end[];
   extern uint8_t bl_aot_text_start[];
   extern uint8_t bl_aot_text_end[];
+  extern int64_t aot_tls_js_context_offset;
 }
+
+static constexpr uint32_t kAOTTlsLoadSiteSize = 12;
 
 inline const uint8_t* GetAOTContainer() {
   return bl_aot_container_start;
@@ -301,9 +304,15 @@ class AOTContext {
   explicit AOTContext(AOTIndirectionTable* table) : table_(table) {}
   void bindMasm(MacroAssembler& masm) { masm_ = &masm; }
   AOTIndirectionTable* indirectionTable() const { return table_; }
+
+  void setTlsLoadSite(uint32_t off) { tlsLoadSiteOffset_ = off; }
+  bool hasTlsLoadSite() const { return tlsLoadSiteOffset_ != UINT32_MAX; }
+  uint32_t tlsLoadSiteOffset() const { return tlsLoadSiteOffset_; }
+
  private:
   MacroAssembler* masm_ = nullptr;
   [[maybe_unused]] AOTIndirectionTable* table_;
+  uint32_t tlsLoadSiteOffset_ = UINT32_MAX;
 };
 
 }  // namespace js::jit

@@ -75,16 +75,32 @@ void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
 }
 
 void MacroAssembler::loadAOTTableBase(Register dest) {
+  uint32_t siteStart = currentOffset();
+
   int32_t tlsOff = GetTlsContextOffset();
   loadPtrFromTls(tlsOff, dest);
+
+  if (isAOT()) {
+    uint32_t used = currentOffset() - siteStart;
+    for (uint32_t i = used; i < kAOTTlsLoadSiteSize; i++) {
+      nop();
+    }
+    aot().setTlsLoadSite(siteStart);
+  }
+
   MacroAssemblerSpecific::loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
   MacroAssemblerSpecific::loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
   addPtr(Imm32(int32_t(JitRuntime::offsetOfAOTIndirectionTable())), dest);
 }
 
 void MacroAssembler::storeAOTTableBaseToFrame(Register scratch) {
-  loadAOTTableBase(scratch);
-  storePtr(scratch, Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
+  if (isAOT()) {
+    loadAOTTableBase(rax);
+    storePtr(rax, Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
+  } else {
+    loadAOTTableBase(scratch);
+    storePtr(scratch, Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
+  }
 }
 
 void MacroAssembler::loadZoneForAOT(Register dest) {

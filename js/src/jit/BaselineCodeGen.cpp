@@ -7387,7 +7387,13 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
     return false;
   }
 
-  return BuildAndSaveInterpBlob(code, s, metadata.begin(), metadata.length());
+  uint32_t tlsSite = UINT32_MAX;
+  if (masm.isAOT() && masm.aot().hasTlsLoadSite()) {
+    tlsSite = masm.aot().tlsLoadSiteOffset();
+  }
+
+  return BuildAndSaveInterpBlob(code, s, metadata.begin(), metadata.length(),
+                                tlsSite);
 }
 
 bool BaselineInterpreterGenerator::loadAOTInterp(

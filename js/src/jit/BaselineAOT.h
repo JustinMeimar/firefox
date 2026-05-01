@@ -30,6 +30,8 @@ struct AOTBlobData {
   Vector<uint8_t, 0, SystemAllocPolicy> manifest;
   Vector<uint8_t, 0, SystemAllocPolicy> metadata;
 
+  uint32_t tlsLoadSiteOffset = UINT32_MAX;
+
   template <typename T>
   static bool appendBytes(Vector<uint8_t, 0, SystemAllocPolicy>& vec,
                           const T* data, size_t count) {
@@ -108,7 +110,8 @@ static_assert(sizeof(AOTICStubManifest) == 16,
 // icReturns concatenated).
 [[nodiscard]] bool BuildAndSaveInterpBlob(
     JitCode* code, const AOTInterpManifest& scalars,
-    const uint8_t* metadataBytes, size_t metadataSize);
+    const uint8_t* metadataBytes, size_t metadataSize,
+    uint32_t tlsLoadSiteOffset = UINT32_MAX);
 
 // Load the AOT interpreter blob from the embedded container and
 // initialize the BaselineInterpreter.
