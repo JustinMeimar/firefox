@@ -253,13 +253,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   MOZ_ASSERT(abiIdx <= kAOTMaxABIFunctions);
 
 #ifdef JS_CODEGEN_X64
-  {
-    uintptr_t tp;
-    asm("movq %%fs:0, %0" : "=r"(tp));
-    auto offset =
-        reinterpret_cast<intptr_t>(&TlsContext) - static_cast<intptr_t>(tp);
-    aot_tls_js_context_offset = static_cast<int64_t>(offset);
-  }
+  aot_tls_js_context_offset = static_cast<int64_t>(GetTlsContextOffset());
 #endif
 }
 

@@ -1452,7 +1452,7 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   }
 
 #ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT()) {
+  if (masm.isAOT() || JitOptions.useAOTBaseline) {
     masm.storeAOTTableBaseToFrame(scratch2);
   }
 #endif
@@ -7387,13 +7387,9 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
     return false;
   }
 
-  uint32_t tlsSite = UINT32_MAX;
-  if (masm.isAOT() && masm.aot().hasTlsLoadSite()) {
-    tlsSite = masm.aot().tlsLoadSiteOffset();
-  }
-
   return BuildAndSaveInterpBlob(code, s, metadata.begin(), metadata.length(),
-                                tlsSite);
+                                masm.isAOT() ? masm.aot().tlsLoadSiteOffset()
+                                             : UINT32_MAX);
 }
 
 bool BaselineInterpreterGenerator::loadAOTInterp(

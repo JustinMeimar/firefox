@@ -189,6 +189,18 @@ extern "C" {
 
 static constexpr uint32_t kAOTTlsLoadSiteSize = 12;
 
+#ifdef JS_CODEGEN_X64
+inline int32_t GetTlsContextOffset() {
+  uintptr_t tp;
+  asm("movq %%fs:0, %0" : "=r"(tp));
+  auto offset =
+      reinterpret_cast<intptr_t>(&TlsContext) - static_cast<intptr_t>(tp);
+  MOZ_ASSERT(offset == static_cast<int32_t>(offset),
+             "TLS offset must fit in int32_t");
+  return static_cast<int32_t>(offset);
+}
+#endif
+
 inline const uint8_t* GetAOTContainer() {
   return bl_aot_container_start;
 }

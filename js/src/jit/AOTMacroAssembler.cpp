@@ -24,16 +24,7 @@ using namespace js::jit;
 
 #ifdef ENABLE_AOT_BASELINE
 
-// NOTE(Justin): x86-64 only for now (%fs segment).
-static int32_t GetTlsContextOffset() {
-  uintptr_t tp;
-  asm("movq %%fs:0, %0" : "=r"(tp));
-  auto offset =
-      reinterpret_cast<intptr_t>(&TlsContext) - static_cast<intptr_t>(tp);
-  MOZ_ASSERT(offset == static_cast<int32_t>(offset),
-             "TLS offset must fit in int32_t");
-  return static_cast<int32_t>(offset);
-}
+// Defined in AOT.h; x86-64 only for now (%fs segment).
 
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   if (inAOTStubFrame_) {
