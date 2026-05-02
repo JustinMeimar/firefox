@@ -169,6 +169,11 @@ static constexpr FloatRegister FloatArgRegs[NumFloatArgRegs] = {
     xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7};
 #endif
 
+// Callee-saved register used to pass &AOTIndirectionTable from JIT entry
+// trampolines into baseline prologues. Set by generateEnterJIT, consumed
+// by emitInitFrameFields, then free for general use.
+static constexpr Register AOTTablePtrReg = r13;
+
 // Registers used by RegExpMatcher and RegExpExecMatch stubs (do not use
 // JSReturnOperand).
 static constexpr Register RegExpMatcherRegExpReg = CallTempReg0;

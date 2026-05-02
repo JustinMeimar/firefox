@@ -217,6 +217,12 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
     masm.addPtr(Imm32(ExitFrameLayout::SizeWithFooter()), rsp);
     masm.branchIfFalseBool(ReturnReg, &error);
 
+#ifdef ENABLE_AOT_BASELINE
+    masm.storePtr(ImmPtr(aotIndirectionTable().baseAddress()),
+                  Address(FramePointer,
+                          BaselineFrame::reverseOffsetOfAOTTableBase()));
+#endif
+
     // If OSR-ing, then emit instrumentation for setting lastProfilerFrame
     // if profiler instrumentation is enabled.
     {
@@ -242,6 +248,10 @@ void JitRuntime::generateEnterJIT(JSContext* cx, MacroAssembler& masm) {
     masm.bind(&notOsr);
     masm.movq(scopeChain, R1.scratchReg());
   }
+
+#ifdef ENABLE_AOT_BASELINE
+  masm.movePtr(ImmPtr(aotIndirectionTable().baseAddress()), AOTTablePtrReg);
+#endif
 
   // The call will push the return address and frame pointer on the stack, thus
   // we check that the stack would be aligned once the call is complete.
