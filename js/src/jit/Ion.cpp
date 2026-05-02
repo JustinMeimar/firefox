@@ -360,20 +360,23 @@ bool JitRuntime::initialize(JSContext* cx) {
 }
 
 #ifdef ENABLE_AOT_BASELINE
-bool JitRuntime::generateAOTInterpPreamble(JSContext* cx) {
+JitCode* JitRuntime::generateAOTPreamble(JSContext* cx, void* target) {
   TempAllocator temp(&cx->tempLifoAlloc());
   StackMacroAssembler masm(cx, temp);
-  AutoCreatedBy acb(masm, "JitRuntime::generateAOTInterpPreamble");
+  AutoCreatedBy acb(masm, "JitRuntime::generateAOTPreamble");
 
   masm.movePtr(ImmPtr(aotIndirectionTable_.baseAddress()), AOTTablePassReg);
-  masm.jump(ImmPtr(baselineInterpreter_.codeRaw()));
+  masm.jump(ImmPtr(target));
 
   Linker linker(masm);
-  JitCode* code = linker.newCode(cx, CodeKind::Other);
+  return linker.newCode(cx, CodeKind::Other);
+}
+
+bool JitRuntime::generateAOTInterpPreamble(JSContext* cx) {
+  JitCode* code = generateAOTPreamble(cx, baselineInterpreter_.codeRaw());
   if (!code) {
     return false;
   }
-
   aotInterpPreamble_ = code;
   return true;
 }

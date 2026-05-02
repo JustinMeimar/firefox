@@ -601,6 +601,20 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
   bs->computeResumeNativeOffsets(script, ResumeOffsetEntryVector());
 
+  // Generate a preamble that sets AOTTablePassReg before entering the
+  // self-hosted AOT code. Must be registered BEFORE setBaselineScript,
+  // which triggers updateJitCodeRaw -> lookupAOTPreamble.
+  JitRuntime* jrt = cx->runtime()->jitRuntime();
+  JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw());
+  if (!preamble) {
+    return false;
+  }
+  JitRuntime::AOTPreambleEntry pe = { code->raw(), preamble->raw() };
+  if (!jrt->aotPreambles_.append(pe)) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+
   // Attach to script before fallible profiler registration so bs is not leaked.
   script->jitScript()->setBaselineScript(script, bs);
 

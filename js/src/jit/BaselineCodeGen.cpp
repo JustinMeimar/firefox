@@ -1373,8 +1373,20 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   masm.bind(&done);
 
 #ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT() || JitOptions.useAOTBaseline) {
-    masm.storeAOTTableBaseToFrame(scratch);
+  if (masm.isAOT()) {
+    // AOT self-hosted: code is part of the blob, use the register
+    // set by the preamble stub.
+    masm.storePtr(
+        AOTTablePassReg,
+        Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
+  } else if (JitOptions.useAOTBaseline) {
+    // Runtime-compiled baseline: bake the absolute table address.
+    masm.movePtr(
+        ImmPtr(masm.runtime()->jitRuntime()->aotIndirectionTable().baseAddress()),
+        scratch);
+    masm.storePtr(
+        scratch,
+        Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
   }
 #endif
 }

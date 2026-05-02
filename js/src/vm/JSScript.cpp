@@ -3357,6 +3357,12 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
     jit::IonScript* ion = ionScript();
     setJitCodeRaw(ion->method()->raw());
   } else if (hasBaselineScript()) {
+#ifdef ENABLE_AOT_BASELINE
+    if (uint8_t* preamble = rt->jitRuntime()->lookupAOTPreamble(
+            baselineScript()->method()->raw())) {
+      setJitCodeRaw(preamble);
+    } else
+#endif
     setJitCodeRaw(baselineScript()->method()->raw());
   } else if (hasJitScript() && js::jit::IsBaselineInterpreterEnabled()) {
     bool usingEntryTrampoline = false;

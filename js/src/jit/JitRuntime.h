@@ -247,6 +247,20 @@ class JitRuntime {
   // before jumping to the AOT interpreter blob entry.
   WriteOnceData<JitCode*> aotInterpPreamble_{nullptr};
   [[nodiscard]] bool generateAOTInterpPreamble(JSContext* cx);
+
+  public:
+  // Preamble stubs for AOT self-hosted functions.
+  // Maps AOT code raw address -> preamble raw address.
+  struct AOTPreambleEntry { uint8_t* aotCode; uint8_t* preamble; };
+  Vector<AOTPreambleEntry, 0, SystemAllocPolicy> aotPreambles_;
+
+  uint8_t* lookupAOTPreamble(uint8_t* codeRaw) const {
+    for (const auto& e : aotPreambles_) {
+      if (e.aotCode == codeRaw) return e.preamble;
+    }
+    return nullptr;
+  }
+  private:
 #endif
 
   void populateAOTIndirectionTable(JSContext* cx);
@@ -374,6 +388,10 @@ class JitRuntime {
   const BaselineInterpreter& baselineInterpreter() const {
     return baselineInterpreter_;
   }
+
+  // Generate a preamble stub for any AOT code entry: sets AOTTablePassReg
+  // and jumps to the given target address.
+  JitCode* generateAOTPreamble(JSContext* cx, void* target);
 
   uint8_t* baselineInterpreterEntryAddr() const {
 #ifdef ENABLE_AOT_BASELINE
