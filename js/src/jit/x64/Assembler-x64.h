@@ -256,6 +256,10 @@ static constexpr Register PreBarrierReg = rdx;
 
 static constexpr Register InterpreterPCReg = r14;
 
+#ifdef ENABLE_AOT_BASELINE
+static constexpr Register AOTTablePassReg = r12;
+#endif
+
 static constexpr uint32_t ABIStackAlignment = 16;
 static constexpr uint32_t CodeAlignment = 16;
 static constexpr uint32_t JitStackAlignment = 16;

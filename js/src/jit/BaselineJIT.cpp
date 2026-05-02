@@ -598,7 +598,7 @@ static bool MaybeCreateBaselineInterpreterEntryScript(JSContext* cx,
   MOZ_ASSERT(script->hasJitScript());
 
   JitRuntime* jitRuntime = cx->runtime()->jitRuntime();
-  if (script->jitCodeRaw() != jitRuntime->baselineInterpreter().codeRaw()) {
+  if (script->jitCodeRaw() != jitRuntime->baselineInterpreterEntryAddr()) {
     // script already has an updated interpreter trampoline.
 #ifdef DEBUG
     auto p = jitRuntime->getInterpreterEntryMap()->lookup(script);

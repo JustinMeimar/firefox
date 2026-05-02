@@ -242,6 +242,13 @@ class JitRuntime {
   // Table of runtime pointers loaded indirectly by AOT baseline code.
   AOTIndirectionTable aotIndirectionTable_;
 
+#ifdef ENABLE_AOT_BASELINE
+  // Preamble stub that loads &aotIndirectionTable into AOTTablePassReg
+  // before jumping to the AOT interpreter blob entry.
+  WriteOnceData<JitCode*> aotInterpPreamble_{nullptr};
+  [[nodiscard]] bool generateAOTInterpPreamble(JSContext* cx);
+#endif
+
   void populateAOTIndirectionTable(JSContext* cx);
   [[nodiscard]] bool populateAOTTrampolineSlots(JSContext* cx);
 
@@ -366,6 +373,15 @@ class JitRuntime {
   BaselineInterpreter& baselineInterpreter() { return baselineInterpreter_; }
   const BaselineInterpreter& baselineInterpreter() const {
     return baselineInterpreter_;
+  }
+
+  uint8_t* baselineInterpreterEntryAddr() const {
+#ifdef ENABLE_AOT_BASELINE
+    if (aotInterpPreamble_.ref()) {
+      return aotInterpPreamble_.ref()->raw();
+    }
+#endif
+    return baselineInterpreter_.codeRaw();
   }
 
   TrampolinePtr getGenericBailoutHandler() const {

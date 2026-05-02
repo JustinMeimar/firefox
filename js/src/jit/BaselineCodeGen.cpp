@@ -1454,6 +1454,13 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
 #ifdef ENABLE_AOT_BASELINE
   if (masm.isAOT()) {
     masm.storeAOTTableBaseToFrame(scratch2);
+#ifdef DEBUG
+    Label aotPassOk;
+    masm.branchPtr(Assembler::Equal, AOTTablePassReg, scratch2, &aotPassOk);
+    masm.assumeUnreachable(
+        "AOT preamble: AOTTablePassReg does not match TLS-derived table base");
+    masm.bind(&aotPassOk);
+#endif
   }
 #endif
 }

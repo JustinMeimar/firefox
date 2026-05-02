@@ -343,6 +343,14 @@ bool JitRuntime::initialize(JSContext* cx) {
     return false;
   }
 
+#ifdef ENABLE_AOT_BASELINE
+  if (baselineInterpreter_.loadedFromAOT()) {
+    if (!generateAOTInterpPreamble(cx)) {
+      return false;
+    }
+  }
+#endif
+
   // Initialize the jitCodeRaw of the Runtime's canonical SelfHostedLazyScript
   // to point to the interpreter trampoline.
   cx->runtime()->selfHostedLazyScript.ref().jitCodeRaw_ =
@@ -350,6 +358,27 @@ bool JitRuntime::initialize(JSContext* cx) {
 
   return true;
 }
+
+#ifdef ENABLE_AOT_BASELINE
+bool JitRuntime::generateAOTInterpPreamble(JSContext* cx) {
+  TempAllocator temp(&cx->tempLifoAlloc());
+  JitContext jctx(cx);
+  StackMacroAssembler masm(cx, temp);
+  AutoCreatedBy acb(masm, "JitRuntime::generateAOTInterpPreamble");
+
+  masm.movePtr(ImmPtr(aotIndirectionTable_.baseAddress()), AOTTablePassReg);
+  masm.jump(ImmPtr(baselineInterpreter_.codeRaw()));
+
+  Linker linker(masm);
+  JitCode* code = linker.newCode(cx, CodeKind::Other);
+  if (!code) {
+    return false;
+  }
+
+  aotInterpPreamble_ = code;
+  return true;
+}
+#endif
 
 bool JitRuntime::generateTrampolines(JSContext* cx) {
   TempAllocator temp(&cx->tempLifoAlloc());
