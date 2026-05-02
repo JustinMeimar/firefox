@@ -362,7 +362,6 @@ bool JitRuntime::initialize(JSContext* cx) {
 #ifdef ENABLE_AOT_BASELINE
 bool JitRuntime::generateAOTInterpPreamble(JSContext* cx) {
   TempAllocator temp(&cx->tempLifoAlloc());
-  JitContext jctx(cx);
   StackMacroAssembler masm(cx, temp);
   AutoCreatedBy acb(masm, "JitRuntime::generateAOTInterpPreamble");
 
