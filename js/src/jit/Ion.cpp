@@ -360,12 +360,13 @@ bool JitRuntime::initialize(JSContext* cx) {
 }
 
 #ifdef ENABLE_AOT_BASELINE
-JitCode* JitRuntime::generateAOTPreamble(JSContext* cx, void* target) {
+JitCode* JitRuntime::generateAOTPreamble(JSContext* cx, void* target,
+                                         Register passReg) {
   TempAllocator temp(&cx->tempLifoAlloc());
   StackMacroAssembler masm(cx, temp);
   AutoCreatedBy acb(masm, "JitRuntime::generateAOTPreamble");
 
-  masm.movePtr(ImmPtr(aotIndirectionTable_.baseAddress()), AOTTablePassReg);
+  masm.movePtr(ImmPtr(aotIndirectionTable_.baseAddress()), passReg);
   masm.jump(ImmPtr(target));
 
   Linker linker(masm);
@@ -373,7 +374,8 @@ JitCode* JitRuntime::generateAOTPreamble(JSContext* cx, void* target) {
 }
 
 bool JitRuntime::generateAOTInterpPreamble(JSContext* cx) {
-  JitCode* code = generateAOTPreamble(cx, baselineInterpreter_.codeRaw());
+  JitCode* code = generateAOTPreamble(cx, baselineInterpreter_.codeRaw(),
+                                      AOTTablePassReg);
   if (!code) {
     return false;
   }
@@ -620,6 +622,14 @@ uint8_t* jit::LazyLinkTopActivation(JSContext* cx,
 
   return calleeScript->jitCodeRaw();
 }
+
+#ifdef ENABLE_AOT_BASELINE
+void JitRuntime::traceAOTPreambles(JSTracer* trc) {
+  for (auto& e : aotPreambles_) {
+    TraceRoot(trc, &e.preamble, "aot-selfhosted-preamble");
+  }
+}
+#endif
 
 /* static */
 void JitRuntime::TraceAtomZoneRoots(JSTracer* trc) {

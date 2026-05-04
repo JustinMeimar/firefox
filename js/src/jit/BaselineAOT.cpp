@@ -601,15 +601,16 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
   bs->computeResumeNativeOffsets(script, ResumeOffsetEntryVector());
 
-  // Generate a preamble that sets AOTTablePassReg before entering the
-  // self-hosted AOT code. Must be registered BEFORE setBaselineScript,
-  // which triggers updateJitCodeRaw -> lookupAOTPreamble.
+  // Generate a preamble trampoline that sets AOTSelfHostedPassReg (r11,
+  // volatile) and jumps to the self-hosted code. Must be registered BEFORE
+  // setBaselineScript, which triggers updateJitCodeRaw -> lookupAOTPreamble.
   JitRuntime* jrt = cx->runtime()->jitRuntime();
-  JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw());
+  JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
+                                                AOTSelfHostedPassReg);
   if (!preamble) {
     return false;
   }
-  JitRuntime::AOTPreambleEntry pe = { code->raw(), preamble->raw() };
+  JitRuntime::AOTPreambleEntry pe = { code->raw(), preamble };
   if (!jrt->aotPreambles_.append(pe)) {
     ReportOutOfMemory(cx);
     return false;

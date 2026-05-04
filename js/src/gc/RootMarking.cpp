@@ -346,6 +346,12 @@ void js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc,
       rt->jitRuntime()->getInterpreterEntryMap()->traceTrampolineCode(trc);
     }
 
+#ifdef ENABLE_AOT_BASELINE
+    if (rt->hasJitRuntime()) {
+      rt->jitRuntime()->traceAOTPreambles(trc);
+    }
+#endif
+
   }
 
   // Trace helper thread roots.

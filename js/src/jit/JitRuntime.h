@@ -250,16 +250,18 @@ class JitRuntime {
 
   public:
   // Preamble stubs for AOT self-hosted functions.
-  // Maps AOT code raw address -> preamble raw address.
-  struct AOTPreambleEntry { uint8_t* aotCode; uint8_t* preamble; };
+  // Stores JitCode* so the GC keeps preambles alive.
+  struct AOTPreambleEntry { uint8_t* aotCode; JitCode* preamble; };
   Vector<AOTPreambleEntry, 0, SystemAllocPolicy> aotPreambles_;
 
   uint8_t* lookupAOTPreamble(uint8_t* codeRaw) const {
     for (const auto& e : aotPreambles_) {
-      if (e.aotCode == codeRaw) return e.preamble;
+      if (e.aotCode == codeRaw) return e.preamble->raw();
     }
     return nullptr;
   }
+
+  void traceAOTPreambles(JSTracer* trc);
   private:
 #endif
 
@@ -389,9 +391,10 @@ class JitRuntime {
     return baselineInterpreter_;
   }
 
-  // Generate a preamble stub for any AOT code entry: sets AOTTablePassReg
-  // and jumps to the given target address.
-  JitCode* generateAOTPreamble(JSContext* cx, void* target);
+  // Generate a preamble trampoline: mov passReg, &table; jmp target.
+  // Interpreter uses AOTTablePassReg (r12, callee-saved, caller saves it).
+  // Self-hosted builtins use AOTSelfHostedPassReg (r11, volatile).
+  JitCode* generateAOTPreamble(JSContext* cx, void* target, Register passReg);
 
   uint8_t* baselineInterpreterEntryAddr() const {
 #ifdef ENABLE_AOT_BASELINE
