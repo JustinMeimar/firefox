@@ -1373,14 +1373,25 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   masm.bind(&done);
 
 #ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT()) {
-    // AOT self-hosted: code is part of the blob. The preamble sets
-    // AOTSelfHostedPassReg (r11, volatile) before jumping here.
-    masm.storePtr(
-        AOTSelfHostedPassReg,
+  if (MOZ_UNLIKELY(masm.isAOT())) {
+    // Similar to the BaselineInterpreter `emitInitFrameFields`, this
+    // path will be hit in AOT compiled self-hosted functions, and therefore
+    // relies on the runtime-generated preamble to pass over the AOTTableBase
+    // in a register. There is no other way for an AOT blob to attain this
+    // runtime pointer (which enables access to all other runtime pointers)
+    // except through this bridge. 
+    masm.storePtr(AOTSelfHostedPassReg,
         Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
   } else if (JitOptions.useAOTBaseline) {
-    masm.storeAOTTableBaseToFrame(scratch);
+    // The Non AOT pathway can bake an absolute address into the frame
+    // field, since it's runtime generated. This is the case for any non-AOT
+    // compiled baseline function.
+    masm.movePtr(
+        ImmPtr(runtime->jitRuntime()->aotIndirectionTable().baseAddress()),
+        scratch);
+    masm.storePtr(
+        scratch,
+        Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
   }
 #endif
 }
