@@ -331,6 +331,10 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
   return true;
 }
 
+//NOTE(Justin): This function is really terrible code quality.
+// There is no principled dumping interface which AOT blocks
+// register into s.t the dispatch can be a simple enumeration
+// of registered kinds.
 bool DumpAOTContainer(JSContext* cx) {
   MOZ_ASSERT(JitOptions.dumpBaselineInterp ||
              JitOptions.dumpBaselineSelfHosted

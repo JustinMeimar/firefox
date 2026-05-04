@@ -81,7 +81,6 @@ extern const double MathRandomScaleInv;
 // No named enum entries needed -- codegen accesses them transparently
 // through movePtr(ImmPtr) / movePtr(ImmGCPtr) interception.
 static constexpr uint32_t kAOTMaxImplicitPtrs = 64;
-
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 
@@ -125,6 +124,11 @@ inline const char* AOTSlotName(AOTSlot slot) {
       break;
   }
   uint32_t s = uint32_t(slot);
+  // if (s = std::clamp(s, AOTSlot::Implicit_Begin,
+  //                       AOTSlot::Implicit_End)) {
+  //   return "Implicit";
+  // }
+
   if (s >= uint32_t(AOTSlot::Implicit_Begin) &&
       s < uint32_t(AOTSlot::Implicit_End)) {
     return "Implicit";
@@ -235,8 +239,21 @@ inline bool ForEachAOTBlob(AOTBlobKind kind, Fn&& fn) {
   return found;
 }
 
+// NOTE(Justin): ForEachAOTBlob should probably be a fold pattern?
+// Or a filter pattern? Probably filter... solves hash problem by
+// asserting length=1.
+//
+// inline const AOTBlobDirectoryEntry* FindBlob(AOTBlobKind kind, uint32_t nameHash)
+// {
+//   auto fn = [](AOTBlobDirectoryEntry* blob){
+// };  return ForEachAOTBlob(kind, fn);
+// }
+
+// NOTE(Justin): nameHash probably isn't secure here. 
 inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind,
                                                 uint32_t nameHash = 0) {
+  //NOTE(Justin): Should we make all the Get functions be
+  // GetOrFail s.t they just MOZ_CRASH at compile time?
   const auto* hdr = GetAOTContainerHeader();
   if (!hdr) return nullptr;
   const auto* dir = GetAOTBlobDirectory();
