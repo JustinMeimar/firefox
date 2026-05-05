@@ -2513,6 +2513,14 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   MOZ_ASSERT(atomsJitZone);
   // First perform a lookup within the atoms JitZone (for AOT ICs).
   code = atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+  // NOTE(Justin): remove this eventually.  
+  if (stubInfo) {
+    static uint32_t aotHits = 0;
+    if (++aotHits <= 20) {
+      fprintf(stderr, "[AOT-IC] hit #%u (kind=%u)\n", aotHits,
+              unsigned(kind));
+    }
+  }
   // Otherwise, fallback to the looking up in current JitZone
   // i.e runtime generated ICs.
   if (!stubInfo) {
