@@ -2513,14 +2513,18 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   MOZ_ASSERT(atomsJitZone);
   // First perform a lookup within the atoms JitZone (for AOT ICs).
   code = atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+  
+#ifdef DEBUG
   // NOTE(Justin): remove this eventually.  
   if (stubInfo) {
     static uint32_t aotHits = 0;
-    if (++aotHits <= 20) {
+    if (++aotHits <= 5000) {
       fprintf(stderr, "[AOT-IC] hit #%u (kind=%u)\n", aotHits,
               unsigned(kind));
     }
   }
+#endif
+
   // Otherwise, fallback to the looking up in current JitZone
   // i.e runtime generated ICs.
   if (!stubInfo) {
@@ -2533,9 +2537,10 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #ifdef ENABLE_JS_AOT_ICS
   if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
       !jitZone->isIncompleteAOTICs()) {
-    DumpNonAOTICStubAndQuit(kind, writer);
-    // Fall through to compile the stub normally so it enters the cache
-    // and doesn't get dumped again on every subsequent encounter.
+    // No pre-compiled AOT IC for this CacheIR body. Return with null
+    // stubInfo so the caller returns TooLarge and the IC stays on the
+    // fallback stub (VM path). No runtime codegen occurs.
+    return true;
   }
 #endif
 
