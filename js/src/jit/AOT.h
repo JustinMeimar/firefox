@@ -91,12 +91,22 @@ enum class AOTSlot : uint32_t {
   AOT_ATOM_SLOTS(EMIT_SLOT)
 #undef EMIT_SLOT
   CoreSlot_End,
+  
+  // Implicit pointers include class pointers, or any other
+  // link time symbol which could conceivably have it's AOT
+  // slot elided by partial symbolization of the AOT blob
+  // format.
   Implicit_Begin = CoreSlot_End,
   Implicit_End = Implicit_Begin + kAOTMaxImplicitPtrs,
+  
+  // Space for VMWrapper slots, one for each VMFunctionId
+  // in the JitRuntime.
   VMWrapper_Begin = Implicit_End,
   VMWrapper_End = VMWrapper_Begin + kAOTMaxVMWrappers,
+   
   ABIFn_Begin = VMWrapper_End,
   ABIFn_End = ABIFn_Begin + kAOTMaxABIFunctions,
+  
   Count = ABIFn_End
 };
 

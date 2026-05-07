@@ -336,15 +336,9 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
 // register into s.t the dispatch can be a simple enumeration
 // of registered kinds.
 bool DumpAOTContainer(JSContext* cx) {
-  MOZ_ASSERT(JitOptions.dumpBaselineInterp ||
-             JitOptions.dumpBaselineSelfHosted
-#ifdef ENABLE_JS_AOT_ICS
-             || JitOptions.dumpAOTICs
-#endif
-  );
+  MOZ_ASSERT(JitOptions.dumpBaselineInterp); 
 
   const char* outPath = kAOTOutputPath;
-
   Vector<AOTBlobData, 0, SystemAllocPolicy> funcBlobs;
   Vector<const AOTBlobData*, 0, SystemAllocPolicy> blobPtrs;
 
