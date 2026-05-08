@@ -9289,79 +9289,96 @@ void MacroAssembler::typedArrayElementSize(Register obj, Register output) {
                         std::begin(TypedArrayObject::resizableClasses),
                 "TypedArray classes are in contiguous memory");
 
-  constexpr ptrdiff_t numFixedLength =
+  // Constexpr subtraction requires using elements of the same array, so we have
+  // to use `std::end` instead of `std::begin`. We still get the right results,
+  // because the classes are in contiguous memory, as asserted above.
+  constexpr ptrdiff_t diffFirstImmutableToFirstFixedLength =
       std::end(TypedArrayObject::fixedLengthClasses) -
       std::begin(TypedArrayObject::fixedLengthClasses);
-  constexpr ptrdiff_t numImmutable =
+  constexpr ptrdiff_t diffFirstResizableToFirstImmutable =
       std::end(TypedArrayObject::immutableClasses) -
       std::begin(TypedArrayObject::immutableClasses);
-
-  constexpr int32_t szClass = int32_t(sizeof(JSClass));
-  constexpr int32_t endFixed = int32_t(numFixedLength) * szClass;
-  constexpr int32_t endImmut = endFixed + int32_t(numImmutable) * szClass;
-  constexpr int32_t diffToFixed_Immut = int32_t(numFixedLength) * szClass;
-  constexpr int32_t diffToFixed_Resiz = int32_t(numFixedLength + numImmutable) * szClass;
+  constexpr ptrdiff_t diffFirstResizableToFirstFixedLength =
+      diffFirstResizableToFirstImmutable + diffFirstImmutableToFirstFixedLength;
 
   loadObjClassUnsafe(obj, output);
 
-  // Normalize to byte offset from fixedLengthClasses base.
-  // movePtr(ImmPtr) uses the AOT indirection table transparently.
-  {
-    ScratchRegisterScope scratch(*this);
-    movePtr(ImmPtr(std::begin(TypedArrayObject::fixedLengthClasses)), scratch);
-    subPtr(scratch, output);
-  }
-
-  // Map immutable and resizable classes to their fixed-length equivalents.
+  // Map immutable and resizable to fixed-length TypedArray classes.
   Label fixedLength, immutable;
-  branch32(Assembler::Below, output, Imm32(endFixed), &fixedLength);
-  branch32(Assembler::Below, output, Imm32(endImmut), &immutable);
-  sub32(Imm32(diffToFixed_Resiz), output);
-  jump(&fixedLength);
+  branchPtr(Assembler::Below, output,
+            ImmPtr(std::end(TypedArrayObject::fixedLengthClasses)),
+            &fixedLength);
+  branchPtr(Assembler::Below, output,
+            ImmPtr(std::end(TypedArrayObject::immutableClasses)), &immutable);
+  {
+    // NB: constexpr evaluation doesn't allow overflow, so the difference is
+    // guaranteed to fit into an int32.
+    constexpr int32_t diff = static_cast<int32_t>(
+        diffFirstResizableToFirstFixedLength * sizeof(JSClass));
+
+    subPtr(Imm32(diff), output);
+    jump(&fixedLength);
+  }
   bind(&immutable);
-  sub32(Imm32(diffToFixed_Immut), output);
+  {
+    // NB: constexpr evaluation doesn't allow overflow, so the difference is
+    // guaranteed to fit into an int32.
+    constexpr int32_t diff = static_cast<int32_t>(
+        diffFirstImmutableToFirstFixedLength * sizeof(JSClass));
+
+    subPtr(Imm32(diff), output);
+  }
   bind(&fixedLength);
 
 #ifdef DEBUG
-  {
-    Label validClass;
-    branchPtr(Assembler::Below, output, ImmWord(endFixed), &validClass);
-    assumeUnreachable("value isn't a valid FixedLengthTypedArray class");
-    bind(&validClass);
-  }
+  Label invalidClass, validClass;
+  branchPtr(Assembler::Below, output,
+            ImmPtr(std::begin(TypedArrayObject::fixedLengthClasses)),
+            &invalidClass);
+  branchPtr(Assembler::Below, output,
+            ImmPtr(std::end(TypedArrayObject::fixedLengthClasses)),
+            &validClass);
+  bind(&invalidClass);
+  assumeUnreachable("value isn't a valid FixedLengthTypedArray class");
+  bind(&validClass);
 #endif
+
+  auto classForType = [](Scalar::Type type) {
+    MOZ_ASSERT(type < Scalar::MaxTypedArrayViewType);
+    return &TypedArrayObject::fixedLengthClasses[type];
+  };
 
   Label one, two, four, eight, done;
 
   static_assert(ValidateSizeRange(Scalar::Int8, Scalar::Int16),
                 "element size is one in [Int8, Int16)");
-  branch32(Assembler::Below, output, Imm32(int32_t(Scalar::Int16) * szClass),
-           &one);
+  branchPtr(Assembler::Below, output, ImmPtr(classForType(Scalar::Int16)),
+            &one);
 
   static_assert(ValidateSizeRange(Scalar::Int16, Scalar::Int32),
                 "element size is two in [Int16, Int32)");
-  branch32(Assembler::Below, output, Imm32(int32_t(Scalar::Int32) * szClass),
-           &two);
+  branchPtr(Assembler::Below, output, ImmPtr(classForType(Scalar::Int32)),
+            &two);
 
   static_assert(ValidateSizeRange(Scalar::Int32, Scalar::Float64),
                 "element size is four in [Int32, Float64)");
-  branch32(Assembler::Below, output, Imm32(int32_t(Scalar::Float64) * szClass),
-           &four);
+  branchPtr(Assembler::Below, output, ImmPtr(classForType(Scalar::Float64)),
+            &four);
 
   static_assert(ValidateSizeRange(Scalar::Float64, Scalar::Uint8Clamped),
                 "element size is eight in [Float64, Uint8Clamped)");
-  branch32(Assembler::Below, output,
-           Imm32(int32_t(Scalar::Uint8Clamped) * szClass), &eight);
+  branchPtr(Assembler::Below, output,
+            ImmPtr(classForType(Scalar::Uint8Clamped)), &eight);
 
   static_assert(ValidateSizeRange(Scalar::Uint8Clamped, Scalar::BigInt64),
                 "element size is one in [Uint8Clamped, BigInt64)");
-  branch32(Assembler::Below, output,
-           Imm32(int32_t(Scalar::BigInt64) * szClass), &one);
+  branchPtr(Assembler::Below, output, ImmPtr(classForType(Scalar::BigInt64)),
+            &one);
 
   static_assert(ValidateSizeRange(Scalar::BigInt64, Scalar::Float16),
                 "element size is eight in [BigInt64, Float16)");
-  branch32(Assembler::Below, output, Imm32(int32_t(Scalar::Float16) * szClass),
-           &eight);
+  branchPtr(Assembler::Below, output, ImmPtr(classForType(Scalar::Float16)),
+            &eight);
 
   static_assert(
       ValidateSizeRange(Scalar::Float16, Scalar::MaxTypedArrayViewType),
@@ -9391,57 +9408,54 @@ void MacroAssembler::resizableTypedArrayElementShiftBy(Register obj,
                                                        Register scratch) {
   loadObjClassUnsafe(obj, scratch);
 
-  // Normalize to byte offset from resizableClasses base.
-  {
-    ScratchRegisterScope tmp(*this);
-    movePtr(ImmPtr(std::begin(TypedArrayObject::resizableClasses)), tmp);
-    subPtr(tmp, scratch);
-  }
-
-  constexpr int32_t szClass = int32_t(sizeof(JSClass));
-
 #ifdef DEBUG
-  {
-    constexpr int32_t endResizable =
-        int32_t(Scalar::MaxTypedArrayViewType) * szClass;
-    Label validClass;
-    branchPtr(Assembler::Below, scratch, ImmWord(endResizable), &validClass);
-    assumeUnreachable("value isn't a valid ResizableLengthTypedArray class");
-    bind(&validClass);
-  }
+  Label invalidClass, validClass;
+  branchPtr(Assembler::Below, scratch,
+            ImmPtr(std::begin(TypedArrayObject::resizableClasses)),
+            &invalidClass);
+  branchPtr(Assembler::Below, scratch,
+            ImmPtr(std::end(TypedArrayObject::resizableClasses)), &validClass);
+  bind(&invalidClass);
+  assumeUnreachable("value isn't a valid ResizableLengthTypedArray class");
+  bind(&validClass);
 #endif
+
+  auto classForType = [](Scalar::Type type) {
+    MOZ_ASSERT(type < Scalar::MaxTypedArrayViewType);
+    return &TypedArrayObject::resizableClasses[type];
+  };
 
   Label zero, one, two, three;
 
   static_assert(ValidateSizeRange(Scalar::Int8, Scalar::Int16),
                 "element shift is zero in [Int8, Int16)");
-  branch32(Assembler::Below, scratch,
-           Imm32(int32_t(Scalar::Int16) * szClass), &zero);
+  branchPtr(Assembler::Below, scratch, ImmPtr(classForType(Scalar::Int16)),
+            &zero);
 
   static_assert(ValidateSizeRange(Scalar::Int16, Scalar::Int32),
                 "element shift is one in [Int16, Int32)");
-  branch32(Assembler::Below, scratch,
-           Imm32(int32_t(Scalar::Int32) * szClass), &one);
+  branchPtr(Assembler::Below, scratch, ImmPtr(classForType(Scalar::Int32)),
+            &one);
 
   static_assert(ValidateSizeRange(Scalar::Int32, Scalar::Float64),
                 "element shift is two in [Int32, Float64)");
-  branch32(Assembler::Below, scratch,
-           Imm32(int32_t(Scalar::Float64) * szClass), &two);
+  branchPtr(Assembler::Below, scratch, ImmPtr(classForType(Scalar::Float64)),
+            &two);
 
   static_assert(ValidateSizeRange(Scalar::Float64, Scalar::Uint8Clamped),
                 "element shift is three in [Float64, Uint8Clamped)");
-  branch32(Assembler::Below, scratch,
-           Imm32(int32_t(Scalar::Uint8Clamped) * szClass), &three);
+  branchPtr(Assembler::Below, scratch,
+            ImmPtr(classForType(Scalar::Uint8Clamped)), &three);
 
   static_assert(ValidateSizeRange(Scalar::Uint8Clamped, Scalar::BigInt64),
                 "element shift is zero in [Uint8Clamped, BigInt64)");
-  branch32(Assembler::Below, scratch,
-           Imm32(int32_t(Scalar::BigInt64) * szClass), &zero);
+  branchPtr(Assembler::Below, scratch, ImmPtr(classForType(Scalar::BigInt64)),
+            &zero);
 
   static_assert(ValidateSizeRange(Scalar::BigInt64, Scalar::Float16),
                 "element shift is three in [BigInt64, Float16)");
-  branch32(Assembler::Below, scratch,
-           Imm32(int32_t(Scalar::Float16) * szClass), &three);
+  branchPtr(Assembler::Below, scratch, ImmPtr(classForType(Scalar::Float16)),
+            &three);
 
   static_assert(
       ValidateSizeRange(Scalar::Float16, Scalar::MaxTypedArrayViewType),
@@ -9466,16 +9480,15 @@ void MacroAssembler::branchIfClassIsNotTypedArray(Register clasp,
                                                   Label* notTypedArray) {
   // Inline implementation of IsTypedArrayClass().
 
+  const auto* firstTypedArrayClass =
+      std::begin(TypedArrayObject::fixedLengthClasses);
+  const auto* lastTypedArrayClass =
+      std::prev(std::end(TypedArrayObject::resizableClasses));
   MOZ_ASSERT(std::end(TypedArrayObject::fixedLengthClasses) ==
                      std::begin(TypedArrayObject::immutableClasses) &&
                  std::end(TypedArrayObject::immutableClasses) ==
                      std::begin(TypedArrayObject::resizableClasses),
              "TypedArray classes are in contiguous memory");
-
-  const auto* firstTypedArrayClass =
-      std::begin(TypedArrayObject::fixedLengthClasses);
-  const auto* lastTypedArrayClass =
-      std::prev(std::end(TypedArrayObject::resizableClasses));
 
   branchPtr(Assembler::Below, clasp, ImmPtr(firstTypedArrayClass),
             notTypedArray);
@@ -9488,14 +9501,13 @@ void MacroAssembler::branchIfClassIsNotNonResizableTypedArray(
   // Inline implementation of IsFixedLengthTypedArrayClass() and
   // IsImmutableTypedArrayClass().
 
-  MOZ_ASSERT(std::end(TypedArrayObject::fixedLengthClasses) ==
-                 std::begin(TypedArrayObject::immutableClasses),
-             "TypedArray classes are in contiguous memory");
-
   const auto* firstTypedArrayClass =
       std::begin(TypedArrayObject::fixedLengthClasses);
   const auto* lastTypedArrayClass =
       std::prev(std::end(TypedArrayObject::immutableClasses));
+  MOZ_ASSERT(std::end(TypedArrayObject::fixedLengthClasses) ==
+                 std::begin(TypedArrayObject::immutableClasses),
+             "TypedArray classes are in contiguous memory");
 
   branchPtr(Assembler::Below, clasp, ImmPtr(firstTypedArrayClass),
             notTypedArray);
