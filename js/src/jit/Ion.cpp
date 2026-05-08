@@ -192,9 +192,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET_IMPLICIT(&WeakMapObject::class_);
   SET_IMPLICIT(&WeakSetObject::class_);
   SET_IMPLICIT(&GeneratorObject::class_);
-  if (auto* wpc = rt->maybeWindowProxyClass()) {
-    SET_IMPLICIT(wpc);
-  }
+  SET_IMPLICIT(rt->maybeWindowProxyClass());
 
   SET_IMPLICIT(&DeadObjectProxy::singleton);
   SET_IMPLICIT(&js::Wrapper::family);
