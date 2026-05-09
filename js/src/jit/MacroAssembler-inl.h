@@ -147,12 +147,12 @@ void MacroAssembler::callWithABI(DynFn fun, ABIType result,
   if (MOZ_UNLIKELY(isAOT())) {
     AOTSlot slot = aot().indirectionTable()->findSlotOrCrash(
         uintptr_t(fun.address));
-    // Resolve argument moves BEFORE loading the function pointer into r10,
-    // so emitAOTSlotLoad cannot clobber a register still holding an argument.
+    // Resolve argument moves BEFORE loading the function pointer into
+    // AOTTablePassReg so emitAOTSlotLoad cannot clobber an argument register.
     uint32_t stackAdjust;
     callWithABIPre(&stackAdjust);
-    emitAOTSlotLoad(slot, r10);
-    call(r10);
+    emitAOTSlotLoad(slot, AOTTablePassReg);
+    call(AOTTablePassReg);
     callWithABIPost(stackAdjust, result);
     return;
   }
@@ -169,12 +169,12 @@ void MacroAssembler::callWithABI(ABIType result, CheckUnsafeCallWithABI check) {
     void* addr = abiFun.address();
     AOTSlot slot = aot().indirectionTable()->findSlotOrCrash(
         uintptr_t(addr));
-    // Resolve argument moves BEFORE loading the function pointer into r10,
-    // so emitAOTSlotLoad cannot clobber a register still holding an argument.
+    // Resolve argument moves BEFORE loading the function pointer into
+    // AOTTablePassReg so emitAOTSlotLoad cannot clobber an argument register.
     uint32_t stackAdjust;
     callWithABIPre(&stackAdjust);
-    emitAOTSlotLoad(slot, r10);
-    call(r10);
+    emitAOTSlotLoad(slot, AOTTablePassReg);
+    call(AOTTablePassReg);
     callWithABIPost(stackAdjust, result);
     return;
   }

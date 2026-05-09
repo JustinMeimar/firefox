@@ -435,8 +435,7 @@ class BaselineCompilerHandler {
   }
 
   bool realmIndependentJitcode() const {
-    // NOTE(Justin): We probably shouldn't pollute this condition with AOT state.
-    return (JS::Prefs::experimental_self_hosted_cache() || isAOT_) &&
+      return (JS::Prefs::experimental_self_hosted_cache() || isAOT_) &&
            script()->selfHosted();
   }
 };
@@ -595,9 +594,6 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   // Offset of the jump (tail call) to the debug trap handler trampoline code.
   // When the debugger is enabled, NOPs are patched to calls to this location.
   uint32_t debugTrapHandlerOffset_ = 0;
-
-  // Offset of the runtime pointer slot.
-  uint32_t compileRuntimePtrOffset_ = 0;
 
 #ifdef ENABLE_AOT_BASELINE
   [[nodiscard]] bool dumpAOTInterp(JSContext* cx, JitCode* code);

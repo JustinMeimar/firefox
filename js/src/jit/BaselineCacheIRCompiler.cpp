@@ -2514,18 +2514,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   // First perform a lookup within the atoms JitZone (for AOT ICs).
   code = atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
   
-#ifdef DEBUG
-  // NOTE(Justin): remove this eventually.  
-  if (stubInfo) {
-    static uint32_t aotHits = 0;
-    if (++aotHits <= 5000) {
-      fprintf(stderr, "[AOT-IC] hit #%u (kind=%u)\n", aotHits,
-              unsigned(kind));
-    }
-  }
-#endif
-
-  // Otherwise, fallback to the looking up in current JitZone
+  // Otherwise, fallback to looking up in the current JitZone
   // i.e runtime generated ICs.
   if (!stubInfo) {
     code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);

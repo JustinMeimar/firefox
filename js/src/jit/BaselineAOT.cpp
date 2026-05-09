@@ -6,9 +6,6 @@
 
 #include "jit/BaselineAOT.h"
 
-#include "mozilla/Assertions.h"
-#include "mozilla/Maybe.h"
-
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
@@ -17,7 +14,6 @@
 #include "frontend/CompilationStencil.h"
 #include "gc/Zone.h"
 #include "jit/AOT.h"
-#include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/IonTypes.h"
@@ -331,10 +327,6 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
   return true;
 }
 
-//NOTE(Justin): This function is really terrible code quality.
-// There is no principled dumping interface which AOT blocks
-// register into s.t the dispatch can be a simple enumeration
-// of registered kinds.
 bool DumpAOTContainer(JSContext* cx) {
   MOZ_ASSERT(JitOptions.dumpBaselineInterp); 
 
@@ -357,9 +349,7 @@ bool DumpAOTContainer(JSContext* cx) {
               "Skipping self-hosted dump: no realm available");
     } else {
 
-    // TODO: temporary whitelist of common self-hosted builtins that compile
-    // reliably. Remove once all self-hosted fns are AOT-safe.
-    static const char* const kSelfHostedWhitelist[] = {
+    static const char* const kSelfHostedAllowlist[] = {
         "ArrayMap", "ArrayFilter", "ArrayReduce", "ArrayReduceRight",
         "ArrayForEach", "ArrayFind", "ArrayFindIndex", "ArraySome",
         "ArrayEvery", "ArrayIncludes", "ArrayFrom", "ArrayFlat",
@@ -381,7 +371,7 @@ bool DumpAOTContainer(JSContext* cx) {
       UniqueChars atomStr = AtomToPrintableString(cx, atom);
       bool allowed = false;
       if (atomStr) {
-        for (const char* name : kSelfHostedWhitelist) {
+        for (const char* name : kSelfHostedAllowlist) {
           if (strcmp(atomStr.get(), name) == 0) {
             allowed = true;
             break;
@@ -410,7 +400,7 @@ bool DumpAOTContainer(JSContext* cx) {
         return false;
       }
     }
-    } // else (has realm)
+    } // if (cx->realm())
   }
 
   auto icBlobs = GetSavedICBlobs();

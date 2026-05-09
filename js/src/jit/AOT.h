@@ -8,31 +8,28 @@
 #define jit_AOT_h
 
 
-
 #include "mozilla/Maybe.h"
 #include <cstdint>
 #include <cstring>
 #include "jstypes.h"
 #include "vm/JSContext.h"
 
-struct JS_PUBLIC_API JSContext;
-
 namespace js::jit {
 
 // [SMDOC] AOT JIT Code 
 
 // When compiled with ENABLE_AOT_BASELINE, SpiderMonkey can emit
-// relocatable JIT code for the the BaselineInterpreter, Inline
+// relocatable JIT code for the BaselineInterpreter, Inline
 // Cache Stubs and self-hosted Baseline compiled builtins.
 //
 // To make JIT code relocatable, all uses of `ImmPtr` are intercepted inside
 // a set of common masm interfaces then compared against a set
 // of expected pointers enumerated in `AOTSlot`. If the pointer
-// can be indentified, the masm emits an indirection to attain the
+// can be identified, the masm emits an indirection to attain the
 // pointer via the &AOTIndirectionTable, stored in the BaselineFrame.
-// This incurs a cost of two loads to attain any runtime poitner, but
-// allows the masm buffer to be independent of the current runtime.
-// The buffer can then be dumped, serailized into an assembly scaffold,
+// This incurs a cost of two loads to attain any runtime pointer, but
+// allows the generated code to be independent from any particular runtime.
+// The buffer can then be dumped, serialized into an assembly scaffold,
 // and reattached as a build input.
 
 #define AOT_RUNTIME_SLOTS(V)                \
@@ -69,16 +66,12 @@ namespace js::jit {
   V(AtomUndefined)                        \
   V(AtomObject)
 
-extern const double MathRandomScaleInv;
-
 #define AOT_CORE_SLOTS(V)  \
   AOT_RUNTIME_SLOTS(V)     \
   AOT_PREBARRIER_SLOTS(V)  \
   AOT_ATOM_SLOTS(V)
 
-// TODO(Justin): This is statically allocated space in the AOT
-// table. Underprovisioning could have security implications.
-// Over provisioning imposes waste.
+extern const double MathRandomScaleInv;
 
 static constexpr uint32_t kAOTMaxImplicitPtrs = 64;
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
@@ -92,7 +85,7 @@ enum class AOTSlot : uint32_t {
 #undef EMIT_SLOT
   CoreSlot_End, 
   // Implicit pointers include class pointers, or any other
-  // link time symbol which could conceivably have it's AOT
+  // link time symbol which could conceivably have its AOT
   // slot elided by partial symbolization of the AOT blob
   // format.
   Implicit_Begin = CoreSlot_End,
@@ -149,8 +142,7 @@ static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
   SelfHostedFunction = 1,
-  InlineCacheStub = 2,
-  /* Trampoline = 3 */
+  InlineCacheStub = 2
 };
 
 // [SMDOC] AOT Container Format
@@ -234,8 +226,6 @@ inline bool ForEachAOTBlob(AOTBlobKind kind, Fn&& fn) {
 
 inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind,
                                                 uint32_t nameHash = 0) {
-  //NOTE(Justin): Should we make all the Get functions be
-  // GetOrFail s.t they just MOZ_CRASH at compile time?
   const auto* hdr = GetAOTContainerHeader();
   if (!hdr) return nullptr;
   const auto* dir = GetAOTBlobDirectory();
@@ -293,16 +283,13 @@ class AOTIndirectionTable {
 // AOTContext is the single flag that switches the codegen pipeline into
 // AOT mode.  Stack-allocated by the caller and passed to MacroAssembler
 // as a non-owning pointer.  When present (non-nullptr), AOT codegen is
-// active: runtime pointers are loaded via a TLS-based pointer chain
-// instead of baked-in absolute addresses.
+// active: runtime pointers are loaded via AOTIndirectionTable. 
 class AOTContext {
  public:
   explicit AOTContext(AOTIndirectionTable* table) : table_(table) {}
-  void bindMasm(MacroAssembler& masm) { masm_ = &masm; }
   AOTIndirectionTable* indirectionTable() const { return table_; }
  private:
-  MacroAssembler* masm_ = nullptr;
-  [[maybe_unused]] AOTIndirectionTable* table_;
+  AOTIndirectionTable* table_;
 };
 
 }  // namespace js::jit

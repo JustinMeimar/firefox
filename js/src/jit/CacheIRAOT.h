@@ -14,8 +14,7 @@
 
 struct JSContext;
 
-namespace js {
-namespace jit {
+namespace js::jit {
 
 class JitZone;
 
@@ -44,7 +43,6 @@ mozilla::Span<const CacheIRAOTStub> GetAOTStubs();
 // The intention is to keep the AOT ICs within the atoms zone.
 void FillAOTICs(JSContext* cx);
 
-}  // namespace jit
-}  // namespace js
+}  // namespace js::jit
 
 #endif /* jit_CacheIRAOT_h */

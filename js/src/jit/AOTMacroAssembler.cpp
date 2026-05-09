@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-style-mode: nil; c-basic-offset: 2 -*-
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
  * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -109,7 +109,7 @@ void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
-    // Whitelisted values that are safe to bake into AOT code:
+    // Values that are safe to bake into AOT code:
     //  - nullptr (always zero)
     //  - values fitting in 32 bits (encoded as imm32, position-independent)
     if (val != 0 && val > UINT32_MAX) {
@@ -163,9 +163,8 @@ void MacroAssembler::storePtr(ImmPtr imm, const Address& address) {
 // Rather than clutter BaselineCodeGen with a bifurcated ifdef, we abstract,
 // even though there is only one use, the logic for filling the blinterp
 // dispatch table.
-// NOTE(Justin): Are the absolute pointers in the dispatch table too
-// perf sensitive to simple be written as a rel-offset as in the AOT
-// case? Probably, but need to profile to be certain.
+// In AOT mode, dispatch table entries are PIC-friendly int32 relative offsets.
+// In non-AOT mode, they are absolute code pointers patched via CodeLabel.
 void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
                                               size_t index,
                                               const Label& handler) {

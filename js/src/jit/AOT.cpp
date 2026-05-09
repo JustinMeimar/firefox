@@ -6,22 +6,14 @@
 
 #include "jit/AOT.h"
 
-#include "mozilla/Assertions.h"
 #include "mozilla/Maybe.h"
 
-#include <cstdint>
-
-#include "gc/Cell.h"
-#include "gc/Tracer.h"
 #include "gc/Zone.h"
-#include "jit/AutoWritableJitCode.h"
 #include "jit/JitCode.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/JitZone.h"
-#include "jit/ProcessExecutableMemory.h"
 #include "vm/JSContext.h"
-#include "vm/JSObject.h"
 
 namespace js::jit {
 

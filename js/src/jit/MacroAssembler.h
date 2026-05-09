@@ -429,11 +429,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // ==================================================================
 
-#ifdef ENABLE_JS_AOT_ICS
-  // Tracking a scratch register to be used during AOT filling of stubs.
-  mozilla::Maybe<Register> maybeAOTScratch;
-#endif
-
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
     // shared between visitors in the CodeGenerator. This assertion

@@ -66,7 +66,9 @@
 #include "jit/WarpBuilder.h"
 #include "jit/WarpOracle.h"
 #include "jit/WasmBCE.h"
-#include "jit/x64/Assembler-x64.h"
+#if defined(JS_CODEGEN_X64)
+#  include "jit/x64/Assembler-x64.h"
+#endif
 #include "js/Printf.h"
 #include "js/UniquePtr.h"
 #include "js/Wrapper.h"
@@ -134,8 +136,6 @@ JitRuntime::~JitRuntime() {
   js_delete(jitHintsMap_.ref());
 }
 
-extern const double MathRandomScaleInv;
-
 void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   JSRuntime* rt = cx->runtime();
 
@@ -162,9 +162,9 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::AtomUndefined,   static_cast<JSString*>(cx->names().undefined));
   SET(AOTSlot::AtomObject,      static_cast<JSString*>(cx->names().object));
 
-  uint32_t implicitIdx_ = 0;
+  uint32_t implicitIdx = 0;
 #define SET_IMPLICIT(val) \
-  aotIndirectionTable_.set(AOTSlotForImplicit(implicitIdx_++), uintptr_t(val))
+  aotIndirectionTable_.set(AOTSlotForImplicit(implicitIdx++), uintptr_t(val))
 
   SET_IMPLICIT(&WithEnvironmentObject::class_);
   SET_IMPLICIT(&FunctionClass);
@@ -209,7 +209,7 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET_IMPLICIT(rt->gc.addressOfNurseryPosition());
   SET_IMPLICIT(rt->gc.addressOfNurseryAllocatedSites());
 
-  MOZ_ASSERT(implicitIdx_ <= kAOTMaxImplicitPtrs);
+  MOZ_ASSERT(implicitIdx <= kAOTMaxImplicitPtrs);
 #undef SET_IMPLICIT
 
   // --- ABI functions (computed from ABIFUNCTION_LIST) ---
