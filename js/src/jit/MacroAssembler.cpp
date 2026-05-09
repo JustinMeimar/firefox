@@ -359,16 +359,9 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
   const JS::TraceKind traceKind = JS::TraceKind::Object;
-  if (!isAOTFill()) {
-    CompileZone* zone = realm()->zone();
-    bumpPointerAllocate(result, temp, fail, zone, traceKind,
-                        totalSize, allocSite);
-  }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    bumpPointerAllocateRuntime(result, temp, fail, traceKind, totalSize, allocSite);
-  }
-#endif
+  CompileZone* zone = isAOTFill() ? nullptr : realm()->zone();
+  bumpPointerAllocate(result, temp, fail, zone, traceKind,
+                      totalSize, allocSite);
 
   if (nDynamicSlots) {
     store32(Imm32(nDynamicSlots),
@@ -657,15 +650,7 @@ void MacroAssembler::nurseryAllocateString(Register result, Register temp,
 
   size_t thingSize = gc::Arena::thingSize(allocKind);
   const JS::TraceKind traceKind = JS::TraceKind::String;
-#ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill()) {
-    bumpPointerAllocateRuntime(result, temp, fail, traceKind,
-                      thingSize);
-    return;
-  }
-#endif
-
-  CompileZone* zone = realm()->zone();
+  CompileZone* zone = isAOTFill() ? nullptr : realm()->zone();
   bumpPointerAllocate(result, temp, fail, zone, traceKind,
                       thingSize);
 }
@@ -680,16 +665,9 @@ void MacroAssembler::nurseryAllocateBigInt(Register result, Register temp,
 
   size_t thingSize = gc::Arena::thingSize(gc::AllocKind::BIGINT);
   const JS::TraceKind traceKind = JS::TraceKind::BigInt;
-#ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill()) {
-    bumpPointerAllocateRuntime(result, temp, fail, traceKind,
-                      thingSize);
-    return;
-  }
-#endif
-  CompileZone* zone = realm()->zone();
+  CompileZone* zone = isAOTFill() ? nullptr : realm()->zone();
   bumpPointerAllocate(result, temp, fail, zone, traceKind,
-                    thingSize);
+                      thingSize);
 }
 
 static bool IsNurseryAllocEnabled(CompileZone* zone, JS::TraceKind kind) {
@@ -705,40 +683,10 @@ static bool IsNurseryAllocEnabled(CompileZone* zone, JS::TraceKind kind) {
   }
 }
 
-#ifdef ENABLE_JS_AOT_ICS
-static inline constexpr int32_t offsetOfNurseryFlag(JS::TraceKind kind) {
-  switch (kind) {
-    case JS::TraceKind::Object:
-      return JS::Zone::offsetOfAllocNurseryObjects();
-    case JS::TraceKind::String:
-      return JS::Zone::offsetOfAllocNurseryStrings();
-    case JS::TraceKind::BigInt:
-      return JS::Zone::offsetOfAllocNurseryBigInts();
-    default:
-      MOZ_CRASH("Bad nursery allocation kind");
-  }
-}
-
-static void failIfNurseryAllocDisabledRuntime(MacroAssembler* masm,
-                                              Register zoneReg,
-                                              JS::TraceKind kind, Label* fail) {
-  Address allocNurseryFlag(zoneReg, offsetOfNurseryFlag(kind));
-  masm->branch8(Assembler::Equal, allocNurseryFlag, Imm32(0), fail);
-}
-
-static void makeNurseryCellHeaderValueRuntime(MacroAssembler* masm,
-                                              Register zoneReg,
-                                              Register headerWordResult,
-                                              JS::TraceKind kind,
-                                              int32_t offsetOfAllocSiteFromZone) {
-  masm->computeEffectiveAddress(Address(zoneReg, offsetOfAllocSiteFromZone),
-                                headerWordResult);
-  masm->orPtr(Imm32(int32_t(kind)), headerWordResult);
-}
-#endif
-
 // This function handles nursery allocations for JS. For wasm, see
 // MacroAssembler::wasmBumpPointerAllocate.
+// When zone is nullptr (AOT fill mode), zone-specific data is loaded
+// at runtime via offset chains.
 void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
                                          Label* fail, CompileZone* zone,
                                          JS::TraceKind traceKind, uint32_t size,
@@ -749,19 +697,28 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   MOZ_ASSERT(totalSize < INT32_MAX, "Nursery allocation too large");
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
-  // We know statically whether nursery allocation is enable for a particular
+  // We know statically whether nursery allocation is enabled for a particular
   // kind because we discard JIT code when this changes.
-  if (!IsNurseryAllocEnabled(zone, traceKind)) {
+  // In AOT fill mode (zone == nullptr), skip this compile-time check; the
+  // nursery end comparison below catches the disabled case at runtime.
+  if (zone && !IsNurseryAllocEnabled(zone, traceKind)) {
     jump(fail);
     return;
   }
 
   // Use a relative 32 bit offset to the Nursery position_ to currentEnd_ to
   // avoid 64-bit immediate loads.
-  void* posAddr = zone->addressOfNurseryPosition();
   int32_t endOffset = Nursery::offsetOfCurrentEndFromPosition();
 
-  movePtr(ImmPtr(posAddr), temp);
+  if (zone) {
+    void* posAddr = zone->addressOfNurseryPosition();
+    movePtr(ImmPtr(posAddr), temp);
+  } else {
+    loadRuntime(temp);
+    addPtr(Imm32(int32_t(JSRuntime::offsetOfNursery() +
+                          Nursery::offsetOfPosition())), temp);
+  }
+
   loadPtr(Address(temp, 0), result);
   addPtr(Imm32(totalSize), result);
   branchPtr(Assembler::Below, Address(temp, endOffset), result, fail);
@@ -771,27 +728,44 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   if (allocSite.is<gc::CatchAllAllocSite>()) {
     // No allocation site supplied. This is the case when called from Warp, or
     // from places that don't support pretenuring.
-    gc::CatchAllAllocSite siteKind = allocSite.as<gc::CatchAllAllocSite>();
-    gc::AllocSite* site = zone->catchAllAllocSite(traceKind, siteKind);
-    uintptr_t headerWord = gc::NurseryCellHeader::MakeValue(site, traceKind);
-    storePtr(ImmWord(headerWord),
-             Address(result, -js::Nursery::nurseryCellHeaderSize()));
+    if (zone) {
+      gc::CatchAllAllocSite siteKind = allocSite.as<gc::CatchAllAllocSite>();
+      gc::AllocSite* site = zone->catchAllAllocSite(traceKind, siteKind);
+      uintptr_t headerWord = gc::NurseryCellHeader::MakeValue(site, traceKind);
+      storePtr(ImmWord(headerWord),
+               Address(result, -js::Nursery::nurseryCellHeaderSize()));
 
-    if (traceKind != JS::TraceKind::Object ||
-        runtime()->geckoProfiler().enabled()) {
-      // Update the catch all allocation site, which his is used to calculate
-      // nursery allocation counts so we can determine whether to disable
-      // nursery allocation of strings and bigints.
-      uint32_t* countAddress = site->nurseryAllocCountAddress();
-      CheckedInt<int32_t> counterOffset =
-          (CheckedInt<uintptr_t>(uintptr_t(countAddress)) -
-           CheckedInt<uintptr_t>(uintptr_t(posAddr)))
-              .toChecked<int32_t>();
-      if (counterOffset.isValid()) {
-        add32(Imm32(1), Address(temp, counterOffset.value()));
-      } else {
-        movePtr(ImmPtr(countAddress), temp);
-        add32(Imm32(1), Address(temp, 0));
+      if (traceKind != JS::TraceKind::Object ||
+          runtime()->geckoProfiler().enabled()) {
+        // Update the catch all allocation site, which is used to calculate
+        // nursery allocation counts so we can determine whether to disable
+        // nursery allocation of strings and bigints.
+        uint32_t* countAddress = site->nurseryAllocCountAddress();
+        void* posAddr = zone->addressOfNurseryPosition();
+        CheckedInt<int32_t> counterOffset =
+            (CheckedInt<uintptr_t>(uintptr_t(countAddress)) -
+             CheckedInt<uintptr_t>(uintptr_t(posAddr)))
+                .toChecked<int32_t>();
+        if (counterOffset.isValid()) {
+          add32(Imm32(1), Address(temp, counterOffset.value()));
+        } else {
+          movePtr(ImmPtr(countAddress), temp);
+          add32(Imm32(1), Address(temp, 0));
+        }
+      }
+    } else {
+      // AOT fill: load zone at runtime to construct the cell header.
+      int32_t siteOffset = Zone::offsetOfUnknownAllocSite(traceKind);
+      loadZoneForAOT(temp);
+      computeEffectiveAddress(Address(temp, siteOffset), temp);
+      orPtr(Imm32(int32_t(traceKind)), temp);
+      storePtr(temp, Address(result, -js::Nursery::nurseryCellHeaderSize()));
+
+      if (traceKind != JS::TraceKind::Object) {
+        int32_t allocCountOffset =
+            siteOffset + gc::AllocSite::offsetOfNurseryAllocCount();
+        loadZoneForAOT(temp);
+        add32(Imm32(1), Address(temp, allocCountOffset));
       }
     }
   } else {
@@ -805,62 +779,9 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   }
 }
 
-#ifdef ENABLE_JS_AOT_ICS
-void MacroAssembler::bumpPointerAllocateRuntime(Register result, Register temp,
-                                         Label* fail, JS::TraceKind traceKind,
-                                         uint32_t size, const AllocSiteInput& allocSite) {
-
-  MOZ_ASSERT(size >= gc::MinCellSize);
-
-  uint32_t totalSize = size + Nursery::nurseryCellHeaderSize();
-  MOZ_ASSERT(totalSize < INT32_MAX, "Nursery allocation too large");
-  MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
-
-  // Load zone into temp to check nursery allocation flag.
-  loadZoneForAOT(temp);
-  failIfNurseryAllocDisabledRuntime(this, temp, traceKind, fail);
-
-  // Load the runtime for nursery position.
-  loadRuntime(temp);
-  Address positionAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition());
-  int32_t endOffset = Nursery::offsetOfCurrentEndFromPosition();
-  Address positionEndAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfPosition() + endOffset);
-
-  loadPtr(positionAddr, result);
-  addPtr(Imm32(totalSize), result);
-  branchPtr(Assembler::Below, positionEndAddr, result, fail);
-  storePtr(result, positionAddr);
-  subPtr(Imm32(size), result);
-
-  if (allocSite.is<gc::CatchAllAllocSite>()) {
-    gc::CatchAllAllocSite siteKind = allocSite.as<gc::CatchAllAllocSite>();
-    (void)siteKind;
-    MOZ_ASSERT(siteKind == gc::CatchAllAllocSite::Unknown);
-
-    // Reload zone for header construction.
-    loadZoneForAOT(temp);
-    int32_t siteOffset = Zone::offsetOfUnknownAllocSite(traceKind);
-    makeNurseryCellHeaderValueRuntime(this, temp, temp, traceKind, siteOffset);
-
-    storePtr(temp, Address(result, -js::Nursery::nurseryCellHeaderSize()));
-
-    if (traceKind != JS::TraceKind::Object) {
-      // Reload zone for alloc count update.
-      loadZoneForAOT(temp);
-      int32_t allocCountOffset =
-          siteOffset + gc::AllocSite::offsetOfNurseryAllocCount();
-      add32(Imm32(1), Address(temp, allocCountOffset));
-    }
-  } else {
-    Register site = allocSite.as<Register>();
-    updateAllocSiteRuntime(temp, site);
-    orPtr(Imm32(int32_t(traceKind)), site);
-    storePtr(site, Address(result, -js::Nursery::nurseryCellHeaderSize()));
-  }
-}
-#endif
-
 // Update the allocation site in the same way as Nursery::allocateCell.
+// When zone is nullptr (AOT fill mode), nursery allocated sites address
+// is loaded via runtime offset chain.
 void MacroAssembler::updateAllocSite(Register temp, Register result,
                                      CompileZone* zone, Register site) {
   Label done;
@@ -871,36 +792,26 @@ void MacroAssembler::updateAllocSite(Register temp, Register result,
            Address(site, gc::AllocSite::offsetOfNurseryAllocCount()),
            Imm32(js::gc::NormalSiteAttentionThreshold), &done);
 
-  loadPtr(AbsoluteAddress(zone->addressOfNurseryAllocatedSites()), temp);
-  storePtr(temp, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
-  storePtr(site, AbsoluteAddress(zone->addressOfNurseryAllocatedSites()));
+  // Load the address of the nurseryAllocatedSites list head into temp.
+  if (zone) {
+    void* allocSitesAddr = zone->addressOfNurseryAllocatedSites();
+    movePtr(ImmPtr(allocSitesAddr), temp);
+  } else {
+    loadRuntime(temp);
+    addPtr(Imm32(int32_t(JSRuntime::offsetOfNursery() +
+                          Nursery::offsetOfNurseryAllocatedSites())), temp);
+  }
+
+  // Splice site into the allocated sites list.
+  // temp holds &allocatedSites; use result as scratch (caller-saved).
+  push(result);
+  loadPtr(Address(temp, 0), result);
+  storePtr(result, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
+  storePtr(site, Address(temp, 0));
+  pop(result);
 
   bind(&done);
 }
-
-#ifdef ENABLE_JS_AOT_ICS
-void MacroAssembler::updateAllocSiteRuntime(Register temp, Register site) {
-  Label done;
-
-  add32(Imm32(1), Address(site, gc::AllocSite::offsetOfNurseryAllocCount()));
-
-  branch32(Assembler::NotEqual,
-           Address(site, gc::AllocSite::offsetOfNurseryAllocCount()),
-           Imm32(js::gc::NormalSiteAttentionThreshold), &done);
-
-  // Load the nursery alloc sites via the zone's runtime.
-  loadRuntime(temp);
-  Address allocSitesAddr(temp, JSRuntime::offsetOfNursery() + Nursery::offsetOfNurseryAllocatedSites());
-
-  loadPtr(allocSitesAddr, temp);
-  storePtr(temp, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
-  // Load the runtime again (since temp was used for allocSites).
-  loadRuntime(temp);
-  storePtr(site, allocSitesAddr);
-
-  bind(&done);
-}
-#endif
 
 // Inlined equivalent of gc::AllocateString, jumping to fail if nursery
 // allocation requested but unsuccessful.

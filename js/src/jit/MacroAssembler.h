@@ -5647,12 +5647,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            const AllocSiteInput& allocSite = AllocSiteInput());
   void updateAllocSite(Register temp, Register result, CompileZone* zone,
                        Register site);
-#ifdef ENABLE_JS_AOT_ICS
-  void bumpPointerAllocateRuntime(Register result, Register temp, Label* fail,
-                                  JS::TraceKind traceKind, uint32_t size,
-                           const AllocSiteInput& allocSite = AllocSiteInput());
-  void updateAllocSiteRuntime(Register temp, Register site);
-#endif
 
   void freeListAllocate(Register result, Register temp, gc::AllocKind allocKind,
                         Label* fail);

@@ -209,6 +209,8 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET_IMPLICIT(&MathRandomScaleInv);
   SET_IMPLICIT(DateTimeInfo::addressOfUTCToLocalOffsetSeconds());
   SET_IMPLICIT(GetDOMProxyHandlerFamily());
+  SET_IMPLICIT(rt->gc.addressOfNurseryPosition());
+  SET_IMPLICIT(rt->gc.addressOfNurseryAllocatedSites());
 
   MOZ_ASSERT(implicitIdx_ <= kAOTMaxImplicitPtrs);
 #undef SET_IMPLICIT
