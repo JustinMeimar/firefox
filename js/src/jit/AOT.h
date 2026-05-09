@@ -7,32 +7,33 @@
 #ifndef jit_AOT_h
 #define jit_AOT_h
 
-// Generic AOT infrastructure: relocation kinds, container format,
-// runtime patches, code allocation, and the AOT compilation context.
-//
-// This file is blob-kind-agnostic. Baseline-interpreter-specific and
-// baseline-compilation-specific manifests live in BaselineAOT.h.
 
-#include "mozilla/HashFunctions.h"
+
 #include "mozilla/Maybe.h"
-
 #include <cstdint>
 #include <cstring>
-
 #include "jstypes.h"
-
-#include "jit/VMFunctions.h"
-#include "js/Vector.h"
 #include "vm/JSContext.h"
 
 struct JS_PUBLIC_API JSContext;
 
 namespace js::jit {
 
-// [SMDOC] AOT Slot Table
+// [SMDOC] AOT JIT Code 
+
+// When compiled with ENABLE_AOT_BASELINE, SpiderMonkey can emit
+// relocatable JIT code for the the BaselineInterpreter, Inline
+// Cache Stubs and self-hosted Baseline compiled builtins.
 //
-// AOTSlot enumerates every runtime address that AOT code needs.
-// Each slot holds a single uintptr_t in the AOTIndirectionTable.
+// To make JIT code relocatable, all uses of `ImmPtr` are intercepted inside
+// a set of common masm interfaces then compared against a set
+// of expected pointers enumerated in `AOTSlot`. If the pointer
+// can be indentified, the masm emits an indirection to attain the
+// pointer via the &AOTIndirectionTable, stored in the BaselineFrame.
+// This incurs a cost of two loads to attain any runtime poitner, but
+// allows the masm buffer to be independent of the current runtime.
+// The buffer can then be dumped, serailized into an assembly scaffold,
+// and reattached as a build input.
 
 #define AOT_RUNTIME_SLOTS(V)                \
   V(JSRuntimePtr)                         \
@@ -70,16 +71,15 @@ namespace js::jit {
 
 extern const double MathRandomScaleInv;
 
-// All named slots that codegen references explicitly.
 #define AOT_CORE_SLOTS(V)  \
   AOT_RUNTIME_SLOTS(V)     \
   AOT_PREBARRIER_SLOTS(V)  \
   AOT_ATOM_SLOTS(V)
 
-// Extra pointer slots: JSClass pointers, static data, etc.
-// Populated by value in populateAOTIndirectionTable; matched by findSlot().
-// No named enum entries needed -- codegen accesses them transparently
-// through movePtr(ImmPtr) / movePtr(ImmGCPtr) interception.
+// TODO(Justin): This is statically allocated space in the AOT
+// table. Underprovisioning could have security implications.
+// Over provisioning imposes waste.
+
 static constexpr uint32_t kAOTMaxImplicitPtrs = 64;
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
@@ -90,8 +90,7 @@ enum class AOTSlot : uint32_t {
   AOT_PREBARRIER_SLOTS(EMIT_SLOT)
   AOT_ATOM_SLOTS(EMIT_SLOT)
 #undef EMIT_SLOT
-  CoreSlot_End,
-  
+  CoreSlot_End, 
   // Implicit pointers include class pointers, or any other
   // link time symbol which could conceivably have it's AOT
   // slot elided by partial symbolization of the AOT blob
@@ -105,8 +104,7 @@ enum class AOTSlot : uint32_t {
   VMWrapper_End = VMWrapper_Begin + kAOTMaxVMWrappers,
    
   ABIFn_Begin = VMWrapper_End,
-  ABIFn_End = ABIFn_Begin + kAOTMaxABIFunctions,
-  
+  ABIFn_End = ABIFn_Begin + kAOTMaxABIFunctions, 
   Count = ABIFn_End
 };
 

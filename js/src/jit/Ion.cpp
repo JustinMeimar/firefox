@@ -134,6 +134,8 @@ JitRuntime::~JitRuntime() {
   js_delete(jitHintsMap_.ref());
 }
 
+extern const double MathRandomScaleInv;
+
 void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   JSRuntime* rt = cx->runtime();
 
