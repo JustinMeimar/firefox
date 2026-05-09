@@ -154,6 +154,8 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::MegamorphicCache,    &rt->caches().megamorphicCache);
   SET(AOTSlot::MegamorphicSetPropCache, rt->caches().megamorphicSetPropCache.get());
   SET(AOTSlot::StringToAtomCache,   &rt->caches().stringToAtomCache);
+  SET(AOTSlot::NurseryPosition,    rt->gc.addressOfNurseryPosition());
+  SET(AOTSlot::NurseryAllocatedSites, rt->gc.addressOfNurseryAllocatedSites());
 
   SET(AOTSlot::AtomEmpty,       static_cast<JSString*>(cx->names().empty_));
   SET(AOTSlot::AtomTrue,        static_cast<JSString*>(cx->names().true_));
@@ -206,8 +208,6 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET_IMPLICIT(&MathRandomScaleInv);
   SET_IMPLICIT(DateTimeInfo::addressOfUTCToLocalOffsetSeconds());
   SET_IMPLICIT(GetDOMProxyHandlerFamily());
-  SET_IMPLICIT(rt->gc.addressOfNurseryPosition());
-  SET_IMPLICIT(rt->gc.addressOfNurseryAllocatedSites());
 
   MOZ_ASSERT(implicitIdx <= kAOTMaxImplicitPtrs);
 #undef SET_IMPLICIT

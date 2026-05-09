@@ -48,7 +48,9 @@ namespace js::jit {
   V(StringToAtomCache)                    \
   V(ExceptionTail)                        \
   V(DebugTrapInterpreter)                 \
-  V(DebugTrapCompiler)
+  V(DebugTrapCompiler)                    \
+  V(NurseryPosition)                      \
+  V(NurseryAllocatedSites)
 
 #define AOT_PREBARRIER_SLOTS(V)             \
   V(PreBarrier_Value)                     \
