@@ -143,7 +143,6 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
     aotIndirectionTable_.set(slot, uintptr_t(val));
   };
 
-  // --- Runtime / context pointers (per-process, change each run) ---
   SET(AOTSlot::JSRuntimePtr,        rt);
   SET(AOTSlot::JSContextPtr,        cx);
   SET(AOTSlot::InterruptBits,       cx->addressOfInterruptBits());
@@ -156,7 +155,6 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::MegamorphicSetPropCache, rt->caches().megamorphicSetPropCache.get());
   SET(AOTSlot::StringToAtomCache,   &rt->caches().stringToAtomCache);
 
-  // --- Well-known atoms (GC pointers, stable within a runtime) ---
   SET(AOTSlot::AtomEmpty,       static_cast<JSString*>(cx->names().empty_));
   SET(AOTSlot::AtomTrue,        static_cast<JSString*>(cx->names().true_));
   SET(AOTSlot::AtomFalse,       static_cast<JSString*>(cx->names().false_));
@@ -164,9 +162,6 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   SET(AOTSlot::AtomUndefined,   static_cast<JSString*>(cx->names().undefined));
   SET(AOTSlot::AtomObject,      static_cast<JSString*>(cx->names().object));
 
-  // --- Implicit pointers (JSClass*, static data, singletons) ---
-  // No named enum entries; codegen accesses them transparently
-  // through movePtr(ImmPtr) / movePtr(ImmGCPtr) -> findSlot().
   uint32_t implicitIdx_ = 0;
 #define SET_IMPLICIT(val) \
   aotIndirectionTable_.set(AOTSlotForImplicit(implicitIdx_++), uintptr_t(val))
@@ -825,7 +820,7 @@ template JitCode* JitCode::New<NoGC>(JSContext* cx, uint8_t* code,
 
 JitCode* JitCode::NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
                              CodeKind kind) {
-  // Static code lives in .text; no pool, no header, no memcpy.
+  // Static code lives in .text and can be shared between runtimes.
   JitCode* codeObj = cx->newCell<JitCode, NoGC>(
       code, /*bufferSize=*/0, /*headerSize=*/0, /*pool=*/nullptr, kind);
   if (!codeObj) {

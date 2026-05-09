@@ -132,10 +132,6 @@ inline const char* AOTSlotName(AOTSlot slot) {
       break;
   }
   uint32_t s = uint32_t(slot);
-  // if (s = std::clamp(s, AOTSlot::Implicit_Begin,
-  //                       AOTSlot::Implicit_End)) {
-  //   return "Implicit";
-  // }
 
   if (s >= uint32_t(AOTSlot::Implicit_Begin) &&
       s < uint32_t(AOTSlot::Implicit_End)) {
@@ -198,21 +194,10 @@ extern "C" {
   extern uint8_t bl_aot_text_end[];
 }
 
-inline const uint8_t* GetAOTContainer() {
-  return bl_aot_container_start;
-}
-
-inline size_t GetAOTContainerSize() {
-  return bl_aot_container_end - bl_aot_container_start;
-}
-
-inline uint8_t* GetAOTTextBase() {
-  return bl_aot_text_start;
-}
-
-inline size_t GetAOTTextSize() {
-  return bl_aot_text_end - bl_aot_text_start;
-}
+inline const uint8_t* GetAOTContainer() { return bl_aot_container_start; }
+inline uint8_t* GetAOTTextBase() { return bl_aot_text_start; }
+inline size_t GetAOTTextSize() { return bl_aot_text_end - bl_aot_text_start; }
+inline size_t GetAOTContainerSize() { return bl_aot_container_end - bl_aot_container_start; }
 
 inline const AOTContainerHeader* GetAOTContainerHeader() {
   if (GetAOTContainerSize() < sizeof(AOTContainerHeader)) {
@@ -247,17 +232,6 @@ inline bool ForEachAOTBlob(AOTBlobKind kind, Fn&& fn) {
   return found;
 }
 
-// NOTE(Justin): ForEachAOTBlob should probably be a fold pattern?
-// Or a filter pattern? Probably filter... solves hash problem by
-// asserting length=1.
-//
-// inline const AOTBlobDirectoryEntry* FindBlob(AOTBlobKind kind, uint32_t nameHash)
-// {
-//   auto fn = [](AOTBlobDirectoryEntry* blob){
-// };  return ForEachAOTBlob(kind, fn);
-// }
-
-// NOTE(Justin): nameHash probably isn't secure here. 
 inline const AOTBlobDirectoryEntry* FindAOTBlob(AOTBlobKind kind,
                                                 uint32_t nameHash = 0) {
   //NOTE(Justin): Should we make all the Get functions be

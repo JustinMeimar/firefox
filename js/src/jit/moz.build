@@ -96,7 +96,6 @@ UNIFIED_SOURCES += [
     "Sink.cpp",
     "Snapshots.cpp",
     "Trampoline.cpp",
-    "TrampolineAOT.cpp",
     "TrampolineNatives.cpp",
     "TrialInlining.cpp",
     "TypePolicy.cpp",
