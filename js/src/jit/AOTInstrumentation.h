@@ -8,6 +8,7 @@
 #define jit_AOTInstrumentation_h
 
 #include "mozilla/Likely.h"
+#include "mozilla/TimeStamp.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +19,7 @@ namespace js::jit {
 enum AOTInstrCh : uint32_t {
   AOTInstr_IC        = 1 << 0,
   AOTInstr_Lifecycle = 1 << 1,
+  AOTInstr_Timing    = 1 << 2,
   AOTInstr_All       = 0xFFFFFFFF,
 };
 
@@ -35,6 +37,7 @@ struct AOTInstrumentation {
       channels = 0;
       if (strstr(env, "ic")) channels |= AOTInstr_IC;
       if (strstr(env, "lifecycle")) channels |= AOTInstr_Lifecycle;
+      if (strstr(env, "timing")) channels |= AOTInstr_Timing;
       if (!channels) channels = AOTInstr_All;
     }
   }
@@ -56,6 +59,26 @@ inline AOTInstrumentation gAOTInstr;
   do {                                                           \
     if (MOZ_UNLIKELY(::js::jit::gAOTInstr.enabled(ch))) {       \
       fprintf(::js::jit::gAOTInstr.out, fmt, ##__VA_ARGS__);    \
+    }                                                            \
+  } while (0)
+
+#define AOT_TIMER_BEGIN(label)                                   \
+  mozilla::TimeStamp aotTimer_##label;                           \
+  if (MOZ_UNLIKELY(::js::jit::gAOTInstr.enabled(                \
+          ::js::jit::AOTInstr_Timing))) {                        \
+    aotTimer_##label = mozilla::TimeStamp::Now();                \
+  }
+
+#define AOT_TIMER_END(label, event, component, extraFmt, ...)    \
+  do {                                                           \
+    if (MOZ_UNLIKELY(::js::jit::gAOTInstr.enabled(              \
+            ::js::jit::AOTInstr_Timing)) &&                      \
+        !aotTimer_##label.IsNull()) {                            \
+      auto elapsed_ = mozilla::TimeStamp::Now() - aotTimer_##label; \
+      double us_ = elapsed_.ToMicroseconds();                    \
+      fprintf(::js::jit::gAOTInstr.out,                          \
+              "%s component=%s us=%.0f" extraFmt "\n",           \
+              event, component, us_, ##__VA_ARGS__);             \
     }                                                            \
   } while (0)
 

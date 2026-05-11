@@ -14,6 +14,7 @@
 #include "frontend/CompilationStencil.h"
 #include "gc/Zone.h"
 #include "jit/AOT.h"
+#include "jit/AOTInstrumentation.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/IonTypes.h"
@@ -438,6 +439,8 @@ bool DumpAOTContainer(JSContext* cx) {
 
 bool LoadAOTInterpFromContainer(JSContext* cx,
                                 BaselineInterpreter& interpreter) {
+  AOT_TIMER_BEGIN(interp);
+
   const AOTBlobDirectoryEntry* entry =
       FindAOTBlob(AOTBlobKind::BaselineInterpreter);
   if (!entry) {
@@ -512,6 +515,8 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
     interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
   }
 
+  AOT_TIMER_END(interp, "aot-load", "interp", " bytes=%u", entry->codeSize);
+
   return true;
 }
 
@@ -521,6 +526,8 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
 
 bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
                        Handle<JSAtom*> name) {
+  AOT_TIMER_BEGIN(sh);
+
   JS::AutoCheckCannotGC nogc;
   uint32_t nameHash = name->hasLatin1Chars()
       ? mozilla::HashStringKnownLength(name->latin1Chars(nogc), name->length())
@@ -632,6 +639,9 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
     bs->toggleProfilerInstrumentation(true);
   }
 
+  AOT_TIMER_END(sh, "aot-load", "selfhosted", " bytes=%u hash=%u",
+                entry->codeSize, nameHash);
+
   return true;
 }
 
@@ -641,6 +651,7 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
 bool LoadAOTICStubs(JSContext* cx) {
   MOZ_ASSERT(cx->inAtomsZone());
+  AOT_TIMER_BEGIN(ics);
 
   JitZone* jitZone = cx->zone()->jitZone();
   if (!jitZone) {
@@ -701,6 +712,12 @@ bool LoadAOTICStubs(JSContext* cx) {
       return;
     }
 
+    AOT_INSTR(AOTInstr_IC, "ic-corpus kind=%s hash=%u code=%u idx=%u\n",
+              CacheKindNames[uint8_t(manifest.kind)],
+              unsigned(CacheIRStubKey::hash(lookup)),
+              unsigned(code->instructionsSize()),
+              totalCount - 1);
+
     loadedCount++;
   });
 
@@ -714,6 +731,8 @@ bool LoadAOTICStubs(JSContext* cx) {
             "WARNING: %u AOT IC stubs failed to load",
             totalCount - loadedCount);
   }
+
+  AOT_TIMER_END(ics, "aot-load", "ics", " count=%u", loadedCount);
 
   return loadedCount > 0;
 }

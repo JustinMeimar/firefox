@@ -17,6 +17,7 @@
 #include "debugger/DebugAPI.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
+#include "jit/AOTInstrumentation.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineAOT.h"
 #include "jit/BaselineCodeGen.h"
@@ -459,6 +460,8 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   }
   StackMacroAssembler masm(cx, temp, aotContext);
 
+  AOT_TIMER_BEGIN(blCompile);
+
   BaselineCompiler compiler(temp, CompileRuntime::get(cx->runtime()), masm,
                             &snapshot);
   if (!compiler.init()) {
@@ -473,6 +476,12 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
 
   if (status == Method_CantCompile) {
     script->disableBaselineCompile();
+  }
+
+  if (status == Method_Compiled) {
+    AOT_TIMER_END(blCompile, "jit-gen",
+                  script->selfHosted() ? "selfhosted" : "baseline",
+                  " bytes=%u", unsigned(masm.instructionsSize()));
   }
 
   return status;

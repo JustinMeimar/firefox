@@ -2503,6 +2503,8 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
                                 CacheIRStubInfo*& stubInfo, JitCode*& code,
                                 const char* name, bool isAOTFill,
                                 JitZone* jitZone) {
+  AOT_TIMER_BEGIN(icLookup);
+
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
 
@@ -2571,6 +2573,14 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {
       return false;
     }
+
+    AOT_TIMER_END(icLookup, "jit-gen", "ics", " bytes=%u kind=%s",
+                  unsigned(code->instructionsSize()),
+                  CacheKindNames[uint8_t(kind)]);
+  } else if (code) {
+    AOT_INSTR(AOTInstr_Timing, "ics-cached kind=%s bytes=%u\n",
+              CacheKindNames[uint8_t(kind)],
+              unsigned(code->instructionsSize()));
   } else if (!stubInfo) {
     MOZ_ASSERT(IsPortableBaselineInterpreterEnabled());
 
@@ -2766,10 +2776,13 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 
   stub->addNewStub(icEntry, newStub);
 
-  AOT_INSTR(AOTInstr_IC, "ic-attach kind=%s code=%u aot=%d\n",
+  AOT_INSTR(AOTInstr_IC, "ic-attach kind=%s code=%u aot=%d hash=%u\n",
             CacheKindNames[uint8_t(kind)],
             unsigned(code->instructionsSize()),
-            int(newStub->isStaticCode()));
+            int(newStub->isStaticCode()),
+            unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
+                kind, ICStubEngine::Baseline,
+                writer.codeStart(), writer.codeLength()))));
 
   JSScript* owningScript = icScript->isInlined()
                                ? icScript->inliningRoot()->owningScript()
@@ -2794,6 +2807,7 @@ void js::jit::FillAOTICs(JSContext* cx) {
   MOZ_ASSERT(cx->inAtomsZone());
   JitZone* jitZone = cx->zone()->getJitZone(cx);
   if (JitOptions.enableAOTICs) {
+    size_t corpusIdx = 0;
     for (auto& stub : GetAOTStubs()) {
       CacheIRWriter writer(cx, stub);
       if (writer.failed()) {
@@ -2805,8 +2819,20 @@ void js::jit::FillAOTICs(JSContext* cx) {
       if (!LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
                                 "aot stub",
                                 /* isAOTFill = */ true, jitZone)) {
+        corpusIdx++;
         continue;
       }
+
+      if (code && stubInfo) {
+        AOT_INSTR(AOTInstr_IC, "ic-corpus kind=%s hash=%u code=%u idx=%zu\n",
+                  CacheKindNames[uint8_t(stub.kind)],
+                  unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
+                      stub.kind, ICStubEngine::Baseline,
+                      writer.codeStart(), writer.codeLength()))),
+                  unsigned(code->instructionsSize()),
+                  corpusIdx);
+      }
+      corpusIdx++;
 
       if (JitOptions.dumpAOTICs && code && stubInfo) {
         AOTBlobData blob;

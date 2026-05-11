@@ -21,6 +21,7 @@
 #include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
+#include "jit/JitZone.h"
 #include "jit/Linker.h"
 #include "jit/PerfSpewer.h"
 #include "jit/SharedICHelpers.h"
@@ -547,9 +548,11 @@ static void TryAttachStub(const char* name, JSContext* cx, BaselineFrame* frame,
 
 void ICFallbackStub::unlinkStub(Zone* zone, ICEntry* icEntry,
                                 ICCacheIRStub* prev, ICCacheIRStub* stub) {
-  AOT_INSTR(AOTInstr_IC, "ic-detach kind=%s code=%u\n",
+  AOT_INSTR(AOTInstr_IC, "ic-detach kind=%s hash=%u\n",
             CacheKindNames[uint8_t(stub->stubInfo()->kind())],
-            unsigned(stub->stubInfo()->codeLength()));
+            unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
+                stub->stubInfo()->kind(), ICStubEngine::Baseline,
+                stub->stubInfo()->code(), stub->stubInfo()->codeLength()))));
 
   // We are removing edges from ICStub to gcthings. Perform a barrier to let the
   // GC know about those edges.

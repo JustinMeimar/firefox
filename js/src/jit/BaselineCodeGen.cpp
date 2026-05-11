@@ -13,6 +13,7 @@
 #include "frontend/CompilationStencil.h"
 #include "gc/GC.h"
 #include "jit/AOT.h"
+#include "jit/AOTInstrumentation.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineAOT.h"
 #include "jit/BaselineCompileQueue.h"
@@ -7427,6 +7428,8 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
   }
 #endif
 
+  AOT_TIMER_BEGIN(interpGen);
+
   AutoCreatedBy acb(masm, "BaselineInterpreterGenerator::generate");
 
   if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
@@ -7537,6 +7540,9 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
   if (coverage::IsLCovEnabled()) {
     interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
   }
+
+  AOT_TIMER_END(interpGen, "jit-gen", "interp", " bytes=%zu",
+                size_t(masm.instructionsSize()));
 
   return true;
 }
