@@ -4220,6 +4220,12 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
 }
 
 void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
+#ifdef ENABLE_AOT_BASELINE
+  if (MOZ_UNLIKELY(isAOT())) {
+    emitAOTSlotLoad(AOTSlotForVMWrapper(uint32_t(id)), dest);
+    return;
+  }
+#endif
   TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
   movePtr(ImmPtr(ptr.value), dest);
 }

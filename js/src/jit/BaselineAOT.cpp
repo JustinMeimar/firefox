@@ -364,21 +364,15 @@ bool DumpAOTContainer(JSContext* cx) {
 
     uint32_t compiled = 0;
     uint32_t skipped = 0;
-    for (auto iter = cx->runtime()->selfHostScriptMap.ref().iter();
-         !iter.done(); iter.next()) {
-      Rooted<JSAtom*> atom(cx, iter.get().key());
-
-      UniqueChars atomStr = AtomToPrintableString(cx, atom);
-      bool allowed = false;
-      if (atomStr) {
-        for (const char* name : kSelfHostedAllowlist) {
-          if (strcmp(atomStr.get(), name) == 0) {
-            allowed = true;
-            break;
-          }
-        }
+    auto& map = cx->runtime()->selfHostScriptMap.ref();
+    for (const char* name : kSelfHostedAllowlist) {
+      Rooted<JSAtom*> atom(cx, Atomize(cx, name, strlen(name)));
+      if (!atom) {
+        skipped++;
+        continue;
       }
-      if (!allowed) {
+      auto ptr = map.readonlyThreadsafeLookup(atom->asPropertyName());
+      if (!ptr) {
         skipped++;
         continue;
       }
