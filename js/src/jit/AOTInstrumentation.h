@@ -30,7 +30,14 @@ struct AOTInstrumentation {
   void init() {
     const char* env = getenv("JS_AOT_INSTR");
     if (!env) return;
-    out = stderr;
+    const char* file = getenv("JS_AOT_INSTR_FILE");
+    if (file && *file) {
+      char buf[2048];
+      snprintf(buf, sizeof(buf), "%s.%d", file, int(getpid()));
+      out = fopen(buf, "w");
+      if (out) setbuf(out, nullptr);
+    }
+    if (!out) out = stderr;
     if (strcmp(env, "1") == 0 || strcmp(env, "all") == 0) {
       channels = AOTInstr_All;
     } else {

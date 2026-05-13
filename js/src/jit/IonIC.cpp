@@ -6,6 +6,8 @@
 
 #include "jit/IonIC.h"
 
+#include "jit/AOTInstrumentation.h"
+#include "jit/CacheIR.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRGenerator.h"
 #include "jit/IonScript.h"
@@ -88,6 +90,14 @@ Register IonIC::scratchRegisterForEntryJump() {
 
 void IonIC::discardStubs(Zone* zone, IonScript* ionScript) {
   if (firstStub_) {
+    uint8_t* codePtr = codeRaw_;
+    for (IonICStub* s = firstStub_; s; s = s->next()) {
+      AOT_INSTR(AOTInstr_IC, "ic-detach kind=%s code=%u engine=ion\n",
+                CacheKindNames[uint8_t(kind_)],
+                unsigned(JitCode::FromExecutable(codePtr)->instructionsSize()));
+      codePtr = s->nextCodeRaw();
+    }
+
     // We are removing edges from IonIC to gcthings. Perform a write barrier to
     // let the GC know about those edges.
     PreWriteBarrier(zone, ionScript);
@@ -747,6 +757,10 @@ uint8_t* IonICStub::stubDataStart() {
 void IonIC::attachStub(IonICStub* newStub, JitCode* code) {
   MOZ_ASSERT(newStub);
   MOZ_ASSERT(code);
+
+  AOT_INSTR(AOTInstr_IC, "ic-attach kind=%s code=%u aot=0 engine=ion\n",
+            CacheKindNames[uint8_t(kind_)],
+            unsigned(code->instructionsSize()));
 
   if (firstStub_) {
     newStub->setNext(firstStub_, codeRaw_);

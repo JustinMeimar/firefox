@@ -548,8 +548,9 @@ static void TryAttachStub(const char* name, JSContext* cx, BaselineFrame* frame,
 
 void ICFallbackStub::unlinkStub(Zone* zone, ICEntry* icEntry,
                                 ICCacheIRStub* prev, ICCacheIRStub* stub) {
-  AOT_INSTR(AOTInstr_IC, "ic-detach kind=%s hash=%u\n",
+  AOT_INSTR(AOTInstr_IC, "ic-detach kind=%s code=%u hash=%u\n",
             CacheKindNames[uint8_t(stub->stubInfo()->kind())],
+            unsigned(stub->jitCode()->instructionsSize()),
             unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
                 stub->stubInfo()->kind(), ICStubEngine::Baseline,
                 stub->stubInfo()->code(), stub->stubInfo()->codeLength()))));
