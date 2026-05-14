@@ -2459,16 +2459,15 @@ static bool AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
 
 #ifdef ENABLE_JS_AOT_ICS
 void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
-  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
-                                writer.codeStart(), writer.codeLength());
-  HashNumber h = CacheIRStubKey::hash(lookup);
-
+  // Generate a random filename (unlikely to conflict with others).
   const char* dir = getenv("AOT_ICS_DIR");
   char filename[256];
   if (dir) {
-    snprintf(filename, sizeof(filename), "%s/IC-%u", dir, unsigned(h));
+    snprintf(filename, sizeof(filename), "%s/IC-%" PRIu64, dir,
+             mozilla::RandomUint64OrDie());
   } else {
-    snprintf(filename, sizeof(filename), "IC-%u", unsigned(h));
+    snprintf(filename, sizeof(filename), "IC-%" PRIu64,
+             mozilla::RandomUint64OrDie());
   }
   FILE* f = fopen(filename, "w");
   MOZ_RELEASE_ASSERT(f);
@@ -2492,6 +2491,30 @@ void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
             filename);
     abort();
   }
+}
+
+static void FMProfileICStub(CacheKind kind, const CacheIRWriter& writer) {
+  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
+                                writer.codeStart(), writer.codeLength());
+  HashNumber h = CacheIRStubKey::hash(lookup);
+
+  const char* dir = getenv("JS_FM_PROFILE_DIR");
+  if (!dir) {
+    dir = ".";
+  }
+  char filename[256];
+  snprintf(filename, sizeof(filename), "%s/IC-%u", dir, unsigned(h));
+
+  FILE* f = fopen(filename, "w");
+  if (!f) {
+    return;
+  }
+  {
+    Fprinter printer(f);
+    SpewCacheIROpsAsAOT(printer, kind, writer);
+  }
+  fflush(f);
+  fclose(f);
 }
 #endif
 
@@ -2576,8 +2599,8 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     }
 
 #ifdef ENABLE_JS_AOT_ICS
-    if (JitOptions.dumpAOTICs && !isAOTFill) {
-      DumpNonAOTICStubAndQuit(kind, writer);
+    if (JitOptions.fmProfileICs && !isAOTFill) {
+      FMProfileICStub(kind, writer);
     }
 #endif
 
@@ -2783,13 +2806,14 @@ ICAttachResult js::jit::AttachBaselineCacheIRStub(
 
   stub->addNewStub(icEntry, newStub);
 
-  AOT_INSTR(AOTInstr_IC, "ic-attach kind=%s code=%u aot=%d hash=%u\n",
+  AOT_INSTR(AOTInstr_IC, "ic-attach kind=%s code=%u aot=%d hash=%u proc=%s\n",
             CacheKindNames[uint8_t(kind)],
             unsigned(code->instructionsSize()),
             int(newStub->isStaticCode()),
             unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
                 kind, ICStubEngine::Baseline,
-                writer.codeStart(), writer.codeLength()))));
+                writer.codeStart(), writer.codeLength()))),
+            gAOTInstr.procTag);
 
   JSScript* owningScript = icScript->isInlined()
                                ? icScript->inliningRoot()->owningScript()

@@ -758,9 +758,10 @@ void IonIC::attachStub(IonICStub* newStub, JitCode* code) {
   MOZ_ASSERT(newStub);
   MOZ_ASSERT(code);
 
-  AOT_INSTR(AOTInstr_IC, "ic-attach kind=%s code=%u aot=0 engine=ion\n",
+  AOT_INSTR(AOTInstr_IC, "ic-attach kind=%s code=%u aot=0 engine=ion proc=%s\n",
             CacheKindNames[uint8_t(kind_)],
-            unsigned(code->instructionsSize()));
+            unsigned(code->instructionsSize()),
+            gAOTInstr.procTag);
 
   if (firstStub_) {
     newStub->setNext(firstStub_, codeRaw_);

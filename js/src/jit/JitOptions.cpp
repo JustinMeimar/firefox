@@ -201,6 +201,7 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(enableAOTICs, false);
   SET_DEFAULT(enableAOTICEnforce, false);
   SET_DEFAULT(dumpAOTICs, false);
+  SET_DEFAULT(fmProfileICs, false);
 
   if (getenv("JS_AOT_ICS")) {
     enableAOTICs = true;
@@ -215,6 +216,9 @@ DefaultJitOptions::DefaultJitOptions() {
   }
   if (dumpAOTICs) {
     enableAOTICs = true;
+  }
+  if (getenv("JS_FM_PROFILE_ICS")) {
+    fmProfileICs = true;
   }
 #endif
 

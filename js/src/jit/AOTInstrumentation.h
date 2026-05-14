@@ -8,6 +8,7 @@
 #define jit_AOTInstrumentation_h
 
 #include "mozilla/Likely.h"
+#include "mozilla/ProcessType.h"
 #include "mozilla/TimeStamp.h"
 
 #include <cstdio>
@@ -27,6 +28,7 @@ struct AOTInstrumentation {
   uint32_t channels = 0;
   FILE* out = nullptr;
   mozilla::TimeStamp epoch;
+  const char* procTag = "parent";
 
   void init() {
     const char* env = getenv("JS_AOT_INSTR");
@@ -48,6 +50,9 @@ struct AOTInstrumentation {
       if (strstr(env, "lifecycle")) channels |= AOTInstr_Lifecycle;
       if (strstr(env, "timing")) channels |= AOTInstr_Timing;
       if (!channels) channels = AOTInstr_All;
+    }
+    if (mozilla::GetGeckoProcessType() == GeckoProcessType_Content) {
+      procTag = "content";
     }
   }
 

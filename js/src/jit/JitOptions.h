@@ -135,6 +135,7 @@ struct DefaultJitOptions {
   bool enableAOTICs;
   bool enableAOTICEnforce;
   bool dumpAOTICs;
+  bool fmProfileICs;
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to
