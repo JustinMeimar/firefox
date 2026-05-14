@@ -2459,15 +2459,16 @@ static bool AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
 
 #ifdef ENABLE_JS_AOT_ICS
 void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
-  // Generate a random filename (unlikely to conflict with others).
+  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
+                                writer.codeStart(), writer.codeLength());
+  HashNumber h = CacheIRStubKey::hash(lookup);
+
   const char* dir = getenv("AOT_ICS_DIR");
   char filename[256];
   if (dir) {
-    snprintf(filename, sizeof(filename), "%s/IC-%" PRIu64, dir,
-             mozilla::RandomUint64OrDie());
+    snprintf(filename, sizeof(filename), "%s/IC-%u", dir, unsigned(h));
   } else {
-    snprintf(filename, sizeof(filename), "IC-%" PRIu64,
-             mozilla::RandomUint64OrDie());
+    snprintf(filename, sizeof(filename), "IC-%u", unsigned(h));
   }
   FILE* f = fopen(filename, "w");
   MOZ_RELEASE_ASSERT(f);
@@ -2573,6 +2574,12 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {
       return false;
     }
+
+#ifdef ENABLE_JS_AOT_ICS
+    if (JitOptions.dumpAOTICs && !isAOTFill) {
+      DumpNonAOTICStubAndQuit(kind, writer);
+    }
+#endif
 
     AOT_TIMER_END(icLookup, "jit-gen", "ics", " bytes=%u kind=%s",
                   unsigned(code->instructionsSize()),

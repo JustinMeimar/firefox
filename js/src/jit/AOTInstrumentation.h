@@ -26,10 +26,12 @@ enum AOTInstrCh : uint32_t {
 struct AOTInstrumentation {
   uint32_t channels = 0;
   FILE* out = nullptr;
+  mozilla::TimeStamp epoch;
 
   void init() {
     const char* env = getenv("JS_AOT_INSTR");
     if (!env) return;
+    epoch = mozilla::TimeStamp::Now();
     const char* file = getenv("JS_AOT_INSTR_FILE");
     if (file && *file) {
       char buf[2048];
@@ -51,6 +53,10 @@ struct AOTInstrumentation {
 
   bool enabled(uint32_t ch) const { return (channels & ch) != 0; }
 
+  double elapsedUs() const {
+    return (mozilla::TimeStamp::Now() - epoch).ToMicroseconds();
+  }
+
   void close() {
     if (out && out != stderr && out != stdout) {
       fclose(out);
@@ -65,7 +71,9 @@ inline AOTInstrumentation gAOTInstr;
 #define AOT_INSTR(ch, fmt, ...)                                  \
   do {                                                           \
     if (MOZ_UNLIKELY(::js::jit::gAOTInstr.enabled(ch))) {       \
-      fprintf(::js::jit::gAOTInstr.out, fmt, ##__VA_ARGS__);    \
+      fprintf(::js::jit::gAOTInstr.out, "ts=%.0f " fmt,         \
+              ::js::jit::gAOTInstr.elapsedUs(),                  \
+              ##__VA_ARGS__);                                    \
     }                                                            \
   } while (0)
 
@@ -84,7 +92,8 @@ inline AOTInstrumentation gAOTInstr;
       auto elapsed_ = mozilla::TimeStamp::Now() - aotTimer_##label; \
       double us_ = elapsed_.ToMicroseconds();                    \
       fprintf(::js::jit::gAOTInstr.out,                          \
-              "%s component=%s us=%.0f" extraFmt "\n",           \
+              "ts=%.0f %s component=%s us=%.0f" extraFmt "\n",  \
+              ::js::jit::gAOTInstr.elapsedUs(),                  \
               event, component, us_, ##__VA_ARGS__);             \
     }                                                            \
   } while (0)
