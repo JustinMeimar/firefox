@@ -20,6 +20,7 @@
 #include "jit/IonTypes.h"
 #include "jit/JitCode.h"
 #include "jit/JitcodeMap.h"
+#include "jit/JitContext.h"
 #include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
@@ -329,7 +330,9 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
 }
 
 bool DumpAOTContainer(JSContext* cx) {
-  MOZ_ASSERT(JitOptions.dumpBaselineInterp); 
+  MOZ_ASSERT(JitOptions.dumpBaselineInterp ||
+             JitOptions.dumpBaselineSelfHosted ||
+             JitOptions.dumpAOTICs);
 
   const char* outPath = kAOTOutputPath;
   Vector<AOTBlobData, 0, SystemAllocPolicy> funcBlobs;
@@ -573,26 +576,25 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
   bs->setMethod(code);
 
   const uint8_t* meta = containerBase + entry->metadataOffset;
-  if (manifest.retAddrEntryCount > 0) {
-    bs->copyRetAddrEntries(
-        reinterpret_cast<const RetAddrEntry*>(meta));
-    meta += manifest.retAddrEntryCount * sizeof(RetAddrEntry);
-  }
-  if (manifest.osrEntryCount > 0) {
-    bs->copyOSREntries(
-        reinterpret_cast<const BaselineScript::OSREntry*>(meta));
-    meta += manifest.osrEntryCount * sizeof(BaselineScript::OSREntry);
-  }
-  if (manifest.debugTrapEntryCount > 0) {
-    bs->copyDebugTrapEntries(
-        reinterpret_cast<const BaselineScript::DebugTrapEntry*>(meta));
-  }
+  auto retAddrs   = ReadMetadataArray<RetAddrEntry>(meta, manifest.retAddrEntryCount);
+  auto osrEntries = ReadMetadataArray<BaselineScript::OSREntry>(meta, manifest.osrEntryCount);
+  auto debugTraps = ReadMetadataArray<BaselineScript::DebugTrapEntry>(meta, manifest.debugTrapEntryCount);
+
+  if (!retAddrs.empty())   bs->copyRetAddrEntries(retAddrs.data());
+  if (!osrEntries.empty()) bs->copyOSREntries(osrEntries.data());
+  if (!debugTraps.empty()) bs->copyDebugTrapEntries(debugTraps.data());
 
   bs->computeResumeNativeOffsets(script, ResumeOffsetEntryVector());
 
   // Generate a preamble trampoline that sets AOTSelfHostedPassReg (r11,
   // volatile) and jumps to the self-hosted code. Must be registered BEFORE
   // setBaselineScript, which triggers updateJitCodeRaw -> lookupAOTPreamble.
+  // A JitContext is needed for MacroAssembler; one may not exist if we're
+  // called lazily from delazifySelfHostedFunction rather than at init time.
+  mozilla::Maybe<JitContext> jctx;
+  if (!MaybeGetJitContext()) {
+    jctx.emplace(cx);
+  }
   JitRuntime* jrt = cx->runtime()->jitRuntime();
   JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
                                                 AOTSelfHostedPassReg);
@@ -675,15 +677,15 @@ bool LoadAOTICStubs(JSContext* cx) {
            sizeof(manifest));
 
     const uint8_t* meta = containerBase + entry->metadataOffset;
-    const uint8_t* cacheIRCode = meta;
-    const uint8_t* fieldTypes = meta + manifest.cacheIRCodeLength;
+    auto cacheIRCode = ReadMetadataArray<uint8_t>(meta, manifest.cacheIRCodeLength);
+    auto fieldTypes  = ReadMetadataArray<uint8_t>(meta, manifest.numStubFields);
 
     CacheIRStubInfo* stubInfo = CacheIRStubInfo::NewFromSerialized(
         manifest.kind, ICStubEngine::Baseline,
         manifest.makesGCCalls != 0,
         manifest.stubDataOffset,
-        cacheIRCode, manifest.cacheIRCodeLength,
-        fieldTypes, manifest.numStubFields);
+        cacheIRCode.data(), cacheIRCode.size(),
+        fieldTypes.data(), fieldTypes.size());
     if (!stubInfo) {
       return;
     }

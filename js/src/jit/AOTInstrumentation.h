@@ -8,7 +8,9 @@
 #define jit_AOTInstrumentation_h
 
 #include "mozilla/Likely.h"
-#include "mozilla/ProcessType.h"
+#ifndef JS_STANDALONE
+#  include "mozilla/ProcessType.h"
+#endif
 #include "mozilla/TimeStamp.h"
 
 #include <cstdio>
@@ -51,9 +53,11 @@ struct AOTInstrumentation {
       if (strstr(env, "timing")) channels |= AOTInstr_Timing;
       if (!channels) channels = AOTInstr_All;
     }
+#ifndef JS_STANDALONE
     if (mozilla::GetGeckoProcessType() == GeckoProcessType_Content) {
       procTag = "content";
     }
+#endif
   }
 
   bool enabled(uint32_t ch) const { return (channels & ch) != 0; }

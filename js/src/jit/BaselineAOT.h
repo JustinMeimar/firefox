@@ -101,6 +101,26 @@ static_assert(sizeof(AOTICStubManifest) == 16,
               "AOTICStubManifest layout changed; bump AOT_CONTAINER_MAGIC or "
               "add migration logic");
 
+// Helpers for reading/writing packed metadata arrays.
+// Metadata regions are sequences of typed arrays laid end-to-end.
+// These eliminate manual cursor arithmetic on both dump and load sides.
+
+template<typename T>
+inline mozilla::Span<const T> ReadMetadataArray(const uint8_t*& cursor,
+                                                uint32_t count) {
+  auto span = mozilla::Span(reinterpret_cast<const T*>(cursor), count);
+  cursor += count * sizeof(T);
+  return span;
+}
+
+template<typename T>
+inline bool WriteMetadataArray(Vector<uint8_t, 0, SystemAllocPolicy>& vec,
+                               mozilla::Span<T> data) {
+  if (data.empty()) return true;
+  const auto* bytes = reinterpret_cast<const uint8_t*>(data.data());
+  return vec.append(bytes, data.size() * sizeof(T));
+}
+
 // Build and save the interpreter AOT blob to the saved-blob slot.
 // Called from BaselineInterpreterGenerator::dumpAOTInterp with all
 // the data extracted from the generator.  The metadata byte vectors

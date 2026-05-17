@@ -1375,23 +1375,16 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code,
   callVMOffsets_.debugEpilogueOffset = s.CallVMDebugEpilogue;
   callVMOffsets_.debugAfterYieldOffset = s.CallVMDebugAfterYield;
 
-  // Load metadata vectors from packed section.
-  // Order: debugInstr, debugTraps, coverage, icReturns
-  auto loadVec = [](auto& destVec, const uint8_t*& cursor, uint32_t count) -> bool {
-    using T = typename std::remove_reference_t<decltype(destVec)>::ElementType;
-    if (count == 0) return true;
-    if (!destVec.append(reinterpret_cast<const T*>(cursor), count)) {
-      return false;
-    }
-    cursor += count * sizeof(T);
-    return true;
-  };
-
   const uint8_t* meta = containerBase + entry->metadataOffset;
-  if (!loadVec(debugInstrumentationOffsets_, meta, s.DebugInstrumentationCount) ||
-      !loadVec(debugTrapOffsets_, meta, s.DebugTrapCount) ||
-      !loadVec(codeCoverageOffsets_, meta, s.CodeCoverageCount) ||
-      !loadVec(icReturnOffsets_, meta, s.ICReturnCount)) {
+  auto debugInstr = ReadMetadataArray<uint32_t>(meta, s.DebugInstrumentationCount);
+  auto debugTraps = ReadMetadataArray<uint32_t>(meta, s.DebugTrapCount);
+  auto coverage   = ReadMetadataArray<uint32_t>(meta, s.CodeCoverageCount);
+  auto icReturns  = ReadMetadataArray<ICReturnOffset>(meta, s.ICReturnCount);
+
+  if (!debugInstrumentationOffsets_.append(debugInstr.data(), debugInstr.size()) ||
+      !debugTrapOffsets_.append(debugTraps.data(), debugTraps.size()) ||
+      !codeCoverageOffsets_.append(coverage.data(), coverage.size()) ||
+      !icReturnOffsets_.append(icReturns.data(), icReturns.size())) {
     JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT metadata vectors");
     return false;
   }
@@ -1411,24 +1404,9 @@ void BaselineScript::fillAOTManifest(
   sm->debugTrapEntryCount = debugTrapEntries().size();
   sm->resumeEntryCount = resumeEntryList().size();
 
-  // Pack trailing arrays into metadata: RetAddrEntry[], OSREntry[],
-  // DebugTrapEntry[] (same order as LoadAOTSelfHosted unpacks).
-  auto appendBytes = [](auto& vec, const auto* data, size_t count) {
-    const auto* bytes = reinterpret_cast<const uint8_t*>(data);
-    return vec.append(bytes, count * sizeof(*data));
-  };
-  auto ra = retAddrEntries();
-  if (ra.size() > 0) {
-    MOZ_ALWAYS_TRUE(appendBytes(*metadata, ra.data(), ra.size()));
-  }
-  auto osr = osrEntries();
-  if (osr.size() > 0) {
-    MOZ_ALWAYS_TRUE(appendBytes(*metadata, osr.data(), osr.size()));
-  }
-  auto dt = debugTrapEntries();
-  if (dt.size() > 0) {
-    MOZ_ALWAYS_TRUE(appendBytes(*metadata, dt.data(), dt.size()));
-  }
+  MOZ_ALWAYS_TRUE(WriteMetadataArray(*metadata, retAddrEntries()));
+  MOZ_ALWAYS_TRUE(WriteMetadataArray(*metadata, osrEntries()));
+  MOZ_ALWAYS_TRUE(WriteMetadataArray(*metadata, debugTrapEntries()));
 }
 
 #endif

@@ -262,6 +262,10 @@ class JitRuntime {
   }
 
   void traceAOTPreambles(JSTracer* trc);
+  void clearAOTPreambles() {
+    aotPreambles_.clear();
+    aotInterpPreamble_ = nullptr;
+  }
   private:
 #endif
 

@@ -32,100 +32,17 @@ namespace js::jit {
 // The buffer can then be dumped, serialized into an assembly scaffold,
 // and reattached as a build input.
 
-#define AOT_RUNTIME_SLOTS(V)                \
-  V(JSRuntimePtr)                         \
-  V(JSContextPtr)                         \
-  V(InterruptBits)                        \
-  V(JitActivation)                        \
-  V(ContextRealm)                         \
-  V(WellKnownSymbols)                     \
-  V(LastBufferedCell)                      \
-  V(ProfilerEnabled)                      \
-  V(ProfilerExitFrameTail)                \
-  V(DoubleToInt32Stub)                    \
-  V(MegamorphicCache)                     \
-  V(MegamorphicSetPropCache)              \
-  V(StringToAtomCache)                    \
-  V(ExceptionTail)                        \
-  V(DebugTrapInterpreter)                 \
-  V(DebugTrapCompiler)                    \
-  V(NurseryPosition)                      \
-  V(NurseryAllocatedSites)
-
-#define AOT_PREBARRIER_SLOTS(V)             \
-  V(PreBarrier_Value)                     \
-  V(PreBarrier_String)                    \
-  V(PreBarrier_Object)                    \
-  V(PreBarrier_Shape)                     \
-  V(PreBarrier_WasmAnyRef)
-
-#define AOT_ATOM_SLOTS(V)                   \
-  V(AtomEmpty)                            \
-  V(AtomTrue)                             \
-  V(AtomFalse)                            \
-  V(AtomFunction)                         \
-  V(AtomUndefined)                        \
-  V(AtomObject)
-
-#define AOT_CLASS_SLOTS(V)                  \
-  V(Class_WithEnvironment)                \
-  V(Class_Function)                       \
-  V(Class_ExtendedFunction)               \
-  V(Class_Array)                          \
-  V(Class_PlainObject)                    \
-  V(Class_FixedLengthArrayBuffer)         \
-  V(Class_ImmutableArrayBuffer)           \
-  V(Class_ResizableArrayBuffer)           \
-  V(Class_FixedLengthSharedArrayBuffer)   \
-  V(Class_GrowableSharedArrayBuffer)      \
-  V(Class_FixedLengthDataView)            \
-  V(Class_ImmutableDataView)              \
-  V(Class_ResizableDataView)              \
-  V(Class_MappedArguments)                \
-  V(Class_UnmappedArguments)              \
-  V(Class_BoundFunction)                  \
-  V(Class_PropertyIterator)               \
-  V(Class_Set)                            \
-  V(Class_Map)                            \
-  V(Class_Date)                           \
-  V(Class_WeakMap)                        \
-  V(Class_WeakSet)                        \
-  V(Class_Generator)                      \
-  V(Class_WindowProxy)
-
-#define AOT_POINTER_SLOTS(V)                \
-  V(Ptr_DeadObjectProxy)                  \
-  V(Ptr_WrapperFamily)                    \
-  V(Ptr_EmptyObjectSlots)                 \
-  V(Ptr_EmptyObjectElements)              \
-  V(Ptr_StaticStrings_Unit)               \
-  V(Ptr_StaticStrings_Length2)             \
-  V(Ptr_StaticStrings_Int)                \
-  V(Ptr_StaticStrings_SmallChar)          \
-  V(Ptr_TypedArrayClasses_FixedLength)    \
-  V(Ptr_TypedArrayClasses_ImmutableEnd)   \
-  V(Ptr_TypedArrayClasses_Resizable)      \
-  V(Ptr_TypedArrayClasses_ResizableEnd)   \
-  V(Ptr_MathRandomScaleInv)               \
-  V(Ptr_DateTimeInfo_UTCOffset)           \
-  V(Ptr_DOMProxyHandlerFamily)
-
 extern const double MathRandomScaleInv;
-
-#define AOT_NAMED_SLOTS(V)     \
-  AOT_RUNTIME_SLOTS(V)        \
-  AOT_PREBARRIER_SLOTS(V)     \
-  AOT_ATOM_SLOTS(V)           \
-  AOT_CLASS_SLOTS(V)          \
-  AOT_POINTER_SLOTS(V)
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 
 enum class AOTSlot : uint32_t {
-#define EMIT_SLOT(name) name,
-  AOT_NAMED_SLOTS(EMIT_SLOT)
-#undef EMIT_SLOT
+#define AOT_SLOT(name, ...) name,
+#define AOT_SLOT_TRAMPOLINE(name) name,
+#include "jit/AOTSlots.tbl"
+#undef AOT_SLOT
+#undef AOT_SLOT_TRAMPOLINE
   NamedSlot_End,
 
   VMWrapper_Begin = NamedSlot_End,
@@ -148,9 +65,11 @@ inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
 
 inline const char* AOTSlotName(AOTSlot slot) {
   switch (slot) {
-#define EMIT_CASE(name) case AOTSlot::name: return #name;
-    AOT_NAMED_SLOTS(EMIT_CASE)
-#undef EMIT_CASE
+#define AOT_SLOT(name, ...) case AOTSlot::name: return #name;
+#define AOT_SLOT_TRAMPOLINE(name) case AOTSlot::name: return #name;
+#include "jit/AOTSlots.tbl"
+#undef AOT_SLOT
+#undef AOT_SLOT_TRAMPOLINE
     default:
       break;
   }

@@ -7389,21 +7389,16 @@ bool BaselineInterpreterGenerator::dumpAOTInterp(JSContext* cx, JitCode* code) {
   s.CodeCoverageCount = handler.codeCoverageOffsets().length();
   s.ICReturnCount = handler.icReturnOffsets().length();
 
-  // Pack metadata: debugInstr + debugTraps + coverage + icReturns.
   Vector<uint8_t, 0, SystemAllocPolicy> metadata;
-  auto appendBytes = [&metadata](const auto* data, size_t count) {
-    const auto* bytes = reinterpret_cast<const uint8_t*>(data);
-    return metadata.append(bytes, count * sizeof(*data));
-  };
   const auto& debugInstr = handler.debugInstrumentationOffsets();
   const auto& debugTraps = debugTrapOffsets_;
   const auto& coverage = handler.codeCoverageOffsets();
   const auto& icReturns = handler.icReturnOffsets();
 
-  if ((debugInstr.length() > 0 && !appendBytes(debugInstr.begin(), debugInstr.length())) ||
-      (debugTraps.length() > 0 && !appendBytes(debugTraps.begin(), debugTraps.length())) ||
-      (coverage.length() > 0 && !appendBytes(coverage.begin(), coverage.length())) ||
-      (icReturns.length() > 0 && !appendBytes(icReturns.begin(), icReturns.length()))) {
+  if (!WriteMetadataArray(metadata, mozilla::Span(debugInstr.begin(), debugInstr.length())) ||
+      !WriteMetadataArray(metadata, mozilla::Span(debugTraps.begin(), debugTraps.length())) ||
+      !WriteMetadataArray(metadata, mozilla::Span(coverage.begin(), coverage.length())) ||
+      !WriteMetadataArray(metadata, mozilla::Span(icReturns.begin(), icReturns.length()))) {
     return false;
   }
 

@@ -444,6 +444,12 @@ void js::gc::GCRuntime::finishRoots() {
   clearSelectedForMarking();
 #endif
 
+#ifdef ENABLE_AOT_BASELINE
+  if (rt->hasJitRuntime()) {
+    rt->jitRuntime()->clearAOTPreambles();
+  }
+#endif
+
   // Clear out the interpreter entry map before the final gc.
   ClearInterpreterEntryMap(rt);
 
