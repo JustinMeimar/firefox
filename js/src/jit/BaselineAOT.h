@@ -17,6 +17,7 @@
 
 #include "jit/AOT.h"
 #include "jit/CacheIR.h"
+#include "jit/ICProfiling.h"
 #include "js/Vector.h"
 
 namespace js::jit {
@@ -125,7 +126,8 @@ static_assert(sizeof(AOTICStubManifest) == 16,
 // Write the final AOT .S container (interpreter blob + self-hosted blobs).
 // Must be called after a realm exists. Respects dumpBaselineInterp and
 // dumpBaselineSelfHosted flags to control which blobs are included.
-[[nodiscard]] bool DumpAOTContainer(JSContext* cx);
+[[nodiscard]] bool DumpAOTContainer(JSContext* cx,
+                                    ICProfileMap* pgoProfiles = nullptr);
 
 // Load pre-compiled IC stubs from the AOT container into the atoms JitZone.
 // Returns true if stubs were loaded, false if none found or on error.

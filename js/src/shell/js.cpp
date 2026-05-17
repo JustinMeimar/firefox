@@ -107,6 +107,7 @@
 #include "jit/BaselineCompileQueue.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIRHealth.h"
+#include "jit/ICProfiling.h"
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
 #include "jit/JitcodeMap.h"
@@ -12355,7 +12356,31 @@ static int Shell(JSContext* cx, OptionParser* op) {
       shouldDumpContainer = shouldDumpContainer || jit::JitOptions.dumpAOTICs;
 #endif
       if (shouldDumpContainer) {
-        if (!jit::DumpAOTContainer(cx)) {
+        jit::ICProfileMap pgoProfiles;
+
+        if (jit::JitOptions.aotWarmupScript) {
+          const char* warmupPath = jit::JitOptions.aotWarmupScript;
+          FILE* warmupFile = fopen(warmupPath, "r");
+          if (!warmupFile) {
+            JS_ReportErrorASCII(cx, "Cannot open AOT warmup script: %s",
+                                warmupPath);
+            return EXIT_FAILURE;
+          }
+          bool warmupOk = RunFile(cx, warmupPath, warmupFile,
+                                  CompileUtf8::DontInflate,
+                                  /* compileOnly = */ false,
+                                  /* fullParse = */ false);
+          fclose(warmupFile);
+          if (!warmupOk) {
+            return EXIT_FAILURE;
+          }
+
+          if (!jit::HarvestSelfHostedICProfiles(cx, &pgoProfiles)) {
+            return EXIT_FAILURE;
+          }
+        }
+
+        if (!jit::DumpAOTContainer(cx, &pgoProfiles)) {
           return EXIT_FAILURE;
         }
       }
@@ -13042,6 +13067,7 @@ bool InitOptionParser(OptionParser& op) {
 #ifdef ENABLE_AOT_BASELINE
       !op.addBoolOption('\0', "dump-bl-interp", "Dump baseline interpreter binary for AOT patching.") ||
       !op.addBoolOption('\0', "dump-bl-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
+      !op.addStringOption('\0', "aot-warmup", "path", "Execute warmup script before AOT self-hosted dump to collect IC profiles.") ||
       !op.addBoolOption('\0', "aot-bl", "Use all AOT compiled components.") ||
       !op.addBoolOption('\0', "aot-interp", "Use AOT compiled Baseline Interpreter.") ||
       !op.addBoolOption('\0', "aot-selfhosted", "Use AOT compiled self-hosted functions.") ||
@@ -14079,6 +14105,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("dump-bl-self-hosted")) {
     jit::JitOptions.dumpBaselineSelfHosted = true;
+  }
+  if (const char* warmup = op.getStringOption("aot-warmup")) {
+    jit::JitOptions.aotWarmupScript = warmup;
   }
   if (op.getBoolOption("aot-bl")) {
     jit::JitOptions.useAOTBaseline = true;

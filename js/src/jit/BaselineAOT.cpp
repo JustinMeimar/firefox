@@ -20,6 +20,7 @@
 #include "jit/IonTypes.h"
 #include "jit/JitCode.h"
 #include "jit/JitcodeMap.h"
+#include "jit/JitContext.h"  // MaybeGetJitContext, JitContext
 #include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
@@ -328,8 +329,8 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
   return true;
 }
 
-bool DumpAOTContainer(JSContext* cx) {
-  MOZ_ASSERT(JitOptions.dumpBaselineInterp); 
+bool DumpAOTContainer(JSContext* cx, ICProfileMap* pgoProfiles) {
+  MOZ_ASSERT(JitOptions.dumpBaselineInterp || JitOptions.dumpBaselineSelfHosted);
 
   const char* outPath = kAOTOutputPath;
   Vector<AOTBlobData, 0, SystemAllocPolicy> funcBlobs;
@@ -593,6 +594,12 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
   // Generate a preamble trampoline that sets AOTSelfHostedPassReg (r11,
   // volatile) and jumps to the self-hosted code. Must be registered BEFORE
   // setBaselineScript, which triggers updateJitCodeRaw -> lookupAOTPreamble.
+  // A JitContext is needed for MacroAssembler; one may not exist if we're
+  // called lazily from delazifySelfHostedFunction rather than at init time.
+  mozilla::Maybe<JitContext> jctx;
+  if (!MaybeGetJitContext()) {
+    jctx.emplace(cx);
+  }
   JitRuntime* jrt = cx->runtime()->jitRuntime();
   JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
                                                 AOTSelfHostedPassReg);
