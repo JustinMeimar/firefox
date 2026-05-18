@@ -23,6 +23,7 @@ enum AOTInstrCh : uint32_t {
   AOTInstr_IC        = 1 << 0,
   AOTInstr_Lifecycle = 1 << 1,
   AOTInstr_Timing    = 1 << 2,
+  AOTInstr_BLInterp  = 1 << 3,
   AOTInstr_All       = 0xFFFFFFFF,
 };
 
@@ -51,6 +52,7 @@ struct AOTInstrumentation {
       if (strstr(env, "ic")) channels |= AOTInstr_IC;
       if (strstr(env, "lifecycle")) channels |= AOTInstr_Lifecycle;
       if (strstr(env, "timing")) channels |= AOTInstr_Timing;
+      if (strstr(env, "blinterp")) channels |= AOTInstr_BLInterp;
       if (!channels) channels = AOTInstr_All;
     }
 #ifndef JS_STANDALONE

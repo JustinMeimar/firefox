@@ -520,6 +520,10 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
 
   AOT_TIMER_END(interp, "aot-load", "interp", " bytes=%u", entry->codeSize);
 
+  AOT_INSTR(AOTInstr_BLInterp,
+            "jit-compile tier=blinterp bytes=%u\n",
+            entry->codeSize);
+
   return true;
 }
 

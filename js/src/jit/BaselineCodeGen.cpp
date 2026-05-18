@@ -7539,6 +7539,10 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
   AOT_TIMER_END(interpGen, "jit-gen", "interp", " bytes=%zu",
                 size_t(masm.instructionsSize()));
 
+  AOT_INSTR(AOTInstr_BLInterp,
+            "jit-compile tier=blinterp bytes=%zu\n",
+            size_t(masm.instructionsSize()));
+
   return true;
 }
 
