@@ -43,6 +43,7 @@
   _(Arm64SimulatorLock, 500)          \
   _(JitSpewGraphOutput, 500)          \
   _(PerfSpewer, 500)                  \
+  _(AOTInstrumentation, 500)          \
   _(CacheIRSpewer, 500)               \
   _(DateTimeInfoMutex, 500)           \
   _(ProcessExecutableRegion, 500)     \

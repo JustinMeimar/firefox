@@ -17,6 +17,10 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "threading/LockGuard.h"
+#include "threading/Mutex.h"
+#include "vm/MutexIDs.h"
+
 namespace js::jit {
 
 enum AOTInstrCh : uint32_t {
@@ -32,6 +36,9 @@ struct AOTInstrumentation {
   FILE* out = nullptr;
   mozilla::TimeStamp epoch;
   const char* procTag = "parent";
+  js::Mutex lock MOZ_UNANNOTATED;
+
+  AOTInstrumentation() : lock(mutexid::AOTInstrumentation) {}
 
   void init() {
     const char* env = getenv("JS_AOT_INSTR");
@@ -82,6 +89,8 @@ inline AOTInstrumentation gAOTInstr;
 #define AOT_INSTR(ch, fmt, ...)                                  \
   do {                                                           \
     if (MOZ_UNLIKELY(::js::jit::gAOTInstr.enabled(ch))) {       \
+      js::LockGuard<js::Mutex> _aotLock(                         \
+          ::js::jit::gAOTInstr.lock);                            \
       fprintf(::js::jit::gAOTInstr.out, "ts=%.0f " fmt,         \
               ::js::jit::gAOTInstr.elapsedUs(),                  \
               ##__VA_ARGS__);                                    \
@@ -102,6 +111,8 @@ inline AOTInstrumentation gAOTInstr;
         !aotTimer_##label.IsNull()) {                            \
       auto elapsed_ = mozilla::TimeStamp::Now() - aotTimer_##label; \
       double us_ = elapsed_.ToMicroseconds();                    \
+      js::LockGuard<js::Mutex> _aotLock(                         \
+          ::js::jit::gAOTInstr.lock);                            \
       fprintf(::js::jit::gAOTInstr.out,                          \
               "ts=%.0f %s component=%s us=%.0f" extraFmt "\n",  \
               ::js::jit::gAOTInstr.elapsedUs(),                  \
