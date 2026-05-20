@@ -453,6 +453,12 @@ void js::gc::GCRuntime::finishRoots() {
   // Clear out the interpreter entry map before the final gc.
   ClearInterpreterEntryMap(rt);
 
+#ifdef ENABLE_AOT_BASELINE
+  if (rt->hasJitRuntime()) {
+    rt->jitRuntime()->clearAOTPreambles();
+  }
+#endif
+
   // Clear any remaining roots from the embedding (as otherwise they will be
   // left dangling after we shut down) and remove the callbacks.
   ClearEdgesTracer trc(rt);

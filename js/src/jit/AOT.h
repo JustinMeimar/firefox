@@ -44,10 +44,8 @@ enum class AOTSlot : uint32_t {
 #undef AOT_SLOT
 #undef AOT_SLOT_TRAMPOLINE
   NamedSlot_End,
-
   VMWrapper_Begin = NamedSlot_End,
   VMWrapper_End = VMWrapper_Begin + kAOTMaxVMWrappers,
-
   ABIFn_Begin = VMWrapper_End,
   ABIFn_End = ABIFn_Begin + kAOTMaxABIFunctions,
   Count = ABIFn_End

@@ -329,7 +329,7 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
   return true;
 }
 
-bool DumpAOTContainer(JSContext* cx) {
+bool DumpAOTContainer(JSContext* cx, ICProfileMap* pgoProfiles) {
   MOZ_ASSERT(JitOptions.dumpBaselineInterp ||
              JitOptions.dumpBaselineSelfHosted ||
              JitOptions.dumpAOTICs);
@@ -520,8 +520,8 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
 
   AOT_TIMER_END(interp, "aot-load", "interp", " bytes=%u", entry->codeSize);
 
-  AOT_INSTR(AOTInstr_BLInterp,
-            "jit-compile tier=blinterp bytes=%u\n",
+  AOT_INSTR(AOTInstr_Lifecycle,
+            "jit-compile tier=blinterp bytes=%u aot=1\n",
             entry->codeSize);
 
   return true;
