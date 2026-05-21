@@ -2459,15 +2459,15 @@ static bool AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
 
 #ifdef ENABLE_JS_AOT_ICS
 void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
-  // Generate a random filename (unlikely to conflict with others).
+  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
+                                writer.codeStart(), writer.codeLength());
+  HashNumber h = CacheIRStubKey::hash(lookup);
   const char* dir = getenv("AOT_ICS_DIR");
   char filename[256];
   if (dir) {
-    snprintf(filename, sizeof(filename), "%s/IC-%" PRIu64, dir,
-             mozilla::RandomUint64OrDie());
+    snprintf(filename, sizeof(filename), "%s/IC-%u", dir, unsigned(h));
   } else {
-    snprintf(filename, sizeof(filename), "IC-%" PRIu64,
-             mozilla::RandomUint64OrDie());
+    snprintf(filename, sizeof(filename), "IC-%u", unsigned(h));
   }
   FILE* f = fopen(filename, "w");
   MOZ_RELEASE_ASSERT(f);
@@ -2552,9 +2552,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #ifdef ENABLE_JS_AOT_ICS
   if (JitOptions.exclusiveAOT && !stubInfo && !isAOTFill &&
       !jitZone->isIncompleteAOTICs()) {
-    // No pre-compiled AOT IC for this CacheIR body. Return with null
-    // stubInfo so the caller returns TooLarge and the IC stays on the
-    // fallback stub (VM path). No runtime codegen occurs.
+    DumpNonAOTICStubAndQuit(kind, writer);
     return true;
   }
 #endif
