@@ -2550,7 +2550,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #endif
 
 #ifdef ENABLE_JS_AOT_ICS
-  if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
+  if (JitOptions.exclusiveAOT && !stubInfo && !isAOTFill &&
       !jitZone->isIncompleteAOTICs()) {
     // No pre-compiled AOT IC for this CacheIR body. Return with null
     // stubInfo so the caller returns TooLarge and the IC stays on the
@@ -2837,7 +2837,7 @@ void js::jit::ClearSavedICBlobs() {
 void js::jit::FillAOTICs(JSContext* cx) {
   MOZ_ASSERT(cx->inAtomsZone());
   JitZone* jitZone = cx->zone()->getJitZone(cx);
-  if (JitOptions.enableAOTICs) {
+  if (JitOptions.useAOT || JitOptions.dumpAOTICs) {
     size_t corpusIdx = 0;
     for (auto& stub : GetAOTStubs()) {
       CacheIRWriter writer(cx, stub);

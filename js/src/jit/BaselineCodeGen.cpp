@@ -1375,18 +1375,12 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
 
 #ifdef ENABLE_AOT_BASELINE
   if (MOZ_UNLIKELY(masm.isAOT())) {
-    // Similar to the BaselineInterpreter `emitInitFrameFields`, this
-    // path will be hit in AOT compiled self-hosted functions, and therefore
-    // relies on the runtime-generated preamble to pass over the AOTTableBase
-    // in a register. There is no other way for an AOT blob to attain this
-    // runtime pointer (which enables access to all other runtime pointers)
-    // except through this bridge. 
+    // AOT self-hosted functions receive the table base via register from
+    // the runtime-generated preamble.
     masm.storePtr(AOTSelfHostedPassReg,
         Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
-  } else if (JitOptions.useAOTBaseline) {
-    // The Non AOT pathway can bake an absolute address into the frame
-    // field, since it's runtime generated. This is the case for any non-AOT
-    // compiled baseline function.
+  } else {
+    // Runtime-generated baseline code bakes the absolute address.
     masm.movePtr(
         ImmPtr(runtime->jitRuntime()->aotIndirectionTable().baseAddress()),
         scratch);
@@ -6565,19 +6559,17 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   masm.bind(&noArgsObj);
 
 #ifdef ENABLE_AOT_BASELINE
-  if (masm.isAOT() || JitOptions.useAOTBaseline) {
-    // Copy aotTableBase_ from the caller's BaselineFrame rather than
-    // recomputing it from TLS. The caller's saved frame pointer is at
-    // [FramePointer + 0] (pushed at frame construction above), and its
-    // aotTableBase_ is at a known reverse offset from that FP.
-    masm.loadPtr(Address(FramePointer, 0), scratch1);
-    masm.loadPtr(
-        Address(scratch1, BaselineFrame::reverseOffsetOfAOTTableBase()),
-        scratch1);
-    masm.storePtr(
-        scratch1,
-        Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
-  }
+  // Copy aotTableBase_ from the caller's BaselineFrame rather than
+  // recomputing it from TLS. The caller's saved frame pointer is at
+  // [FramePointer + 0] (pushed at frame construction above), and its
+  // aotTableBase_ is at a known reverse offset from that FP.
+  masm.loadPtr(Address(FramePointer, 0), scratch1);
+  masm.loadPtr(
+      Address(scratch1, BaselineFrame::reverseOffsetOfAOTTableBase()),
+      scratch1);
+  masm.storePtr(
+      scratch1,
+      Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
 #endif
 
   // If profiler instrumentation is on, update lastProfilingFrame on
@@ -7414,12 +7406,12 @@ bool BaselineInterpreterGenerator::loadAOTInterp(
 bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
 #ifdef ENABLE_AOT_BASELINE
-  if (JitOptions.useAOTInterp) {
+  if (JitOptions.useAOT) {
     if (loadAOTInterp(cx, interpreter)) {
       MOZ_ASSERT(interpreter.loadedFromAOT());
       return true;
     }
-    MOZ_CRASH("AOT interp load failed but --aot-bl was requested");
+    MOZ_CRASH("AOT interp load failed but --aot was requested");
   }
 #endif
 

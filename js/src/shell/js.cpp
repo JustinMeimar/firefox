@@ -13057,10 +13057,6 @@ bool InitOptionParser(OptionParser& op) {
                         "Disable Portable Baseline Interpreter") ||
 #endif
 #ifdef ENABLE_JS_AOT_ICS
-      !op.addBoolOption('\0', "aot-ics", "Enable ahead-of-time-known ICs") ||
-      !op.addBoolOption(
-          '\0', "enforce-aot-ics",
-          "Enable enforcing only use of ahead-of-time-known ICs") ||
       !op.addBoolOption('\0', "dump-aot-ics",
                         "Dump AOT IC stubs as binary blobs into the container.") ||
 #endif
@@ -13068,9 +13064,8 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "dump-bl-interp", "Dump baseline interpreter binary for AOT patching.") ||
       !op.addBoolOption('\0', "dump-bl-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
       !op.addStringOption('\0', "aot-warmup", "path", "Execute warmup script before AOT self-hosted dump to collect IC profiles.") ||
-      !op.addBoolOption('\0', "aot-bl", "Use all AOT compiled components.") ||
-      !op.addBoolOption('\0', "aot-interp", "Use AOT compiled Baseline Interpreter.") ||
-      !op.addBoolOption('\0', "aot-selfhosted", "Use AOT compiled self-hosted functions.") ||
+      !op.addBoolOption('\0', "aot", "Use all AOT compiled artifacts.") ||
+      !op.addBoolOption('\0', "exclusive-aot", "Use AOT only; disable runtime IC codegen.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14054,15 +14049,7 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
 #endif
 
 #ifdef ENABLE_JS_AOT_ICS
-  if (op.getBoolOption("aot-ics")) {
-    jit::JitOptions.enableAOTICs = true;
-  }
-  if (op.getBoolOption("enforce-aot-ics")) {
-    jit::JitOptions.enableAOTICs = true;
-    jit::JitOptions.enableAOTICEnforce = true;
-  }
   if (op.getBoolOption("dump-aot-ics")) {
-    jit::JitOptions.enableAOTICs = true;
     jit::JitOptions.dumpAOTICs = true;
   }
 #endif
@@ -14109,16 +14096,12 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (const char* warmup = op.getStringOption("aot-warmup")) {
     jit::JitOptions.aotWarmupScript = warmup;
   }
-  if (op.getBoolOption("aot-bl")) {
-    jit::JitOptions.useAOTBaseline = true;
-    jit::JitOptions.useAOTInterp = true;
-    jit::JitOptions.useAOTSelfHosted = true;
+  if (op.getBoolOption("aot")) {
+    jit::JitOptions.useAOT = true;
   }
-  if (op.getBoolOption("aot-interp")) {
-    jit::JitOptions.useAOTInterp = true;
-  }
-  if (op.getBoolOption("aot-selfhosted")) {
-    jit::JitOptions.useAOTSelfHosted = true;
+  if (op.getBoolOption("exclusive-aot")) {
+    jit::JitOptions.useAOT = true;
+    jit::JitOptions.exclusiveAOT = true;
   }
 #endif
   if (op.getBoolOption("no-ion")) {

@@ -76,9 +76,8 @@ struct DefaultJitOptions {
   bool dumpBaselineInterp;
   bool dumpBaselineSelfHosted;
   const char* aotWarmupScript = nullptr;
-  bool useAOTInterp;
-  bool useAOTSelfHosted;
-  bool useAOTBaseline;
+  bool useAOT;
+  bool exclusiveAOT;
   bool baselineInterpreter;
   bool baselineJit;
   bool baselineBatching;
@@ -133,8 +132,6 @@ struct DefaultJitOptions {
   uint32_t wasmBatchBaselineThreshold;
   uint32_t wasmBatchIonThreshold;
 #ifdef ENABLE_JS_AOT_ICS
-  bool enableAOTICs;
-  bool enableAOTICEnforce;
   bool dumpAOTICs;
   bool fmProfileICs;
 #endif
