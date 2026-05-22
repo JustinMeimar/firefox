@@ -580,10 +580,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
     movq(Operand(address), dest);
   }
   void loadPtr(const Operand& src, Register dest) { movq(src, dest); }
-  // Load a pointer from an FS-segment-relative offset (x64 Linux TLS).
-  void loadPtrFromTls(int32_t tlsOffset, Register dest) {
-    masm.movq_fs(tlsOffset, dest.encoding());
-  }
+  
   FaultingCodeOffset loadPtr(const BaseIndex& src, Register dest) {
     FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
     movq(Operand(src), dest);

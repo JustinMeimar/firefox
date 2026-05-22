@@ -4768,10 +4768,10 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
 
 StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
                                          AOTContext* aotContext)
-    : MacroAssembler(
-          alloc, CompileRuntime::get(cx->runtime()),
-          aotContext ? nullptr : CompileRealm::get(cx->realm()),
-          aotContext) {}
+    // AOT blob is realm-independent; null realm poisons masm.realm() accessors.
+    : MacroAssembler(alloc, CompileRuntime::get(cx->runtime()),
+                     aotContext ? nullptr : CompileRealm::get(cx->realm()),
+                     aotContext) {}
 
 OffThreadMacroAssembler::OffThreadMacroAssembler(TempAllocator& alloc,
                                                  CompileRealm* realm)

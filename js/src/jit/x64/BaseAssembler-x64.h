@@ -704,17 +704,6 @@ class BaseAssemblerX64 : public BaseAssembler {
     m_formatter.oneByteOp64(OP_MOV_GvEv, addr, dst);
   }
 
-  // Load a 64-bit value from an FS-segment-relative absolute offset.
-  // Emits: 64 REX.W 8b ModRM SIB disp32
-  // i.e.   movq %fs:offset, dst
-  void movq_fs(int32_t offset, RegisterID dst) {
-    spew("movq       %%fs:0x%x, %s", offset, GPReg64Name(dst));
-    m_formatter.prefix(PRE_FS);
-    m_formatter.oneByteOp64(OP_MOV_GvEv,
-                            reinterpret_cast<const void*>(
-                                static_cast<intptr_t>(offset)),
-                            dst);
-  }
 
   void leaq_mr(int32_t offset, RegisterID base, RegisterID index, int scale,
                RegisterID dst) {

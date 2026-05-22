@@ -491,6 +491,9 @@ class AssemblerX86Shared : public AssemblerShared {
     masm.jumpTablePointer(-1);
     label->patchAt()->bind(masm.size());
   }
+  // REFACTOR: The only consumer for this interface is
+  // /home/justin/spidermonkey/firefox/js/src/jit/AOTMacroAssembler.cpp:175
+  // just remove this and inline call? No?
   void writeInt32Data(int32_t value) {
     MOZ_ASSERT(hasCreator());
     masm.int32Constant(value);

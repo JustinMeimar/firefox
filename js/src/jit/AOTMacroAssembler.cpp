@@ -24,17 +24,6 @@ using namespace js::jit;
 
 #ifdef ENABLE_AOT_BASELINE
 
-// NOTE(Justin): x86-64 only for now (%fs segment).
-static int32_t GetTlsContextOffset() {
-  uintptr_t tp;
-  asm("movq %%fs:0, %0" : "=r"(tp));
-  auto offset =
-      reinterpret_cast<intptr_t>(&TlsContext) - static_cast<intptr_t>(tp);
-  MOZ_ASSERT(offset == static_cast<int32_t>(offset),
-             "TLS offset must fit in int32_t");
-  return static_cast<int32_t>(offset);
-}
-
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   if (inAOTStubFrame_) {
     // In IC code the frame-pointer is set to the ICFrame, rather than
@@ -72,19 +61,6 @@ void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
   MOZ_ASSERT(scratch != PreBarrierReg);
   emitAOTSlotLoad(PreBarrierSlotForMIRType(type), scratch);
   call(scratch);
-}
-
-void MacroAssembler::loadAOTTableBase(Register dest) {
-  int32_t tlsOff = GetTlsContextOffset();
-  loadPtrFromTls(tlsOff, dest);
-  MacroAssemblerSpecific::loadPtr(Address(dest, JSContext::offsetOfRuntime()), dest);
-  MacroAssemblerSpecific::loadPtr(Address(dest, JSRuntime::offsetOfJitRuntime()), dest);
-  addPtr(Imm32(int32_t(JitRuntime::offsetOfAOTIndirectionTable())), dest);
-}
-
-void MacroAssembler::storeAOTTableBaseToFrame(Register scratch) {
-  loadAOTTableBase(scratch);
-  storePtr(scratch, Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
 }
 
 void MacroAssembler::loadZoneForAOT(Register dest) {

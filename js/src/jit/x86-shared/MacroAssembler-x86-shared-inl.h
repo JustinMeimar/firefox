@@ -607,6 +607,8 @@ void MacroAssembler::branchPtr(Condition cond, Register lhs, ImmPtr rhs,
       branchPtr(cond, lhs, scratch, label);
       return;
     }
+    //REFACTOR(Justin): Something less verbose, like a AOT_SLOT_CRASH macro
+    //which cleanly wraps MOZ_CRASH. Just needs to print this function.
     uintptr_t val = uintptr_t(rhs.value);
     if (val != 0 && val > UINT32_MAX) {
       MOZ_CRASH_UNSAFE_PRINTF(
@@ -647,6 +649,10 @@ void MacroAssembler::branchPtr(Condition cond, const Address& lhs, ImmPtr rhs,
       branchPtrImpl(cond, lhs, scratch, label);
       return;
     }
+    // REFACTOR: This should be less verbose, maybe just a AOT_SLOT_CRASH which
+    // is a better name, not value guard... just don't print the value.
+    // Same for other MASM interface choke points. We want uniform
+    // AOT_SLOT_CRASHs
     uintptr_t val = uintptr_t(rhs.value);
     if (val != 0 && val > UINT32_MAX) {
       MOZ_CRASH_UNSAFE_PRINTF(
