@@ -13065,7 +13065,7 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "dump-bl-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
       !op.addStringOption('\0', "aot-warmup", "path", "Execute warmup script before AOT self-hosted dump to collect IC profiles.") ||
       !op.addBoolOption('\0', "aot", "Use all AOT compiled artifacts.") ||
-      !op.addBoolOption('\0', "exclusive-aot", "Use AOT only; disable runtime IC codegen.") ||
+      !op.addBoolOption('\0', "enforce-aot-ics", "Disable runtime IC codegen; use only AOT stubs or fallback.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14099,9 +14099,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("aot")) {
     jit::JitOptions.useAOT = true;
   }
-  if (op.getBoolOption("exclusive-aot")) {
+  if (op.getBoolOption("enforce-aot-ics")) {
     jit::JitOptions.useAOT = true;
-    jit::JitOptions.exclusiveAOT = true;
+    jit::JitOptions.enforceAOTICs = true;
   }
 #endif
   if (op.getBoolOption("no-ion")) {

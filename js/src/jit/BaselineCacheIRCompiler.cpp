@@ -2458,7 +2458,7 @@ static bool AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
 }
 
 #ifdef ENABLE_JS_AOT_ICS
-void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
+static void LogUnseenICStub(CacheKind kind, const CacheIRWriter& writer) {
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
   HashNumber h = CacheIRStubKey::hash(lookup);
@@ -2471,26 +2471,12 @@ void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
   }
   FILE* f = fopen(filename, "w");
   MOZ_RELEASE_ASSERT(f);
-
-  // Generate the CacheIR text to dump to a file.
   {
     Fprinter printer(f);
     SpewCacheIROpsAsAOT(printer, kind, writer);
   }
   fflush(f);
   fclose(f);
-  if (!getenv("AOT_ICS_KEEP_GOING")) {
-    fprintf(stderr, "UNEXPECTED NEW IC BODY\n");
-    fprintf(stderr,
-            "Please add the file '%s' to the ahead-of-time known IC bodies in "
-            "js/src/ics/.\n"
-            "\n"
-            "To keep running and dump all new ICs (useful for updating with "
-            "test-suites),\n"
-            "set the environment variable AOT_ICS_KEEP_GOING=1 and rerun.\n",
-            filename);
-    abort();
-  }
 }
 
 static void FMProfileICStub(CacheKind kind, const CacheIRWriter& writer) {
@@ -2549,10 +2535,11 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
 #endif
 
-#ifdef ENABLE_JS_AOT_ICS
-  if (JitOptions.exclusiveAOT && !stubInfo && !isAOTFill &&
-      !jitZone->isIncompleteAOTICs()) {
-    DumpNonAOTICStubAndQuit(kind, writer);
+#ifdef ENABLE_AOT_BASELINE
+  if (JitOptions.enforceAOTICs && !stubInfo && !isAOTFill) {
+    if (getenv("AOT_ICS_LOG_UNSEEN")) {
+      LogUnseenICStub(kind, writer);
+    }
     return true;
   }
 #endif

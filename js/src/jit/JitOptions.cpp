@@ -139,7 +139,7 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(dumpBaselineSelfHosted, false);
 
   SET_DEFAULT(useAOT, false);
-  SET_DEFAULT(exclusiveAOT, false);
+  SET_DEFAULT(enforceAOTICs, false);
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   // Whether the Portable Baseline Interpreter is enabled.
@@ -205,7 +205,7 @@ DefaultJitOptions::DefaultJitOptions() {
   }
   if (getenv("JS_AOT_ICS_ENFORCE")) {
     useAOT = true;
-    exclusiveAOT = true;
+    enforceAOTICs = true;
   }
   if (getenv("JS_AOT_ICS_DUMP")) {
     dumpAOTICs = true;
@@ -215,7 +215,7 @@ DefaultJitOptions::DefaultJitOptions() {
   }
 #endif
 
-  if (exclusiveAOT) {
+  if (enforceAOTICs) {
     useAOT = true;
   }
 
