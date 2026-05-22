@@ -2945,18 +2945,12 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
 }
 
 void MacroAssembler::guardObjectHasSameRealm(Register obj, Register scratch,
-                                             Label* fail, Register scratch2) {
+                                             Label* fail) {
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  if (!isAOTFill()) {
-    branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
-              scratch, fail);
-  } else {
-    MOZ_ASSERT(scratch2 != InvalidReg);
-    loadCurrentRealm(scratch2);
-    branchPtr(Assembler::NotEqual, scratch2, scratch, fail);
-  }
+  branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
+            scratch, fail);
 }
 
 void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
@@ -3052,17 +3046,6 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
                                              Label* cacheMiss) {
   Label isString, isSymbol, isNull, isUndefined, done, nonAtom, atom;
 
-#ifdef ENABLE_JS_AOT_ICS
-  if (isAOTFill()) {
-    // Load the runtime before the branches.
-    // Each branch is visited once, outId is clobbered and it jumps to done.
-    // So the runtime is only needed once but it is needed in several paths.
-    loadRuntime(outId);
-    loadPtr(Address(outId, JSRuntime::offsetOfCommonNames()), outId);
-    // outId contains the ptr to names.
-  }
-#endif
-
   {
     ScratchTagScope tag(*this, value);
     splitTagForTest(value, tag);
@@ -3072,37 +3055,19 @@ void MacroAssembler::loadAtomOrSymbolAndHash(ValueOperand value, Register outId,
     branchTestUndefined(Assembler::NotEqual, tag, cacheMiss);
   }
 
-  if (!isAOTFill()) {
+  {
     const JSAtomState& names = runtime()->names();
     movePropertyKey(NameToId(names.undefined), outId);
     move32(Imm32(names.undefined->hash()), outHash);
   }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    Address undefinedAddr(outId, NAME_OFFSET(undefined));
-    loadPtr(undefinedAddr, outId);
-    loadAtomHash(outId, outHash, nullptr);
-    // NameToId
-    orPtr(Imm32(js::PropertyKey::StringTypeTag), outId);
-  }
-#endif
   jump(&done);
 
   bind(&isNull);
-  if (!isAOTFill()) {
+  {
     const JSAtomState& names = runtime()->names();
     movePropertyKey(NameToId(names.null), outId);
     move32(Imm32(names.null->hash()), outHash);
   }
-#ifdef ENABLE_JS_AOT_ICS
-  else {
-    Address nullAddr(outId, NAME_OFFSET(null));
-    loadPtr(nullAddr, outId);
-    loadAtomHash(outId, outHash, nullptr);
-    // NameToId
-    orPtr(Imm32(js::PropertyKey::StringTypeTag), outId);
-  }
-#endif
   jump(&done);
 
   bind(&isSymbol);

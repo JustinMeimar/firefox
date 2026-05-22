@@ -5501,18 +5501,13 @@ bool CacheIRCompiler::emitGuardObjectHasSameRealm(ObjOperandId objId) {
 
   Register obj = allocator.useRegister(masm, objId);
   AutoScratchRegister scratch(allocator, masm);
-  Maybe<AutoScratchRegister> scratchForAOT;
-  if (aotContext_) {
-    scratchForAOT.emplace(allocator, masm);
-  }
 
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
     return false;
   }
 
-  masm.guardObjectHasSameRealm(obj, scratch, failure->label(),
-                               scratchForAOT.isSome() ? scratchForAOT.ref() : InvalidReg);
+  masm.guardObjectHasSameRealm(obj, scratch, failure->label());
   return true;
 }
 

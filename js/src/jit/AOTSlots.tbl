@@ -40,6 +40,7 @@ AOT_SLOT(AtomTrue,               static_cast<JSString*>(cx->names().true_))
 AOT_SLOT(AtomFalse,              static_cast<JSString*>(cx->names().false_))
 AOT_SLOT(AtomFunction,           static_cast<JSString*>(cx->names().function))
 AOT_SLOT(AtomUndefined,          static_cast<JSString*>(cx->names().undefined))
+AOT_SLOT(AtomNull,               static_cast<JSString*>(cx->names().null))
 AOT_SLOT(AtomObject,             static_cast<JSString*>(cx->names().object))
 
 // --- JSClass pointers ---

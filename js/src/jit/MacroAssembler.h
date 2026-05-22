@@ -5130,8 +5130,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void switchToWasmInstanceRealm(Register scratch1, Register scratch2);
   void debugAssertContextRealm(const void* realm, Register scratch);
 
-  void guardObjectHasSameRealm(Register obj, Register scratch, Label* fail,
-                               Register scratch2 = InvalidReg);
+  void guardObjectHasSameRealm(Register obj, Register scratch, Label* fail);
 
   template <typename ValueType>
   void storeLocalAllocSite(ValueType value, Register scratch);
