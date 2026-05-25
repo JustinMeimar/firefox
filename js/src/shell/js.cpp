@@ -13065,6 +13065,9 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "dump-bl-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
       !op.addStringOption('\0', "aot-warmup", "path", "Execute warmup script before AOT self-hosted dump to collect IC profiles.") ||
       !op.addBoolOption('\0', "aot", "Use all AOT compiled artifacts.") ||
+      !op.addBoolOption('\0', "aot-interp", "Use AOT baseline interpreter.") ||
+      !op.addBoolOption('\0', "aot-selfhosted", "Use AOT self-hosted functions.") ||
+      !op.addBoolOption('\0', "aot-ics", "Use AOT inline caches.") ||
       !op.addBoolOption('\0', "enforce-aot-ics", "Disable runtime IC codegen; use only AOT stubs or fallback.") ||
 #endif
       !op.addIntOption(
@@ -14097,10 +14100,21 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
     jit::JitOptions.aotWarmupScript = warmup;
   }
   if (op.getBoolOption("aot")) {
-    jit::JitOptions.useAOT = true;
+    jit::JitOptions.useAOTInterp = true;
+    jit::JitOptions.useAOTSelfHosted = true;
+    jit::JitOptions.useAOTICs = true;
+  }
+  if (op.getBoolOption("aot-interp")) {
+    jit::JitOptions.useAOTInterp = true;
+  }
+  if (op.getBoolOption("aot-selfhosted")) {
+    jit::JitOptions.useAOTSelfHosted = true;
+  }
+  if (op.getBoolOption("aot-ics")) {
+    jit::JitOptions.useAOTICs = true;
   }
   if (op.getBoolOption("enforce-aot-ics")) {
-    jit::JitOptions.useAOT = true;
+    jit::JitOptions.useAOTICs = true;
     jit::JitOptions.enforceAOTICs = true;
   }
 #endif

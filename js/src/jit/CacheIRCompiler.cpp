@@ -9138,8 +9138,8 @@ void CacheIRCompiler::emitPostBarrierShared(Register obj,
 
   // Check one element cache to avoid VM call.
   auto* lastCellAddr = cx_->runtime()->gc.addressOfLastBufferedWholeCell();
-  masm.branchPtr(Assembler::Equal, AbsoluteAddress(lastCellAddr), obj,
-                 &skipBarrier);
+  masm.movePtr(ImmPtr(lastCellAddr), scratch);
+  masm.branchPtr(Assembler::Equal, Address(scratch, 0), obj, &skipBarrier);
 
   // Call one of these, depending on maybeIndex:
   //

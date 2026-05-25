@@ -2822,7 +2822,7 @@ void js::jit::ClearSavedICBlobs() {
 void js::jit::FillAOTICs(JSContext* cx) {
   MOZ_ASSERT(cx->inAtomsZone());
   JitZone* jitZone = cx->zone()->getJitZone(cx);
-  if (JitOptions.useAOT || JitOptions.dumpAOTICs) {
+  if (JitOptions.useAOTICs || JitOptions.dumpAOTICs) {
     size_t corpusIdx = 0;
     for (auto& stub : GetAOTStubs()) {
       CacheIRWriter writer(cx, stub);

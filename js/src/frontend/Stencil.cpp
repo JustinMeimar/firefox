@@ -3074,7 +3074,7 @@ bool CompilationStencil::delazifySelfHostedFunction(
 #ifdef ENABLE_AOT_BASELINE
   // Check AOT container for a pre-compiled self-hosted function blob.
   // Skip scripts that can't be baseline-interpreted (e.g. ForceInterpreter).
-  if (jit::JitOptions.useAOT &&
+  if (jit::JitOptions.useAOTSelfHosted &&
       jit::IsBaselineInterpreterEnabled() &&
       jit::CanBaselineInterpretScript(script)) {
     if (!cx->zone()->ensureJitZoneExists(cx)) {

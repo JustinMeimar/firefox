@@ -147,12 +147,17 @@ void MacroAssembler::callWithABI(DynFn fun, ABIType result,
   if (MOZ_UNLIKELY(isAOT())) {
     AOTSlot slot = aot().indirectionTable()->findSlotOrCrash(
         uintptr_t(fun.address));
-    // Resolve argument moves BEFORE loading the function pointer into
-    // AOTTablePassReg so emitAOTSlotLoad cannot clobber an argument register.
+    // Resolve argument moves BEFORE loading the function pointer so
+    // emitAOTSlotLoad cannot clobber an argument register.
     uint32_t stackAdjust;
     callWithABIPre(&stackAdjust);
-    emitAOTSlotLoad(slot, AOTTablePassReg);
-    call(AOTTablePassReg);
+    // Use a volatile scratch register for the function pointer. Using a
+    // callee-saved register (e.g. AOTTablePassReg/r12) would silently
+    // clobber any live value the CacheIR allocator placed there, since
+    // liveVolatileRegs() does not save/restore non-volatile registers
+    // and the callee preserves the clobbered value across the call.
+    emitAOTSlotLoad(slot, ScratchReg);
+    call(ScratchReg);
     callWithABIPost(stackAdjust, result);
     return;
   }
@@ -169,12 +174,17 @@ void MacroAssembler::callWithABI(ABIType result, CheckUnsafeCallWithABI check) {
     void* addr = abiFun.address();
     AOTSlot slot = aot().indirectionTable()->findSlotOrCrash(
         uintptr_t(addr));
-    // Resolve argument moves BEFORE loading the function pointer into
-    // AOTTablePassReg so emitAOTSlotLoad cannot clobber an argument register.
+    // Resolve argument moves BEFORE loading the function pointer so
+    // emitAOTSlotLoad cannot clobber an argument register.
     uint32_t stackAdjust;
     callWithABIPre(&stackAdjust);
-    emitAOTSlotLoad(slot, AOTTablePassReg);
-    call(AOTTablePassReg);
+    // Use a volatile scratch register for the function pointer. Using a
+    // callee-saved register (e.g. AOTTablePassReg/r12) would silently
+    // clobber any live value the CacheIR allocator placed there, since
+    // liveVolatileRegs() does not save/restore non-volatile registers
+    // and the callee preserves the clobbered value across the call.
+    emitAOTSlotLoad(slot, ScratchReg);
+    call(ScratchReg);
     callWithABIPost(stackAdjust, result);
     return;
   }

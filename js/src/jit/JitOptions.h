@@ -76,7 +76,9 @@ struct DefaultJitOptions {
   bool dumpBaselineInterp;
   bool dumpBaselineSelfHosted;
   const char* aotWarmupScript = nullptr;
-  bool useAOT;
+  bool useAOTInterp;
+  bool useAOTSelfHosted;
+  bool useAOTICs;
   bool enforceAOTICs;
   bool baselineInterpreter;
   bool baselineJit;

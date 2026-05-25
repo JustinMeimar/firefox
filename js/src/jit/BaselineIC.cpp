@@ -136,6 +136,12 @@ AllocatableGeneralRegisterSet BaselineICAvailableGeneralRegs(size_t numInputs) {
 #endif
   regs.take(ICStubReg);
 
+#ifdef ENABLE_AOT_BASELINE
+  if (JitOptions.useAOTInterp) {
+    regs.take(AOTTablePassReg);
+  }
+#endif
+
   switch (numInputs) {
     case 0:
       break;

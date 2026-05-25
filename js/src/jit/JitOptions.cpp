@@ -138,7 +138,9 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether to dump AOT-compiled self-hosted functions.
   SET_DEFAULT(dumpBaselineSelfHosted, false);
 
-  SET_DEFAULT(useAOT, false);
+  SET_DEFAULT(useAOTInterp, false);
+  SET_DEFAULT(useAOTSelfHosted, false);
+  SET_DEFAULT(useAOTICs, false);
   SET_DEFAULT(enforceAOTICs, false);
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
@@ -201,10 +203,10 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(fmProfileICs, false);
 
   if (getenv("JS_AOT_ICS")) {
-    useAOT = true;
+    useAOTICs = true;
   }
   if (getenv("JS_AOT_ICS_ENFORCE")) {
-    useAOT = true;
+    useAOTICs = true;
     enforceAOTICs = true;
   }
   if (getenv("JS_AOT_ICS_DUMP")) {
@@ -216,7 +218,7 @@ DefaultJitOptions::DefaultJitOptions() {
 #endif
 
   if (enforceAOTICs) {
-    useAOT = true;
+    useAOTICs = true;
   }
 
   // How many invocations or loop iterations are needed before functions
