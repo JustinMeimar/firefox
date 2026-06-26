@@ -347,6 +347,9 @@ void js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc,
     }
 
 #ifdef ENABLE_AOT_BASELINE
+    // Trace the AOT preamble trampoline, which is a new intermediate JitCode
+    // between the enterJit trampoline and jitCode, which performs some
+    // additional accounting neccessary for AOT.
     if (rt->hasJitRuntime()) {
       rt->jitRuntime()->traceAOTPreambles(trc);
     }

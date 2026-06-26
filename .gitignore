@@ -3,9 +3,6 @@
 # See docs/code-quality/lint/linters/ignorefile.rst for lint-ignore-next-line
 # syntax.
 
-# AOT IC corpus (symlink to ~/spidermonkey/ic-corpi/*)
-js/src/ics
-
 # Filenames that should be ignored wherever they appear
 *~
 *.pyc

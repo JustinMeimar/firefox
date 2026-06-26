@@ -12,11 +12,9 @@
 #  include "mozilla/ProcessType.h"
 #endif
 #include "mozilla/TimeStamp.h"
-
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
 #include "threading/LockGuard.h"
 #include "threading/Mutex.h"
 #include "vm/MutexIDs.h"
@@ -30,6 +28,9 @@ enum AOTInstrCh : uint32_t {
   AOTInstr_BLInterp  = 1 << 3,
   AOTInstr_All       = 0xFFFFFFFF,
 };
+
+// NOTE(Justin): This is research code, not intended for use outside of
+// evaluating FrostMonkey for the paper. 
 
 struct AOTInstrumentation {
   uint32_t channels = 0;

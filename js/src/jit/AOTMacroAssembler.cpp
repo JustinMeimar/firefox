@@ -25,9 +25,17 @@ using namespace js::jit;
 #ifdef ENABLE_AOT_BASELINE
 
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
-  if (inAOTStubFrame_) {
-    // In IC code the frame-pointer is set to the ICFrame, rather than
-    // the baseline frame. We pay an extra load to reach the BaselineFrame.
+    
+  // NOTE(Justin): There is some unforuntate bifurcation here. Without having a pinned
+  // register live for both baseline and baseline-IC contexts, we rely
+  // on indirection through the BaselineFrame for now. When executing within
+  // an AOT IC, the frame pointer is set to the ICFrame, which itself contains
+  // a field for the BaselineFrame. Therefore we need two loads rather than
+  // one when `inAOTStubFrame_`. Ideally this could be collapsed if a pinned
+  // register solution is found (?), though there are more portability
+  // challanges with register allocation.
+  
+  if (inAOTStubFrame_) { 
     MacroAssemblerSpecific::loadPtr(Address(FramePointer, 0), dest);
     MacroAssemblerSpecific::loadPtr(
         Address(dest, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
@@ -40,6 +48,10 @@ void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
 }
 
 static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
+  // NOTE(Justin): There is alsmot certainly a more elegant way to provide indirections for
+  // the PreBarrier. This simply mirrors the pattern in `JitRuntime::preBarrier` but for
+  // AOT slots rather than `trampolineCode` ptrs (which are runtime generated,
+  // hence can't be called to directly in AOT code.)
   switch (type) {
     case MIRType::Value:
       return AOTSlot::PreBarrier_Value;
@@ -58,7 +70,7 @@ static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
 
 void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
   MOZ_ASSERT(isAOT());
-  MOZ_ASSERT(scratch != PreBarrierReg);
+  MOZ_ASSERT(scratch != PreBarrierReg); // NOTE: Why?
   emitAOTSlotLoad(PreBarrierSlotForMIRType(type), scratch);
   call(scratch);
 }
