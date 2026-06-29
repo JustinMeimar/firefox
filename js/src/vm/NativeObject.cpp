@@ -2474,7 +2474,7 @@ static bool SetPropertyByDefining(JSContext* cx, HandleId id, HandleValue v,
                                   ObjectOpResult& result) {
   // Step 2.b.
   if (!receiverValue.isObject()) {
-    MOZ_CRASH("AOT IC bug: SetPropertyByDefining receiver is not an object");
+    return result.fail(JSMSG_SET_NON_OBJECT_RECEIVER);
   }
   RootedObject receiver(cx, &receiverValue.toObject());
 
