@@ -394,6 +394,10 @@ class GCRuntime {
 
 #ifdef JS_GC_ZEAL
   const uint32_t* addressOfZealModeBits() { return &zealModeBits.refNoCheck(); }
+  static size_t offsetOfZealModeBits() {
+    return offsetof(GCRuntime, zealModeBits) +
+           decltype(zealModeBits)::offsetOfValue();
+  }
   void getZealBits(uint32_t* zealBits, uint32_t* frequency,
                    uint32_t* nextScheduled);
   void setZeal(uint8_t zeal, uint32_t frequency);
@@ -1581,6 +1585,12 @@ class GCRuntime {
 
   friend class MarkingValidator;
   friend class AutoEnterIteration;
+
+public:
+  static size_t offsetOfNursery() {
+    return offsetof(GCRuntime, nursery_) +
+      decltype(GCRuntime::nursery_)::offsetOfValue();
+  }
 };
 
 #ifndef JS_GC_ZEAL

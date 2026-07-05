@@ -808,6 +808,12 @@ struct JSRuntime {
  public:
   JS::GCContext* gcContext() { return &gc.mainThreadContext.ref(); }
 
+#ifdef JS_GC_ZEAL
+  static size_t offsetOfGCZealModeBits() {
+    return offsetof(JSRuntime, gc) + js::gc::GCRuntime::offsetOfZealModeBits();
+  }
+#endif
+
 #if !JS_HAS_INTL_API
   /* Number localization, used by jsnum.cpp. */
   js::WriteOnceData<const char*> thousandsSeparator;
@@ -1116,6 +1122,12 @@ struct JSRuntime {
 
  public:
   js::MainThreadData<js::RuntimeFuses> runtimeFuses;
+
+  static size_t offsetOfRuntimeFuse(js::RuntimeFuses::FuseIndex index) {
+    return offsetof(JSRuntime, runtimeFuses) +
+           decltype(runtimeFuses)::offsetOfValue() +
+           js::RuntimeFuses::offsetOfFuseByIndex(index);
+  }
 };
 
 namespace js {

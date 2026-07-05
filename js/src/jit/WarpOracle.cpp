@@ -10,6 +10,7 @@
 
 #include <algorithm>
 
+#include "jit/AOT.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRReader.h"
@@ -1005,6 +1006,15 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
 
   ICFallbackStub* fallbackStub;
   const ICEntry& entry = getICEntryAndFallback(loc, &fallbackStub);
+
+#ifdef ENABLE_JS_AOT
+  // NOTE(aot): skip leading never-entered pre-attached hints so cold sites
+  // stay cold. Validated hints (entered) are transpiled as any other stub.
+  while (firstStub != fallbackStub && firstStub->isPreAttached() &&
+         firstStub->enteredCount() == 0) {
+    firstStub = firstStub->toCacheIRStub()->next();
+  }
+#endif
 
   uint32_t offset = loc.bytecodeToOffset(script_);
 

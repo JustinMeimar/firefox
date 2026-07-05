@@ -478,7 +478,7 @@ void CacheIRSpewer::endCache() {
 
 #endif /* JS_CACHEIR_SPEW */
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_JS_AOT
 
 // Note: for several of the functions below that return string
 // representations of enums, it's important to keep the strings below
@@ -522,6 +522,8 @@ static const char* ArrayBufferViewKindName(ArrayBufferViewKind kind) {
       return "FixedLength";
     case ArrayBufferViewKind::Resizable:
       return "Resizable";
+    case ArrayBufferViewKind::Immutable:
+      return "Immutable";
   }
   MOZ_CRASH("Unknown ArrayBufferViewKind");
 }
@@ -575,7 +577,7 @@ class MOZ_RAII CacheIROpsAotSpewer {
   }
   void spewTypeofEqOperandImm(const char* name, TypeofEqOperand operand) {
     (void)name;
-    out_.printf(name, "TYPEOFEQOPERAND(%u)", operand.rawValue());
+    out_.printf("TYPEOFEQOPERAND(%u)", operand.rawValue());
   }
   void spewStaticStringImm(const char* name, const char* str) {
     (void)name;
@@ -699,4 +701,4 @@ void js::jit::SpewCacheIROpsAsAOT(GenericPrinter& out, CacheKind kind,
   out.printf("\n");
 }
 
-#endif /* ENABLE_JS_AOT_ICS */
+#endif /* ENABLE_JS_AOT */

@@ -338,6 +338,13 @@ void js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc,
          zone.next()) {
       zone->traceRootsInMajorGC(trc);
     }
+
+#ifdef ENABLE_JS_AOT
+    if (rt->hasJitRuntime()) {
+      rt->jitRuntime()->traceAOTPreambles(trc);
+    }
+#endif
+
   }
 
   // Trace helper thread roots.
@@ -428,6 +435,12 @@ void js::gc::GCRuntime::finishRoots() {
 
 #ifdef JS_GC_ZEAL
   clearSelectedForMarking();
+#endif
+
+#ifdef ENABLE_JS_AOT
+  if (rt->hasJitRuntime()) {
+    rt->jitRuntime()->clearAOTPreambles();
+  }
 #endif
 
   // Clear any remaining roots from the embedding (as otherwise they will be

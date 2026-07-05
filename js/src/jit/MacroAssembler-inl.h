@@ -795,11 +795,18 @@ void MacroAssembler::branchTestNeedsMarkingBarrierAnyZone(Condition cond,
   } else {
     // We are compiling the interpreter or another runtime-wide trampoline, so
     // we have to load cx->zone.
-    loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+    // NOTE(aot): addressOfZone() is not in the slot table; go via JSContext.
+    if (isAOT()) {
+      loadJSContext(scratch);
+      loadPtr(Address(scratch, JSContext::offsetOfZone()), scratch);
+    } else {
+      loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+    }
     Address needsBarrierAddr(scratch, Zone::offsetOfNeedsMarkingBarrier());
     branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
   }
 }
+
 
 void MacroAssembler::branchTestMagicValue(Condition cond,
                                           const ValueOperand& val,

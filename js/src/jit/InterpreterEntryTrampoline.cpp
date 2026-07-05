@@ -108,7 +108,7 @@ void JitRuntime::generateBaselineInterpreterEntryTrampoline(
                                      scratch, scratch);
 
   // Call into baseline interpreter
-  uint8_t* blinterpAddr = baselineInterpreter().codeRaw();
+  uint8_t* blinterpAddr = baselineInterpreterEntryAddr();
   masm.assertStackAlignment(JitStackAlignment, 2 * sizeof(uintptr_t));
   masm.call(ImmPtr(blinterpAddr));
 

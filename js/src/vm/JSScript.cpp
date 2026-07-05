@@ -3415,6 +3415,12 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
     jit::IonScript* ion = ionScript();
     setJitCodeRaw(ion->method()->raw());
   } else if (hasBaselineScript()) {
+#ifdef ENABLE_JS_AOT
+    if (uint8_t* preamble = rt->jitRuntime()->lookupAOTPreamble(
+            baselineScript()->method()->raw())) {
+      setJitCodeRaw(preamble);
+    } else
+#endif
     setJitCodeRaw(baselineScript()->method()->raw());
   } else if (hasJitScript() && js::jit::IsBaselineInterpreterEnabled()) {
     bool usingEntryTrampoline = false;
@@ -3431,7 +3437,7 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
       }
     }
     if (!usingEntryTrampoline) {
-      setJitCodeRaw(rt->jitRuntime()->baselineInterpreter().codeRaw());
+      setJitCodeRaw(rt->jitRuntime()->baselineInterpreterEntryAddr());
     }
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   } else if (hasJitScript() &&

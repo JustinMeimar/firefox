@@ -612,11 +612,24 @@ void MacroAssembler::branchPtr(Condition cond, Register lhs, Imm32 rhs,
 
 void MacroAssembler::branchPtr(Condition cond, Register lhs, ImmPtr rhs,
                                Label* label) {
+#ifdef ENABLE_JS_AOT
+  if (MOZ_UNLIKELY(isAOT())) {
+    ScratchRegisterScope scratch(*this);
+    MOZ_ASSERT(lhs != scratch);
+    movePtr(rhs, scratch);
+    branchPtr(cond, lhs, scratch, label);
+    return;
+  }
+#endif
   branchPtrImpl(cond, lhs, rhs, label);
 }
 
 void MacroAssembler::branchPtr(Condition cond, Register lhs, ImmGCPtr rhs,
                                Label* label) {
+#ifdef ENABLE_JS_AOT
+  MOZ_ASSERT(!isAOT(),
+             "branchPtr(Reg, ImmGCPtr) not intercepted in AOT mode");
+#endif
   branchPtrImpl(cond, lhs, rhs, label);
 }
 
@@ -632,11 +645,23 @@ void MacroAssembler::branchPtr(Condition cond, const Address& lhs, Register rhs,
 
 void MacroAssembler::branchPtr(Condition cond, const Address& lhs, ImmPtr rhs,
                                Label* label) {
+#ifdef ENABLE_JS_AOT
+  if (MOZ_UNLIKELY(isAOT())) {
+    ScratchRegisterScope scratch(*this);
+    movePtr(rhs, scratch);
+    branchPtrImpl(cond, lhs, scratch, label);
+    return;
+  }
+#endif
   branchPtrImpl(cond, lhs, rhs, label);
 }
 
 void MacroAssembler::branchPtr(Condition cond, const Address& lhs, ImmGCPtr rhs,
                                Label* label) {
+#ifdef ENABLE_JS_AOT
+  MOZ_ASSERT(!isAOT(),
+             "branchPtr(Addr, ImmGCPtr) not intercepted in AOT mode");
+#endif
   branchPtrImpl(cond, lhs, rhs, label);
 }
 

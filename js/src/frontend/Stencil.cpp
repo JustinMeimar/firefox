@@ -13,6 +13,7 @@
 #include "mozilla/RefPtr.h"                 // RefPtr
 #include "mozilla/ScopeExit.h"              // mozilla::ScopeExit
 #include "mozilla/Sprintf.h"                // SprintfLiteral
+#include "mozilla/TimeStamp.h"              // mozilla::TimeStamp, mozilla::TimeDuration
 
 #include <algorithm>  // std::fill
 #include <string.h>   // strlen
@@ -30,12 +31,14 @@
 #include "frontend/StencilXdr.h"  // XDRStencilEncoder, XDRStencilDecoder
 #include "gc/AllocKind.h"         // gc::AllocKind
 #include "gc/Tracer.h"            // TraceRoot
+#include "jit/BaselineAOT.h"      // jit::LoadAOTSelfHosted
 #include "jit/BaselineCompileTask.h"  // BaselineCompileTask::OffThreadBaselineCompilationAvailable
 #include "jit/BaselineJIT.h"  // jit::BaselineScript, jit::CanBaselineCompileScript
-#include "jit/JitContext.h"     // jit::MethodStatus
-#include "jit/JitRuntime.h"     // jit::JitRuntime
-#include "jit/JitScript.h"      // AutoKeepJitScripts
-#include "js/CallArgs.h"        // JSNative
+#include "jit/JitContext.h"   // jit::MethodStatus
+#include "jit/JitOptions.h"   // jit::JitOptions
+#include "jit/JitRuntime.h"   // jit::JitRuntime
+#include "jit/JitScript.h"    // AutoKeepJitScripts
+#include "js/CallArgs.h"      // JSNative
 #include "js/CompileOptions.h"  // JS::DecodeOptions, JS::ReadOnlyDecodeOptions
 #include "js/DOMEventDispatch.h"            // TRACE_FOR_TEST_DOM
 #include "js/experimental/CompileScript.h"  // JS::PrepareForInstantiate
@@ -3120,6 +3123,29 @@ bool CompilationStencil::delazifySelfHostedFunction(
   if (!script) {
     return false;
   }
+
+#ifdef ENABLE_JS_AOT
+  // Check AOT container for a pre-compiled self-hosted function blob
+  // which can be baseline interpreted.
+  if (jit::JitOptions.useAOTSelfHosted &&
+      jit::IsBaselineInterpreterEnabled() &&
+      jit::CanBaselineInterpretScript(script)) {
+    if (!cx->zone()->ensureJitZoneExists(cx)) {
+      return false;
+    }
+    jit::AutoKeepJitScripts keepJitScript(cx);
+    if (!script->ensureHasJitScript(cx, keepJitScript)) {
+      return false;
+    }
+    // NOTE(Justin): I'm sceptical this is the correct spot for this code.
+    // Some similar guards are performed in the jitCache lookup below. The
+    // call to `LoadAOTSelfHosted` could find an equivalent location within
+    // one of the self-hosted cache lookup branches.
+    if (jit::LoadAOTSelfHosted(cx, script, name)) {
+      return true;
+    }
+  }
+#endif
 
   if (JS::Prefs::experimental_self_hosted_cache()) {
     Rooted<JSRuntime::JitCacheKey> jitCacheKey(cx, name, script->isDebuggee());

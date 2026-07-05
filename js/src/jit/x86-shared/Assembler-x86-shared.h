@@ -490,6 +490,10 @@ class AssemblerX86Shared : public AssemblerShared {
     masm.jumpTablePointer(-1);
     label->patchAt()->bind(masm.size());
   }
+  void writeInt32Data(int32_t value) {
+    MOZ_ASSERT(hasCreator());
+    masm.int32Constant(value);
+  }
   void cmovCCl(Condition cond, const Operand& src, Register dest) {
     X86Encoding::Condition cc = static_cast<X86Encoding::Condition>(cond);
     switch (src.kind()) {

@@ -40,6 +40,7 @@
                                                                              \
   /* BASELINE COMPILER SPEW */                                               \
   _(BaselineAbort, "Baseline compiler abort messages")                       \
+  _(BaselineAOT, "Baseline AOT compilation")                                 \
   _(BaselineScripts, "Baseline script-compilation")                          \
   _(BaselineOp, "Baseline compiler detailed op-specific messages")           \
   _(BaselineIC, "Baseline inline-cache messages")                            \
@@ -102,6 +103,7 @@
   _("warp-transpiler", WarpTranspiler)        \
   _("warp-trial-inlining", WarpTrialInlining) \
   _("bl-aborts", BaselineAbort)               \
+  _("bl-aot", BaselineAOT)                    \
   _("bl-scripts", BaselineScripts)            \
   _("bl-op", BaselineOp)                      \
   _("bl-ic", BaselineIC)                      \

@@ -10,8 +10,8 @@
 
 namespace js::jit {
 
-inline JitHintsMap::ScriptKey JitHintsMap::getScriptKey(
-    JSScript* script) const {
+// static
+inline JitHintsMap::ScriptKey JitHintsMap::getScriptKey(JSScript* script) {
   ScriptKey filenameHash = script->filenameHash();
   // Do not include scrips that have an introducer filename.  These include
   // dynamically created scripts such as eval() and new Function() which

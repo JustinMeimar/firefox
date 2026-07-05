@@ -75,6 +75,10 @@ void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
   movslq(Operand(src), dest);
 }
 
+void MacroAssembler::load32SignExtendToPtr(const BaseIndex& src, Register dest) {
+  movslq(Operand(src), dest);
+}
+
 // ===============================================================
 // Logical instructions
 
@@ -205,7 +209,13 @@ void MacroAssembler::addPtr(Imm32 imm, const Address& dest) {
 }
 
 void MacroAssembler::addPtr(Imm32 imm, const AbsoluteAddress& dest) {
-  addq(imm, Operand(dest));
+  if (X86Encoding::IsAddressImmediate(dest.addr)) {
+    addq(imm, Operand(dest));
+  } else {
+    ScratchRegisterScope scratch(*this);
+    mov(ImmPtr(dest.addr), scratch);
+    addq(imm, Operand(Address(scratch, 0)));
+  }
 }
 
 void MacroAssembler::addPtr(const Address& src, Register dest) {
@@ -343,8 +353,8 @@ void MacroAssembler::mulBy3(Register src, Register dest) {
 
 void MacroAssembler::mulDoublePtr(ImmPtr imm, Register temp,
                                   FloatRegister dest) {
-  movq(imm, ScratchReg);
-  vmulsd(Operand(ScratchReg, 0), dest, dest);
+  movePtr(imm, temp);
+  vmulsd(Operand(temp, 0), dest, dest);
 }
 
 void MacroAssembler::inc64(AbsoluteAddress dest) {
@@ -687,21 +697,30 @@ void MacroAssembler::popcnt64(Register64 src64, Register64 dest64,
 
 void MacroAssembler::branch32(Condition cond, const AbsoluteAddress& lhs,
                               Register rhs, Label* label) {
-  if (X86Encoding::IsAddressImmediate(lhs.addr)) {
+  if (X86Encoding::IsAddressImmediate(lhs.addr)
+#ifdef ENABLE_JS_AOT
+      && !isAOT()
+#endif
+  ) {
     branch32(cond, Operand(lhs), rhs, label);
   } else {
     ScratchRegisterScope scratch(*this);
-    mov(ImmPtr(lhs.addr), scratch);
+    MOZ_ASSERT(rhs != scratch);
+    movePtr(ImmPtr(lhs.addr), scratch);
     branch32(cond, Address(scratch, 0), rhs, label);
   }
 }
 void MacroAssembler::branch32(Condition cond, const AbsoluteAddress& lhs,
                               Imm32 rhs, Label* label) {
-  if (X86Encoding::IsAddressImmediate(lhs.addr)) {
+  if (X86Encoding::IsAddressImmediate(lhs.addr)
+#ifdef ENABLE_JS_AOT
+      && !isAOT()
+#endif
+  ) {
     branch32(cond, Operand(lhs), rhs, label);
   } else {
     ScratchRegisterScope scratch(*this);
-    mov(ImmPtr(lhs.addr), scratch);
+    movePtr(ImmPtr(lhs.addr), scratch);
     branch32(cond, Address(scratch, 0), rhs, label);
   }
 }
@@ -797,10 +816,14 @@ void MacroAssembler::branchPtr(Condition cond, const AbsoluteAddress& lhs,
                                Register rhs, Label* label) {
   ScratchRegisterScope scratch(*this);
   MOZ_ASSERT(rhs != scratch);
-  if (X86Encoding::IsAddressImmediate(lhs.addr)) {
+  if (X86Encoding::IsAddressImmediate(lhs.addr)
+#ifdef ENABLE_JS_AOT
+      && !isAOT()
+#endif
+  ) {
     branchPtrImpl(cond, Operand(lhs), rhs, label);
   } else {
-    mov(ImmPtr(lhs.addr), scratch);
+    movePtr(ImmPtr(lhs.addr), scratch);
     branchPtrImpl(cond, Operand(scratch, 0x0), rhs, label);
   }
 }
@@ -811,7 +834,7 @@ void MacroAssembler::branchPtr(Condition cond, const AbsoluteAddress& lhs,
     branchPtrImpl(cond, Operand(lhs), rhs, label);
   } else {
     ScratchRegisterScope scratch(*this);
-    mov(ImmPtr(lhs.addr), scratch);
+    movePtr(ImmPtr(lhs.addr), scratch);
     branchPtrImpl(cond, Operand(scratch, 0x0), rhs, label);
   }
 }
@@ -899,11 +922,15 @@ void MacroAssembler::branchUInt64NotInPtrRange(Register64 src, Label* label) {
 
 void MacroAssembler::branchTest32(Condition cond, const AbsoluteAddress& lhs,
                                   Imm32 rhs, Label* label) {
-  if (X86Encoding::IsAddressImmediate(lhs.addr)) {
+  if (X86Encoding::IsAddressImmediate(lhs.addr)
+#ifdef ENABLE_JS_AOT
+      && !isAOT()
+#endif
+  ) {
     test32(Operand(lhs), rhs);
   } else {
     ScratchRegisterScope scratch(*this);
-    mov(ImmPtr(lhs.addr), scratch);
+    movePtr(ImmPtr(lhs.addr), scratch);
     test32(Operand(scratch, 0), rhs);
   }
   j(cond, label);

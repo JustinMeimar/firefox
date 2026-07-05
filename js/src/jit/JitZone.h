@@ -132,6 +132,18 @@ class JitZone {
                 SystemAllocPolicy, BaselineCacheIRStubCodeMapGCPolicy>;
   BaselineCacheIRStubCodeMap baselineCacheIRStubCodes_;
 
+ public:
+  // NOTE(aot): corpus-index -> stub table used by initICEntries. Populated
+  // on the atoms JitZone; non-owning (canonical owner is the map above,
+  // rooted via JitRuntime::TraceAtomZoneRoots).
+  struct AOTStubBlueprint {
+    JitCode* code = nullptr;
+    const CacheIRStubInfo* info = nullptr;
+  };
+
+ private:
+  Vector<AOTStubBlueprint, 0, SystemAllocPolicy> aotStubBlueprints_;
+
   // Executable allocator for all code except wasm code.
   MainThreadData<ExecutableAllocator> execAlloc_;
 
@@ -185,9 +197,6 @@ class JitZone {
  public:
   explicit JitZone(JSContext* cx, bool zoneHasNurseryStrings) {
     setStringsCanBeInNursery(zoneHasNurseryStrings);
-#ifdef ENABLE_JS_AOT_ICS
-    js::jit::FillAOTICs(cx, this);
-#endif
   }
   ~JitZone() {
     MOZ_ASSERT(jitScripts_.isEmpty());
@@ -204,7 +213,7 @@ class JitZone {
   ICStubSpace* stubSpace() { return &stubSpace_; }
 
   JitCode* getBaselineCacheIRStubCode(const CacheIRStubKey::Lookup& key,
-                                      CacheIRStubInfo** stubInfo) {
+                                      CacheIRStubInfo** stubInfo) const {
     auto p = baselineCacheIRStubCodes_.lookup(key);
     if (p) {
       *stubInfo = p->key().stubInfo.get();
@@ -219,6 +228,24 @@ class JitZone {
     auto p = baselineCacheIRStubCodes_.lookupForAdd(lookup);
     MOZ_ASSERT(!p);
     return baselineCacheIRStubCodes_.add(p, std::move(key), stubCode);
+  }
+
+  [[nodiscard]] bool setAOTStubBlueprint(uint32_t corpusIdx, JitCode* code,
+                                         const CacheIRStubInfo* info) {
+    if (corpusIdx >= aotStubBlueprints_.length() &&
+        !aotStubBlueprints_.resize(corpusIdx + 1)) {
+      return false;
+    }
+    aotStubBlueprints_[corpusIdx] = AOTStubBlueprint{code, info};
+    return true;
+  }
+
+  const AOTStubBlueprint* getAOTStubBlueprint(uint32_t corpusIdx) const {
+    if (corpusIdx >= aotStubBlueprints_.length() ||
+        !aotStubBlueprints_[corpusIdx].code) {
+      return nullptr;
+    }
+    return &aotStubBlueprints_[corpusIdx];
   }
 
   CacheIRStubInfo* getIonCacheIRStubInfo(const CacheIRStubKey::Lookup& key) {

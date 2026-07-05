@@ -6,7 +6,14 @@
 
 #include "mozilla/Casting.h"
 
+#include <algorithm>
+
+#include "frontend/CompilationStencil.h"
 #include "gc/GC.h"
+#include "jit/AOT.h"
+#include "jit/AOTInstrumentation.h"
+#include "jit/AutoWritableJitCode.h"
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineCompileQueue.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineIC.h"
@@ -16,18 +23,22 @@
 #include "jit/CalleeToken.h"
 #include "jit/FixedList.h"
 #include "jit/IonOptimizationLevels.h"
+#include "jit/JitCode.h"
 #include "jit/JitcodeMap.h"
 #include "jit/JitFrames.h"
+#include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/Linker.h"
 #include "jit/PerfSpewer.h"
+#include "jit/ProcessExecutableMemory.h"
 #include "jit/SharedICHelpers.h"
 #include "jit/TemplateObject.h"
 #include "jit/TrialInlining.h"
 #include "jit/VMFunctions.h"
 #include "js/friend/ErrorMessages.h"  // JSMSG_*
 #include "js/UniquePtr.h"
+#include "util/Memory.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/BuiltinObjectKind.h"
@@ -35,9 +46,12 @@
 #include "vm/EnvironmentObject.h"
 #include "vm/FunctionFlags.h"  // js::FunctionFlags
 #include "vm/Interpreter.h"
+#include "vm/JSAtomUtils.h"
 #include "vm/JSFunction.h"
 #include "vm/Logging.h"
+#include "vm/Runtime.h"
 #include "vm/Time.h"
+
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
 #endif
@@ -86,7 +100,8 @@ BaselineCompilerHandler::BaselineCompilerHandler(MacroAssembler& masm,
       icEntryIndex_(0),
       baseWarmUpThreshold_(snapshot->baseWarmUpThreshold()),
       compileDebugInstrumentation_(snapshot->compileDebugInstrumentation()),
-      ionCompileable_(snapshot->isIonCompileable()) {
+      ionCompileable_(snapshot->isIonCompileable()),
+      isAOT_(masm.isAOT()) {
 }
 
 BaselineInterpreterHandler::BaselineInterpreterHandler(MacroAssembler& masm)
@@ -320,8 +335,7 @@ bool BaselineCompiler::compileImpl() {
 
 bool BaselineCompiler::finishCompile(JSContext* cx) {
   Rooted<JSScript*> script(cx, handler.script());
-  bool isRealmIndependentJitCodeShared =
-      JS::Prefs::experimental_self_hosted_cache() && script->selfHosted();
+  bool isRealmIndependentJitCodeShared = handler.realmIndependentJitcode();
 
   UniquePtr<BaselineScript> baselineScript(
       nullptr, JS::DeletePolicy<BaselineScript>(cx->runtime()));
@@ -882,9 +896,7 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
   inCall_ = false;
 #endif
 
-  TrampolinePtr code = runtime->jitRuntime()->getVMWrapper(id);
   const VMFunctionData& fun = GetVMFunction(id);
-
   uint32_t argSize = GetVMFunctionArgSize(fun);
 
   // Assert all arguments were pushed.
@@ -903,7 +915,12 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
     masm.push(FrameDescriptor(FrameType::BaselineJS));
   }
   // Perform the call.
-  uint32_t callOffset = masm.callJit(code);
+  uint32_t callOffset;
+  {
+    Register scratch = R0.scratchReg();
+    masm.loadVMWrapper(id, scratch);
+    callOffset = masm.callJit(scratch);
+  }
 
   // Pop arguments from framePushed.
   masm.implicitPop(argSize);
@@ -924,6 +941,7 @@ bool BaselineCodeGen<Handler>::callVM(RetAddrEntry::Kind kind,
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emitStackCheck() {
   Label skipCall;
+
   if (handler.mustIncludeSlotsInStackCheck()) {
     // Subtract the size of script->nslots() first.
     Register scratch = R1.scratchReg();
@@ -1100,8 +1118,16 @@ void BaselineCodeGen<Handler>::pushGlobalLexicalEnvironmentValue(
 
 template <>
 void BaselineCompilerCodeGen::loadGlobalThisValue(ValueOperand dest) {
-  JSObject* thisObj = handler.globalThis();
-  masm.moveValue(ObjectValue(*thisObj), dest);
+  if (handler.realmIndependentJitcode()) {
+    Register scratch = dest.scratchReg();
+    loadGlobalLexicalEnvironment(scratch);
+    static constexpr size_t SlotOffset =
+        GlobalLexicalEnvironmentObject::offsetOfThisValueSlot();
+    masm.loadValue(Address(scratch, SlotOffset), dest);
+  } else {
+    JSObject* thisObj = handler.globalThis();
+    masm.moveValue(ObjectValue(*thisObj), dest);
+  }
 }
 
 template <>
@@ -1124,7 +1150,21 @@ void BaselineCodeGen<Handler>::pushScriptArg() {
 
 template <>
 void BaselineCompilerCodeGen::pushBytecodePCArg() {
-  pushArg(ImmPtr(handler.pc()));
+  if (handler.realmIndependentJitcode()) {
+    uint32_t pcOffset = handler.script()->pcToOffset(handler.pc());
+    ScratchRegisterScope scratch(masm);
+    loadScript(scratch);
+    masm.loadPtr(Address(scratch, JSScript::offsetOfSharedData()), scratch);
+    masm.loadPtr(Address(scratch, SharedImmutableScriptData::offsetOfISD()),
+                 scratch);
+    masm.computeEffectiveAddress(
+        Address(scratch,
+                int32_t(ImmutableScriptData::offsetOfCode() + pcOffset)),
+        scratch);
+    pushArg(scratch);
+  } else {
+    pushArg(ImmPtr(handler.pc()));
+  }
 }
 
 template <>
@@ -1371,6 +1411,12 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
                   frame.addressOfICScript());
   }
   masm.bind(&done);
+
+#ifdef ENABLE_JS_AOT
+  masm.emitAOTStoreFrameTableBase(
+      AOTSelfHostedPassReg, scratch,
+      Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
+#endif
 }
 
 template <>
@@ -1444,6 +1490,13 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   } else {
     masm.storePtr(scratch1, frame.addressOfInterpreterPC());
   }
+
+#ifdef ENABLE_JS_AOT
+  // NOTE(aot): scratch1 may hold the interpreter PC; use scratch2.
+  masm.emitAOTStoreFrameTableBase(
+      AOTTablePassReg, scratch2,
+      Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
+#endif
 }
 
 // Assert we don't need a post write barrier to write sourceObj to a slot of
@@ -1764,8 +1817,8 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
       AbsoluteAddress addressOfEnabled(
           runtime->geckoProfiler().addressOfEnabled());
       masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
-      masm.loadPtr(AbsoluteAddress(runtime->addressOfJitActivation()),
-                   scratchReg);
+      masm.movePtr(ImmPtr(runtime->addressOfJitActivation()), scratchReg);
+      masm.loadPtr(Address(scratchReg, 0), scratchReg);
       masm.loadPtr(
           Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
           scratchReg);
@@ -2040,7 +2093,10 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   // jump. Starts off initially disabled.
   Label noInstrument;
   CodeOffset toggleOffset = masm.toggledJump(&noInstrument);
-  masm.profilerExitFrame();
+  Register ptrReg = R1.scratchReg();
+  masm.movePtr(ImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value), ptrReg);
+  masm.jump(ptrReg);
+
   masm.bind(&noInstrument);
 
   // Store the start offset in the appropriate location.
@@ -2860,8 +2916,18 @@ bool BaselineCodeGen<Handler>::emit_String() {
 template <>
 bool BaselineCompilerCodeGen::emit_Symbol() {
   unsigned which = GET_UINT8(handler.pc());
-  JS::Symbol* sym = runtime->wellKnownSymbols().get(which);
-  frame.push(SymbolValue(sym));
+  if (handler.realmIndependentJitcode()) {
+    frame.syncStack(0);
+    Register scratch1 = R0.scratchReg();
+    Register scratch2 = R1.scratchReg();
+    masm.movePtr(ImmPtr(&runtime->wellKnownSymbols()), scratch2);
+    masm.loadPtr(Address(scratch2, which * sizeof(JS::Symbol*)), scratch1);
+    masm.tagValue(JSVAL_TYPE_SYMBOL, scratch1, R0);
+    frame.push(R0);
+  } else {
+    JS::Symbol* sym = runtime->wellKnownSymbols().get(which);
+    frame.push(SymbolValue(sym));
+  }
   return true;
 }
 
@@ -6311,7 +6377,8 @@ bool BaselineInterpreterCodeGen::emitAfterYieldDebugInstrumentation(
   if (!handler.addDebugInstrumentationOffset(toggleOffset)) {
     return false;
   }
-  masm.loadPtr(AbsoluteAddress(runtime->addressOfRealm()), scratch);
+  masm.movePtr(ImmPtr(runtime->addressOfRealm()), scratch);
+  masm.loadPtr(Address(scratch, 0), scratch);
   masm.branchTest32(Assembler::Zero,
                     Address(scratch, Realm::offsetOfDebugModeBits()),
                     Imm32(Realm::debugModeIsDebuggeeBit()), &done);
@@ -6537,23 +6604,6 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   masm.push(FramePointer);
   masm.moveStackPtrTo(FramePointer);
 
-  // If profiler instrumentation is on, update lastProfilingFrame on
-  // current JitActivation
-  {
-    Register scratchReg = scratch2;
-    Label skip;
-    AbsoluteAddress addressOfEnabled(
-        runtime->geckoProfiler().addressOfEnabled());
-    masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skip);
-    masm.loadJSContext(scratchReg);
-    masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
-                 scratchReg);
-    masm.storePtr(
-        FramePointer,
-        Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()));
-    masm.bind(&skip);
-  }
-
   masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
   masm.assertStackAlignment(sizeof(Value), 0);
 
@@ -6573,6 +6623,27 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
     masm.or32(Imm32(BaselineFrame::HAS_ARGS_OBJ), frame.addressOfFlags());
   }
   masm.bind(&noArgsObj);
+
+#ifdef ENABLE_JS_AOT
+  masm.emitAOTCopyFrameTableBaseFromCaller(scratch1);
+#endif
+
+  // NOTE(aot): profiler block must come after aotTableBase_ init above;
+  // loadJSContext may reach through emitAOTSlotLoad.
+  {
+    Register scratchReg = scratch2;
+    Label skip;
+    AbsoluteAddress addressOfEnabled(
+        runtime->geckoProfiler().addressOfEnabled());
+    masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &skip);
+    masm.loadJSContext(scratchReg);
+    masm.loadPtr(Address(scratchReg, JSContext::offsetOfProfilingActivation()),
+                 scratchReg);
+    masm.storePtr(
+        FramePointer,
+        Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()));
+    masm.bind(&skip);
+  }
 
   // Push locals and expression slots if needed.
   Label noStackStorage;
@@ -6959,15 +7030,14 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   masm.moveStackPtrTo(FramePointer);
 
   masm.checkStackAlignment();
-
-  emitProfilerEnterFrame();
-
   masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
 
   // Initialize BaselineFrame. Also handles env chain pre-initialization (in
   // case GC gets run during stack check). For global and eval scripts, the env
   // chain is in R1. For function scripts, the env chain is in the callee.
   emitInitFrameFields(R1.scratchReg());
+
+  emitProfilerEnterFrame();
 
   // When compiling with Debugger instrumentation, set the debuggeeness of
   // the frame before any operation that can call into the VM.
@@ -7164,18 +7234,25 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   Label interpretOpAfterDebugTrap;
   masm.bind(&interpretOpAfterDebugTrap);
 
-  // Load pc, bytecode op.
-  Register pcReg = LoadBytecodePC(masm, scratch1);
-  masm.load8ZeroExtend(Address(pcReg, 0), scratch1);
-
-  // Jump to table[op].
-  {
+  auto emitDispatch = [&](Register opcodeReg) -> bool {
     CodeOffset label = masm.moveNearAddressWithPatch(scratch2);
     if (!tableLabels_.append(label)) {
       return false;
     }
-    BaseIndex pointer(scratch2, scratch1, ScalePointer);
+#ifdef ENABLE_JS_AOT
+    masm.emitAOTDispatch(opcodeReg, scratch2);
+#else
+    BaseIndex pointer(scratch2, opcodeReg, ScalePointer);
     masm.branchToComputedAddress(pointer);
+#endif
+    return true;
+  };
+
+  Register pcReg = LoadBytecodePC(masm, scratch1);
+  masm.load8ZeroExtend(Address(pcReg, 0), scratch1);
+
+  if (!emitDispatch(scratch1)) {
+    return false;
   }
 
   // At the end of each op, emit code to bump the pc and jump to the
@@ -7211,12 +7288,9 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
 
     // Load the opcode, jump to table[op].
     masm.load8ZeroExtend(Address(InterpreterPCRegAtDispatch, 0), scratch1);
-    CodeOffset label = masm.moveNearAddressWithPatch(scratch2);
-    if (!tableLabels_.append(label)) {
+    if (!emitDispatch(scratch1)) {
       return false;
     }
-    BaseIndex pointer(scratch2, scratch1, ScalePointer);
-    masm.branchToComputedAddress(pointer);
     return true;
   };
 
@@ -7261,29 +7335,31 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   // Emit debug trap handler code (target of patchable call instructions). This
   // is just a tail call to the debug trap handler trampoline code.
   {
+    debugTrapHandlerOffset_ = masm.currentOffset();
     JitCode* handlerCode = runtime->jitRuntime()->debugTrapHandler(
         DebugTrapHandlerKind::Interpreter);
-    debugTrapHandlerOffset_ = masm.currentOffset();
-    masm.jump(handlerCode);
+    Register ptrReg = R1.scratchReg();
+    masm.movePtr(ImmPtr(handlerCode->raw()), ptrReg);
+    masm.jump(ptrReg);
   }
 
-  // Emit the table.
-  masm.haltingAlign(sizeof(void*));
+#ifdef ENABLE_JS_AOT
+  size_t entrySize = masm.aotDispatchTableEntrySize();
+#else
+  size_t entrySize = sizeof(uintptr_t);
+#endif
+  masm.haltingAlign(entrySize);
 
 #if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
     defined(JS_CODEGEN_RISCV64)
-  size_t numInstructions = JSOP_LIMIT * (sizeof(uintptr_t) / sizeof(uint32_t));
+  size_t numInstructions = JSOP_LIMIT * (entrySize / sizeof(uint32_t));
   AutoForbidPoolsAndNops afp(&masm, numInstructions);
 #endif
 
   tableOffset_ = masm.currentOffset();
 
-  for (const auto& opLabel : opLabels) {
-    MOZ_ASSERT(opLabel.bound());
-    CodeLabel cl;
-    masm.writeCodePointer(&cl);
-    cl.target()->bind(opLabel.offset());
-    masm.addCodeLabel(cl);
+  for (size_t i = 0; i < JSOP_LIMIT; i++) {
+    masm.writeDispatchTableEntry(tableOffset_, i, opLabels[i]);
   }
 
   return true;
@@ -7316,7 +7392,6 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 #endif
 
   saveInterpreterPCReg();
-
   using Fn2 = void (*)(BaselineFrame* frame, jsbytecode* pc);
   masm.setupUnalignedABICall(R0.scratchReg());
   masm.loadBaselineFramePtr(FramePointer, R0.scratchReg());
@@ -7329,8 +7404,52 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
   masm.ret();
 }
 
+#ifdef ENABLE_JS_AOT
+bool BaselineInterpreterGenerator::writeAOTBaseline(JSContext* cx, JitCode* code) {
+  AOTInterpManifest s;
+  s.InterpretOp = interpretOpOffset_;
+  s.InterpretOpNoDebugTrap = interpretOpNoDebugTrapOffset_;
+  s.BailoutPrologue = bailoutPrologueOffset_.offset();
+  s.ProfilerEnterToggle = profilerEnterFrameToggleOffset_.offset();
+  s.ProfilerExitToggle = profilerExitFrameToggleOffset_.offset();
+  s.DebugTrapHandler = debugTrapHandlerOffset_;
+  s.CallVMDebugPrologue = handler.callVMOffsets().debugPrologueOffset;
+  s.CallVMDebugEpilogue = handler.callVMOffsets().debugEpilogueOffset;
+  s.CallVMDebugAfterYield = handler.callVMOffsets().debugAfterYieldOffset;
+  s.DebugInstrumentationCount = handler.debugInstrumentationOffsets().length();
+  s.DebugTrapCount = debugTrapOffsets_.length();
+  s.CodeCoverageCount = handler.codeCoverageOffsets().length();
+  s.ICReturnCount = handler.icReturnOffsets().length();
+
+  const auto& debugInstr = handler.debugInstrumentationOffsets();
+  const auto& debugTraps = debugTrapOffsets_;
+  const auto& coverage = handler.codeCoverageOffsets();
+  const auto& icReturns = handler.icReturnOffsets();
+
+  return BuildAndSaveInterpBlob(
+      code, s,
+      mozilla::Span(debugInstr.begin(), debugInstr.length()),
+      mozilla::Span(debugTraps.begin(), debugTraps.length()),
+      mozilla::Span(coverage.begin(), coverage.length()),
+      mozilla::Span(icReturns.begin(), icReturns.length()));
+}
+
+#endif
+
 bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
+#ifdef ENABLE_JS_AOT
+  if (JitOptions.useAOTBaseline) {
+    if (LoadAOTInterpFromContainer(cx, interpreter)) {
+      MOZ_ASSERT(interpreter.loadedFromAOT());
+      return true;
+    }
+    MOZ_CRASH("AOT interp load failed but --aot=interp was requested");
+  }
+#endif
+
+  AOT_TIMER_BEGIN(interpGen);
+
   AutoCreatedBy acb(masm, "BaselineInterpreterGenerator::generate");
 
   if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
@@ -7341,18 +7460,21 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
   perfSpewer_.startRecording();
   perfSpewer_.recordOffset(masm, "Prologue");
   if (!emitPrologue()) {
+    JitSpew(JitSpew_BaselineAOT, "ERROR: emitPrologue failed");
     ReportOutOfMemory(cx);
     return false;
   }
 
   perfSpewer_.recordOffset(masm, "InterpreterLoop");
   if (!emitInterpreterLoop()) {
+    JitSpew(JitSpew_BaselineAOT, "ERROR: emitInterpreterLoop failed");
     ReportOutOfMemory(cx);
     return false;
   }
 
   perfSpewer_.recordOffset(masm, "Epilogue");
   if (!emitEpilogue()) {
+    JitSpew(JitSpew_BaselineAOT, "ERROR: emitEpilogue failed");
     ReportOutOfMemory(cx);
     return false;
   }
@@ -7376,6 +7498,9 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
       return false;
     }
 
+    MOZ_ASSERT(code->instructionsSize() == masm.instructionsSize());
+    MOZ_ASSERT(code->instructionsSize() > 0);
+
     // Register BaselineInterpreter code with the profiler's JitCode table.
     {
       auto entry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
@@ -7394,7 +7519,6 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
       code->setHasBytecodeMap();
     }
 
-    // Patch loads now that we know the tableswitch base address.
     CodeLocationLabel tableLoc(code, CodeOffset(tableOffset_));
     for (CodeOffset off : tableLabels_) {
       MacroAssembler::patchNearAddressMove(CodeLocationLabel(code, off),
@@ -7406,6 +7530,13 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 
 #ifdef MOZ_VTUNE
     vtune::MarkStub(code, "BaselineInterpreter");
+#endif
+
+#ifdef ENABLE_JS_AOT
+    if (JitOptions.dumpAOTBaseline && !writeAOTBaseline(cx, code)) {
+      JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT manifest");
+      return false;
+    }
 #endif
 
     interpreter.init(
@@ -7425,6 +7556,13 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
   if (coverage::IsLCovEnabled()) {
     interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
   }
+
+  AOT_TIMER_END(interpGen, "jit-gen", "interp", " bytes=%zu",
+                size_t(masm.instructionsSize()));
+
+  AOT_INSTR(AOTInstr_Lifecycle,
+            "jit-compile tier=blinterp bytes=%zu aot=0\n",
+            size_t(masm.instructionsSize()));
 
   return true;
 }

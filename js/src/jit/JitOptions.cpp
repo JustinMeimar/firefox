@@ -137,6 +137,15 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether replacing Object.keys with NativeIterators is globally disabled.
   SET_DEFAULT(disableObjectKeysScalarReplacement, false);
 
+  SET_DEFAULT(dumpAOTBaseline, false);
+  SET_DEFAULT(dumpAOTSelfHosted, false);
+
+  SET_DEFAULT(useAOTBaseline, false);
+  SET_DEFAULT(useAOTSelfHosted, false);
+  SET_DEFAULT(useAOTICs, false);
+  SET_DEFAULT(enforceAOTICs, false);
+  SET_DEFAULT(useAOTICHints, true);
+
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   // Whether the Portable Baseline Interpreter is enabled.
   SET_DEFAULT(portableBaselineInterpreter, false);
@@ -192,19 +201,27 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether to enable extra code to perform dynamic validations.
   SET_DEFAULT(runExtraChecks, false);
 
-#ifdef ENABLE_JS_AOT_ICS
-  SET_DEFAULT(enableAOTICs, false);
-  SET_DEFAULT(enableAOTICEnforce, false);
+#ifdef ENABLE_JS_AOT
+  SET_DEFAULT(dumpAOTICs, false);
+
+  if (getenv("JS_AOT_ICS")) {
+    useAOTICs = true;
+  }
+  if (getenv("JS_AOT_ICS_ENFORCE")) {
+    useAOTICs = true;
+    enforceAOTICs = true;
+  }
+  if (getenv("JS_AOT_ICS_DUMP")) {
+    dumpAOTICs = true;
+  }
+  if (getenv("JS_AOT_IC_HINTS_DISABLE")) {
+    useAOTICHints = false;
+  }
 #endif
 
-#ifdef ENABLE_JS_AOT_ICS_FORCE
-  SET_DEFAULT(enableAOTICs, true);
-#endif
-
-#ifdef ENABLE_JS_AOT_ICS_ENFORCE
-  SET_DEFAULT(enableAOTICs, true);
-  SET_DEFAULT(enableAOTICEnforce, true);
-#endif
+  if (enforceAOTICs) {
+    useAOTICs = true;
+  }
 
   // How many invocations or loop iterations are needed before functions
   // enter the Baseline Interpreter.

@@ -29,6 +29,7 @@ namespace jit {
 
 class BaselineFrame;
 class CacheIRStubInfo;
+class CompileZone;
 class ICScript;
 class ICStubSpace;
 
@@ -154,6 +155,9 @@ class ICStub {
   // Whether this is an ICFallbackStub or an ICCacheIRStub.
   bool isFallback_;
 
+  // NOTE(aot): pre-attached from a profile hint; transpiler ignores until entered.
+  bool preAttached_ = false;
+
   ICStub(uint8_t* stubCode, bool isFallback)
       : stubCode_(stubCode), isFallback_(isFallback) {
 #ifndef ENABLE_PORTABLE_BASELINE_INTERP
@@ -209,6 +213,13 @@ class ICStub {
   void setEnteredCount(uint32_t count) { enteredCount_ = count; }
   void resetEnteredCount() { enteredCount_ = 0; }
 
+  bool isPreAttached() const { return preAttached_; }
+  void setPreAttached() { preAttached_ = true; }
+
+  bool isStaticCode() const;
+
+  uint8_t* stubCodeRaw() const { return stubCode_; }
+
   static constexpr size_t offsetOfStubCode() {
     return offsetof(ICStub, stubCode_);
   }
@@ -242,6 +253,10 @@ class ICFallbackStub final : public ICStub {
   // Add a new stub to the IC chain terminated by this fallback stub.
   inline void addNewStub(ICEntry* icEntry, ICCacheIRStub* stub);
 
+  // NOTE(aot): splice a hint stub onto the chain without touching ICState so
+  // IRGen decisions stay unperturbed by mispredicted hints.
+  inline void addPreAttachedStub(ICEntry* icEntry, ICCacheIRStub* stub);
+
   void discardStubs(Zone* zone, ICEntry* icEntry);
 
   void clearUsedByTranspiler() { state_.clearUsedByTranspiler(); }
@@ -273,6 +288,12 @@ class ICCacheIRStub final : public ICStub {
 
   const CacheIRStubInfo* stubInfo_;
 
+#ifdef ENABLE_JS_AOT
+  // NOTE(aot): static AOT stubs have no JitCodeHeader, so FromExecutable
+  // can't find the JitCode; store it here.
+  JitCode* jitCode_;
+#endif
+
 #ifndef JS_64BIT
   // Ensure stub data is 8-byte aligned on 32-bit.
   uintptr_t padding_ = 0;
@@ -281,8 +302,20 @@ class ICCacheIRStub final : public ICStub {
  public:
   ICCacheIRStub(JitCode* stubCode, const CacheIRStubInfo* stubInfo)
       : ICStub(stubCode ? stubCode->raw() : nullptr, /* isFallback = */ false),
-        stubInfo_(stubInfo) {
+        stubInfo_(stubInfo)
+#ifdef ENABLE_JS_AOT
+        , jitCode_(stubCode)
+#endif
+  {
     MOZ_ASSERT_IF(!IsPortableBaselineInterpreterEnabled(), stubCode);
+  }
+
+  JitCode* jitCode() const {
+#ifdef ENABLE_JS_AOT
+    return jitCode_;
+#else
+    return JitCode::FromExecutable(stubCode_);
+#endif
   }
 
   ICStub* next() const { return next_; }
@@ -316,10 +349,18 @@ class ICCacheIRStub final : public ICStub {
 // Assert stub size is what we expect to catch regressions.
 #ifdef JS_64BIT
 static_assert(sizeof(ICFallbackStub) == 3 * sizeof(uintptr_t));
+#  ifdef ENABLE_JS_AOT
+static_assert(sizeof(ICCacheIRStub) == 5 * sizeof(uintptr_t));
+#  else
 static_assert(sizeof(ICCacheIRStub) == 4 * sizeof(uintptr_t));
+#  endif
 #else
 static_assert(sizeof(ICFallbackStub) == 5 * sizeof(uintptr_t));
+#  ifdef ENABLE_JS_AOT
+static_assert(sizeof(ICCacheIRStub) == 7 * sizeof(uintptr_t));
+#  else
 static_assert(sizeof(ICCacheIRStub) == 6 * sizeof(uintptr_t));
+#  endif
 #endif
 
 inline ICStub* ICStub::maybeNext() const {
@@ -331,6 +372,14 @@ inline void ICFallbackStub::addNewStub(ICEntry* icEntry, ICCacheIRStub* stub) {
   stub->setNext(icEntry->firstStub());
   icEntry->setFirstStub(stub);
   state_.trackAttached();
+}
+
+inline void ICFallbackStub::addPreAttachedStub(ICEntry* icEntry,
+                                               ICCacheIRStub* stub) {
+  MOZ_ASSERT(stub->next() == nullptr);
+  stub->setPreAttached();
+  stub->setNext(icEntry->firstStub());
+  icEntry->setFirstStub(stub);
 }
 
 AllocatableGeneralRegisterSet BaselineICAvailableGeneralRegs(size_t numInputs);

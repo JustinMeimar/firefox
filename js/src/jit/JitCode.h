@@ -47,7 +47,16 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
 
   // Raw pointer to the allocated memory to be able to modify the JitCodePointer
   // which is stored above the code.
-  uint8_t* allocatedMemory() const { return headerPtr() - headerSize_; }
+  uint8_t* allocatedMemory() const {
+    if (isStaticCode_) {
+      return headerPtr();  // NOTE(aot): no header for static code.
+    }
+    return headerPtr() - headerSize_;
+  }
+
+  bool isStaticCode() const { return isStaticCode_; }
+
+  void setInstructionsSize(uint32_t size) { insnSize_ = size; }
 
  protected:
   ExecutablePool* pool_;
@@ -64,6 +73,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
                              // native=>bytecode mapping tables.
   bool profilerInstrumented_ : 1;  // Whether or not profiling instrumentation
                                    // is on. Used by BaselineScript.
+  bool isStaticCode_ : 1;   // NOTE(aot): points directly at static .text.
   uint8_t localTracingSlots_;
 
   JitCode() = delete;
@@ -81,6 +91,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
         invalidated_(false),
         hasBytecodeMap_(false),
         profilerInstrumented_(false),
+        isStaticCode_(false),
         localTracingSlots_(0) {
     MOZ_ASSERT(CodeKind(kind_) == kind);
     MOZ_ASSERT(headerSize_ == headerSize);
@@ -101,7 +112,12 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   size_t instructionsSize() const { return insnSize_; }
   size_t bufferSize() const { return bufferSize_; }
   size_t headerSize() const { return headerSize_; }
-  size_t allocatedSize() const { return bufferSize_ + headerSize_; }
+  size_t allocatedSize() const {
+    if (isStaticCode_) {
+      return insnSize_;  // NOTE(aot): no buffer/header overhead.
+    }
+    return bufferSize_ + headerSize_;
+  }
 
   void traceChildren(JSTracer* trc);
   void finalize(JS::GCContext* gcx);
@@ -132,6 +148,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
 
   static JitCode* FromExecutable(uint8_t* buffer) {
     JitCode* code = JitCodeHeader::FromExecutable(buffer)->jitCode_;
+    MOZ_ASSERT(!code->isStaticCode_);
     MOZ_ASSERT(code->raw() == buffer);
     return code;
   }
@@ -146,6 +163,10 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   template <AllowGC allowGC>
   static JitCode* New(JSContext* cx, uint8_t* code, uint32_t totalSize,
                       uint32_t headerSize, ExecutablePool* pool, CodeKind kind);
+
+  // NOTE(aot): GC cell pointing directly at static .text; no pool, no header.
+  static JitCode* NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
+                            CodeKind kind);
 
  public:
   static const JS::TraceKind TraceKind = JS::TraceKind::JitCode;
@@ -173,8 +194,10 @@ class Concrete<js::jit::JitCode> : TracerConcrete<js::jit::JitCode> {
 
   Size size(mozilla::MallocSizeOf mallocSizeOf) const override {
     Size size = js::gc::Arena::thingSize(get().asTenured().getAllocKind());
-    size += get().bufferSize();
-    size += get().headerSize();
+    if (!get().isStaticCode()) {
+      size += get().bufferSize();
+      size += get().headerSize();
+    }
     return size;
   }
 

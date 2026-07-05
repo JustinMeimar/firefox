@@ -1592,6 +1592,30 @@ CacheIRStubInfo* CacheIRStubInfo::New(CacheKind kind, ICStubEngine engine,
                                  writer.codeLength());
 }
 
+/* static */
+CacheIRStubInfo* CacheIRStubInfo::NewFromSerialized(
+    CacheKind kind, ICStubEngine engine, bool makesGCCalls,
+    uint32_t stubDataOffset,
+    const uint8_t* cacheIRCode, uint32_t cacheIRCodeLength,
+    const uint8_t* fieldTypes, uint32_t numFields) {
+  size_t bytesNeeded =
+      sizeof(CacheIRStubInfo) + cacheIRCodeLength + (numFields + 1);
+  uint8_t* p = js_pod_malloc<uint8_t>(bytesNeeded);
+  if (!p) {
+    return nullptr;
+  }
+
+  uint8_t* codeStart = p + sizeof(CacheIRStubInfo);
+  memcpy(codeStart, cacheIRCode, cacheIRCodeLength);
+
+  uint8_t* ft = codeStart + cacheIRCodeLength;
+  memcpy(ft, fieldTypes, numFields);
+  ft[numFields] = uint8_t(StubField::Type::Limit);
+
+  return new (p) CacheIRStubInfo(kind, engine, makesGCCalls, stubDataOffset,
+                                 cacheIRCodeLength);
+}
+
 bool OperandLocation::operator==(const OperandLocation& other) const {
   if (kind_ != other.kind_) {
     return false;
@@ -8434,15 +8458,18 @@ bool CacheIRCompiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
                     &isUndefined);
 
   masm.bind(&isCallable);
-  masm.moveValue(StringValue(cx_->names().function), output.valueReg());
+  masm.movePtr(ImmGCPtr(cx_->names().function), scratch);
+  masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   masm.jump(&done);
 
   masm.bind(&isUndefined);
-  masm.moveValue(StringValue(cx_->names().undefined), output.valueReg());
+  masm.movePtr(ImmGCPtr(cx_->names().undefined), scratch);
+  masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   masm.jump(&done);
 
   masm.bind(&isObject);
-  masm.moveValue(StringValue(cx_->names().object), output.valueReg());
+  masm.movePtr(ImmGCPtr(cx_->names().object), scratch);
+  masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   masm.jump(&done);
 
   {
@@ -11849,12 +11876,18 @@ bool CacheIRCompiler::emitGuardFuse(RealmFuses::FuseIndex fuseIndex) {
 bool CacheIRCompiler::emitGuardRuntimeFuse(RuntimeFuses::FuseIndex fuseIndex) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
 
+  Maybe<AutoScratchRegister> scratchForAOT;
+  if (masm.isAOT()) {
+    scratchForAOT.emplace(allocator, masm);
+  }
+
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
     return false;
   }
 
-  masm.guardRuntimeFuse(fuseIndex, failure->label());
+  masm.guardRuntimeFuse(fuseIndex, failure->label(),
+                        scratchForAOT.isSome() ? scratchForAOT.ref() : InvalidReg);
   return true;
 }
 

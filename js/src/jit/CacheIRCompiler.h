@@ -765,6 +765,10 @@ class MOZ_RAII CacheIRCompiler {
 
   StubFieldPolicy stubFieldPolicy_;
 
+#ifdef ENABLE_JS_AOT
+  bool isAOTFill_ = false;
+#endif
+
   CacheIRCompiler(JSContext* cx, TempAllocator& alloc,
                   const CacheIRWriter& writer, uint32_t stubDataOffset,
                   Mode mode, StubFieldPolicy policy)
@@ -987,6 +991,11 @@ class MOZ_RAII CacheIRCompiler {
   void callVMInternal(MacroAssembler& masm, VMFunctionId id);
   template <typename Fn, Fn fn>
   void callVM(MacroAssembler& masm);
+
+ public:
+#ifdef ENABLE_JS_AOT
+  void setAOTFill() { isAOTFill_ = true; }
+#endif
 };
 
 // Ensures the IC's output register is available for writing.
@@ -1372,6 +1381,12 @@ class CacheIRStubInfo {
   static CacheIRStubInfo* New(CacheKind kind, ICStubEngine engine,
                               bool canMakeCalls, uint32_t stubDataOffset,
                               const CacheIRWriter& writer);
+
+  static CacheIRStubInfo* NewFromSerialized(
+      CacheKind kind, ICStubEngine engine, bool makesGCCalls,
+      uint32_t stubDataOffset,
+      const uint8_t* cacheIRCode, uint32_t cacheIRCodeLength,
+      const uint8_t* fieldTypes, uint32_t numFields);
 
   template <class Stub, StubField::Type type>
   typename MapStubFieldToType<type>::WrappedType& getStubField(

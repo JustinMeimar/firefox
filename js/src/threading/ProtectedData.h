@@ -364,6 +364,8 @@ class ProtectedDataWriteOnce {
     return value;
   }
 
+  static size_t offsetOfValue() { return offsetof(ThisType, value); }
+
  private:
   T value;
 #ifdef JS_HAS_PROTECTED_DATA_CHECKS

@@ -9,10 +9,20 @@
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/MemoryReporting.h"
 
+#include <fstream>
+
+#include "jsmath.h"
+
+#include "builtin/Array.h"
+#include "builtin/DataViewObject.h"
+#include "builtin/MapObject.h"
+#include "builtin/WeakMapObject.h"
+#include "builtin/WeakSetObject.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #include "jit/AliasAnalysis.h"
 #include "jit/AlignmentMaskAnalysis.h"
+#include "jit/AOTInstrumentation.h"
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BacktrackingAllocator.h"
 #include "jit/BaselineFrame.h"
@@ -58,13 +68,34 @@
 #include "jit/WarpOracle.h"
 #include "jit/WasmBCE.h"
 #include "jit/WasmRefTypeAnalysis.h"
+#if defined(JS_CODEGEN_X64)
+#  include "jit/x64/Assembler-x64.h"
+#endif
 #include "js/friend/UsageStatistics.h"  // JSUseCounter
 #include "js/Printf.h"
 #include "js/UniquePtr.h"
+#include "js/Wrapper.h"
+#include "proxy/DeadObjectProxy.h"
+#include "proxy/DOMProxy.h"
 #include "util/Memory.h"
 #include "util/WindowsWrapper.h"
+#include "vm/ArgumentsObject.h"
+#include "vm/ArrayBufferObject.h"
+#include "vm/ArrayObject.h"
+#include "vm/BoundFunctionObject.h"
+#include "vm/DateObject.h"
+#include "vm/DateTime.h"
+#include "vm/EnvironmentObject.h"
+#include "vm/GeneratorObject.h"
+#include "vm/GlobalObject.h"
 #include "vm/HelperThreads.h"
+#include "vm/Iteration.h"
+#include "vm/JSFunction.h"
+#include "vm/NativeObject.h"
+#include "vm/PlainObject.h"
 #include "vm/Realm.h"
+#include "vm/SharedArrayObject.h"
+#include "vm/TypedArrayObject.h"
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
 #endif
@@ -103,6 +134,89 @@ JitRuntime::~JitRuntime() {
   js_delete(jitHintsMap_.ref());
 }
 
+#ifdef ENABLE_JS_AOT
+void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
+  JSRuntime* rt = cx->runtime();
+
+#define AOT_SLOT(name, expr) \
+  aotIndirectionTable_.set(AOTSlot::name, uintptr_t(expr));
+#define AOT_SLOT_TRAMPOLINE(name) /* populated in populateAOTTrampolineSlots */
+#include "jit/AOTSlots.tbl"
+#undef AOT_SLOT
+#undef AOT_SLOT_TRAMPOLINE
+
+  uint32_t abiIdx = 0;
+  auto setABI = [&](auto fp) {
+    aotIndirectionTable_.set(
+        AOTSlotForABIFn(abiIdx++),
+        uintptr_t(JS_FUNC_TO_DATA_PTR(void*, fp)));
+  };
+
+#define EMIT_ABI(fp) setABI(fp);
+  ABIFUNCTION_LIST(EMIT_ABI)
+#undef EMIT_ABI
+#define EMIT_ABI_TYPED(fp, ...) setABI(static_cast<__VA_ARGS__>(fp));
+  ABIFUNCTION_AND_TYPE_LIST(EMIT_ABI_TYPED)
+#undef EMIT_ABI_TYPED
+
+  for (uint8_t i = uint8_t(UnaryMathFunction::SinNative);
+       i <= uint8_t(UnaryMathFunction::Round); i++) {
+    setABI(GetUnaryMathFunctionPtr(UnaryMathFunction(i)));
+  }
+  constexpr Scalar::Type atomicTypes[] = {
+      Scalar::Int8, Scalar::Uint8, Scalar::Int16,
+      Scalar::Uint16, Scalar::Int32, Scalar::Uint32};
+  for (auto ty : atomicTypes) { setABI(AtomicsCompareExchange(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsExchange(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsAdd(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsSub(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsAnd(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsOr(ty)); }
+  for (auto ty : atomicTypes) { setABI(AtomicsXor(ty)); }
+
+  setABI(ArrayConstructor);
+#define EMIT_TA_CTOR(_, T, N) setABI(TypedArrayConstructorNative(Scalar::N));
+  JS_FOR_EACH_TYPED_ARRAY(EMIT_TA_CTOR)
+#undef EMIT_TA_CTOR
+
+  MOZ_ASSERT(abiIdx <= kAOTMaxABIFunctions);
+}
+
+
+bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {
+
+#define SET(slot, val) aotIndirectionTable_.set(AOTSlot::slot, uintptr_t(val))
+  SET(ProfilerExitFrameTail, getProfilerExitFrameTail().value);
+  SET(DoubleToInt32Stub,     getDoubleToInt32ValueStub().value);
+  SET(ExceptionTail,         getExceptionTail().value);
+  SET(PreBarrier_Value,      preBarrier(MIRType::Value).value);
+  SET(PreBarrier_String,     preBarrier(MIRType::String).value);
+  SET(PreBarrier_Object,     preBarrier(MIRType::Object).value);
+  SET(PreBarrier_Shape,      preBarrier(MIRType::Shape).value);
+  SET(PreBarrier_WasmAnyRef, preBarrier(MIRType::WasmAnyRef).value);
+  
+  // NOTE(aot): two AOT reloc kinds hold debug trap handler addresses; make
+  // sure they exist so the reverse lookup doesn't find nullptr during dump.
+  if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Interpreter) ||
+      !ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Compiler)) {
+    return false;
+  }
+  SET(DebugTrapInterpreter,
+      debugTrapHandler(DebugTrapHandlerKind::Interpreter)->raw());
+  SET(DebugTrapCompiler,
+      debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw());
+#undef SET
+
+  size_t n = functionWrapperOffsets_.length();
+  for (size_t i = 0; i < n; i++) {
+    aotIndirectionTable_.set(
+        AOTSlotForVMWrapper(i),
+        uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
+  }
+  return true;
+}
+#endif  // ENABLE_JS_AOT
+
 uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
   AutoCreatedBy acb(masm, "startTrampolineCode");
 
@@ -116,12 +230,26 @@ uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
 bool JitRuntime::initialize(JSContext* cx) {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
 
+#ifdef ENABLE_JS_AOT
+  gAOTInstr.init();
+#endif
+
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
+
+#ifdef ENABLE_JS_AOT
+  populateAOTIndirectionTable(cx);
+#endif
 
   if (!generateTrampolines(cx)) {
     return false;
   }
+
+#ifdef ENABLE_JS_AOT
+  if (!populateAOTTrampolineSlots(cx)) {
+    return false;
+  }
+#endif
 
   if (!generateBaselineICFallbackCode(cx)) {
     return false;
@@ -143,6 +271,14 @@ bool JitRuntime::initialize(JSContext* cx) {
     return false;
   }
 
+#ifdef ENABLE_JS_AOT
+  if (baselineInterpreter_.loadedFromAOT()) {
+    if (!generateAOTInterpPreamble(cx)) {
+      return false;
+    }
+  }
+#endif
+
   // Initialize the jitCodeRaw of the Runtime's canonical SelfHostedLazyScript
   // to point to the interpreter trampoline.
   cx->runtime()->selfHostedLazyScript.ref().jitCodeRaw_ =
@@ -151,9 +287,35 @@ bool JitRuntime::initialize(JSContext* cx) {
   return true;
 }
 
+#ifdef ENABLE_JS_AOT
+JitCode* JitRuntime::generateAOTPreamble(JSContext* cx, void* target,
+                                         Register passReg) {
+  TempAllocator temp(&cx->tempLifoAlloc());
+  StackMacroAssembler masm(cx, temp);
+  AutoCreatedBy acb(masm, "JitRuntime::generateAOTPreamble");
+
+  masm.movePtr(ImmPtr(aotIndirectionTable_.baseAddress()), passReg);
+  masm.jump(ImmPtr(target));
+
+  Linker linker(masm);
+  return linker.newCode(cx, CodeKind::Other);
+}
+
+bool JitRuntime::generateAOTInterpPreamble(JSContext* cx) {
+  JitCode* code = generateAOTPreamble(cx, baselineInterpreter_.codeRaw(),
+                                      AOTTablePassReg);
+  if (!code) {
+    return false;
+  }
+  aotInterpPreamble_ = code;
+  return true;
+}
+#endif
+
 bool JitRuntime::generateTrampolines(JSContext* cx) {
   TempAllocator temp(&cx->tempLifoAlloc());
   StackMacroAssembler masm(cx, temp);
+  AutoCreatedBy acb(masm, "JitRuntime::generateTrampolines");
   PerfSpewerRangeRecorder rangeRecorder(masm);
 
   Label bailoutTail;
@@ -389,6 +551,14 @@ uint8_t* jit::LazyLinkTopActivation(JSContext* cx,
   return calleeScript->jitCodeRaw();
 }
 
+#ifdef ENABLE_JS_AOT
+void JitRuntime::traceAOTPreambles(JSTracer* trc) {
+  for (auto& e : aotPreambles_) {
+    TraceRoot(trc, &e.preamble, "aot-selfhosted-preamble");
+  }
+}
+#endif
+
 /* static */
 void JitRuntime::TraceAtomZoneRoots(JSTracer* trc) {
   // Shared stubs are allocated in the atoms zone, so do not iterate
@@ -583,6 +753,20 @@ template JitCode* JitCode::New<NoGC>(JSContext* cx, uint8_t* code,
                                      uint32_t bufferSize, uint32_t headerSize,
                                      ExecutablePool* pool, CodeKind kind);
 
+JitCode* JitCode::NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
+                             CodeKind kind) {
+  // NOTE(aot): shared across runtimes; lives in .text.
+  JitCode* codeObj = cx->newCell<JitCode, NoGC>(
+      code, /*bufferSize=*/0, /*headerSize=*/0, /*pool=*/nullptr, kind);
+  if (!codeObj) {
+    ReportOutOfMemory(cx);
+    return nullptr;
+  }
+  codeObj->isStaticCode_ = true;
+  codeObj->insnSize_ = codeSize;
+  return codeObj;
+}
+
 void JitCode::copyFrom(MacroAssembler& masm) {
   // Store the JitCode pointer in the JitCodeHeader so we can recover the
   // gcthing from relocation tables.
@@ -601,6 +785,11 @@ void JitCode::copyFrom(MacroAssembler& masm) {
 }
 
 void JitCode::traceChildren(JSTracer* trc) {
+  // NOTE(aot): no relocation tables on static code.
+  if (isStaticCode_) {
+    return;
+  }
+
   // Note that we cannot mark invalidated scripts, since we've basically
   // corrupted the code stream by injecting bailouts.
   if (invalidated()) {
@@ -635,6 +824,12 @@ void JitCode::finalize(JS::GCContext* gcx) {
 #ifdef MOZ_VTUNE
   vtune::UnmarkCode(this);
 #endif
+
+  // NOTE(aot): static code has no pool/header to release.
+  if (isStaticCode_) {
+    setHeaderPtr(nullptr);
+    return;
+  }
 
   MOZ_ASSERT(pool_);
 

@@ -32,6 +32,12 @@ const JitRuntime* CompileRuntime::jitRuntime() {
   return runtime()->jitRuntime();
 }
 
+#ifdef ENABLE_JS_AOT
+const JitZone* CompileRuntime::atomsJitZone() {
+  return runtime()->atomsZone()->jitZone();
+}
+#endif
+
 const GeckoProfilerRuntime& CompileRuntime::geckoProfiler() {
   return runtime()->geckoProfiler();
 }
@@ -96,6 +102,14 @@ const void* CompileRuntime::addressOfStringToAtomCache() {
 
 const void* CompileRuntime::addressOfLastBufferedWholeCell() {
   return runtime()->gc.addressOfLastBufferedWholeCell();
+}
+
+void* CompileRuntime::addressOfNurseryPosition() {
+  return runtime()->gc.addressOfNurseryPosition();
+}
+
+void* CompileRuntime::addressOfNurseryAllocatedSites() {
+  return runtime()->gc.addressOfNurseryAllocatedSites();
 }
 
 const void* CompileRuntime::addressOfRuntimeFuse(

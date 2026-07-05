@@ -30,7 +30,6 @@ UNIFIED_SOURCES += [
     "BranchPruning.cpp",
     "BytecodeAnalysis.cpp",
     "CacheIR.cpp",
-    "CacheIRAOT.cpp",
     "CacheIRCompiler.cpp",
     "CacheIRHealth.cpp",
     "CacheIRSpewer.cpp",
@@ -264,6 +263,17 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
         "wasm32/Trampoline-wasm32.cpp",
     ]
 
+
+if CONFIG["ENABLE_JS_AOT"]:
+    SOURCES += [
+        "AOT.cpp",
+        "AOTBaseline.S",
+        "AOTMacroAssembler.cpp",
+        "BaselineAOT.cpp",
+        "CacheIRAOT.cpp",
+    ]
+
+
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(
     "ABIFunctionTypeGenerated.h",
@@ -303,7 +313,7 @@ GeneratedFile(
     inputs=[],
 )
 
-if CONFIG["ENABLE_JS_AOT_ICS"]:
+if CONFIG["ENABLE_JS_AOT"]:
     GeneratedFile(
         "CacheIRAOTGenerated.h",
         script="GenerateCacheIRFiles.py",

@@ -32,6 +32,7 @@
 #endif
 #include "jit/ABIArgGenerator.h"
 #include "jit/ABIFunctions.h"
+#include "jit/AOT.h"
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
@@ -346,15 +347,19 @@ struct BranchWasmRefIsSubtypeRegisters {
 // lifoAlloc use if one will be destroyed before the other.
 class MacroAssembler : public MacroAssemblerSpecific {
  private:
-  // Information about the current JSRuntime. This is nullptr only for Wasm
-  // compilations.
+  // Information about the current JSRuntime. This is nullptr for Wasm
+  // compilations and AOT IC compilation.
   CompileRuntime* maybeRuntime_ = nullptr;
 
-  // Information about the current Realm. This is nullptr for Wasm compilations
-  // and when compiling runtime-wide jitcode that will live in the Atom zone:
-  // for example, trampolines, the baseline interpreter, and (if
-  // self_hosted_cache is enabled) self-hosted baseline code.
+  // Information about the current Realm. This is nullptr for Wasm compilations,
+  // AOT IC compilations, and when compiling runtime-wide jitcode that will live
+  // in the Atom zone: for example, trampolines, the baseline interpreter, and
+  // (if self_hosted_cache is enabled) self-hosted baseline code.
   CompileRealm* maybeRealm_ = nullptr;
+
+  // NOTE(aot): non-null while an AutoAOTCodegen scope is active.
+  AOTContext* aotContext_ = nullptr;
+  bool inAOTStubFrame_ = false;
 
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
@@ -366,6 +371,64 @@ class MacroAssembler : public MacroAssemblerSpecific {
                           CompileRealm* maybeRealm = nullptr);
 
  public:
+  // [SMDOC] AOT MacroAssembler Interface
+  //
+  // Dual-mode codegen helpers implemented in AOTMacroAssembler.cpp:
+  // in AOT mode they emit TLS-based indirection table loads; otherwise
+  // they resolve to compile-time addresses.
+  bool isAOT() const {
+#ifdef ENABLE_JS_AOT
+    return aotContext_ != nullptr;
+#else
+    return false;
+#endif
+  }
+
+#ifdef ENABLE_JS_AOT
+  AOTContext& aot() const {
+    MOZ_ASSERT(aotContext_);
+    return *aotContext_;
+  }
+
+  // Install/uninstall AOTContext. AutoAOTCodegen owns this transition;
+  // callers should not invoke directly. Installation must happen before any
+  // code is emitted so masm.isAOT() is stable over the whole codegen.
+  void setAOTContext(AOTContext* ctx) {
+    MOZ_ASSERT((aotContext_ == nullptr) != (ctx == nullptr),
+               "AOTContext must be installed and uninstalled in balanced pairs");
+    if (ctx) {
+      MOZ_ASSERT(currentOffset() == 0,
+                 "AOT scope must be installed before any code is emitted");
+      // NOTE(aot): realm-independent codegen; poison to catch stray uses.
+      maybeRealm_ = nullptr;
+    }
+    aotContext_ = ctx;
+  }
+
+  void emitAOTSlotLoad(AOTSlot slot, Register dest);
+  void callPreBarrierAOT(MIRType type, Register scratch);
+
+  void enterAOTStubFrame() { inAOTStubFrame_ = true; }
+  void leaveAOTStubFrame() { inAOTStubFrame_ = false; }
+  void loadZoneForAOT(Register dest);
+
+  // Dual-mode codegen helpers used at baseline AOT decision points.
+  // In AOT capture: emit table-based sequences. In non-AOT with the
+  // indirection-table option set: emit indirection loads. Otherwise: fall
+  // through to the ordinary sequence (may be a no-op).
+  void emitAOTStoreFrameTableBase(Register passReg, Register scratch,
+                                  const Address& dst);
+  void emitAOTCopyFrameTableBaseFromCaller(Register scratch);
+  void emitAOTDispatch(Register opcodeReg, Register tableReg);
+  size_t aotDispatchTableEntrySize() const;
+#endif
+
+  void loadRuntime(Register reg);
+  void loadVMWrapper(VMFunctionId id, Register dest);
+
+  void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
+                               const Label& handler);
+
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
     // shared between visitors in the CodeGenerator. This assertion
@@ -1027,6 +1090,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Load instructions
 
   inline void load32SignExtendToPtr(const Address& src, Register dest) PER_ARCH;
+  inline void load32SignExtendToPtr(const BaseIndex& src, Register dest) DEFINED_ON(x86, x64);
 
   inline void loadAbiReturnAddress(Register dest) PER_SHARED_ARCH;
 
@@ -5113,6 +5177,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                     Label* notSameDigit);
 
   void loadJSContext(Register dest);
+  void loadCurrentRealm(Register dest);
 
   void loadGlobalObjectData(Register dest);
 
@@ -5120,7 +5185,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void loadRuntimeFuse(RuntimeFuses::FuseIndex index, Register dest);
 
-  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail);
+  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail,
+                        Register scratch = InvalidReg);
 
   void switchToRealm(Register realm);
   void switchToRealm(const void* realm, Register scratch);
@@ -5237,7 +5303,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
  private:
   TrampolinePtr preBarrierTrampoline(MIRType type);
-
   template <typename T>
   void unguardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
@@ -5250,9 +5315,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Push(PreBarrierReg);
     computeEffectiveAddress(address, PreBarrierReg);
 
-    TrampolinePtr preBarrier = preBarrierTrampoline(type);
-
-    call(preBarrier);
+#ifdef ENABLE_JS_AOT
+    if (isAOT()) {
+      callPreBarrierAOT(type, ScratchReg);
+    } else
+#endif
+    {
+      TrampolinePtr preBarrier = preBarrierTrampoline(type);
+      call(preBarrier);
+    }
     Pop(PreBarrierReg);
     // On arm64, SP may be < PSP now (that's OK).
     // eg testcase: tests/auto-regress/bug702915.js
@@ -5263,7 +5334,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
   template <typename T>
   void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
-    branchTestNeedsMarkingBarrier(Assembler::Zero, &done);
+#ifdef ENABLE_JS_AOT
+    if (isAOT()) {
+      // NOTE(aot): no realm; use AnyZone variant that loads cx->zone.
+      branchTestNeedsMarkingBarrierAnyZone(Assembler::Zero, &done, ScratchReg);
+    } else
+#endif
+    {
+      branchTestNeedsMarkingBarrier(Assembler::Zero, &done);
+    }
     unguardedCallPreBarrier(address, type);
     bind(&done);
   }
@@ -6038,10 +6117,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   using MacroAssemblerSpecific::movePtr;
+  void movePtr(ImmPtr imm, Register dest);
+  void movePtr(ImmGCPtr imm, Register dest);
 
-  void movePtr(TrampolinePtr ptr, Register dest) {
-    movePtr(ImmPtr(ptr.value), dest);
-  }
+  using MacroAssemblerSpecific::storePtr;
+  void storePtr(ImmPtr imm, const Address& address);
 
  private:
   void handleFailure();

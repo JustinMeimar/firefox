@@ -73,6 +73,13 @@ struct DefaultJitOptions {
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   bool portableBaselineInterpreter;
 #endif
+  bool dumpAOTBaseline;
+  bool dumpAOTSelfHosted;
+  bool useAOTBaseline;
+  bool useAOTSelfHosted;
+  bool useAOTICs;
+  bool enforceAOTICs;
+  bool useAOTICHints;
   bool baselineInterpreter;
   bool baselineJit;
   bool baselineBatching;
@@ -126,9 +133,8 @@ struct DefaultJitOptions {
   uint32_t ionMaxLocalsAndArgsMainThread;
   uint32_t wasmBatchBaselineThreshold;
   uint32_t wasmBatchIonThreshold;
-#ifdef ENABLE_JS_AOT_ICS
-  bool enableAOTICs;
-  bool enableAOTICEnforce;
+#ifdef ENABLE_JS_AOT
+  bool dumpAOTICs;
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to
@@ -182,6 +188,18 @@ struct DefaultJitOptions {
   void maybeSetWriteProtectCode(bool val);
 
   bool eagerIonCompilation() const { return normalIonWarmUpThreshold == 0; }
+
+#ifdef ENABLE_JS_AOT
+  bool aotNeedsIndirectionTable() const {
+    return useAOTBaseline || useAOTSelfHosted || useAOTICs || dumpAOTICs;
+  }
+  bool aotHintsEnabled() const {
+    return useAOTICs && useAOTICHints;
+  }
+  bool aotLoadCorpusAtInit() const {
+    return useAOTICs && !dumpAOTICs;
+  }
+#endif
 };
 
 extern DefaultJitOptions JitOptions;

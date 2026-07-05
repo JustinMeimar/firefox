@@ -564,7 +564,7 @@ void jit::JitSpewDef(JitSpewChannel channel, const char* str,
 
 #endif /* JS_JITSPEW */
 
-#if defined(JS_JITSPEW) || defined(ENABLE_JS_AOT_ICS)
+#if defined(JS_JITSPEW) || defined(ENABLE_JS_AOT)
 
 const char* js::jit::ValTypeToString(JSValueType type) {
   switch (type) {
@@ -597,4 +597,4 @@ const char* js::jit::ValTypeToString(JSValueType type) {
   }
 }
 
-#endif /* defined(JS_JITSPEW) || defined(ENABLE_JS_AOT_ICS) */
+#endif /* defined(JS_JITSPEW) || defined(ENABLE_JS_AOT) */

@@ -10,13 +10,18 @@
 #include "jstypes.h"
 
 #include "builtin/Eval.h"
+#include "jit/AOT.h"
+#include "jit/AOTInstrumentation.h"
 #include "jit/BaselineCacheIRCompiler.h"
+#include "jit/CacheIRAOT.h"
 #include "jit/CacheIRGenerator.h"
 #include "jit/CacheIRHealth.h"
 #include "jit/JitFrames.h"
 #include "jit/JitHints.h"
+#include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
+#include "jit/JitZone.h"
 #include "jit/Linker.h"
 #include "jit/PerfSpewer.h"
 #include "jit/SharedICHelpers.h"
@@ -38,6 +43,7 @@
 #  include "vtune/VTuneWrapper.h"
 #endif
 
+#include "jit/JitHints-inl.h"
 #include "jit/MacroAssembler-inl.h"
 #include "jit/SharedICHelpers-inl.h"
 #include "jit/VMFunctionList-inl.h"
@@ -51,6 +57,15 @@ using mozilla::DebugOnly;
 
 namespace js {
 namespace jit {
+
+bool ICStub::isStaticCode() const {
+#ifdef ENABLE_JS_AOT
+  uint8_t* base = GetAOTTextBase();
+  return stubCode_ >= base && stubCode_ < base + GetAOTTextSize();
+#else
+  return false;
+#endif
+}
 
 // Class used to emit all Baseline IC fallback code when initializing the
 // JitRuntime.
@@ -122,6 +137,12 @@ AllocatableGeneralRegisterSet BaselineICAvailableGeneralRegs(size_t numInputs) {
   MOZ_ASSERT(!regs.has(ICTailCallReg));
 #endif
   regs.take(ICStubReg);
+
+#ifdef ENABLE_JS_AOT
+  if (JitOptions.useAOTBaseline) {
+    regs.take(AOTTablePassReg);
+  }
+#endif
 
   switch (numInputs) {
     case 0:
@@ -387,6 +408,25 @@ void ICScript::initICEntries(JSContext* cx, JSScript* script) {
   const BaselineICFallbackCode& fallbackCode =
       cx->runtime()->jitRuntime()->baselineICFallbackCode();
 
+#ifdef ENABLE_JS_AOT
+  // NOTE(aot): PGO eager attach. Hints sorted by pcOffset, matched via a
+  // single cursor walk. Pre-attached stubs are ICState-invisible (see
+  // addPreAttachedStub) and transpiler-invisible until entered
+  // (WarpScriptOracle::maybeAddIcSnapshot), so a mispredicted hint costs
+  // one dead guard per dispatch.
+  mozilla::Span<const CacheIRAOTHint> aotHints;
+  const JitZone* atomsJitZone = nullptr;
+  if (JitOptions.aotHintsEnabled() && !isInlined() &&
+      !script->treatAsRunOnce()) {
+    aotHints =
+        GetAOTEagerICHintsForScript(JitHintsMap::getScriptKey(script));
+    if (!aotHints.empty()) {
+      atomsJitZone = cx->runtime()->atomsZone()->jitZone();
+    }
+  }
+  size_t aotHintCursor = 0;
+#endif
+
   // For JOF_IC ops: initialize ICEntries and fallback stubs.
   for (BytecodeLocation loc : js::AllBytecodesIterable(script)) {
     JSOp op = loc.getOp();
@@ -422,6 +462,44 @@ void ICScript::initICEntries(JSContext* cx, JSScript* script) {
     icEntryIndex++;
     new (&entryRef) ICEntry(stub);
     new (stub) ICFallbackStub(offset, stubCode);
+
+#ifdef ENABLE_JS_AOT
+    if (atomsJitZone) {
+      while (aotHintCursor < aotHints.size() &&
+             aotHints[aotHintCursor].pcOffset < offset) {
+        aotHintCursor++;
+      }
+      for (; aotHintCursor < aotHints.size() &&
+             aotHints[aotHintCursor].pcOffset == offset;
+           aotHintCursor++) {
+        const JitZone::AOTStubBlueprint* bp = atomsJitZone->getAOTStubBlueprint(
+            aotHints[aotHintCursor].corpusIdx);
+        if (!bp) {
+          continue;
+        }
+        // NOTE(aot): stub-data present here means corpus/hint-table drift.
+        if (MOZ_UNLIKELY(bp->info->stubDataSize() != 0)) {
+          MOZ_ASSERT_UNREACHABLE("eager IC hint resolved to a Tier B stub");
+          continue;
+        }
+
+        void* mem = cx->zone()->jitZone()->stubSpace()->alloc(
+            bp->info->stubDataOffset());
+        if (!mem) {
+          // NOTE(aot): stop eager attach on OOM; fallback path still works.
+          atomsJitZone = nullptr;
+          break;
+        }
+        auto* newStub = new (mem) ICCacheIRStub(bp->code, bp->info);
+        stub->addPreAttachedStub(&entryRef, newStub);
+
+        AOT_INSTR(AOTInstr_IC, "ic-preattach kind=%s idx=%u script=%u pc=%u\n",
+                  CacheKindNames[uint8_t(bp->info->kind())],
+                  aotHints[aotHintCursor].corpusIdx,
+                  aotHints[aotHintCursor].scriptKey, offset);
+      }
+    }
+#endif
   }
 
   // Assert all ICEntries have been initialized.
@@ -457,10 +535,16 @@ static void MaybeNotifyWarp(JSScript* script, ICFallbackStub* stub) {
 }
 
 void ICCacheIRStub::trace(JSTracer* trc) {
+#ifdef ENABLE_JS_AOT
+  if (jitCode_) {
+    TraceManuallyBarrieredEdge(trc, &jitCode_, "baseline-ic-stub-code");
+  }
+#else
   if (hasJitCode()) {
     JitCode* stubJitCode = jitCode();
     TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
   }
+#endif
 
   TraceCacheIRStub(trc, this, stubInfo());
 }
@@ -542,6 +626,13 @@ static void TryAttachStub(const char* name, JSContext* cx, BaselineFrame* frame,
 
 void ICFallbackStub::unlinkStub(Zone* zone, ICEntry* icEntry,
                                 ICCacheIRStub* prev, ICCacheIRStub* stub) {
+  AOT_INSTR(AOTInstr_IC, "ic-detach kind=%s code=%u hash=%u\n",
+            CacheKindNames[uint8_t(stub->stubInfo()->kind())],
+            unsigned(stub->jitCode()->instructionsSize()),
+            unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
+                stub->stubInfo()->kind(), ICStubEngine::Baseline,
+                stub->stubInfo()->code(), stub->stubInfo()->codeLength()))));
+
   // We are removing edges from ICStub to gcthings. Perform a barrier to let the
   // GC know about those edges.
   PreWriteBarrier(zone, stub);

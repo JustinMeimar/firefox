@@ -69,6 +69,9 @@ class BaselineFrame {
   JSObject* envChain_;        // Environment chain (always initialized).
   ICScript* icScript_;        // IC script (initialized if Warp is enabled).
   ArgumentsObject* argsObj_;  // If HAS_ARGS_OBJ, the arguments object.
+#ifdef ENABLE_JS_AOT
+  uintptr_t* aotTableBase_;
+#endif
 
   // We need to split the Value into 2 fields of 32 bits, otherwise the C++
   // compiler may add some padding between the fields.
@@ -212,6 +215,9 @@ class BaselineFrame {
 
  private:
   bool uninlineIsProfilerSamplingEnabled(JSContext* cx);
+#ifdef ENABLE_JS_AOT
+  void initAOTTableBase(JSContext* cx);
+#endif
 
  public:
   // Switch a JIT frame on the stack to Interpreter mode. The caller is
@@ -224,12 +230,18 @@ class BaselineFrame {
     MOZ_ASSERT(!runningInInterpreter());
     flags_ |= RUNNING_IN_INTERPRETER;
     setInterpreterFields(pc);
+#ifdef ENABLE_JS_AOT
+    initAOTTableBase(cx);
+#endif
   }
   void switchFromJitToInterpreterAtPrologue(JSContext* cx) {
     MOZ_ASSERT(!uninlineIsProfilerSamplingEnabled(cx));
     MOZ_ASSERT(!runningInInterpreter());
     flags_ |= RUNNING_IN_INTERPRETER;
     setInterpreterFieldsForPrologue(script());
+#ifdef ENABLE_JS_AOT
+    initAOTTableBase(cx);
+#endif
   }
 
   // Like switchFromJitToInterpreter, but set the interpreterICEntry_ field to
@@ -244,6 +256,9 @@ class BaselineFrame {
     interpreterScript_ = script();
     interpreterPC_ = pc;
     interpreterICEntry_ = nullptr;
+#ifdef ENABLE_JS_AOT
+    initAOTTableBase(cx);
+#endif
   }
 
   bool runningInInterpreter() const { return flags_ & RUNNING_IN_INTERPRETER; }
@@ -339,6 +354,11 @@ class BaselineFrame {
     return *argsObj_;
   }
 
+#ifdef ENABLE_JS_AOT
+  uintptr_t* aotTableBase() const { return aotTableBase_; }
+  void setAOTTableBase(uintptr_t* base) { aotTableBase_ = base; }
+#endif
+
   bool prevUpToDate() const { return flags_ & PREV_UP_TO_DATE; }
   void setPrevUpToDate() { flags_ |= PREV_UP_TO_DATE; }
   void unsetPrevUpToDate() { flags_ &= ~PREV_UP_TO_DATE; }
@@ -410,6 +430,11 @@ class BaselineFrame {
   static int reverseOffsetOfICScript() {
     return -int(Size()) + offsetof(BaselineFrame, icScript_);
   }
+#ifdef ENABLE_JS_AOT
+  static int reverseOffsetOfAOTTableBase() {
+    return -int(Size()) + offsetof(BaselineFrame, aotTableBase_);
+  }
+#endif
   static int reverseOffsetOfLocal(size_t index) {
     return -int(Size()) - (index + 1) * sizeof(Value);
   }

@@ -6,6 +6,8 @@
 #define jit_x64_SharedICHelpers_x64_inl_h
 
 #include "jit/BaselineFrame.h"
+#include "jit/CompileWrappers.h"
+#include "jit/JitRuntime.h"
 #include "jit/SharedICHelpers.h"
 
 #include "jit/MacroAssembler-inl.h"
@@ -39,7 +41,7 @@ inline void EmitBaselineCallVM(TrampolinePtr target, MacroAssembler& masm) {
   masm.call(target);
 }
 
-inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register) {
+inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register scratch) {
 #ifdef DEBUG
   // Compute frame size. Because the return address is still on the stack,
   // this is:
@@ -48,7 +50,6 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register) {
   //   - StackPointer
   //   - sizeof(return address)
 
-  ScratchRegisterScope scratch(masm);
   masm.movq(FramePointer, scratch);
   masm.subq(StackPointer, scratch);
   masm.subq(Imm32(sizeof(void*)), scratch);  // Return address.
@@ -65,11 +66,27 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register) {
   masm.storePtr(ImmWord(MakeFrameDescriptor(FrameType::BaselineJS)),
                 Address(StackPointer, sizeof(uintptr_t)));
 
+#ifdef ENABLE_JS_AOT
+  // NOTE(aot): can't bake the table address; grab it from the baseline frame.
+  if (masm.isAOT()) {
+    masm.loadPtr(
+        Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()),
+        scratch);
+  } else {
+    const AOTIndirectionTable& table =
+        masm.runtime()->jitRuntime()->aotIndirectionTable();
+    masm.movePtr(ImmPtr(table.baseAddress()), scratch);
+  }
+#endif
+
   // Save old frame pointer, stack pointer and stub reg.
   masm.Push(FramePointer);
   masm.mov(StackPointer, FramePointer);
 
   masm.Push(ICStubReg);
+#ifdef ENABLE_JS_AOT
+  masm.Push(scratch);
+#endif
 }
 
 }  // namespace jit

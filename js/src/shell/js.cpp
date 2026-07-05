@@ -89,7 +89,9 @@
 #  include "irregexp/RegExpAPI.h"
 #endif
 
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineCompileQueue.h"
+#include "jit/BaselineJIT.h"
 #include "jit/CacheIRHealth.h"
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
@@ -12373,6 +12375,16 @@ static int Shell(JSContext* cx, OptionParser* op) {
 
     JSAutoRealm ar(cx, glob);
 
+#ifdef ENABLE_JS_AOT
+    if (jit::JitOptions.dumpAOTBaseline ||
+        jit::JitOptions.dumpAOTSelfHosted ||
+        jit::JitOptions.dumpAOTICs) {
+      if (!jit::DumpAOTContainer(cx)) {
+        return EXIT_FAILURE;
+      }
+    }
+#endif
+
     ShellContext* sc = GetShellContext(cx);
     if (!sc->moduleLoader && !InitModuleLoader(cx, *op)) {
       return EXIT_FAILURE;
@@ -13057,11 +13069,16 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "no-portable-baseline",
                         "Disable Portable Baseline Interpreter") ||
 #endif
-#ifdef ENABLE_JS_AOT_ICS
-      !op.addBoolOption('\0', "aot-ics", "Enable ahead-of-time-known ICs") ||
-      !op.addBoolOption(
-          '\0', "enforce-aot-ics",
-          "Enable enforcing only use of ahead-of-time-known ICs") ||
+#ifdef ENABLE_JS_AOT
+      !op.addBoolOption('\0', "aot-dump-baseline", "Dump baseline interpreter binary for AOT patching.") ||
+      !op.addBoolOption('\0', "aot-dump-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
+      !op.addBoolOption('\0', "aot-dump-ics", "Dump AOT IC stubs as binary blobs into the container.") ||
+      !op.addBoolOption('\0', "aot", "Use all AOT compiled artifacts.") ||
+      !op.addBoolOption('\0', "aot-baseline", "Use AOT baseline interpreter.") ||
+      !op.addBoolOption('\0', "aot-self-hosted", "Use AOT self-hosted functions.") ||
+      !op.addBoolOption('\0', "aot-ics", "Use AOT inline caches.") ||
+      !op.addBoolOption('\0', "aot-ics-enforce", "Disable runtime IC codegen; use only AOT stubs or fallback.") ||
+      !op.addBoolOption('\0', "no-aot-ic-hints", "Do not eagerly attach hinted AOT IC stubs at initICEntries.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14154,15 +14171,6 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
 #endif
 
-#ifdef ENABLE_JS_AOT_ICS
-  if (op.getBoolOption("aot-ics")) {
-    jit::JitOptions.enableAOTICs = true;
-  }
-  if (op.getBoolOption("enforce-aot-ics")) {
-    jit::JitOptions.enableAOTICEnforce = true;
-  }
-#endif
-
   if (op.getBoolOption("blinterp")) {
     jit::JitOptions.baselineInterpreter = true;
   }
@@ -14195,7 +14203,38 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("no-baseline")) {
     jit::JitOptions.baselineJit = false;
   }
-
+#ifdef ENABLE_JS_AOT
+  if (op.getBoolOption("aot-dump-baseline")) {
+    jit::JitOptions.dumpAOTBaseline = true;
+  }
+  if (op.getBoolOption("aot-dump-self-hosted")) {
+    jit::JitOptions.dumpAOTSelfHosted = true;
+  }
+  if (op.getBoolOption("aot-dump-ics")) {
+    jit::JitOptions.dumpAOTICs = true;
+  }
+  if (op.getBoolOption("aot")) {
+    jit::JitOptions.useAOTBaseline = true;
+    jit::JitOptions.useAOTSelfHosted = true;
+    jit::JitOptions.useAOTICs = true;
+  }
+  if (op.getBoolOption("aot-baseline")) {
+    jit::JitOptions.useAOTBaseline = true;
+  }
+  if (op.getBoolOption("aot-self-hosted")) {
+    jit::JitOptions.useAOTSelfHosted = true;
+  }
+  if (op.getBoolOption("aot-ics")) {
+    jit::JitOptions.useAOTICs = true;
+  }
+  if (op.getBoolOption("aot-ics-enforce")) {
+    jit::JitOptions.useAOTICs = true;
+    jit::JitOptions.enforceAOTICs = true;
+  }
+  if (op.getBoolOption("no-aot-ic-hints")) {
+    jit::JitOptions.useAOTICHints = false;
+  }
+#endif
   if (op.getBoolOption("no-ion")) {
     jit::JitOptions.ion = false;
   }

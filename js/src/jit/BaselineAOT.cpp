@@ -1,0 +1,601 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "jit/BaselineAOT.h"
+
+#include "mozilla/Sprintf.h"
+
+#include <cstdint>
+#include <fstream>
+
+#include "frontend/CompilationStencil.h"
+#include "gc/Zone.h"
+#include "jit/AOT.h"
+#include "jit/AOTInstrumentation.h"
+#include "jit/BaselineJIT.h"
+#include "jit/CacheIRCompiler.h"
+#include "jit/CacheIRSpewer.h"
+#include "jit/CacheIRWriter.h"
+#include "jit/IonTypes.h"
+#include "jit/JitCode.h"
+#include "jit/JitcodeMap.h"
+#include "jit/JitContext.h"
+#include "jit/JitHints.h"
+#include "jit/JitOptions.h"
+#include "jit/JitRuntime.h"
+#include "jit/JitSpewer.h"
+#include "jit/JitZone.h"
+#include "jit/ProcessExecutableMemory.h"
+#include "jit/VMFunctions.h"
+#include "vm/JSAtomUtils.h"
+#include "vm/JSContext.h"
+#include "vm/JSFunction.h"
+#include "vm/JSScript.h"
+#include "vm/Runtime.h"
+
+#include "jit/JitScript-inl.h"
+#include "vm/GeckoProfiler-inl.h"
+#include "vm/JSObject-inl.h"
+#include "vm/JSScript-inl.h"
+
+namespace js::jit {
+
+#ifdef ENABLE_JS_AOT
+
+void MaybeLogUnseenICStub(CacheKind kind, const CacheIRWriter& writer) {
+  if (!getenv("AOT_ICS_LOG_UNSEEN")) {
+    return;
+  }
+  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
+                                writer.codeStart(), writer.codeLength());
+  HashNumber h = CacheIRStubKey::hash(lookup);
+  const char* dir = getenv("AOT_ICS_DIR");
+  char filename[256];
+  if (dir) {
+    SprintfLiteral(filename, "%s/IC-%u", dir, unsigned(h));
+  } else {
+    SprintfLiteral(filename, "IC-%u", unsigned(h));
+  }
+  FILE* f = fopen(filename, "w");
+  if (!f) {
+    fprintf(stderr, "MaybeLogUnseenICStub: fopen %s failed: %s\n", filename,
+            strerror(errno));
+    return;
+  }
+  {
+    Fprinter printer(f);
+    SpewCacheIROpsAsAOT(printer, kind, writer);
+  }
+  fflush(f);
+  fclose(f);
+}
+
+void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
+                           bool isAOTFill) {
+  if (isAOTFill || !gAOTInstr.enabled(AOTInstr_IC) ||
+      !gAOTInstr.pgoDumpDir) {
+    return;
+  }
+
+  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
+                                writer.codeStart(), writer.codeLength());
+  HashNumber h = CacheIRStubKey::hash(lookup);
+
+  char filename[600];
+  SprintfLiteral(filename, "%s/IC-%u", gAOTInstr.pgoDumpDir, unsigned(h));
+
+  FILE* f = fopen(filename, "w");
+  if (!f) {
+    fprintf(stderr, "MaybeDumpICStubForPGO: fopen %s failed: %s\n", filename,
+            strerror(errno));
+    return;
+  }
+  {
+    Fprinter printer(f);
+    SpewCacheIROpsAsAOT(printer, kind, writer);
+  }
+  fflush(f);
+  fclose(f);
+}
+
+static mozilla::Maybe<AOTBlobWriter> sSavedInterpreterBlob;
+
+bool BuildAndSaveInterpBlob(
+    JitCode* code, const AOTInterpManifest& scalars,
+    mozilla::Span<const uint32_t> debugInstr,
+    mozilla::Span<const uint32_t> debugTraps,
+    mozilla::Span<const uint32_t> coverage,
+    mozilla::Span<const BaselineInterpreter::ICReturnOffset> icReturns) {
+  uint8_t* codeStart = code->raw();
+  size_t codeSize = code->rawEnd() - codeStart;
+
+  sSavedInterpreterBlob.reset();
+  sSavedInterpreterBlob.emplace(AOTBlobKind::BaselineInterpreter, 0,
+                                "BaselineInterpreter");
+
+  AOTBlobWriter& blob = *sSavedInterpreterBlob;
+  if (!blob.writeCode(codeStart, codeSize)) return false;
+  if (!blob.writeManifest(scalars)) return false;
+  if (!blob.writeMetadata(debugInstr, debugTraps, coverage, icReturns)) {
+    return false;
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "Saved interpreter blob: code=%zu manifest=%zu metadata=%zu",
+          codeSize, sizeof(scalars),
+          debugInstr.size() * sizeof(uint32_t) +
+              debugTraps.size() * sizeof(uint32_t) +
+              coverage.size() * sizeof(uint32_t) +
+              icReturns.size() *
+                  sizeof(BaselineInterpreter::ICReturnOffset));
+
+  return true;
+}
+
+static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
+                                 AOTBlobWriter* blobOut) {
+  Rooted<PropertyName*> name(cx, atom->asPropertyName());
+  auto indexRange = cx->runtime()->getSelfHostedScriptIndexRange(name);
+  if (!indexRange) {
+    return false;
+  }
+  AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
+
+  UniqueChars nameStr = AtomToPrintableString(cx, atom);
+  if (!nameStr) {
+    return false;
+  }
+
+  RootedFunction fun(
+      cx, cx->runtime()->selfHostStencil().instantiateSelfHostedLazyFunction(
+              cx, cx->runtime()->selfHostStencilInput().atomCache,
+              indexRange->start, name));
+  if (!fun) {
+    return false;
+  }
+  if (!cx->runtime()->delazifySelfHostedFunction(cx, name, fun)) {
+    return false;
+  }
+
+  Rooted<JSScript*> script(cx, fun->nonLazyScript());
+  MOZ_ASSERT(script);
+
+  if (!CanBaselineInterpretScript(script)) {
+    return false;
+  }
+
+  if (!cx->zone()->ensureJitZoneExists(cx)) {
+    return false;
+  }
+  AutoKeepJitScripts keepJitScript(cx);
+  if (!script->ensureHasJitScript(cx, keepJitScript)) {
+    return false;
+  }
+
+  BaselineOptions options({BaselineOption::ForceMainThreadCompilation});
+  MethodStatus result = BaselineCompile(cx, script, options,
+                                        /*isAOTDump=*/true);
+  if (result != Method_Compiled) {
+    return false;
+  }
+  MOZ_ASSERT(script->hasBaselineScript());
+
+  BaselineScript* bs = script->baselineScript();
+  JitCode* jitCode = bs->method();
+
+  AOTScriptManifest sm{};
+  bs->fillAOTManifest(&sm, blobOut);
+  sm.codeSize = jitCode->instructionsSize();
+  sm.headerSize = jitCode->headerSize();
+
+  if (!blobOut->writeCode(jitCode->raw(), jitCode->instructionsSize())) {
+    return false;
+  }
+  if (!blobOut->writeManifest(sm)) return false;
+
+  JitSpew(JitSpew_BaselineAOT,
+          "AOT Compiled '%-22s' size=%5ub  callSites=%3u  osr=%u",
+          nameStr.get(), sm.codeSize, sm.retAddrEntryCount,
+          sm.osrEntryCount);
+
+  return true;
+}
+
+bool DumpAOTContainer(JSContext* cx) {
+  MOZ_ASSERT(JitOptions.dumpAOTBaseline ||
+             JitOptions.dumpAOTSelfHosted ||
+             JitOptions.dumpAOTICs);
+
+  const char* outPath = kAOTOutputPath;
+  AOTContainerWriter container;
+
+  if (sSavedInterpreterBlob) {
+    if (!container.addBlob(std::move(*sSavedInterpreterBlob))) return false;
+    sSavedInterpreterBlob.reset();
+  }
+
+  if (JitOptions.dumpAOTSelfHosted) {
+    if (!cx->realm()) {
+      JitSpew(JitSpew_BaselineAOT,
+              "Skipping self-hosted dump: no realm available");
+    } else {
+
+    JS::RootedVector<JSAtom*> names(cx);
+    {
+      auto& map = cx->runtime()->selfHostScriptMap.ref();
+      if (!names.reserve(map.count())) return false;
+      for (auto iter = map.iter(); !iter.done(); iter.next()) {
+        names.infallibleAppend(iter.get().key());
+      }
+    }
+
+    uint32_t compiled = 0;
+    uint32_t skipped = 0;
+    for (JSAtom* rawAtom : names.get()) {
+      Rooted<JSAtom*> atom(cx, rawAtom);
+      UniqueChars nameStr = AtomToPrintableString(cx, atom);
+      if (!nameStr) {
+        skipped++;
+        continue;
+      }
+
+      AOTBlobWriter blob(AOTBlobKind::SelfHostedFunction,
+                         mozilla::HashString(nameStr.get()),
+                         std::string(nameStr.get()));
+      if (!compileAOTSelfHosted(cx, atom, &blob)) {
+        skipped++;
+        continue;
+      }
+      compiled++;
+      if (!container.addBlob(std::move(blob))) return false;
+    }
+    JitSpew(JitSpew_BaselineAOT,
+            "Self-hosted AOT: compiled %u, skipped %u", compiled, skipped);
+    }
+  }
+
+  auto icBlobs = TakeSavedICBlobs();
+  for (auto& icBlob : icBlobs) {
+    if (!container.addBlob(std::move(icBlob))) return false;
+  }
+
+  if (container.blobCount() == 0) {
+    JitSpew(JitSpew_BaselineAOT, "No blobs to write, skipping container.");
+    return true;
+  }
+
+  std::ofstream out(outPath, std::ios::trunc);
+  if (!out.is_open()) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.", outPath);
+    return false;
+  }
+
+  if (!container.finalize(out)) {
+    return false;
+  }
+
+  out.close();
+
+  JitSpew(JitSpew_BaselineAOT, "Wrote AOT container with %u blob(s) to %s",
+          container.blobCount(), outPath);
+  JitSpew(JitSpew_BaselineAOT, "Rebuild the engine to use AOT mode.");
+
+  return true;
+}
+
+bool LoadAOTInterpFromContainer(JSContext* cx,
+                                BaselineInterpreter& interpreter) {
+  AOT_TIMER_BEGIN(interp);
+
+  auto container = AOTContainerReader::fromEmbedded();
+  if (!container) {
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: No valid AOT container embedded");
+    return false;
+  }
+
+  auto reader = container->getBlob(AOTBlobKind::BaselineInterpreter);
+  if (!reader) {
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: No BaselineInterpreter blob in AOT container!");
+    return false;
+  }
+
+  if (reader->entry()->manifestSize != sizeof(AOTInterpManifest)) {
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: Interpreter manifest size mismatch (expected %zu, got %u). "
+            "Stale AOT container?",
+            sizeof(AOTInterpManifest), reader->entry()->manifestSize);
+    return false;
+  }
+
+  if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
+          cx, DebugTrapHandlerKind::Interpreter)) {
+    return false;
+  }
+  if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
+          cx, DebugTrapHandlerKind::Compiler)) {
+    return false;
+  }
+
+  AOTIndirectionTable& table = cx->runtime()->jitRuntime()->aotIndirectionTable();
+  table.set(AOTSlot::DebugTrapInterpreter,
+            uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
+                DebugTrapHandlerKind::Interpreter)->raw()));
+  table.set(AOTSlot::DebugTrapCompiler,
+            uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
+                DebugTrapHandlerKind::Compiler)->raw()));
+
+  JitCode* code = AllocateAOTCode(
+      cx, reader->entry(), GetAOTTextBase(), CodeKind::Other);
+  if (!code) {
+    return false;
+  }
+
+  if (!interpreter.initFromAOT(cx, code, *reader)) {
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: Failed to initialize from AOT symbols");
+    return false;
+  }
+
+  {
+    auto profEntry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
+        cx, code, code->raw(), code->rawEnd());
+    if (!profEntry) {
+      return false;
+    }
+
+    JitcodeGlobalTable* globalTable =
+        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+    if (!globalTable->addEntry(std::move(profEntry))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+
+    code->setHasBytecodeMap();
+  }
+
+  if (cx->runtime()->geckoProfiler().enabled()) {
+    interpreter.toggleProfilerInstrumentation(true);
+  }
+
+  if (coverage::IsLCovEnabled()) {
+    interpreter.toggleCodeCoverageInstrumentationUnchecked(true);
+  }
+
+  AOT_TIMER_END(interp, "aot-load", "interp", " bytes=%u",
+                reader->entry()->codeSize);
+
+  AOT_INSTR(AOTInstr_Lifecycle,
+            "jit-compile tier=blinterp bytes=%u aot=1\n",
+            reader->entry()->codeSize);
+
+  return true;
+}
+
+bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
+                       Handle<JSAtom*> name) {
+  AOT_TIMER_BEGIN(sh);
+
+  JS::AutoCheckCannotGC nogc;
+  uint32_t nameHash = name->hasLatin1Chars()
+      ? mozilla::HashStringKnownLength(name->latin1Chars(nogc), name->length())
+      : mozilla::HashStringKnownLength(name->twoByteChars(nogc), name->length());
+
+  auto container = AOTContainerReader::fromEmbedded();
+  if (!container) {
+    return false;
+  }
+
+  auto reader = container->getBlob(AOTBlobKind::SelfHostedFunction, nameHash);
+  if (!reader) {
+    return false;
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "Loading AOT self-hosted function (nameHash=%u, codeSize=%u)",
+          nameHash, reader->entry()->codeSize);
+
+  if (reader->entry()->manifestSize != sizeof(AOTScriptManifest)) {
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: Script manifest size mismatch (expected %zu, got %u). "
+            "Stale AOT container?",
+            sizeof(AOTScriptManifest), reader->entry()->manifestSize);
+    return false;
+  }
+
+  AOTScriptManifest manifest = reader->readManifest<AOTScriptManifest>();
+
+  JitCode* code = AllocateAOTCode(
+      cx, reader->entry(), GetAOTTextBase(), CodeKind::Baseline);
+  if (!code) {
+    return false;
+  }
+
+  BaselineScript* bs = BaselineScript::New(
+      cx, manifest.warmUpCheckPrologueOffset,
+      manifest.profilerEnterToggleOffset,
+      manifest.profilerExitToggleOffset,
+      manifest.retAddrEntryCount, manifest.osrEntryCount,
+      manifest.debugTrapEntryCount, manifest.resumeEntryCount);
+  if (!bs) {
+    return false;
+  }
+  bs->setMethod(code);
+
+  auto retAddrs   = reader->readMetadataArray<RetAddrEntry>(manifest.retAddrEntryCount);
+  auto osrEntries = reader->readMetadataArray<BaselineScript::OSREntry>(manifest.osrEntryCount);
+  auto debugTraps = reader->readMetadataArray<BaselineScript::DebugTrapEntry>(manifest.debugTrapEntryCount);
+
+  if (!retAddrs.empty())   bs->copyRetAddrEntries(retAddrs.data());
+  if (!osrEntries.empty()) bs->copyOSREntries(osrEntries.data());
+  if (!debugTraps.empty()) bs->copyDebugTrapEntries(debugTraps.data());
+
+  bs->computeResumeNativeOffsets(script, ResumeOffsetEntryVector());
+
+  mozilla::Maybe<JitContext> jctx;
+  if (!MaybeGetJitContext()) {
+    jctx.emplace(cx);
+  }
+  JitRuntime* jrt = cx->runtime()->jitRuntime();
+  JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
+                                                AOTSelfHostedPassReg);
+  if (!preamble) {
+    return false;
+  }
+  JitRuntime::AOTPreambleEntry pe = { code->raw(), preamble };
+  if (!jrt->aotPreambles_.append(pe)) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+
+  script->jitScript()->setBaselineScript(script, bs);
+
+  {
+    JitcodeGlobalTable* globalTable =
+        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+    if (!globalTable->lookup(code->raw())) {
+      UniqueChars str =
+          GeckoProfilerRuntime::allocProfileString(cx, script);
+      if (!str) {
+        return false;
+      }
+
+      auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
+          cx, code, code->raw(), code->rawEnd(), std::move(str));
+      if (!profEntry) {
+        return false;
+      }
+
+      if (!globalTable->addEntry(std::move(profEntry))) {
+        ReportOutOfMemory(cx);
+        return false;
+      }
+      code->setHasBytecodeMap();
+    }
+  }
+
+  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
+          cx->runtime())) {
+    bs->toggleProfilerInstrumentation(true);
+  }
+
+  AOT_TIMER_END(sh, "aot-load", "selfhosted", " bytes=%u hash=%u",
+                reader->entry()->codeSize, nameHash);
+
+  return true;
+}
+
+bool LoadAOTICStubs(JSContext* cx) {
+  MOZ_ASSERT(cx->inAtomsZone());
+  AOT_TIMER_BEGIN(ics);
+
+  JitZone* jitZone = cx->zone()->jitZone();
+  if (!jitZone) {
+    return false;
+  }
+
+  auto container = AOTContainerReader::fromEmbedded();
+  if (!container) {
+    return false;
+  }
+
+  uint8_t* textBase = GetAOTTextBase();
+  uint32_t loadedCount = 0;
+  uint32_t totalCount = 0;
+
+  container->forEachBlob(AOTBlobKind::InlineCacheStub,
+      [&](AOTBlobReader& reader) {
+    totalCount++;
+    if (reader.entry()->manifestSize != sizeof(AOTICStubManifest)) {
+      return;
+    }
+
+    AOTICStubManifest manifest =
+        reader.readManifest<AOTICStubManifest>();
+
+    auto cacheIRCode = reader.readMetadataArray<uint8_t>(
+        manifest.cacheIRCodeLength);
+    auto fieldTypes  = reader.readMetadataArray<uint8_t>(
+        manifest.numStubFields);
+
+    CacheIRStubInfo* stubInfo = CacheIRStubInfo::NewFromSerialized(
+        manifest.kind, ICStubEngine::Baseline,
+        manifest.makesGCCalls != 0,
+        manifest.stubDataOffset,
+        cacheIRCode.data(), cacheIRCode.size(),
+        fieldTypes.data(), fieldTypes.size());
+    if (!stubInfo) {
+      return;
+    }
+
+    JitCode* code = AllocateAOTCode(
+        cx, reader.entry(), textBase, CodeKind::Baseline);
+    if (!code) {
+      js_free(stubInfo);
+      return;
+    }
+
+    code->setLocalTracingSlots(manifest.localTracingSlots);
+
+    CacheIRStubKey::Lookup lookup(
+        manifest.kind, ICStubEngine::Baseline,
+        stubInfo->code(), stubInfo->codeLength());
+
+    CacheIRStubInfo* existing = nullptr;
+    if (jitZone->getBaselineCacheIRStubCode(lookup, &existing)) {
+      js_free(stubInfo);
+      return;
+    }
+
+    CacheIRStubKey key(stubInfo);
+    if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {
+      return;
+    }
+
+    // NOTE(aot): nameHash carries corpusIdx+1 so eager-attach hints resolve to
+    // (JitCode*, CacheIRStubInfo*). stubInfo moved into the primary map above;
+    // re-lookup for the canonical pointer.
+    MOZ_ASSERT(reader.entry()->nameHash != 0);
+    uint32_t corpusIdx = reader.entry()->nameHash - 1;
+    CacheIRStubInfo* installed = nullptr;
+    (void)jitZone->getBaselineCacheIRStubCode(lookup, &installed);
+    MOZ_ASSERT(installed);
+    if (reader.entry()->nameHash == 0 ||
+        !jitZone->setAOTStubBlueprint(corpusIdx, code, installed)) {
+      // NOTE(aot): non-fatal; primary map works, hints for this stub no-op.
+      JitSpew(JitSpew_BaselineAOT,
+              "AOTStubBlueprint insert failed for idx=%u", corpusIdx);
+    }
+
+    AOT_INSTR(AOTInstr_IC, "ic-corpus kind=%s hash=%u code=%u idx=%u\n",
+              CacheKindNames[uint8_t(manifest.kind)],
+              unsigned(CacheIRStubKey::hash(lookup)),
+              unsigned(code->instructionsSize()),
+              corpusIdx);
+
+    loadedCount++;
+  });
+
+  if (loadedCount > 0) {
+    JitSpew(JitSpew_BaselineAOT,
+            "Loaded %u/%u AOT IC stubs from container",
+            loadedCount, totalCount);
+  }
+  if (loadedCount < totalCount) {
+    JitSpew(JitSpew_BaselineAOT,
+            "WARNING: %u AOT IC stubs failed to load",
+            totalCount - loadedCount);
+  }
+
+  AOT_TIMER_END(ics, "aot-load", "ics", " count=%u", loadedCount);
+
+  return loadedCount > 0;
+}
+
+#endif  // ENABLE_JS_AOT
+
+}  // namespace js::jit

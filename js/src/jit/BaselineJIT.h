@@ -35,6 +35,9 @@ class RunState;
 
 namespace jit {
 
+class AOTBlobReader;
+class AOTBlobWriter;
+struct AOTScriptManifest;
 class BaselineFrame;
 class ExceptionBailoutInfo;
 class IonCompileTask;
@@ -376,6 +379,11 @@ class alignas(uintptr_t) BaselineScript final
   void removePendingIonCompileTask(JSRuntime* rt, JSScript* script);
 
   size_t allocBytes() const { return allocBytes_; }
+
+#ifdef ENABLE_JS_AOT
+  void fillAOTManifest(struct AOTScriptManifest* sm,
+                       AOTBlobWriter* blob);
+#endif
 };
 static_assert(
     sizeof(BaselineScript) % sizeof(uintptr_t) == 0,
@@ -469,10 +477,12 @@ bool DispatchOffThreadBaselineBatchEager(JSContext* cx);
 bool DispatchOffThreadBaselineBatch(JSContext* cx);
 
 MethodStatus BaselineCompile(JSContext* cx, JSScript* script,
-                             BaselineOptions options);
+                             BaselineOptions options,
+                             bool isAOTDump = false);
 
 // Class storing the generated Baseline Interpreter code for the runtime.
 class BaselineInterpreter {
+ friend class BaselineInterpreterGenerator;
  public:
   struct CallVMOffsets {
     uint32_t debugPrologueOffset = 0;
@@ -525,6 +535,10 @@ class BaselineInterpreter {
   // Offsets of some callVMs for BaselineDebugModeOSR.
   CallVMOffsets callVMOffsets_;
 
+#ifdef ENABLE_JS_AOT
+  bool loadedFromAOT_ = false;
+#endif
+
   uint8_t* codeAtOffset(uint32_t offset) const {
     MOZ_ASSERT(offset > 0);
     MOZ_ASSERT(offset < code_->instructionsSize());
@@ -547,7 +561,14 @@ class BaselineInterpreter {
             ICReturnOffsetVector&& icReturnOffsets,
             const CallVMOffsets& callVMOffsets);
 
+#ifdef ENABLE_JS_AOT
+  [[nodiscard]] bool initFromAOT(JSContext* cx, JitCode* code,
+                                  AOTBlobReader& reader);
+  bool loadedFromAOT() const { return loadedFromAOT_; }
+#endif
+
   uint8_t* codeRaw() const { return code_->raw(); }
+  size_t codeSize() const { return code_->instructionsSize(); }
 
   uint8_t* retAddrForDebugPrologueCallVM() const {
     return codeAtOffset(callVMOffsets_.debugPrologueOffset);
@@ -580,6 +601,9 @@ class BaselineInterpreter {
 
 [[nodiscard]] bool GenerateBaselineInterpreter(
     JSContext* cx, BaselineInterpreter& interpreter);
+
+// LoadAOTSelfHosted, DumpAOTContainer, and LoadAOTInterpFromContainer
+// are declared in jit/BaselineAOT.h.
 
 inline bool IsBaselineJitEnabled(JSContext* cx) {
   if (MOZ_UNLIKELY(!IsBaselineInterpreterEnabled())) {

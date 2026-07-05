@@ -247,6 +247,15 @@ static constexpr Register PreBarrierReg = rdx;
 
 static constexpr Register InterpreterPCReg = r14;
 
+#ifdef ENABLE_JS_AOT
+// r12 (callee-saved) for the interpreter -- generateEnterJIT saves it.
+static constexpr Register AOTTablePassReg = r12;
+// r11 (volatile/ScratchReg) for self-hosted builtins -- entered via normal
+// JIT call conventions where volatile regs are dead. Nothing in the baseline
+// prologue before emitInitFrameFields touches r11.
+static constexpr Register AOTSelfHostedPassReg = r11;
+#endif
+
 static constexpr uint32_t ABIStackAlignment = 16;
 static constexpr uint32_t CodeAlignment = 16;
 static constexpr uint32_t JitStackAlignment = 16;
@@ -338,6 +347,12 @@ class Assembler : public AssemblerX86Shared {
   using AssemblerX86Shared::vmovq;
 
   Assembler() : extendedJumpTable_(0) {}
+
+  const PendingJumpVector& extendedJumps() const { return extendedJumps_; }
+  uint32_t extendedJumpTableOffset() const { return extendedJumpTable_; }
+  static constexpr uint32_t sizeOfJumpTableEntry() {
+    return SizeOfJumpTableEntry;
+  }
 
   static void TraceJumpRelocations(JSTracer* trc, JitCode* code,
                                    CompactBufferReader& reader);

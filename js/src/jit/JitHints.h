@@ -10,6 +10,7 @@
 #include "mozilla/LinkedList.h"
 #include "jit/ICState.h"
 #include "jit/JitOptions.h"
+#include "js/Vector.h"
 #include "vm/BytecodeLocation.h"
 #include "vm/JSScript.h"
 
@@ -32,9 +33,12 @@ class ICScript;
  */
 
 class JitHintsMap {
+ public:
   // ScriptKey is a hash on the filename+sourceStart.
   using ScriptKey = HashNumber;
-  ScriptKey getScriptKey(JSScript* script) const;
+  static ScriptKey getScriptKey(JSScript* script);
+
+ private:
 
   static constexpr uint32_t ICModeHintMaxEntries = 128;
 

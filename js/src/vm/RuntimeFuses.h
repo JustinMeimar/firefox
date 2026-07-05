@@ -91,6 +91,20 @@ struct RuntimeFuses {
     MOZ_CRASH("Fuse Not Found");
   }
 
+  static constexpr size_t offsetOfFuseByIndex(FuseIndex index) {
+    switch (index) {
+      // Return fuses.
+#define FUSE(Name, LowerName) \
+  case FuseIndex::Name:       \
+    return offsetof(RuntimeFuses, LowerName);
+      FOR_EACH_RUNTIME_FUSE(FUSE)
+#undef FUSE
+      case FuseIndex::LastFuseIndex:
+        break;
+    }
+    MOZ_CRASH("Fuse Not Found");
+  }
+
   static int32_t fuseOffsets[];
   static const char* fuseNames[];
 

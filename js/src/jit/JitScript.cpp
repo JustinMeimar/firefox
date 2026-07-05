@@ -10,6 +10,9 @@
 #include <utility>
 
 #include "gc/GCMarker.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTInstrumentation.h"
+#endif
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BytecodeAnalysis.h"
@@ -669,6 +672,12 @@ void JitScript::setBaselineScriptImpl(JS::GCContext* gcx, JSScript* script,
   if (hasBaselineScript()) {
     AddCellMemory(script, baselineScript_->allocBytes(),
                   MemoryUse::BaselineScript);
+#ifdef ENABLE_JS_AOT
+    AOT_INSTR(AOTInstr_Lifecycle, "jit-compile tier=baseline bytes=%zu script=%s:%u\n",
+              baselineScript_->allocBytes(),
+              script->filename() ? script->filename() : "<null>",
+              unsigned(script->lineno()));
+#endif
   }
 
   script->resetWarmUpResetCounter();
@@ -696,6 +705,12 @@ void JitScript::setIonScriptImpl(JS::GCContext* gcx, JSScript* script,
   MOZ_ASSERT_IF(hasIonScript(), hasBaselineScript());
   if (hasIonScript()) {
     AddCellMemory(script, ionScript_->allocBytes(), MemoryUse::IonScript);
+#ifdef ENABLE_JS_AOT
+    AOT_INSTR(AOTInstr_Lifecycle, "jit-compile tier=ion bytes=%zu script=%s:%u\n",
+              ionScript_->allocBytes(),
+              script->filename() ? script->filename() : "<null>",
+              unsigned(script->lineno()));
+#endif
   }
 
   script->updateJitCodeRaw(gcx->runtime());
@@ -987,11 +1002,22 @@ JitScript* ICScript::outerJitScript() {
 // 5. The hash will change if the set of shapes stored in ShapeListSnapshot
 //    is changed by stub folding or GC (the shapes in ShapeListObject are weak
 //    pointers).
+// 6. The hash will change if the entered count of a leading AOT
+//    pre-attached stub changes from 0.
 HashNumber ICScript::hash(JSContext* cx) {
   HashNumber h = 0;
   for (size_t i = 0; i < numICEntries(); i++) {
     ICStub* stub = icEntry(i).firstStub();
     ICFallbackStub* fallback = fallbackStub(i);
+
+#ifdef ENABLE_JS_AOT
+    // NOTE(aot): mirrors WarpScriptOracle::maybeAddIcSnapshot; skip
+    // never-entered hints so the hash matches the transpiler's view.
+    while (!stub->isFallback() && stub->isPreAttached() &&
+           stub->enteredCount() == 0) {
+      stub = stub->toCacheIRStub()->next();
+    }
+#endif
 
     // Hash the address of the first stub.
     h = mozilla::AddToHash(h, stub);

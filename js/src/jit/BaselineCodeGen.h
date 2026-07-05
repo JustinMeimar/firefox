@@ -5,6 +5,7 @@
 #ifndef jit_BaselineCodeGen_h
 #define jit_BaselineCodeGen_h
 
+#include "jit/BaselineAOT.h"
 #include "jit/BaselineFrameInfo.h"
 #include "jit/BytecodeAnalysis.h"
 #include "jit/CompileWrappers.h"
@@ -334,6 +335,7 @@ class BaselineCompilerHandler {
   bool compilingOffThread_ = false;
 
   bool needsEnvAllocSite_ = false;
+  bool isAOT_ = false;
 
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
 
@@ -433,7 +435,7 @@ class BaselineCompilerHandler {
   }
 
   bool realmIndependentJitcode() const {
-    return JS::Prefs::experimental_self_hosted_cache() &&
+      return (JS::Prefs::experimental_self_hosted_cache() || isAOT_) &&
            script()->selfHosted();
   }
 
@@ -577,6 +579,7 @@ class BaselineInterpreterHandler {
 using BaselineInterpreterCodeGen = BaselineCodeGen<BaselineInterpreterHandler>;
 
 class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
+  friend class BaselineCodeGen<BaselineInterpreterHandler>;
   // Offsets of patchable call instructions for debugger breakpoints/stepping.
   Vector<uint32_t, 0, SystemAllocPolicy> debugTrapOffsets_;
 
@@ -595,6 +598,10 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   // Offset of the jump (tail call) to the debug trap handler trampoline code.
   // When the debugger is enabled, NOPs are patched to calls to this location.
   uint32_t debugTrapHandlerOffset_ = 0;
+
+#ifdef ENABLE_JS_AOT
+  [[nodiscard]] bool writeAOTBaseline(JSContext* cx, JitCode* code);
+#endif
 
   BaselineInterpreterPerfSpewer perfSpewer_;
 

@@ -16,6 +16,7 @@
 #include "jstypes.h"
 
 #include "jit/ABIFunctions.h"
+#include "jit/AOT.h"
 #include "jit/BaselineICList.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CalleeToken.h"
@@ -231,6 +232,39 @@ class JitRuntime {
   MainThreadData<uint32_t> disallowArbitraryCode_{false};
 #endif
 
+  AOTIndirectionTable aotIndirectionTable_;
+
+#ifdef ENABLE_JS_AOT
+  // NOTE(aot): loads &aotIndirectionTable into AOTTablePassReg then jumps to
+  // the interpreter blob entry.
+  WriteOnceData<JitCode*> aotInterpPreamble_{nullptr};
+  [[nodiscard]] bool generateAOTInterpPreamble(JSContext* cx);
+
+  public:
+  // NOTE(aot): JitCode* keeps preambles GC-alive.
+  struct AOTPreambleEntry { uint8_t* aotCode; JitCode* preamble; };
+  Vector<AOTPreambleEntry, 0, SystemAllocPolicy> aotPreambles_;
+
+  uint8_t* lookupAOTPreamble(uint8_t* codeRaw) const {
+    for (const auto& e : aotPreambles_) {
+      if (e.aotCode == codeRaw) return e.preamble->raw();
+    }
+    return nullptr;
+  }
+
+  void traceAOTPreambles(JSTracer* trc);
+  void clearAOTPreambles() {
+    aotPreambles_.clear();
+    aotInterpPreamble_ = nullptr;
+  }
+  private:
+#endif
+
+#ifdef ENABLE_JS_AOT
+  void populateAOTIndirectionTable(JSContext* cx);
+  [[nodiscard]] bool populateAOTTrampolineSlots(JSContext* cx);
+#endif
+
   bool generateTrampolines(JSContext* cx);
   bool generateBaselineICFallbackCode(JSContext* cx);
 
@@ -356,6 +390,20 @@ class JitRuntime {
     return baselineInterpreter_;
   }
 
+  // NOTE(aot): preamble trampoline is `mov passReg, &table; jmp target`.
+  // Interp uses AOTTablePassReg (r12, callee-saved); self-hosted uses
+  // AOTSelfHostedPassReg (r11, volatile).
+  JitCode* generateAOTPreamble(JSContext* cx, void* target, Register passReg);
+
+  uint8_t* baselineInterpreterEntryAddr() const {
+#ifdef ENABLE_JS_AOT
+    if (aotInterpPreamble_.ref()) {
+      return aotInterpPreamble_.ref()->raw();
+    }
+#endif
+    return baselineInterpreter_.codeRaw();
+  }
+
   TrampolinePtr getGenericBailoutHandler() const {
     return trampolineCode(bailoutHandlerOffset_);
   }
@@ -382,6 +430,13 @@ class JitRuntime {
                                trampolineCode(enterJITOffset_).value);
   }
 
+  AOTIndirectionTable& aotIndirectionTable() { return aotIndirectionTable_; }
+  const AOTIndirectionTable& aotIndirectionTable() const {
+    return aotIndirectionTable_;
+  }
+  static size_t offsetOfAOTIndirectionTable() {
+    return offsetof(JitRuntime, aotIndirectionTable_);
+  }
   // Return the registers from the native caller frame of the given JIT frame.
   // Nothing{} if frameStackAddress is NOT pointing at a native-to-JIT entry
   // frame, or if the information is not accessible/implemented on this

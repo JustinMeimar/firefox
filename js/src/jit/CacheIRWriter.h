@@ -370,7 +370,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
         lastIndex_(0) {
   }
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_JS_AOT
   CacheIRWriter(JSContext* cx, const CacheIRAOTStub& aot);
 #endif
 
@@ -422,6 +422,9 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     return currentInstruction > operandLastUsed_[operandId];
   }
   uint32_t operandLastUsed(uint32_t operandId) const {
+    if (operandId >= operandLastUsed_.length()) {
+      return UINT32_MAX;
+    }
     return operandLastUsed_[operandId];
   }
 

@@ -7,6 +7,9 @@
 #include "mozilla/RandomNum.h"
 
 #include "gc/GC.h"
+#include "jit/AOTInstrumentation.h"
+#include "jit/AutoAOTCodegen.h"
+#include "jit/BaselineAOT.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRAOT.h"
 #include "jit/CacheIRSpewer.h"
@@ -28,6 +31,7 @@
 #include "vm/PortableBaselineInterpret.h"
 #include "vm/StaticStrings.h"
 
+#include "jit/JitHints-inl.h"
 #include "jit/JitScript-inl.h"
 #include "jit/MacroAssembler-inl.h"
 #include "jit/SharedICHelpers-inl.h"
@@ -121,6 +125,9 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
 
   MOZ_ASSERT(!compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = true;
+#ifdef ENABLE_JS_AOT
+  masm.enterAOTStubFrame();
+#endif
 
   // All current uses of this are to call VM functions that can GC.
   compiler.makesGCCalls_ = true;
@@ -128,6 +135,9 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
 void AutoStubFrame::leave(MacroAssembler& masm) {
   MOZ_ASSERT(compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = false;
+#ifdef ENABLE_JS_AOT
+  masm.leaveAOTStubFrame();
+#endif
 
 #ifdef DEBUG
   masm.setFramePushed(framePushedAtEnterStubFrame_);
@@ -194,6 +204,14 @@ void BaselineCacheIRCompiler::callVM(MacroAssembler& masm) {
 
 JitCode* BaselineCacheIRCompiler::compile() {
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compile");
+
+#ifdef ENABLE_JS_AOT
+  mozilla::Maybe<AutoAOTCodegen> aotScope;
+  if (isAOTFill_) {
+    aotScope.emplace(masm, cx_);
+  }
+  MOZ_ASSERT_IF(isAOTFill_, !JitOptions.enableICFramePointers);
+#endif
 
 #ifndef JS_USE_LINK_REGISTER
   masm.adjustFrame(sizeof(intptr_t));
@@ -901,16 +919,16 @@ bool BaselineCacheIRCompiler::emitStoreSlotShared(bool isFixed,
   Address offsetAddr = stubAddress(offsetOffset);
   masm.load32(offsetAddr, scratch1);
 
-  if (isFixed) {
-    BaseIndex slot(obj, scratch1, TimesOne);
-    EmitPreBarrier(masm, slot, MIRType::Value);
-    masm.storeValue(val, slot);
-  } else {
+  auto buildSlot = [this, obj, isFixed, &scratch1, &scratch2]() -> BaseIndex {
+    if (isFixed) {
+      return BaseIndex(obj, scratch1, TimesOne);
+    }
     masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch2.ref());
-    BaseIndex slot(scratch2.ref(), scratch1, TimesOne);
-    EmitPreBarrier(masm, slot, MIRType::Value);
-    masm.storeValue(val, slot);
-  }
+    return BaseIndex(scratch2.ref(), scratch1, TimesOne);
+  };
+  BaseIndex slot(buildSlot());
+  EmitPreBarrier(masm, slot, MIRType::Value);
+  masm.storeValue(val, slot);
 
   emitPostBarrierSlot(obj, val, scratch1);
   return true;
@@ -2066,23 +2084,43 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
                                 CacheIRStubInfo*& stubInfo, JitCode*& code,
                                 const char* name, bool isAOTFill,
                                 JitZone* jitZone) {
+  AOT_TIMER_BEGIN(icLookup);
+
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
 
-  code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+#ifdef ENABLE_JS_AOT
+  stubInfo = nullptr;
+  if (JitOptions.aotNeedsIndirectionTable()) {
+    const JitZone* atomsJitZone =
+        CompileRuntime::get(cx->runtime())->atomsJitZone();
+    MOZ_ASSERT(atomsJitZone);
+    // NOTE(aot): AOT IC stubs live in the atoms JitZone; look there first.
+    code = atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+  }
 
-#ifdef ENABLE_JS_AOT_ICS
-  if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
-      !jitZone->isIncompleteAOTICs()) {
-    DumpNonAOTICStubAndQuit(kind, writer);
+  if (!stubInfo) {
+    code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+  }
+#else
+  code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+#endif
+
+#ifdef ENABLE_JS_AOT
+  if (JitOptions.enforceAOTICs && !stubInfo && !isAOTFill) {
+    MaybeLogUnseenICStub(kind, writer);
+    return true;
   }
 #endif
 
   if (!code && !IsPortableBaselineInterpreterEnabled()) {
     // We have to generate stub code.
     TempAllocator temp(&cx->tempLifoAlloc());
-    JitContext jctx(cx);
+    JitContext jitCtx(cx);
     BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset);
+    if (isAOTFill) {
+      comp.setAOTFill();
+    }
     if (!comp.init(kind)) {
       return false;
     }
@@ -2110,6 +2148,18 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {
       return false;
     }
+
+#ifdef ENABLE_JS_AOT
+    MaybeDumpICStubForPGO(kind, writer, isAOTFill);
+#endif
+
+    AOT_TIMER_END(icLookup, "jit-gen", "ics", " bytes=%u kind=%s",
+                  unsigned(code->instructionsSize()),
+                  CacheKindNames[uint8_t(kind)]);
+  } else if (code) {
+    AOT_INSTR(AOTInstr_Timing, "ics-cached kind=%s bytes=%u\n",
+              CacheKindNames[uint8_t(kind)],
+              unsigned(code->instructionsSize()));
   } else if (!stubInfo) {
     MOZ_ASSERT(IsPortableBaselineInterpreterEnabled());
 
@@ -2200,6 +2250,13 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
                            /* isAOTFill = */ false, cx->zone()->jitZone())) {
     return ICAttachResult::OOM;
   }
+
+#ifdef ENABLE_JS_AOT
+  // NOTE(aot): enforce-aot-ics: no stub => skip attachment, fall back to VM.
+  if (!stubInfo) {
+    return ICAttachResult::TooLarge;
+  }
+#endif
 
   ICEntry* icEntry = icScript->icEntryForStub(stub);
 
@@ -2320,6 +2377,22 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
 
   stub->addNewStub(icEntry, newStub);
 
+  // NOTE(aot): scriptKey=0 for eval/dyngen or inlined ICScript so hint lookup
+  // in initICEntries does not misresolve.
+  uint32_t scriptKey =
+      icScript->isInlined() ? 0 : JitHintsMap::getScriptKey(outerScript);
+
+  AOT_INSTR(AOTInstr_IC,
+            "ic-attach kind=%s code=%u aot=%d hash=%u script=%u pc=%u proc=%s\n",
+            CacheKindNames[uint8_t(kind)],
+            unsigned(code->instructionsSize()),
+            int(newStub->isStaticCode()),
+            unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
+                kind, ICStubEngine::Baseline,
+                writer.codeStart(), writer.codeLength()))),
+            scriptKey, unsigned(stub->pcOffset()),
+            gAOTInstr.procTag);
+
   JSScript* owningScript = icScript->isInlined()
                                ? icScript->inliningRoot()->owningScript()
                                : outerScript;
@@ -2327,31 +2400,111 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   return ICAttachResult::Attached;
 }
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_JS_AOT
 
-#  ifndef ENABLE_PORTABLE_BASELINE_INTERP
-// The AOT loading of ICs doesn't work (yet) in modes with a native
-// JIT enabled because compilation tries to access state that doesn't
-// exist yet (trampolines?) when we create the JitZone.
-#    error AOT ICs are only supported (for now) in PBL builds.
-#  endif
+static Vector<AOTBlobWriter, 0, SystemAllocPolicy> sSavedICBlobs;
 
-void js::jit::FillAOTICs(JSContext* cx, JitZone* zone) {
-  if (JitOptions.enableAOTICs) {
-    for (auto& stub : GetAOTStubs()) {
+Vector<AOTBlobWriter, 0, SystemAllocPolicy> js::jit::TakeSavedICBlobs() {
+  return std::move(sSavedICBlobs);
+}
+
+void js::jit::FillAOTICs(JSContext* cx) {
+  MOZ_ASSERT(cx->inAtomsZone());
+  JitZone* jitZone = cx->zone()->getJitZone(cx);
+  if (JitOptions.aotNeedsIndirectionTable()) {
+    auto stubs = GetAOTStubs();
+    for (size_t corpusIdx = 0; corpusIdx < stubs.size(); corpusIdx++) {
+      const auto& stub = stubs[corpusIdx];
       CacheIRWriter writer(cx, stub);
       if (writer.failed()) {
-        zone->setIncompleteAOTICs();
+        jitZone->setIncompleteAOTICs();
         break;
       }
       CacheIRStubInfo* stubInfo;
       JitCode* code;
-      (void)LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
+      if (!LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
                                 "aot stub",
-                                /* isAOTFill = */ true, zone);
-      (void)stubInfo;
-      (void)code;
+                                /* isAOTFill = */ true, jitZone)) {
+        continue;
+      }
+
+      if (code && stubInfo) {
+        if (!jitZone->setAOTStubBlueprint(uint32_t(corpusIdx), code,
+                                          stubInfo)) {
+          JitSpew(JitSpew_BaselineAOT,
+                  "AOTStubBlueprint insert failed for idx=%zu", corpusIdx);
+        }
+
+        AOT_INSTR(AOTInstr_IC, "ic-corpus kind=%s hash=%u code=%u idx=%zu\n",
+                  CacheKindNames[uint8_t(stub.kind)],
+                  unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
+                      stub.kind, ICStubEngine::Baseline,
+                      writer.codeStart(), writer.codeLength()))),
+                  unsigned(code->instructionsSize()),
+                  corpusIdx);
+      }
+
+      if (JitOptions.dumpAOTICs && code && stubInfo) {
+        // NOTE(aot): nameHash = corpusIdx+1 so 0 stays "unnamed" for getBlob.
+        AOTBlobWriter blob(AOTBlobKind::InlineCacheStub,
+                           uint32_t(corpusIdx) + 1,
+                           "IC_" + std::to_string(sSavedICBlobs.length()));
+
+        if (!blob.writeCode(code->raw(), code->instructionsSize())) {
+          continue;
+        }
+
+        AOTICStubManifest manifest{};
+        manifest.kind = stubInfo->kind();
+        manifest.makesGCCalls = stubInfo->makesGCCalls() ? 1 : 0;
+        manifest.stubDataOffset = stubInfo->stubDataOffset();
+        manifest.localTracingSlots = code->localTracingSlots();
+        manifest.pad = 0;
+        manifest.cacheIRCodeLength = stubInfo->codeLength();
+
+        uint32_t numFields = 0;
+        while (stubInfo->fieldType(numFields) != StubField::Type::Limit) {
+          numFields++;
+        }
+        manifest.numStubFields = numFields;
+
+        if (!blob.writeManifest(manifest)) {
+          continue;
+        }
+
+        if (!blob.writeRawMetadata(stubInfo->code(),
+                                   stubInfo->codeLength())) {
+          continue;
+        }
+
+        const uint8_t* fieldStart = stubInfo->code() + stubInfo->codeLength();
+        if (!blob.writeRawMetadata(fieldStart, numFields)) {
+          continue;
+        }
+
+        fprintf(stdout,
+                "[BaselineAOT] AOT IC #%-3zu  kind=%-20s  size=%5ub"
+                "  cacheIR=%3ub  fields=%u%s\n",
+                sSavedICBlobs.length(),
+                CacheKindNames[uint8_t(stubInfo->kind())],
+                unsigned(code->instructionsSize()),
+                unsigned(stubInfo->codeLength()),
+                numFields,
+                manifest.makesGCCalls ? "  [gc]" : "");
+
+        (void)sSavedICBlobs.append(std::move(blob));
+      }
     }
+  }
+
+  if (JitOptions.dumpAOTICs) {
+    size_t totalBytes = 0;
+    for (auto& b : sSavedICBlobs) {
+      totalBytes += b.codeSize();
+    }
+    fprintf(stdout,
+            "[BaselineAOT] Dumped %zu AOT IC stubs (%zu bytes total)\n",
+            sSavedICBlobs.length(), totalBytes);
   }
 }
 #endif

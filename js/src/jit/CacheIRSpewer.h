@@ -115,7 +115,7 @@ extern void SpewCacheIROps(GenericPrinter& out, const char* prefix,
 
 #endif /* JS_CACHEIR_SPEW */
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_JS_AOT
 extern void SpewCacheIROpsAsAOT(GenericPrinter& out, CacheKind kind,
                                 const CacheIRWriter& writer);
 #endif

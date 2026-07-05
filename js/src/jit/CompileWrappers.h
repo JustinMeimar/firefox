@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "gc/Pretenuring.h"
+#include "jit/JitZone.h"
 #include "js/TypeDecls.h"
 #include "vm/Realm.h"
 #include "vm/RealmFuses.h"
@@ -64,6 +65,10 @@ class CompileRuntime {
 
   const JitRuntime* jitRuntime();
 
+#ifdef ENABLE_JS_AOT
+  const JitZone* atomsJitZone();
+#endif
+
   const GeckoProfilerRuntime& geckoProfiler();
 
   bool hadOutOfMemory();
@@ -85,6 +90,8 @@ class CompileRuntime {
   const void* addressOfMegamorphicSetPropCache();
   const void* addressOfStringToAtomCache();
   const void* addressOfLastBufferedWholeCell();
+  void* addressOfNurseryPosition();
+  void* addressOfNurseryAllocatedSites();
 
   bool runtimeFuseIntact(RuntimeFuses::FuseIndex index);
   const void* addressOfRuntimeFuse(RuntimeFuses::FuseIndex index);

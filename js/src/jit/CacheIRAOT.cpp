@@ -2,9 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef ENABLE_JS_AOT_ICS
+#ifdef ENABLE_JS_AOT
 
 #  include "jit/CacheIRAOT.h"
+
+#  include <algorithm>
 
 #  include "jstypes.h"
 
@@ -19,11 +21,10 @@
 #  include "vm/Opcodes.h"
 #  include "wasm/WasmValType.h"
 
-// Include null pointers for "native" pointers: an AOT-loaded stub
-// should not bake in an arbitrary pointer observed from a previous
-// execution. In any case, the AOT corpus should not include any ICs
-// that bake in pointers (baseline does not generate any).
+namespace js::jit {
 
+// NOTE(aot): AOT-loaded stubs never bake in pointers; baseline doesn't emit
+// any either. Null out any native pointer slots.
 #  if JS_BITS_PER_WORD == 32
 #    define NATIVE_NULLPTR 0, 0, 0, 0
 #  elif JS_BITS_PER_WORD == 64
@@ -31,9 +32,6 @@
 #  else
 #    error Please add a case for a non-32/64-bit system here.
 #  endif
-
-// These correspond to the CacheIRWriter definitions of the serialized
-// CacheIR format.
 
 #  define OP(op) \
     uint8_t(uint16_t(CacheOp::op) & 0xff), uint8_t(uint16_t(CacheOp::op) >> 8),
@@ -61,12 +59,10 @@
 #  define ALLOCKIND(name) uint8_t(gc::AllocKind::name),
 #  define COMPLETIONKIND(name) uint8_t(CompletionKind::name),
 #  define REALMFUSE(i) i,
+#  define RUNTIMEFUSE(i) i,
 
-// Other macros used to serialize parts of the CacheIRWriter.
 #  define STUBFIELD(ty) AOTStubFieldData{StubField::Type::ty, 0},
 #  define LASTUSED(n) n,
-
-// First, generate individual IC bodies.
 
 #  define IC_BODY(idx, _kind, _num_input_operands, _num_operand_ids,        \
                   _num_instructions, _typedata, _stubdatasize, _stubfields, \
@@ -75,8 +71,6 @@
 
 JS_AOT_IC_DATA(IC_BODY)
 
-// Generate the stubfield lists.
-
 #  define IC_STUBFIELD(idx, _kind, _num_input_operands, _num_operand_ids, \
                        _num_instructions, _typedata, _stubdatasize,       \
                        stubfields, _lastused, _ops)                       \
@@ -84,17 +78,12 @@ JS_AOT_IC_DATA(IC_BODY)
 
 JS_AOT_IC_DATA(IC_STUBFIELD)
 
-// Generate the operand-last-used lists.
-
 #  define IC_LASTUSED(idx, _kind, _num_input_operands, _num_operand_ids, \
                       _num_instructions, _typedata, _stubdatasize,       \
                       _stubfields, lastused, _ops)                       \
     static const uint32_t IC##idx##LastUsed[] = {lastused};
 
 JS_AOT_IC_DATA(IC_LASTUSED)
-
-// Now, generate the toplevel list of AOT structs from which we can
-// reconstitute a CacheIRWriter.
 
 #  define IC_TOP(idx, kind, num_input_operands, num_operand_ids,        \
                  num_instructions, typedata, stubdatasize, _stubfields, \
@@ -114,8 +103,28 @@ JS_AOT_IC_DATA(IC_LASTUSED)
 
 static const CacheIRAOTStub stubs[] = {JS_AOT_IC_DATA(IC_TOP)};
 
-mozilla::Span<const CacheIRAOTStub> js::jit::GetAOTStubs() {
+mozilla::Span<const CacheIRAOTStub> GetAOTStubs() {
   return mozilla::Span(stubs, sizeof(stubs) / sizeof(stubs[0]));
+}
+
+#  define IC_HINT(scriptKey, pcOffset, corpusIdx) \
+    CacheIRAOTHint{scriptKey, pcOffset, corpusIdx},
+
+// NOTE(aot): leading zero keeps the array non-empty; key 0 is never queried.
+static const CacheIRAOTHint hints[] = {CacheIRAOTHint{0, 0, 0},
+                                       JS_AOT_EAGER_IC_HINTS(IC_HINT)};
+
+mozilla::Span<const CacheIRAOTHint> GetAOTEagerICHintsForScript(
+    uint32_t scriptKey) {
+  if (scriptKey == 0) {
+    return mozilla::Span<const CacheIRAOTHint>();
+  }
+  auto [lower, upper] = std::equal_range(
+      std::begin(hints), std::end(hints), CacheIRAOTHint{scriptKey, 0, 0},
+      [](const CacheIRAOTHint& a, const CacheIRAOTHint& b) {
+        return a.scriptKey < b.scriptKey;
+      });
+  return mozilla::Span(lower, upper);
 }
 
 CacheIRWriter::CacheIRWriter(JSContext* cx, const CacheIRAOTStub& stub)
@@ -141,4 +150,6 @@ CacheIRWriter::CacheIRWriter(JSContext* cx, const CacheIRAOTStub& stub)
   buffer_.writeBytes(stub.data, stub.dataLength);
 }
 
-#endif /* ENABLE_JS_AOT_ICS */
+}  // namespace js::jit
+
+#endif /* ENABLE_JS_AOT */

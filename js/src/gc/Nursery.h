@@ -277,6 +277,9 @@ class Nursery {
   void printTotalProfileTimes();
 
   void* addressOfPosition() const { return (void**)&toSpace.position_; }
+  static constexpr size_t offsetOfPosition() {
+    return offsetof(Nursery, toSpace.position_);
+  }
   static constexpr int32_t offsetOfCurrentEndFromPosition() {
     return offsetof(Nursery, toSpace.currentEnd_) -
            offsetof(Nursery, toSpace.position_);
@@ -284,6 +287,9 @@ class Nursery {
 
   void* addressOfNurseryAllocatedSites() {
     return pretenuringNursery.addressOfAllocatedSites();
+  }
+  static constexpr size_t offsetOfNurseryAllocatedSites() {
+    return offsetof(Nursery, pretenuringNursery) + gc::PretenuringNursery::offsetOfAllocatedSites();
   }
 
   void requestMinorGC(JS::GCReason reason);
