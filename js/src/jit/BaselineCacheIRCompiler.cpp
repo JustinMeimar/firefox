@@ -206,11 +206,7 @@ JitCode* BaselineCacheIRCompiler::compile() {
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compile");
 
 #ifdef ENABLE_JS_AOT
-  mozilla::Maybe<AutoAOTCodegen> aotScope;
-  if (isAOTFill_) {
-    aotScope.emplace(masm, cx_);
-  }
-  MOZ_ASSERT_IF(isAOTFill_, !JitOptions.enableICFramePointers);
+  MOZ_ASSERT_IF(masm.isAOT(), !JitOptions.enableICFramePointers);
 #endif
 
 #ifndef JS_USE_LINK_REGISTER
@@ -2118,9 +2114,12 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     TempAllocator temp(&cx->tempLifoAlloc());
     JitContext jitCtx(cx);
     BaselineCacheIRCompiler comp(cx, temp, writer, StubDataOffset);
+#ifdef ENABLE_JS_AOT
+    mozilla::Maybe<AutoAOTCodegen> aotScope;
     if (isAOTFill) {
-      comp.setAOTFill();
+      aotScope.emplace(comp.masmForAOT(), cx);
     }
+#endif
     if (!comp.init(kind)) {
       return false;
     }

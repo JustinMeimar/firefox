@@ -765,10 +765,6 @@ class MOZ_RAII CacheIRCompiler {
 
   StubFieldPolicy stubFieldPolicy_;
 
-#ifdef ENABLE_JS_AOT
-  bool isAOTFill_ = false;
-#endif
-
   CacheIRCompiler(JSContext* cx, TempAllocator& alloc,
                   const CacheIRWriter& writer, uint32_t stubDataOffset,
                   Mode mode, StubFieldPolicy policy)
@@ -994,7 +990,7 @@ class MOZ_RAII CacheIRCompiler {
 
  public:
 #ifdef ENABLE_JS_AOT
-  void setAOTFill() { isAOTFill_ = true; }
+  MacroAssembler& masmForAOT() { return masm; }
 #endif
 };
 
