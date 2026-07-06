@@ -10350,7 +10350,9 @@ bool CacheIRCompiler::emitConcatStringsResult(StringOperandId lhsId,
     // code in CallRegExpStub.
     Label vmCall;
     Register temp = CallTempReg2;
-    masm.movePtr(ImmPtr(cx_->zone()->jitZone()), temp);
+    masm.loadJSContext(temp);
+    masm.loadPtr(Address(temp, JSContext::offsetOfZone()), temp);
+    masm.loadPtr(Address(temp, Zone::offsetOfJitZone()), temp);
     masm.loadPtr(Address(temp, JitZone::offsetOfStringConcatStub()), temp);
     masm.branchTestPtr(Assembler::Zero, temp, temp, &vmCall);
     masm.call(Address(temp, JitCode::offsetOfCode()));

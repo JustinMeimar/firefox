@@ -3974,13 +3974,15 @@ bool BaselineCacheIRCompiler::emitCloseIterScriptedResult(
 
 static void CallRegExpStub(MacroAssembler& masm, size_t jitZoneStubOffset,
                            Register temp, Label* vmCall) {
-  // Call jitZone()->regExpStub. We store a pointer to the RegExp
+  // Call cx->zone()->jitZone()->regExpStub. We store a pointer to the RegExp
   // stub in the IC stub to keep it alive, but we shouldn't use it if the stub
   // has been discarded in the meantime (because we might have changed GC string
   // pretenuring heuristics that affect behavior of the stub). This is uncommon
   // but can happen if we discarded all JIT code but had some active (Baseline)
   // scripts on the stack.
-  masm.movePtr(ImmPtr(masm.realm()->zone()->jitZone()), temp);
+  masm.loadJSContext(temp);
+  masm.loadPtr(Address(temp, JSContext::offsetOfZone()), temp);
+  masm.loadPtr(Address(temp, Zone::offsetOfJitZone()), temp);
   masm.loadPtr(Address(temp, jitZoneStubOffset), temp);
   masm.branchTestPtr(Assembler::Zero, temp, temp, vmCall);
   masm.call(Address(temp, JitCode::offsetOfCode()));
