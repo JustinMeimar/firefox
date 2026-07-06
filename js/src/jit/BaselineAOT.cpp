@@ -89,7 +89,8 @@ bool BuildAndSaveInterpBlob(
   size_t codeSize = code->rawEnd() - codeStart;
 
   sSavedInterpreterBlob.reset();
-  sSavedInterpreterBlob.emplace(AOTBlobKind::BaselineInterpreter, 0,
+  sSavedInterpreterBlob.emplace(AOTBlobKind::BaselineInterpreter,
+                                /* nameHash = */ 0, kNoCorpusIndex,
                                 "BaselineInterpreter");
 
   AOTBlobWriter& blob = *sSavedInterpreterBlob;
@@ -220,7 +221,7 @@ bool DumpAOTContainer(JSContext* cx) {
 
       AOTBlobWriter blob(AOTBlobKind::SelfHostedFunction,
                          mozilla::HashString(nameStr.get()),
-                         std::string(nameStr.get()));
+                         kNoCorpusIndex, std::string(nameStr.get()));
       if (!compileAOTSelfHosted(cx, atom, &blob)) {
         skipped++;
         continue;
@@ -532,19 +533,19 @@ bool LoadAOTICStubs(JSContext* cx) {
       return;
     }
 
-    // NOTE(aot): nameHash carries corpusIdx+1 so eager-attach hints resolve to
-    // (JitCode*, CacheIRStubInfo*). stubInfo moved into the primary map above;
-    // re-lookup for the canonical pointer.
-    MOZ_ASSERT(reader.entry()->nameHash != 0);
-    uint32_t corpusIdx = reader.entry()->nameHash - 1;
+    // Register the (JitCode, CacheIRStubInfo) pair against its corpus index
+    // so eager-attach hints in initICEntries() can look it up. stubInfo was
+    // moved into the primary map above; re-fetch the canonical pointer.
+    uint32_t corpusIdx = reader.entry()->corpusIndex;
     CacheIRStubInfo* installed = nullptr;
     (void)jitZone->getBaselineCacheIRStubCode(lookup, &installed);
     MOZ_ASSERT(installed);
-    if (reader.entry()->nameHash == 0 ||
-        !jitZone->setAOTStubBlueprint(corpusIdx, code, installed)) {
-      // NOTE(aot): non-fatal; primary map works, hints for this stub no-op.
+    if (corpusIdx == kNoCorpusIndex ||
+        !jitZone->setAOTStubEntry(corpusIdx, code, installed)) {
+      // Non-fatal: the primary code map still works; only hints for this
+      // stub become no-ops.
       JitSpew(JitSpew_BaselineAOT,
-              "AOTStubBlueprint insert failed for idx=%u", corpusIdx);
+              "AOTStubEntry insert failed for idx=%u", corpusIdx);
     }
 
     AOT_INSTR(AOTInstr_IC, "ic-corpus kind=%s hash=%u code=%u idx=%u\n",

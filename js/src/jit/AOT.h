@@ -84,10 +84,15 @@ inline const char* AOTSlotName(AOTSlot slot) {
 
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 
-// NOTE(aot): bump on layout/semantic changes so stale containers are rejected.
-static constexpr uint32_t AOT_CONTAINER_VERSION = 2;
+// Bump on any layout or semantic change so stale containers are rejected
+// at load time.
+static constexpr uint32_t AOT_CONTAINER_VERSION = 3;
 
 static constexpr uint32_t kAOTAlignment = 16;
+
+// Sentinel for AOTBlobDirectoryEntry::corpusIndex meaning "not an IC-hint
+// blueprint." Distinct from 0, which is a valid corpus index.
+static constexpr uint32_t kNoCorpusIndex = UINT32_MAX;
 
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
@@ -114,7 +119,12 @@ static_assert(sizeof(AOTContainerHeader) == 16,
 
 struct AOTBlobDirectoryEntry {
   AOTBlobKind kind;
+  // Content hash of the blob's name. Populated for SelfHostedFunction so
+  // getBlob() can match by function name; zero for other kinds.
   uint32_t nameHash;
+  // Corpus index for InlineCacheStub, used by the eager IC-attach hint
+  // machinery in initICEntries. kNoCorpusIndex for other kinds.
+  uint32_t corpusIndex;
   uint32_t codeOffset;
   uint32_t codeSize;
   uint32_t metadataOffset;
@@ -123,8 +133,8 @@ struct AOTBlobDirectoryEntry {
   uint32_t manifestSize;
 };
 
-static_assert(sizeof(AOTBlobDirectoryEntry) == 32,
-              "AOTBlobDirectoryEntry must be 32 bytes");
+static_assert(sizeof(AOTBlobDirectoryEntry) == 36,
+              "AOTBlobDirectoryEntry must be 36 bytes");
 
 extern "C" {
   extern const uint8_t bl_aot_container_start[];
@@ -212,6 +222,7 @@ class AOTContext {
 class AOTBlobWriter {
   AOTBlobKind kind_;
   uint32_t nameHash_;
+  uint32_t corpusIndex_;
   std::string name_;
   Vector<uint8_t, 0, SystemAllocPolicy> code_;
   Vector<uint8_t, 0, SystemAllocPolicy> manifest_;
@@ -223,12 +234,14 @@ class AOTBlobWriter {
   }
 
  public:
-  AOTBlobWriter(AOTBlobKind kind, uint32_t nameHash, std::string name);
+  AOTBlobWriter(AOTBlobKind kind, uint32_t nameHash, uint32_t corpusIndex,
+                std::string name);
   AOTBlobWriter(AOTBlobWriter&&) = default;
   AOTBlobWriter& operator=(AOTBlobWriter&&) = default;
 
   AOTBlobKind kind() const { return kind_; }
   uint32_t nameHash() const { return nameHash_; }
+  uint32_t corpusIndex() const { return corpusIndex_; }
   const std::string& name() const { return name_; }
   mozilla::Span<const uint8_t> codeBytes() const {
     return {code_.begin(), code_.length()};

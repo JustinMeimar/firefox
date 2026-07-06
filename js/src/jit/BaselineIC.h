@@ -155,7 +155,9 @@ class ICStub {
   // Whether this is an ICFallbackStub or an ICCacheIRStub.
   bool isFallback_;
 
-  // NOTE(aot): pre-attached from a profile hint; transpiler ignores until entered.
+  // Set for stubs installed by MaybeAttachAOTHintedStubs. WarpScriptOracle
+  // and ICScript::hash skip leading pre-attached stubs whose enteredCount
+  // is still 0. See [SMDOC] AOT IC Hinting in BaselineIC.cpp.
   bool preAttached_ = false;
 
   ICStub(uint8_t* stubCode, bool isFallback)
@@ -253,8 +255,9 @@ class ICFallbackStub final : public ICStub {
   // Add a new stub to the IC chain terminated by this fallback stub.
   inline void addNewStub(ICEntry* icEntry, ICCacheIRStub* stub);
 
-  // NOTE(aot): splice a hint stub onto the chain without touching ICState so
-  // IRGen decisions stay unperturbed by mispredicted hints.
+  // Like addNewStub, but does not call state_.trackAttached(); pre-attached
+  // hint stubs are invisible to ICState and to the transpiler until they
+  // have been entered. See [SMDOC] AOT IC Hinting in BaselineIC.cpp.
   inline void addPreAttachedStub(ICEntry* icEntry, ICCacheIRStub* stub);
 
   void discardStubs(Zone* zone, ICEntry* icEntry);

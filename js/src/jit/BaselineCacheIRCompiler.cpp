@@ -2402,10 +2402,9 @@ void js::jit::FillAOTICs(JSContext* cx) {
       }
 
       if (code && stubInfo) {
-        if (!jitZone->setAOTStubBlueprint(uint32_t(corpusIdx), code,
-                                          stubInfo)) {
+        if (!jitZone->setAOTStubEntry(uint32_t(corpusIdx), code, stubInfo)) {
           JitSpew(JitSpew_BaselineAOT,
-                  "AOTStubBlueprint insert failed for idx=%zu", corpusIdx);
+                  "AOTStubEntry insert failed for idx=%zu", corpusIdx);
         }
 
         AOT_INSTR(AOTInstr_IC, "ic-corpus kind=%s hash=%u code=%u idx=%zu\n",
@@ -2418,9 +2417,8 @@ void js::jit::FillAOTICs(JSContext* cx) {
       }
 
       if (JitOptions.dumpAOTICs && code && stubInfo) {
-        // NOTE(aot): nameHash = corpusIdx+1 so 0 stays "unnamed" for getBlob.
         AOTBlobWriter blob(AOTBlobKind::InlineCacheStub,
-                           uint32_t(corpusIdx) + 1,
+                           /* nameHash = */ 0, uint32_t(corpusIdx),
                            "IC_" + std::to_string(sSavedICBlobs.length()));
 
         if (!blob.writeCode(code->raw(), code->instructionsSize())) {

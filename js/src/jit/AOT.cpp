@@ -74,8 +74,11 @@ AOTSlot AOTIndirectionTable::findSlotOrCrash(uintptr_t value) const {
 }
 
 AOTBlobWriter::AOTBlobWriter(AOTBlobKind kind, uint32_t nameHash,
-                             std::string name)
-    : kind_(kind), nameHash_(nameHash), name_(std::move(name)) {}
+                             uint32_t corpusIndex, std::string name)
+    : kind_(kind),
+      nameHash_(nameHash),
+      corpusIndex_(corpusIndex),
+      name_(std::move(name)) {}
 
 static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
   for (size_t i = 0; i < len; i += 16) {
@@ -109,6 +112,7 @@ bool AOTContainerWriter::finalize(std::ostream& out) {
     AOTBlobDirectoryEntry e{};
     e.kind = blob.kind();
     e.nameHash = blob.nameHash();
+    e.corpusIndex = blob.corpusIndex();
     e.codeSize = blob.codeBytes().size();
     e.manifestSize = blob.manifestBytes().size();
     e.metadataSize = blob.metadataBytes().size();
