@@ -45,23 +45,18 @@ namespace js::jit {
 
 #ifdef ENABLE_JS_AOT
 
-void MaybeLogUnseenICStub(CacheKind kind, const CacheIRWriter& writer) {
-  if (!getenv("AOT_ICS_LOG_UNSEEN")) {
-    return;
-  }
+void DumpAOTICStubToDir(const char* dir, CacheKind kind,
+                        const CacheIRWriter& writer) {
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
   HashNumber h = CacheIRStubKey::hash(lookup);
-  const char* dir = getenv("AOT_ICS_DIR");
-  char filename[256];
-  if (dir) {
-    SprintfLiteral(filename, "%s/IC-%u", dir, unsigned(h));
-  } else {
-    SprintfLiteral(filename, "IC-%u", unsigned(h));
-  }
+
+  char filename[600];
+  SprintfLiteral(filename, "%s/IC-%u", dir, unsigned(h));
+
   FILE* f = fopen(filename, "w");
   if (!f) {
-    fprintf(stderr, "MaybeLogUnseenICStub: fopen %s failed: %s\n", filename,
+    fprintf(stderr, "DumpAOTICStubToDir: fopen %s failed: %s\n", filename,
             strerror(errno));
     return;
   }
@@ -79,26 +74,7 @@ void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
       !gAOTInstr.pgoDumpDir) {
     return;
   }
-
-  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
-                                writer.codeStart(), writer.codeLength());
-  HashNumber h = CacheIRStubKey::hash(lookup);
-
-  char filename[600];
-  SprintfLiteral(filename, "%s/IC-%u", gAOTInstr.pgoDumpDir, unsigned(h));
-
-  FILE* f = fopen(filename, "w");
-  if (!f) {
-    fprintf(stderr, "MaybeDumpICStubForPGO: fopen %s failed: %s\n", filename,
-            strerror(errno));
-    return;
-  }
-  {
-    Fprinter printer(f);
-    SpewCacheIROpsAsAOT(printer, kind, writer);
-  }
-  fflush(f);
-  fclose(f);
+  DumpAOTICStubToDir(gAOTInstr.pgoDumpDir, kind, writer);
 }
 
 static mozilla::Maybe<AOTBlobWriter> sSavedInterpreterBlob;

@@ -2038,39 +2038,6 @@ static void ResetEnteredCounts(const ICEntry* icEntry) {
   }
 }
 
-#ifdef ENABLE_JS_AOT_ICS
-void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
-  // Generate a random filename (unlikely to conflict with others).
-  char filename[64];
-  snprintf(filename, sizeof(filename), "IC-%" PRIu64,
-           mozilla::RandomUint64OrDie());
-  FILE* f = fopen(filename, "w");
-  MOZ_RELEASE_ASSERT(f);
-
-  // Generate the CacheIR text to dump to a file.
-  {
-    Fprinter printer(f);
-    SpewCacheIROpsAsAOT(printer, kind, writer);
-  }
-  fflush(f);
-  fclose(f);
-  fprintf(stderr, "UNEXPECTED NEW IC BODY\n");
-
-  fprintf(stderr,
-          "Please add the file '%s' to the ahead-of-time known IC bodies in "
-          "js/src/ics/.\n"
-          "\n"
-          "To keep running and dump all new ICs (useful for updating with "
-          "test-suites),\n"
-          "set the environment variable AOT_ICS_KEEP_GOING=1 and rerun.\n",
-          filename);
-
-  if (!getenv("AOT_ICS_KEEP_GOING")) {
-    abort();
-  }
-}
-#endif
-
 static constexpr uint32_t StubDataOffset = sizeof(ICCacheIRStub);
 static_assert(StubDataOffset % sizeof(uint64_t) == 0,
               "Stub fields must be aligned");
@@ -2104,8 +2071,16 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 
 #ifdef ENABLE_JS_AOT
   if (JitOptions.enforceAOTICs && !stubInfo && !isAOTFill) {
-    MaybeLogUnseenICStub(kind, writer);
-    return true;
+    if (const char* dir = getenv("AOT_ICS_DUMP_MISSING_DIR")) {
+      DumpAOTICStubToDir(dir, kind, writer);
+    }
+    if (getenv("AOT_ICS_KEEP_GOING")) {
+      return true;
+    }
+    MOZ_CRASH_UNSAFE_PRINTF(
+        "enforce-aot-ics: no AOT stub for kind=%s (hash=%u)",
+        CacheKindNames[uint8_t(kind)],
+        unsigned(CacheIRStubKey::hash(lookup)));
   }
 #endif
 
@@ -2251,7 +2226,6 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   }
 
 #ifdef ENABLE_JS_AOT
-  // NOTE(aot): enforce-aot-ics: no stub => skip attachment, fall back to VM.
   if (!stubInfo) {
     return ICAttachResult::TooLarge;
   }

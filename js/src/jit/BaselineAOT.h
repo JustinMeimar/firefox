@@ -101,10 +101,10 @@ class CacheIRWriter;
 
 #ifdef ENABLE_JS_AOT
 
-// Dump one IC stub's CacheIR body to a $AOT_ICS_DIR file so
-// enforce-aot-ics runs can capture stubs that were missing from the corpus.
-// No-op if $AOT_ICS_LOG_UNSEEN is unset.
-void MaybeLogUnseenICStub(CacheKind kind, const CacheIRWriter& writer);
+// Write one IC stub's CacheIR body to <dir>/IC-<hash>. Filename is a
+// content hash so re-runs are idempotent. Silently no-ops on fopen failure.
+void DumpAOTICStubToDir(const char* dir, CacheKind kind,
+                        const CacheIRWriter& writer);
 
 // Dump one IC stub's CacheIR body to $JS_AOT_PGO_DIR/IC-<hash> so
 // SelectAOTCorpus.py can knapsack-pick the corpus from a PGO run.
