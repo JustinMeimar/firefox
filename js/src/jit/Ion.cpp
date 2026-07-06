@@ -11,8 +11,6 @@
 
 #include <fstream>
 
-#include "jsmath.h"
-
 #include "builtin/Array.h"
 #include "builtin/DataViewObject.h"
 #include "builtin/MapObject.h"

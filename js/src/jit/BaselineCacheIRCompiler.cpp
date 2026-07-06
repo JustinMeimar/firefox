@@ -2410,7 +2410,7 @@ Vector<AOTBlobWriter, 0, SystemAllocPolicy> js::jit::TakeSavedICBlobs() {
 
 void js::jit::FillAOTICs(JSContext* cx) {
   MOZ_ASSERT(cx->inAtomsZone());
-  JitZone* jitZone = cx->zone()->getJitZone(cx);
+  JitZone* jitZone = cx->zone()->getOrCreateJitZone(cx);
   if (JitOptions.aotNeedsIndirectionTable()) {
     auto stubs = GetAOTStubs();
     for (size_t corpusIdx = 0; corpusIdx < stubs.size(); corpusIdx++) {

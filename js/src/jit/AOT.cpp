@@ -31,7 +31,7 @@ JitCode* AllocateAOTCode(JSContext* cx,
     az.emplace(cx);
   }
 
-  if (!cx->zone()->getJitZone(cx)) {
+  if (!cx->zone()->ensureJitZoneExists(cx)) {
     ReportOutOfMemory(cx);
     return nullptr;
   }
