@@ -11878,18 +11878,12 @@ bool CacheIRCompiler::emitGuardFuse(RealmFuses::FuseIndex fuseIndex) {
 bool CacheIRCompiler::emitGuardRuntimeFuse(RuntimeFuses::FuseIndex fuseIndex) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
 
-  Maybe<AutoScratchRegister> scratchForAOT;
-  if (masm.isAOT()) {
-    scratchForAOT.emplace(allocator, masm);
-  }
-
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
     return false;
   }
 
-  masm.guardRuntimeFuse(fuseIndex, failure->label(),
-                        scratchForAOT.isSome() ? scratchForAOT.ref() : InvalidReg);
+  masm.guardRuntimeFuse(fuseIndex, failure->label());
   return true;
 }
 

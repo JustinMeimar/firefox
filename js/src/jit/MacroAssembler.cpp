@@ -2767,9 +2767,7 @@ void MacroAssembler::loadGlobalObjectData(Register dest) {
 }
 
 void MacroAssembler::switchToRealm(Register realm) {
-  MOZ_ASSERT(realm != ScratchReg);
-  movePtr(ImmPtr(ContextRealmPtr(runtime())), ScratchReg);
-  storePtr(realm, Address(ScratchReg, 0));
+  storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
 }
 
 void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
@@ -2792,19 +2790,19 @@ void MacroAssembler::loadRuntimeFuse(RuntimeFuses::FuseIndex index,
 }
 
 void MacroAssembler::guardRuntimeFuse(RuntimeFuses::FuseIndex index,
-                                      Label* fail, Register scratch) {
-  if (!isAOT()) {
-    AbsoluteAddress addr(runtime()->addressOfRuntimeFuse(index));
-    branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
-  }
+                                      Label* fail) {
 #ifdef ENABLE_JS_AOT
-  else {
-    MOZ_ASSERT(scratch != InvalidReg);
+  if (isAOT()) {
+    ScratchRegisterScope scratch(*this);
     loadRuntime(scratch);
-    Address addr(scratch, JSRuntime::offsetOfRuntimeFuse(index));
-    branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
+    branchPtr(Assembler::NotEqual,
+              Address(scratch, JSRuntime::offsetOfRuntimeFuse(index)),
+              ImmWord(0), fail);
+    return;
   }
 #endif
+  AbsoluteAddress addr(runtime()->addressOfRuntimeFuse(index));
+  branchPtr(Assembler::NotEqual, addr, ImmWord(0), fail);
 }
 
 void MacroAssembler::switchToRealm(const void* realm, Register scratch) {
@@ -4274,8 +4272,7 @@ void MacroAssembler::handleFailure() {
   // Re-entry code is irrelevant because the exception will leave the
   // running function and never come back
   TrampolinePtr excTail = runtime()->jitRuntime()->getExceptionTail();
-  movePtr(ImmPtr(excTail.value), ScratchReg);
-  jump(ScratchReg);
+  jump(excTail);
 }
 
 void MacroAssembler::assertUnreachable(const char* output) {

@@ -143,22 +143,29 @@ void MacroAssembler::loadZoneBase(Register dest) {
 // What to do about OSX and Windows?
 static constexpr uintptr_t kAOTBakeableSentinelLimit = 16;
 
+// Crash when an AOT intercept sees an unknown pointer that isn't a small
+// sentinel. Real pointers must be registered in the indirection table.
+#ifdef ENABLE_JS_AOT
+#  define AOT_CRASH_ON_UNKNOWN_PTR(kind, val)                             \
+    do {                                                                  \
+      if ((val) >= kAOTBakeableSentinelLimit) {                           \
+        MOZ_CRASH_UNSAFE_PRINTF(                                          \
+            "AOT: no indirection slot for " kind                          \
+            " %p -- add to the AOT indirection table.",                   \
+            reinterpret_cast<void*>(val));                                \
+      }                                                                   \
+    } while (0)
+#endif
+
 void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 #ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
     uintptr_t val = uintptr_t(imm.value);
-    auto slot = aot().indirectionTable()->findSlot(val);
-    if (slot) {
+    if (auto slot = aot().indirectionTable()->findSlot(val)) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
-    if (val >= kAOTBakeableSentinelLimit) {
-      MOZ_CRASH_UNSAFE_PRINTF(
-          "AOT: no indirection slot for ImmPtr %p -- add this address to "
-          "the AOT indirection table, or use ImmWord if it is a raw "
-          "bit-pattern.",
-          imm.value);
-    }
+    AOT_CRASH_ON_UNKNOWN_PTR("movePtr(ImmPtr)", val);
   }
 #endif
   MacroAssemblerSpecific::movePtr(imm, dest);
@@ -167,8 +174,7 @@ void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
 #ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
-    auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value));
-    if (slot) {
+    if (auto slot = aot().indirectionTable()->findSlot(uintptr_t(imm.value))) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
@@ -179,28 +185,76 @@ void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
   MacroAssemblerSpecific::movePtr(imm, dest);
 }
 
+#ifndef JS_CODEGEN_RISCV64
+void MacroAssembler::loadPtr(AbsoluteAddress addr, Register dest) {
+#  ifdef ENABLE_JS_AOT
+  if (MOZ_UNLIKELY(isAOT())) {
+    uintptr_t val = uintptr_t(addr.addr);
+    if (auto slot = aot().indirectionTable()->findSlot(val)) {
+      emitAOTSlotLoad(*slot, dest);
+      MacroAssemblerSpecific::loadPtr(Address(dest, 0), dest);
+      return;
+    }
+    AOT_CRASH_ON_UNKNOWN_PTR("loadPtr(AbsoluteAddress)", val);
+  }
+#  endif
+  MacroAssemblerSpecific::loadPtr(addr, dest);
+}
+#endif
+
 void MacroAssembler::storePtr(ImmPtr imm, const Address& address) {
 #ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
     uintptr_t val = uintptr_t(imm.value);
-    auto slot = aot().indirectionTable()->findSlot(val);
-    if (slot) {
+    if (auto slot = aot().indirectionTable()->findSlot(val)) {
       ScratchRegisterScope scratch(*this);
       emitAOTSlotLoad(*slot, scratch);
       MacroAssemblerSpecific::storePtr(scratch, address);
       return;
     }
-    if (val >= kAOTBakeableSentinelLimit) {
-      MOZ_CRASH_UNSAFE_PRINTF(
-          "AOT: no indirection slot for ImmPtr %p in storePtr -- add this "
-          "address to the AOT indirection table, or use ImmWord if it is "
-          "a raw bit-pattern.",
-          imm.value);
-    }
+    AOT_CRASH_ON_UNKNOWN_PTR("storePtr(ImmPtr, Address)", val);
   }
 #endif
   MacroAssemblerSpecific::storePtr(imm, address);
 }
+
+#ifndef JS_CODEGEN_RISCV64
+void MacroAssembler::storePtr(Register src, AbsoluteAddress address) {
+#  ifdef ENABLE_JS_AOT
+  if (MOZ_UNLIKELY(isAOT())) {
+    uintptr_t val = uintptr_t(address.addr);
+    if (auto slot = aot().indirectionTable()->findSlot(val)) {
+      ScratchRegisterScope scratch(*this);
+      emitAOTSlotLoad(*slot, scratch);
+      MacroAssemblerSpecific::storePtr(src, Address(scratch, 0));
+      return;
+    }
+    AOT_CRASH_ON_UNKNOWN_PTR("storePtr(Register, AbsoluteAddress)", val);
+  }
+#  endif
+  MacroAssemblerSpecific::storePtr(src, address);
+}
+#endif
+
+void MacroAssembler::jump(TrampolinePtr code) {
+#ifdef ENABLE_JS_AOT
+  if (MOZ_UNLIKELY(isAOT())) {
+    uintptr_t val = uintptr_t(code.value);
+    if (auto slot = aot().indirectionTable()->findSlot(val)) {
+      ScratchRegisterScope scratch(*this);
+      emitAOTSlotLoad(*slot, scratch);
+      MacroAssemblerSpecific::jump(scratch);
+      return;
+    }
+    AOT_CRASH_ON_UNKNOWN_PTR("jump(TrampolinePtr)", val);
+  }
+#endif
+  MacroAssemblerSpecific::jump(code);
+}
+
+#ifdef ENABLE_JS_AOT
+#  undef AOT_CRASH_ON_UNKNOWN_PTR
+#endif
 
 // NOTE(aot): entries are PIC-friendly int32 offsets in AOT mode, absolute
 // CodeLabel pointers otherwise.

@@ -5202,8 +5202,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void loadRuntimeFuse(RuntimeFuses::FuseIndex index, Register dest);
 
-  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail,
-                        Register scratch = InvalidReg);
+  void guardRuntimeFuse(RuntimeFuses::FuseIndex index, Label* fail);
 
   void switchToRealm(Register realm);
   void switchToRealm(const void* realm, Register scratch);
@@ -6139,6 +6138,17 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   using MacroAssemblerSpecific::storePtr;
   void storePtr(ImmPtr imm, const Address& address);
+#ifndef JS_CODEGEN_RISCV64
+  void storePtr(Register src, AbsoluteAddress address);
+#endif
+
+  using MacroAssemblerSpecific::loadPtr;
+#ifndef JS_CODEGEN_RISCV64
+  void loadPtr(AbsoluteAddress addr, Register dest);
+#endif
+
+  using MacroAssemblerSpecific::jump;
+  void jump(TrampolinePtr code);
 
  private:
   void handleFailure();
