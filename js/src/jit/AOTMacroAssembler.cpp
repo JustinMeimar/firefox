@@ -14,6 +14,10 @@
 #include "jit/MacroAssembler-inl.h"
 #include "vm/JSObject-inl.h"
 
+// NOTE(Justin): This file is separate from MacroAssembler.cpp purely for
+// convenience. The interfaces here all belong to `MacroAssembler` and
+// could be moved into the primary source file eventually.
+
 using namespace js;
 using namespace js::jit;
 
@@ -119,6 +123,16 @@ void MacroAssembler::loadRuntime(Register reg) {
   movePtr(ImmPtr(runtime()), reg);
 }
 
+// NOTE(aot): only sub-page sentinel values (val < 16) are safe to bake as
+// literal pointers. Real user-space pointers on Linux can never land there
+// (page 0 is unmappable), so the SpecialScriptBit sentinels 0x1/0x3/0x5 pass
+// while anything that could be a real address is rejected. Genuine small
+// bit-patterns should use ImmWord; real pointers must be added to the
+// indirection table.
+//
+// What to do about OSX and Windows?
+static constexpr uintptr_t kAOTBakeableSentinelLimit = 16;
+
 void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 #ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
@@ -128,11 +142,11 @@ void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
-    // NOTE(aot): nullptr and 32-bit values are position-independent, safe to bake.
-    if (val != 0 && val > UINT32_MAX) {
+    if (val >= kAOTBakeableSentinelLimit) {
       MOZ_CRASH_UNSAFE_PRINTF(
           "AOT: no indirection slot for ImmPtr %p -- add this address to "
-          "the AOT indirection table.",
+          "the AOT indirection table, or use ImmWord if it is a raw "
+          "bit-pattern.",
           imm.value);
     }
   }
@@ -166,10 +180,11 @@ void MacroAssembler::storePtr(ImmPtr imm, const Address& address) {
       MacroAssemblerSpecific::storePtr(scratch, address);
       return;
     }
-    if (val != 0 && val > UINT32_MAX) {
+    if (val >= kAOTBakeableSentinelLimit) {
       MOZ_CRASH_UNSAFE_PRINTF(
           "AOT: no indirection slot for ImmPtr %p in storePtr -- add this "
-          "address to the AOT indirection table.",
+          "address to the AOT indirection table, or use ImmWord if it is "
+          "a raw bit-pattern.",
           imm.value);
     }
   }
