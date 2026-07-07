@@ -408,8 +408,24 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
   void callPreBarrierAOT(MIRType type, Register scratch);
 
-  void enterAOTStubFrame() { inAOTStubFrame_ = true; }
-  void leaveAOTStubFrame() { inAOTStubFrame_ = false; }
+  // RAII scope for regions where FramePointer points at a baseline stub frame.
+  // While active, emitAOTSlotLoad reads the AOT table base from the stub frame
+  // instead of the baseline frame. Nesting is safe: the previous value is
+  // saved and restored.
+  class MOZ_RAII AutoInAOTStubFrame {
+    MacroAssembler& masm_;
+    bool prev_;
+
+   public:
+    explicit AutoInAOTStubFrame(MacroAssembler& masm)
+        : masm_(masm), prev_(masm.inAOTStubFrame_) {
+      masm.inAOTStubFrame_ = true;
+    }
+    ~AutoInAOTStubFrame() { masm_.inAOTStubFrame_ = prev_; }
+    AutoInAOTStubFrame(const AutoInAOTStubFrame&) = delete;
+    void operator=(const AutoInAOTStubFrame&) = delete;
+  };
+
   void loadZoneForAOT(Register dest);
 
   // Dual-mode codegen helpers used at baseline AOT decision points.

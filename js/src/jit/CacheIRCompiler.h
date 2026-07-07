@@ -1033,6 +1033,9 @@ class MOZ_RAII AutoOutputRegister {
 // definitions.
 class MOZ_RAII AutoStubFrame {
   BaselineCacheIRCompiler& compiler;
+#ifdef ENABLE_JS_AOT
+  mozilla::Maybe<MacroAssembler::AutoInAOTStubFrame> aotScope_;
+#endif
 #ifdef DEBUG
   uint32_t framePushedAtEnterStubFrame_;
 #endif
