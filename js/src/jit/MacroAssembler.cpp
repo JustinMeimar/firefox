@@ -386,22 +386,11 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   Label fallback;
   Label success;
 
-  // Load the first and last offsets of |zone|'s free list for |allocKind|.
+  // Load the first and last offsets of the zone's free list for |allocKind|.
   // If there is no room remaining in the span, fall back to get the next one.
-
-  CompileZone* zone = isAOT() ? nullptr : realm()->zone();
-  auto loadFreeList =
-    [this, zone, allocKind](Register target) {
-      if (!isAOT()) {
-        gc::FreeSpan** ptrFreeList = zone->addressOfFreeList(allocKind);
-        loadPtr(AbsoluteAddress(ptrFreeList), target);
-      }
-#ifdef ENABLE_JS_AOT
-      else {
-        loadZoneForAOT(target);
-        loadPtr(Address(target, Zone::offsetOfFreeList(allocKind)), target);
-      }
-#endif
+  auto loadFreeList = [this, allocKind](Register target) {
+    loadZoneBase(target);
+    loadPtr(Address(target, Zone::offsetOfFreeList(allocKind)), target);
   };
 
   loadFreeList(temp);
