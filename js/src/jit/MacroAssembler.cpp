@@ -844,41 +844,19 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
                                      const LiveRegisterSet& liveRegs) {
   Label done, abiCall;
 
-  if (!isAOT()) {
-    CompileZone* zone = realm()->zone();
-    loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCount()),
-            scratchSuccess);
-    branchPtr(Assembler::Equal,
-              AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCapacity()),
-              scratchSuccess, &abiCall);
-    loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappers()),
-            scratch2);
-  }
-#ifdef ENABLE_JS_AOT
-  else {
-    loadZoneForAOT(scratch2);
-    loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappersCount()), scratchSuccess);
-    branchPtr(Assembler::Equal,
-              Address(scratch2, Zone::offsetOfPreservedWrappersCapacity()),
-              scratchSuccess, &abiCall);
-    loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappers()),
-            scratch2);
-  }
-#endif
+  loadZoneBase(scratch2);
+  loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappersCount()),
+          scratchSuccess);
+  branchPtr(Assembler::Equal,
+            Address(scratch2, Zone::offsetOfPreservedWrappersCapacity()),
+            scratchSuccess, &abiCall);
+  loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappers()), scratch2);
 
   storePtr(wrapper, BaseIndex(scratch2, scratchSuccess, ScalePointer));
   addPtr(Imm32(1), scratchSuccess);
-  if (!isAOT()) {
-    storePtr(scratchSuccess,
-            AbsoluteAddress(realm()->zone()->zone()->addressOfPreservedWrappersCount()));
-  }
-#ifdef ENABLE_JS_AOT
-  else {
-    loadZoneForAOT(scratch2);
-    storePtr(scratchSuccess,
-            Address(scratch2, Zone::offsetOfPreservedWrappersCount()));
-  }
-#endif
+  loadZoneBase(scratch2);
+  storePtr(scratchSuccess,
+           Address(scratch2, Zone::offsetOfPreservedWrappersCount()));
   move32(Imm32(1), scratchSuccess);
 
   jump(&done);

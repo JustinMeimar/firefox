@@ -440,6 +440,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #endif
 
   void loadRuntime(Register reg);
+  void loadZoneBase(Register dest);
   void loadVMWrapper(VMFunctionId id, Register dest);
 
   void writeDispatchTableEntry(uint32_t tableOffset, size_t index,

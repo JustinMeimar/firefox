@@ -123,6 +123,16 @@ void MacroAssembler::loadRuntime(Register reg) {
   movePtr(ImmPtr(runtime()), reg);
 }
 
+void MacroAssembler::loadZoneBase(Register dest) {
+#ifdef ENABLE_JS_AOT
+  if (isAOT()) {
+    loadZoneForAOT(dest);
+    return;
+  }
+#endif
+  MacroAssemblerSpecific::movePtr(ImmPtr(realm()->zone()->zone()), dest);
+}
+
 // NOTE(aot): only sub-page sentinel values (val < 16) are safe to bake as
 // literal pointers. Real user-space pointers on Linux can never land there
 // (page 0 is unmappable), so the SpecialScriptBit sentinels 0x1/0x3/0x5 pass
