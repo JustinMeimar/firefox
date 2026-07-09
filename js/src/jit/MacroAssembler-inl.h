@@ -47,6 +47,8 @@
 
 #include "wasm/WasmBuiltins.h"
 
+#include "jit/AOTMacroAssembler-inl.h"
+
 namespace js {
 namespace jit {
 

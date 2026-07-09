@@ -439,12 +439,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
   size_t aotDispatchTableEntrySize() const;
 #endif
 
-  void loadRuntime(Register reg);
-  void loadZoneBase(Register dest);
+  inline void loadRuntime(Register reg);
+  inline void loadZoneBase(Register dest);
   void loadVMWrapper(VMFunctionId id, Register dest);
 
-  void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
-                               const Label& handler);
+  inline void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
+                                      const Label& handler);
 
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
@@ -6133,22 +6133,22 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   using MacroAssemblerSpecific::movePtr;
-  void movePtr(ImmPtr imm, Register dest);
-  void movePtr(ImmGCPtr imm, Register dest);
+  inline void movePtr(ImmPtr imm, Register dest);
+  inline void movePtr(ImmGCPtr imm, Register dest);
 
   using MacroAssemblerSpecific::storePtr;
-  void storePtr(ImmPtr imm, const Address& address);
+  inline void storePtr(ImmPtr imm, const Address& address);
 #ifndef JS_CODEGEN_RISCV64
-  void storePtr(Register src, AbsoluteAddress address);
+  inline void storePtr(Register src, AbsoluteAddress address);
 #endif
 
   using MacroAssemblerSpecific::loadPtr;
 #ifndef JS_CODEGEN_RISCV64
-  void loadPtr(AbsoluteAddress addr, Register dest);
+  inline void loadPtr(AbsoluteAddress addr, Register dest);
 #endif
 
   using MacroAssemblerSpecific::jump;
-  void jump(TrampolinePtr code);
+  inline void jump(TrampolinePtr code);
 
  private:
   void handleFailure();
