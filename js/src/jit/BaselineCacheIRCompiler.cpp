@@ -2350,6 +2350,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
 
   stub->addNewStub(icEntry, newStub);
 
+#ifdef ENABLE_JS_AOT
   // NOTE(aot): scriptKey=0 for eval/dyngen or inlined ICScript so hint lookup
   // in initICEntries does not misresolve.
   uint32_t scriptKey =
@@ -2365,6 +2366,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
                 writer.codeStart(), writer.codeLength()))),
             scriptKey, unsigned(stub->pcOffset()),
             gAOTInstr.procTag);
+#endif
 
   JSScript* owningScript = icScript->isInlined()
                                ? icScript->inliningRoot()->owningScript()

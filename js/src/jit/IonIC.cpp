@@ -88,6 +88,7 @@ Register IonIC::scratchRegisterForEntryJump() {
 
 void IonIC::discardStubs(Zone* zone, IonScript* ionScript) {
   if (firstStub_) {
+#ifdef ENABLE_JS_AOT
     uint8_t* codePtr = codeRaw_;
     for (IonICStub* s = firstStub_; s; s = s->next()) {
       AOT_INSTR(AOTInstr_IC, "ic-detach kind=%s code=%u engine=ion\n",
@@ -95,6 +96,7 @@ void IonIC::discardStubs(Zone* zone, IonScript* ionScript) {
                 unsigned(JitCode::FromExecutable(codePtr)->instructionsSize()));
       codePtr = s->nextCodeRaw();
     }
+#endif
 
     // We are removing edges from IonIC to gcthings. Perform a write barrier to
     // let the GC know about those edges.

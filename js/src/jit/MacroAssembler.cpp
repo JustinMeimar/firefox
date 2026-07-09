@@ -735,6 +735,7 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
         }
       }
     } else {
+#ifdef ENABLE_JS_AOT
       // NOTE(aot): load zone at runtime to build the cell header.
       int32_t siteOffset = Zone::offsetOfUnknownAllocSite(traceKind);
       loadZoneForAOT(temp);
@@ -748,6 +749,9 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
         loadZoneForAOT(temp);
         add32(Imm32(1), Address(temp, allocCountOffset));
       }
+#else
+      MOZ_CRASH("null zone in bumpPointerAllocate requires ENABLE_JS_AOT");
+#endif
     }
   } else {
     // Update allocation site and store pointer in the nursery cell header. This

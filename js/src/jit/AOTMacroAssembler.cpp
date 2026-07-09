@@ -133,6 +133,7 @@ void MacroAssembler::loadZoneBase(Register dest) {
   MacroAssemblerSpecific::movePtr(ImmPtr(realm()->zone()->zone()), dest);
 }
 
+#ifdef ENABLE_JS_AOT
 // NOTE(aot): only sub-page sentinel values (val < 16) are safe to bake as
 // literal pointers. Real user-space pointers on Linux can never land there
 // (page 0 is unmappable), so the SpecialScriptBit sentinels 0x1/0x3/0x5 pass
@@ -145,7 +146,6 @@ static constexpr uintptr_t kAOTBakeableSentinelLimit = 16;
 
 // Crash when an AOT intercept sees an unknown pointer that isn't a small
 // sentinel. Real pointers must be registered in the indirection table.
-#ifdef ENABLE_JS_AOT
 #  define AOT_CRASH_ON_UNKNOWN_PTR(kind, val)                             \
     do {                                                                  \
       if ((val) >= kAOTBakeableSentinelLimit) {                           \
