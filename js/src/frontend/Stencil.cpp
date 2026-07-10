@@ -3127,9 +3127,15 @@ bool CompilationStencil::delazifySelfHostedFunction(
 #ifdef ENABLE_JS_AOT
   // Check AOT container for a pre-compiled self-hosted function blob
   // which can be baseline interpreted.
+  //
+  // NOTE(aot): Skip when the realm is being debugged. The shared AOT blob
+  // was compiled once without debug instrumentation, so falling through
+  // lets the baseline interpreter (whose debug hooks are toggleable at
+  // runtime) handle it correctly instead.
   if (jit::JitOptions.useAOTSelfHosted &&
       jit::IsBaselineInterpreterEnabled() &&
-      jit::CanBaselineInterpretScript(script)) {
+      jit::CanBaselineInterpretScript(script) &&
+      !script->isDebuggee()) {
     if (!cx->zone()->ensureJitZoneExists(cx)) {
       return false;
     }
@@ -3137,10 +3143,6 @@ bool CompilationStencil::delazifySelfHostedFunction(
     if (!script->ensureHasJitScript(cx, keepJitScript)) {
       return false;
     }
-    // NOTE(Justin): I'm sceptical this is the correct spot for this code.
-    // Some similar guards are performed in the jitCache lookup below. The
-    // call to `LoadAOTSelfHosted` could find an equivalent location within
-    // one of the self-hosted cache lookup branches.
     if (jit::LoadAOTSelfHosted(cx, script, name)) {
       return true;
     }
