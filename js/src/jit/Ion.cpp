@@ -271,6 +271,12 @@ bool JitRuntime::initialize(JSContext* cx) {
   }
 
 #ifdef ENABLE_JS_AOT
+  if (IsBaselineInterpreterEnabled()) {
+    aotIndirectionTable_.set(
+        AOTSlot::InterpretOp,
+        uintptr_t(baselineInterpreter_.interpretOpAddr().value));
+  }
+
   if (baselineInterpreter_.loadedFromAOT()) {
     if (!generateAOTInterpPreamble(cx)) {
       return false;
