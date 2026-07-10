@@ -340,6 +340,10 @@ class alignas(uintptr_t) BaselineScript final
   void copyRetAddrEntries(const RetAddrEntry* entries);
   void copyOSREntries(const OSREntry* entries);
   void copyDebugTrapEntries(const DebugTrapEntry* entries);
+  // Populate resumeEntryList from native-code offsets. UINT32_MAX marks an
+  // unreachable entry and is stored as nullptr. Used by the AOT loader; the
+  // normal compile path uses computeResumeNativeOffsets instead.
+  void copyResumeEntries(const uint32_t* offsets);
 
   // Copy resumeOffsets list from |script| and convert the pcOffsets
   // to native addresses in the Baseline code based on |entries|.

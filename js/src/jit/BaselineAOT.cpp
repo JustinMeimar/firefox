@@ -407,12 +407,12 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
   auto retAddrs   = reader->readMetadataArray<RetAddrEntry>(manifest.retAddrEntryCount);
   auto osrEntries = reader->readMetadataArray<BaselineScript::OSREntry>(manifest.osrEntryCount);
   auto debugTraps = reader->readMetadataArray<BaselineScript::DebugTrapEntry>(manifest.debugTrapEntryCount);
+  auto resumeOffsets = reader->readMetadataArray<uint32_t>(manifest.resumeEntryCount);
 
-  if (!retAddrs.empty())   bs->copyRetAddrEntries(retAddrs.data());
-  if (!osrEntries.empty()) bs->copyOSREntries(osrEntries.data());
-  if (!debugTraps.empty()) bs->copyDebugTrapEntries(debugTraps.data());
-
-  bs->computeResumeNativeOffsets(script, ResumeOffsetEntryVector());
+  if (!retAddrs.empty())     bs->copyRetAddrEntries(retAddrs.data());
+  if (!osrEntries.empty())   bs->copyOSREntries(osrEntries.data());
+  if (!debugTraps.empty())   bs->copyDebugTrapEntries(debugTraps.data());
+  if (!resumeOffsets.empty()) bs->copyResumeEntries(resumeOffsets.data());
 
   mozilla::Maybe<JitContext> jctx;
   if (!MaybeGetJitContext()) {

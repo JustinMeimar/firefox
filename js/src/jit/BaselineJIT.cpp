@@ -1453,6 +1453,14 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code,
   return true;
 }
 
+void BaselineScript::copyResumeEntries(const uint32_t* offsets) {
+  mozilla::Span<uint8_t*> entries = resumeEntryList();
+  uint8_t* base = method_->raw();
+  for (size_t i = 0; i < entries.size(); i++) {
+    entries[i] = offsets[i] == UINT32_MAX ? nullptr : base + offsets[i];
+  }
+}
+
 void BaselineScript::fillAOTManifest(
     AOTScriptManifest* sm,
     AOTBlobWriter* blob) {
@@ -1464,8 +1472,20 @@ void BaselineScript::fillAOTManifest(
   sm->debugTrapEntryCount = debugTrapEntries().size();
   sm->resumeEntryCount = resumeEntryList().size();
 
+  // Serialize resume entries as native offsets from method_->raw() so they
+  // can be relocated on load. Unreachable entries were stored as nullptr;
+  // preserve them by encoding as UINT32_MAX.
+  mozilla::Vector<uint32_t, 0, SystemAllocPolicy> resumeOffsets;
+  MOZ_ALWAYS_TRUE(resumeOffsets.reserve(resumeEntryList().size()));
+  uint8_t* base = method_->raw();
+  for (uint8_t* entry : resumeEntryList()) {
+    resumeOffsets.infallibleAppend(entry ? uint32_t(entry - base) : UINT32_MAX);
+  }
+
   MOZ_ALWAYS_TRUE(blob->writeMetadata(
-      retAddrEntries(), osrEntries(), debugTrapEntries()));
+      retAddrEntries(), osrEntries(), debugTrapEntries(),
+      mozilla::Span<const uint32_t>(resumeOffsets.begin(),
+                                    resumeOffsets.length())));
 }
 
 #endif
