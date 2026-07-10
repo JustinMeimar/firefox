@@ -3144,6 +3144,9 @@ bool CompilationStencil::delazifySelfHostedFunction(
     if (jit::LoadAOTSelfHosted(cx, script, name)) {
       return true;
     }
+    if (cx->isExceptionPending()) {
+      return false;
+    }
   }
 #endif
 
