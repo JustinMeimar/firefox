@@ -15,6 +15,7 @@
 #include "gc/Zone.h"
 #include "jit/AOT.h"
 #include "jit/AOTInstrumentation.h"
+#include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRSpewer.h"
@@ -457,6 +458,7 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
   if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
           cx->runtime())) {
+    AutoWritableJitCode awjc(bs->method());
     bs->toggleProfilerInstrumentation(true);
   }
 

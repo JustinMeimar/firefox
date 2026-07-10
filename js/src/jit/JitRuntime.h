@@ -27,6 +27,7 @@
 #include "jit/shared/Assembler-shared.h"
 #include "jit/TrampolineNatives.h"
 #include "js/AllocPolicy.h"
+#include "js/HashTable.h"
 #include "js/ProfilingFrameIterator.h"
 #include "js/TypeDecls.h"
 #include "js/UniquePtr.h"
@@ -257,6 +258,13 @@ class JitRuntime {
     aotPreambles_.clear();
     aotInterpPreamble_ = nullptr;
   }
+
+  // Multiple per-realm JitCodes can point at the same AOT static .text
+  // region; each JitCode has its own profilerInstrumented_ flag but the
+  // underlying toggled bytes are shared. Track the shared state here so
+  // ToggleProfilerInstrumentation is idempotent across sibling JitCodes.
+  HashSet<uint8_t*, mozilla::DefaultHasher<uint8_t*>, SystemAllocPolicy>
+      staticCodeProfilerOn_;
   private:
 #endif
 

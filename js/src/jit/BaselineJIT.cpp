@@ -1236,6 +1236,29 @@ static void ToggleProfilerInstrumentation(JitCode* code,
                                        CodeOffset(profilerExitToggleOffset));
 
   code->setProfilerInstrumented(enable);
+
+#ifdef ENABLE_JS_AOT
+  // Sibling JitCodes may already have flipped the shared static bytes;
+  // the runtime-level set is the authoritative state for AOT regions.
+  if (code->isStaticCode()) {
+    auto& set = code->runtimeFromMainThread()
+                    ->jitRuntime()
+                    ->staticCodeProfilerOn_;
+    bool currentlyOn = set.has(code->raw());
+    if (currentlyOn == enable) {
+      return;
+    }
+    if (enable) {
+      AutoEnterOOMUnsafeRegion oomUnsafe;
+      if (!set.put(code->raw())) {
+        oomUnsafe.crash("staticCodeProfilerOn_ OOM");
+      }
+    } else {
+      set.remove(code->raw());
+    }
+  }
+#endif
+
   if (enable) {
     Assembler::ToggleToCmp(enterToggleLocation);
     Assembler::ToggleToCmp(exitToggleLocation);
@@ -1249,10 +1272,6 @@ void BaselineScript::toggleProfilerInstrumentation(bool enable) {
   JitSpew(JitSpew_BaselineIC, "  toggling profiling %s for BaselineScript %p",
           enable ? "on" : "off", this);
 
-  mozilla::Maybe<AutoWritableJitCode> awjc;
-  if (method_->isStaticCode()) {
-    awjc.emplace(method_);
-  }
   ToggleProfilerInstrumentation(method_, profilerEnterToggleOffset_,
                                 profilerExitToggleOffset_, enable);
 }
