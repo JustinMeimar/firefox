@@ -49,7 +49,8 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   // which is stored above the code.
   uint8_t* allocatedMemory() const {
     if (isStaticCode_) {
-      return headerPtr();  // NOTE(aot): no header for static code.
+      // NOTE(aot): Static AOT code has no JitCodeHeader in front of it.
+      return headerPtr();
     }
     return headerPtr() - headerSize_;
   }
@@ -73,7 +74,8 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
                              // native=>bytecode mapping tables.
   bool profilerInstrumented_ : 1;  // Whether or not profiling instrumentation
                                    // is on. Used by BaselineScript.
-  bool isStaticCode_ : 1;   // NOTE(aot): points directly at static .text.
+  // NOTE(aot): Set when raw() addresses the static AOT .text region.
+  bool isStaticCode_ : 1;
   uint8_t localTracingSlots_;
 
   JitCode() = delete;
@@ -114,7 +116,8 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   size_t headerSize() const { return headerSize_; }
   size_t allocatedSize() const {
     if (isStaticCode_) {
-      return insnSize_;  // NOTE(aot): no buffer/header overhead.
+      // NOTE(aot): Static AOT code has no buffer or header overhead.
+      return insnSize_;
     }
     return bufferSize_ + headerSize_;
   }
@@ -164,7 +167,8 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   static JitCode* New(JSContext* cx, uint8_t* code, uint32_t totalSize,
                       uint32_t headerSize, ExecutablePool* pool, CodeKind kind);
 
-  // NOTE(aot): GC cell pointing directly at static .text; no pool, no header.
+  // NOTE(aot): Construct a JitCode that refers directly to static AOT
+  // .text. There is no ExecutablePool or JitCodeHeader backing it.
   static JitCode* NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
                             CodeKind kind);
 

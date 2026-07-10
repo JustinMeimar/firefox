@@ -19,26 +19,42 @@
 
 namespace js::jit {
 
-// [SMDOC] AOT JIT Code 
-
-// When compiled with ENABLE_JS_AOT, SpiderMonkey can emit
-// relocatable JIT code for the BaselineInterpreter, Inline
-// Cache Stubs and self-hosted Baseline compiled builtins.
+// [SMDOC] AOT JIT Code
 //
-// To make JIT code relocatable, all uses of `ImmPtr` are intercepted inside
-// a set of common masm interfaces then compared against a set
-// of expected pointers enumerated in `AOTSlot`. If the pointer
-// can be identified, the masm emits an indirection to attain the
-// pointer via the &AOTIndirectionTable, stored in the BaselineFrame.
-// This incurs a cost of two loads to attain any runtime pointer, but
-// allows the generated code to be independent from any particular runtime.
-// The buffer can then be dumped, serialized into an assembly scaffold,
-// and reattached as a build input.
+// When built with `ENABLE_JS_AOT`, SpiderMonkey can emit relocatable JIT
+// code for the baseline interpreter, inline cache stubs orself-hosted
+// builtins.
+//
+// An AOT container refers to the assembly scaffold which is filled with
+// AOT artifacts, called "Blobs". A single IC, baseline interpreter, or
+// self hosted function constitutes an AOT blob. The container uses a
+// binary manifest pattern in which uniform manifest payloads are packed
+// into a flat binary buffer, each of which describes the code offset,
+// code size, metadata offset and metadata size for each AOT blob. From
+// there, AOT artifacts can be reconstructed and deserialized into their
+// respective C++ classes, only this time with a JitCode backed by static
+// memory rather than dynamic heap memory.
+//
+// To make JIT code relocatable, all uses of `ImmPtr` are intercepted
+// inside a set of common masm interfaces then compared against a set of
+// expected pointers enumerated in `AOTSlot`. If the pointer can be
+// identified, the masm emits an indirection to attain the pointer via
+// the &AOTIndirectionTable, stored in the BaselineFrame. This incurs a
+// cost of two loads to attain any runtime pointer, but allows the
+// generated code to be independent from any particular runtime. The
+// buffer can then be dumped, serialized into an assembly scaffold, and
+// reattached as a build input.
 
 extern const double MathRandomScaleInv;
+class JitCode;
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
+static constexpr uint32_t kNoCorpusIndex = UINT32_MAX; // Used for IC hints
+static constexpr uint32_t kAOTAlignment = 16;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 3;
+static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
+
 
 enum class AOTSlot : uint32_t {
 #define AOT_SLOT(name, ...) name,
@@ -82,31 +98,14 @@ inline const char* AOTSlotName(AOTSlot slot) {
   return "Unknown";
 }
 
-static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
-
-// Bump on any layout or semantic change so stale containers are rejected
-// at load time.
-static constexpr uint32_t AOT_CONTAINER_VERSION = 3;
-
-static constexpr uint32_t kAOTAlignment = 16;
-
-// Sentinel for AOTBlobDirectoryEntry::corpusIndex meaning "not an IC-hint
-// blueprint." Distinct from 0, which is a valid corpus index.
-static constexpr uint32_t kNoCorpusIndex = UINT32_MAX;
-
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
   SelfHostedFunction = 1,
   InlineCacheStub = 2,
 };
 
-// [SMDOC] AOT Container Format
-//
-// The on-disk (and embedded) container is a flat binary with a fixed
-// header, a directory of blob entries, and the blob payloads (code,
-// manifest, metadata).  Each blob carries its own kind tag
-// (interpreter vs. self-hosted function, ... ) so the loader can
-// lookup the code and meta-data.
+// The container is a flat binary with a fixed header, a directory
+// of blob entries, and the blob payloads (code, manifest, metadata).
 struct AOTContainerHeader {
   uint32_t magic;
   uint32_t version;
@@ -117,14 +116,12 @@ struct AOTContainerHeader {
 static_assert(sizeof(AOTContainerHeader) == 16,
               "AOTContainerHeader must be 16 bytes");
 
+// Contains the code, metadata and manifest size and offset pairs to
+// enable the code and data to be reconstructed from the binary.
 struct AOTBlobDirectoryEntry {
   AOTBlobKind kind;
-  // Content hash of the blob's name. Populated for SelfHostedFunction so
-  // getBlob() can match by function name; zero for other kinds.
   uint32_t nameHash;
-  // Corpus index for InlineCacheStub, used by the eager IC-attach hint
-  // machinery in initICEntries. kNoCorpusIndex for other kinds.
-  uint32_t corpusIndex;
+  uint32_t corpusIndex; // used only in IC hint prototype
   uint32_t codeOffset;
   uint32_t codeSize;
   uint32_t metadataOffset;
@@ -166,8 +163,6 @@ inline const AOTBlobDirectoryEntry* GetAOTBlobDirectory() {
       GetAOTContainer() + sizeof(AOTContainerHeader));
 }
 
-class JitCode;
-
 [[nodiscard]] JitCode* AllocateAOTCode(
     JSContext* cx, const AOTBlobDirectoryEntry* entry,
     uint8_t* textBase, CodeKind codeKind);
@@ -201,12 +196,9 @@ class AOTIndirectionTable {
   uintptr_t slots_[uint32_t(AOTSlot::Count)] = {};
 };
 
-// [SMDOC] AOT Compilation Context
-//
-// AOTContext is the single flag that switches the codegen pipeline into
-// AOT mode.  Stack-allocated by the caller and passed to MacroAssembler
-// as a non-owning pointer.  When present (non-nullptr), AOT codegen is
-// active: runtime pointers are loaded via AOTIndirectionTable.
+// AOTContext switches codegen to emit position independent code
+// via indirection through the indirection tabel. This class is Stack-allocated
+// by the caller and passed to MacroAssembler.
 class AOTContext {
  public:
   explicit AOTContext(AOTIndirectionTable* table) : table_(table) {}
@@ -215,8 +207,6 @@ class AOTContext {
   AOTIndirectionTable* table_;
 };
 
-// [SMDOC] AOT Blob Writer
-//
 // Accumulates code, manifest, and metadata for one AOT blob.
 // Created by AOTContainerWriter::addBlob().  Movable.
 class AOTBlobWriter {
@@ -287,8 +277,6 @@ class AOTBlobWriter {
   }
 };
 
-// [SMDOC] AOT Container Writer
-//
 // Builds the multi-blob AOT container and emits the assembly .S file.
 // Blobs are added via addBlob() which returns a movable AOTBlobWriter.
 // Call finalize() after all blobs are populated.
@@ -306,18 +294,18 @@ class AOTContainerWriter {
   bool finalize(std::ostream& out);
 };
 
-// [SMDOC] AOT Blob Reader
-//
+
 // Typed view into one blob within the embedded AOT container.
 // Metadata arrays are read sequentially via readMetadataArray<T>(count),
 // which advances an internal cursor.  These methods are non-const because
-// reading mutates the cursor state; callers should not hold const refs
+// reading mutates the cursor state, callers should not hold const refs
 // if they intend to read metadata.
 class AOTBlobReader {
   const AOTBlobDirectoryEntry* entry_;
   const uint8_t* codeBase_;
   const uint8_t* manifestBase_;
-  [[maybe_unused]] const uint8_t* metadataBase_;  // NOTE(aot): DEBUG bounds-assert only
+  // NOTE(aot): Retained only for DEBUG bounds assertions.
+  [[maybe_unused]] const uint8_t* metadataBase_;
   const uint8_t* metadataCursor_;
 
   friend class AOTContainerReader;
@@ -368,8 +356,6 @@ class AOTBlobReader {
   }
 };
 
-// [SMDOC] AOT Container Reader
-//
 // Wraps the embedded AOT container.  Provides lookup by blob kind
 // and optional name hash, returning typed AOTBlobReader instances.
 class AOTContainerReader {

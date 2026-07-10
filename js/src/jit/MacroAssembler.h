@@ -357,7 +357,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // (if self_hosted_cache is enabled) self-hosted baseline code.
   CompileRealm* maybeRealm_ = nullptr;
 
-  // NOTE(aot): non-null while an AutoAOTCodegen scope is active.
+  // NOTE(aot): Non-null while an AutoAOTCodegen scope is active. Drives
+  // isAOT() and the ImmPtr indirection overrides.
   AOTContext* aotContext_ = nullptr;
   bool inAOTStubFrame_ = false;
 
@@ -399,7 +400,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
     if (ctx) {
       MOZ_ASSERT(currentOffset() == 0,
                  "AOT scope must be installed before any code is emitted");
-      // NOTE(aot): realm-independent codegen; poison to catch stray uses.
+      // NOTE(aot): AOT codegen is realm-independent. Clear maybeRealm_
+      // so any stray access asserts.
       maybeRealm_ = nullptr;
     }
     aotContext_ = ctx;
@@ -5352,7 +5354,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Label done;
 #ifdef ENABLE_JS_AOT
     if (isAOT()) {
-      // NOTE(aot): no realm; use AnyZone variant that loads cx->zone.
+      // NOTE(aot): No compile-time realm under AOT. Use the AnyZone
+      // variant, which loads the zone from JSContext.
       branchTestNeedsMarkingBarrierAnyZone(Assembler::Zero, &done, ScratchReg);
     } else
 #endif

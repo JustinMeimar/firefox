@@ -1492,7 +1492,8 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   }
 
 #ifdef ENABLE_JS_AOT
-  // NOTE(aot): scratch1 may hold the interpreter PC; use scratch2.
+  // NOTE(aot): scratch1 may still hold the interpreter PC on
+  // architectures with InterpreterPCReg. Use scratch2 for the store.
   masm.emitAOTStoreFrameTableBase(
       AOTTablePassReg, scratch2,
       Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
@@ -6628,8 +6629,9 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   masm.emitAOTCopyFrameTableBaseFromCaller(scratch1);
 #endif
 
-  // NOTE(aot): profiler block must come after aotTableBase_ init above;
-  // loadJSContext may reach through emitAOTSlotLoad.
+  // NOTE(aot): This profiler block must follow the aotTableBase_ init
+  // above, because loadJSContext can reach through emitAOTSlotLoad and
+  // therefore depends on the frame slot being populated.
   {
     Register scratchReg = scratch2;
     Label skip;

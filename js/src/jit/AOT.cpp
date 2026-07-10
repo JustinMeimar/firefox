@@ -252,7 +252,8 @@ mozilla::Maybe<AOTBlobReader> AOTContainerReader::getBlob(
   for (uint32_t i = 0; i < blobCount_; i++) {
     if (dir_[i].kind != kind) continue;
     if (nameHash != 0 && dir_[i].nameHash != nameHash) continue;
-    // NOTE(aot): skip empty directory entries (holes from partial dumps).
+    // NOTE(aot): Skip directory entries with zero-sized payloads. These
+    // are holes left behind by partial dumps.
     if (dir_[i].codeSize == 0 && dir_[i].manifestSize == 0 &&
         dir_[i].metadataSize == 0) {
       continue;

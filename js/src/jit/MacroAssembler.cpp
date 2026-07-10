@@ -283,9 +283,10 @@ void MacroAssembler::checkAllocatorState(Register temp, gc::AllocKind allocKind,
   // If the zone has a realm with an object allocation metadata hook, emit a
   // guard for this. Note that IC stubs and some other trampolines can be shared
   // across realms, so we don't bake in a realm pointer.
-  // NOTE(aot): TODO(chase): is skipping this guard for AOT fill sound?
-  // The hasRealmWithAllocMetadataBuilder check is compile-time; the realm/zone
-  // in the AOT IC is loaded at runtime.
+  // NOTE(aot): TODO(chase): confirm that skipping this guard during AOT
+  // fill is sound. The hasRealmWithAllocMetadataBuilder check is a
+  // compile-time property, whereas AOT ICs bind their realm and zone at
+  // runtime.
   if (gc::IsObjectAllocKind(allocKind) && !isAOT() &&
       realm()->zone()->hasRealmWithAllocMetadataBuilder()) {
     loadJSContext(temp);
@@ -687,8 +688,9 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   MOZ_ASSERT(totalSize < INT32_MAX, "Nursery allocation too large");
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
-  // NOTE(aot): in AOT fill (zone == nullptr) skip the compile-time check;
-  // the runtime nursery-end comparison handles the disabled case.
+  // NOTE(aot): During AOT fill zone is nullptr, so bypass the
+  // compile-time IsNurseryAllocEnabled check. The runtime nursery-end
+  // comparison already covers the disabled case.
   if (zone && !IsNurseryAllocEnabled(zone, traceKind)) {
     jump(fail);
     return;
@@ -736,7 +738,8 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
       }
     } else {
 #ifdef ENABLE_JS_AOT
-      // NOTE(aot): load zone at runtime to build the cell header.
+      // NOTE(aot): No compile-time zone is available. Load it from
+      // JSContext to build the nursery cell header.
       int32_t siteOffset = Zone::offsetOfUnknownAllocSite(traceKind);
       loadZoneForAOT(temp);
       computeEffectiveAddress(Address(temp, siteOffset), temp);
@@ -2747,8 +2750,9 @@ static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
 }
 
 void MacroAssembler::loadCurrentRealm(Register dest) {
-  // NOTE(aot): under AutoAOTCodegen the ImmPtr override routes this to the
-  // ContextRealm slot; in normal codegen it bakes the address.
+  // NOTE(aot): Under AutoAOTCodegen the ImmPtr overload rewrites this
+  // move into a load from the ContextRealm slot. Normal codegen bakes
+  // the address directly.
   movePtr(ImmPtr(ContextRealmPtr(runtime())), dest);
   loadPtr(Address(dest, 0), dest);
 }
@@ -9125,7 +9129,8 @@ void MacroAssembler::debugAssertObjectHasClass(Register obj, Register scratch,
                                                const JSClass* clasp) {
 #ifdef DEBUG
 #ifdef ENABLE_JS_AOT
-  // NOTE(aot): class ptrs need an indirection slot; skip unknowns.
+  // NOTE(aot): The class pointer comparison requires an indirection
+  // slot for the class. Skip the assertion when no slot is registered.
   if (isAOT() && !aot().indirectionTable()->findSlot(uintptr_t(clasp))) {
     return;
   }

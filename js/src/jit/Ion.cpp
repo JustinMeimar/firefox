@@ -192,9 +192,10 @@ bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {
   SET(PreBarrier_Object,     preBarrier(MIRType::Object).value);
   SET(PreBarrier_Shape,      preBarrier(MIRType::Shape).value);
   SET(PreBarrier_WasmAnyRef, preBarrier(MIRType::WasmAnyRef).value);
-  
-  // NOTE(aot): two AOT reloc kinds hold debug trap handler addresses; make
-  // sure they exist so the reverse lookup doesn't find nullptr during dump.
+
+  // NOTE(aot): The AOT relocation stream references both debug trap
+  // handlers. Ensure they are generated before populating their
+  // indirection slots, so the reverse lookup does not see nullptr.
   if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Interpreter) ||
       !ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Compiler)) {
     return false;
@@ -753,7 +754,6 @@ template JitCode* JitCode::New<NoGC>(JSContext* cx, uint8_t* code,
 
 JitCode* JitCode::NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
                              CodeKind kind) {
-  // NOTE(aot): shared across runtimes; lives in .text.
   JitCode* codeObj = cx->newCell<JitCode, NoGC>(
       code, /*bufferSize=*/0, /*headerSize=*/0, /*pool=*/nullptr, kind);
   if (!codeObj) {
@@ -783,7 +783,8 @@ void JitCode::copyFrom(MacroAssembler& masm) {
 }
 
 void JitCode::traceChildren(JSTracer* trc) {
-  // NOTE(aot): no relocation tables on static code.
+  // NOTE(aot): Static AOT code carries no relocation tables, so there
+  // are no children to trace.
   if (isStaticCode_) {
     return;
   }
@@ -823,7 +824,8 @@ void JitCode::finalize(JS::GCContext* gcx) {
   vtune::UnmarkCode(this);
 #endif
 
-  // NOTE(aot): static code has no pool/header to release.
+  // NOTE(aot): Static AOT code has no ExecutablePool or header to
+  // release. Clear the header pointer and return.
   if (isStaticCode_) {
     setHeaderPtr(nullptr);
     return;

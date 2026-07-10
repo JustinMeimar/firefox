@@ -238,8 +238,8 @@ JS_PUBLIC_API bool JS::InitSelfHostedCode(JSContext* cx, SelfHostedCache cache,
     }
 
 #ifdef ENABLE_JS_AOT
-    // NOTE(aot): fill Atom JitZone with AOT ICs. Requires the baseline
-    // interp and other trampolines to already exist.
+    // NOTE(aot): Populate the atoms JitZone with AOT ICs. Requires the
+    // baseline interpreter and other trampolines to already exist.
     js::AutoAllocInAtomsZone az(cx);
     bool loadedBinaryICs = false;
     if (js::jit::JitOptions.aotLoadCorpusAtInit()) {

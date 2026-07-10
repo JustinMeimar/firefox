@@ -1011,8 +1011,9 @@ HashNumber ICScript::hash(JSContext* cx) {
     ICFallbackStub* fallback = fallbackStub(i);
 
 #ifdef ENABLE_JS_AOT
-    // NOTE(aot): mirrors WarpScriptOracle::maybeAddIcSnapshot; skip
-    // never-entered hints so the hash matches the transpiler's view.
+    // NOTE(aot): Mirror WarpScriptOracle::maybeAddIcSnapshot by skipping
+    // never-entered pre-attached hints. This keeps the hash aligned with
+    // the transpiler's view of the stub chain.
     while (!stub->isFallback() && stub->isPreAttached() &&
            stub->enteredCount() == 0) {
       stub = stub->toCacheIRStub()->next();

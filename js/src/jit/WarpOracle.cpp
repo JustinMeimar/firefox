@@ -1009,8 +1009,9 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
   ICStub* firstStub = entry.firstStub();
 
 #ifdef ENABLE_JS_AOT
-  // NOTE(aot): skip leading never-entered pre-attached hints so cold sites
-  // stay cold. Validated hints (entered) are transpiled as any other stub.
+  // NOTE(aot): Skip leading pre-attached hints that have never been
+  // entered, so cold sites remain cold. Once a hint has been entered,
+  // it is transpiled the same as any other stub.
   while (firstStub != fallbackStub && firstStub->isPreAttached() &&
          firstStub->enteredCount() == 0) {
     firstStub = firstStub->toCacheIRStub()->next();

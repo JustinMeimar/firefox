@@ -797,7 +797,8 @@ void MacroAssembler::branchTestNeedsMarkingBarrierAnyZone(Condition cond,
   } else {
     // We are compiling the interpreter or another runtime-wide trampoline, so
     // we have to load cx->zone.
-    // NOTE(aot): addressOfZone() is not in the slot table; go via JSContext.
+    // NOTE(aot): The runtime zone pointer has no indirection slot.
+    // Reach it via JSContext instead.
     if (isAOT()) {
       loadJSContext(scratch);
       loadPtr(Address(scratch, JSContext::offsetOfZone()), scratch);

@@ -24,7 +24,10 @@ using namespace js::jit;
 #ifdef ENABLE_JS_AOT
 
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
-  // NOTE(aot): stub frames get the table base pushed by EmitBaselineEnterStubFrame.
+  // NOTE(aot): Inside a baseline stub frame the AOT table base is at
+  // BaselineStubFrameLayout::AOTTableOffsetFromFP, pushed by
+  // EmitBaselineEnterStubFrame. Elsewhere it lives in the baseline
+  // frame slot.
   if (inAOTStubFrame_) {
     MacroAssemblerSpecific::loadPtr(
         Address(FramePointer, BaselineStubFrameLayout::AOTTableOffsetFromFP),
@@ -39,8 +42,9 @@ void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
 }
 
 static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
-  // NOTE(aot): mirrors JitRuntime::preBarrier but for AOT slots; trampolineCode
-  // ptrs are runtime-generated and can't be called directly in AOT code.
+  // NOTE(aot): Mirror JitRuntime::preBarrier through AOT slots. The
+  // trampolineCode pointers are generated at runtime, so AOT code cannot
+  // call them as immediates.
   switch (type) {
     case MIRType::Value:
       return AOTSlot::PreBarrier_Value;

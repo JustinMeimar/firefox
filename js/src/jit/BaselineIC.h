@@ -292,8 +292,9 @@ class ICCacheIRStub final : public ICStub {
   const CacheIRStubInfo* stubInfo_;
 
 #ifdef ENABLE_JS_AOT
-  // NOTE(aot): static AOT stubs have no JitCodeHeader, so FromExecutable
-  // can't find the JitCode; store it here.
+  // NOTE(aot): Static AOT stubs have no JitCodeHeader in front of
+  // their code, so JitCode::FromExecutable cannot recover the owning
+  // JitCode. Cache it directly on the stub.
   JitCode* jitCode_;
 #endif
 

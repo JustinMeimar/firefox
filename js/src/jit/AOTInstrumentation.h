@@ -31,7 +31,8 @@ enum AOTInstrCh : uint32_t {
   AOTInstr_All       = 0xFFFFFFFF,
 };
 
-// NOTE(aot): research code, not intended for use outside FrostMonkey paper.
+// NOTE(aot): Research instrumentation used for the FrostMonkey paper.
+// Not intended for production use.
 
 struct AOTInstrumentation {
   uint32_t channels = 0;

@@ -2058,7 +2058,8 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     const JitZone* atomsJitZone =
         CompileRuntime::get(cx->runtime())->atomsJitZone();
     MOZ_ASSERT(atomsJitZone);
-    // NOTE(aot): AOT IC stubs live in the atoms JitZone; look there first.
+    // NOTE(aot): AOT IC stubs live in the atoms JitZone. Consult it
+    // before falling back to the script's own zone.
     code = atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
   }
 
@@ -2351,8 +2352,9 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   stub->addNewStub(icEntry, newStub);
 
 #ifdef ENABLE_JS_AOT
-  // NOTE(aot): scriptKey=0 for eval/dyngen or inlined ICScript so hint lookup
-  // in initICEntries does not misresolve.
+  // NOTE(aot): Use scriptKey=0 for eval, dyngen, and inlined ICScripts.
+  // This prevents the hint lookup in initICEntries from misresolving to
+  // an unrelated script.
   uint32_t scriptKey =
       icScript->isInlined() ? 0 : JitHintsMap::getScriptKey(outerScript);
 

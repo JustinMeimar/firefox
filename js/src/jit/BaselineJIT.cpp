@@ -430,14 +430,16 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       return Method_Error;
     }
   } else {
-    // NOTE(aot): minimal prep; JitScript must exist already.
+    // NOTE(aot): AOT dump path bypasses PrepareToCompile. The JitScript
+    // is expected to already exist.
     MOZ_ASSERT(rooted->hasJitScript());
     if (!rooted->jitScript()->ensureHasCachedBaselineJitData(cx, rooted)) {
       return Method_Error;
     }
   }
 
-  // NOTE(aot): self-hosted codegen is realm-independent; no globals used.
+  // NOTE(aot): Self-hosted codegen is realm-independent, so no global
+  // lexical or Ion threshold information is required.
   GlobalLexicalEnvironmentObject* globalLexical = nullptr;
   JSObject* globalThis = nullptr;
   uint32_t baseWarmUpThreshold;
@@ -1462,8 +1464,9 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
 #ifdef ENABLE_JS_AOT
-    // NOTE(aot): dump AOT blob then regenerate a normal interpreter for
-    // runtime; AOT-mode TLS indirection is unsafe in shared-library contexts.
+    // NOTE(aot): Emit the AOT blob on an isolated MacroAssembler, then
+    // fall through to build the normal interpreter used at runtime. The
+    // AOT-mode TLS indirection is unsafe in shared-library contexts.
     if (JitOptions.dumpAOTBaseline) {
       auto clearDumpFlag = mozilla::MakeScopeExit(
           [] { JitOptions.dumpAOTBaseline = false; });

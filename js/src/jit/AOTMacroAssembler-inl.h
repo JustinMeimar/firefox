@@ -13,12 +13,11 @@
 namespace js::jit {
 
 #ifdef ENABLE_JS_AOT
-// NOTE(aot): only sub-page sentinel values (val < 16) are safe to bake as
-// literal pointers. Real user-space pointers on Linux can never land there
-// (page 0 is unmappable), so the SpecialScriptBit sentinels 0x1/0x3/0x5 pass
-// while anything that could be a real address is rejected. Genuine small
-// bit-patterns should use ImmWord; real pointers must be added to the
-// indirection table.
+
+// Only tolerate literal `ImmPtr` values up to this value being baked into
+// the AOT JIT code. Uses for passing nullptr through the `ImmPtr` interface
+// occasionally occur, same with `SpecialScriptBit`, both of which we don't
+// want to crash upon for failing to match in the indirection table.
 static constexpr uintptr_t kAOTBakeableSentinelLimit = 16;
 
 #  define AOT_CRASH_ON_UNKNOWN_PTR(kind, val)                             \
@@ -67,8 +66,8 @@ inline void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
-    // NOTE(aot): unknown GC ptrs (e.g. script-specific atoms) fall through
-    // to a normal relocatable move.
+    // NOTE(aot): GC pointers with no matching slot (for example
+    // script-specific atoms) fall through to a normal relocatable move.
   }
 #endif
   MacroAssemblerSpecific::movePtr(imm, dest);
@@ -141,8 +140,9 @@ inline void MacroAssembler::jump(TrampolinePtr code) {
   MacroAssemblerSpecific::jump(code);
 }
 
-// NOTE(aot): entries are PIC-friendly int32 offsets in AOT mode, absolute
-// CodeLabel pointers otherwise.
+// NOTE(aot): In AOT mode dispatch table entries are PIC-friendly int32
+// offsets from the table base. Non-AOT codegen writes absolute CodeLabel
+// pointers.
 inline void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset,
                                                     size_t index,
                                                     const Label& handler) {

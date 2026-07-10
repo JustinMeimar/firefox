@@ -38,8 +38,9 @@ class MOZ_RAII AutoWritableJitCodeFallible {
   bool isStatic_;
   AutoMarkJitCodeWritableForThread writableForThread_;
 
-  // NOTE(aot): static .text code lives outside the JIT pool, so
-  // ReprotectRegion asserts; mprotect it directly.
+  // NOTE(aot): Static AOT code lives in the binary's .text segment
+  // rather than the JIT pool, so ReprotectRegion asserts on it. Toggle
+  // its protection with mprotect directly.
   [[nodiscard]] static bool StaticMprotect(void* addr, size_t size,
                                            bool writable) {
     size_t page = gc::SystemPageSize();

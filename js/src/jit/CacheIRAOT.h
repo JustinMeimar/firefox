@@ -36,7 +36,7 @@ struct CacheIRAOTStub {
 };
 
 mozilla::Span<const CacheIRAOTStub> GetAOTStubs();
-// NOTE(aot): must be called while in the atoms zone; AOT ICs live there.
+// NOTE(aot): Must be called while in the atoms zone. AOT ICs live there.
 void FillAOTICs(JSContext* cx);
 
 struct CacheIRAOTHint {

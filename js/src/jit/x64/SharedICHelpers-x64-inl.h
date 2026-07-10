@@ -67,7 +67,9 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register scratch) {
                 Address(StackPointer, sizeof(uintptr_t)));
 
 #ifdef ENABLE_JS_AOT
-  // NOTE(aot): can't bake the table address; grab it from the baseline frame.
+  // NOTE(aot): The AOT interpreter cannot bake the indirection table
+  // address, so reload it from the baseline frame slot. Non-AOT callers
+  // can move the compile-time base directly.
   if (masm.isAOT()) {
     masm.loadPtr(
         Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()),

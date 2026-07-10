@@ -23,8 +23,9 @@
 
 namespace js::jit {
 
-// NOTE(aot): AOT-loaded stubs never bake in pointers; baseline doesn't emit
-// any either. Null out any native pointer slots.
+// NOTE(aot): AOT-loaded stubs never bake native pointers into their
+// bodies, and baseline does not emit any. Emit zeros for native pointer
+// slots.
 #  if JS_BITS_PER_WORD == 32
 #    define NATIVE_NULLPTR 0, 0, 0, 0
 #  elif JS_BITS_PER_WORD == 64
@@ -110,7 +111,8 @@ mozilla::Span<const CacheIRAOTStub> GetAOTStubs() {
 #  define IC_HINT(scriptKey, pcOffset, corpusIdx) \
     CacheIRAOTHint{scriptKey, pcOffset, corpusIdx},
 
-// NOTE(aot): leading zero keeps the array non-empty; key 0 is never queried.
+// NOTE(aot): Leading sentinel entry keeps the array non-empty when
+// JS_AOT_EAGER_IC_HINTS is empty. Key 0 is reserved and never queried.
 static const CacheIRAOTHint hints[] = {CacheIRAOTHint{0, 0, 0},
                                        JS_AOT_EAGER_IC_HINTS(IC_HINT)};
 
