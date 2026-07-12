@@ -589,6 +589,24 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   if (osrSourceFrame && osrSourceFrame.isDebuggee()) {
     options.setFlag(BaselineOption::ForceDebugInstrumentation);
   }
+
+#ifdef ENABLE_JS_AOT
+  bool aotEligible = !script->isDebuggee() &&
+                     script->outermostScope()->kind() == ScopeKind::Global;
+  if (JitOptions.useAOTBaselineCorpus && aotEligible) {
+    if (LoadAOTBaselineFunction(cx, script)) {
+      return Method_Compiled;
+    }
+  }
+  if (JitOptions.dumpAOTBaselineCorpus && aotEligible) {
+    MethodStatus status = BaselineCompile(cx, script, options,
+                                          /*isAOTDump=*/true);
+    if (status == Method_Compiled) {
+      (void)RecordAOTBaselineFunction(cx, script);
+    }
+    return status;
+  }
+#endif
   return BaselineCompile(cx, script, options);
 }
 
@@ -1471,6 +1489,10 @@ void BaselineScript::fillAOTManifest(
   sm->osrEntryCount = osrEntries().size();
   sm->debugTrapEntryCount = debugTrapEntries().size();
   sm->resumeEntryCount = resumeEntryList().size();
+  // Compat tuple populated by the caller if it has the JSScript.
+  sm->nargs = 0;
+  sm->nfixed = 0;
+  sm->scopeKind = 0;
 
   // Serialize resume entries as native offsets from method_->raw() so they
   // can be relocated on load. Unreachable entries were stored as nullptr;

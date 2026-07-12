@@ -36,6 +36,8 @@
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
 #include "vm/Runtime.h"
+#include "vm/Scope.h"
+#include "vm/SharedStencil.h"
 
 #include "jit/JitScript-inl.h"
 #include "vm/GeckoProfiler-inl.h"
@@ -79,6 +81,19 @@ void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
 }
 
 static mozilla::Maybe<AOTBlobWriter> sSavedInterpreterBlob;
+
+static Vector<AOTBlobWriter, 0, SystemAllocPolicy> sSavedBaselineBlobs;
+
+static uint32_t ComputeBaselineFunctionKey(JSScript* script) {
+  uint32_t h = uint32_t(script->sharedData()->hash());
+  uint16_t nargs = script->function() ? uint16_t(script->function()->nargs())
+                                      : 0;
+  uint16_t nfixed = uint16_t(script->nfixed());
+  uint8_t scopeKind = uint8_t(script->outermostScope()->kind());
+  h ^= (uint32_t(nargs) << 16) ^ uint32_t(nfixed);
+  h ^= uint32_t(scopeKind) << 8;
+  return h;
+}
 
 bool BuildAndSaveInterpBlob(
     JitCode* code, const AOTInterpManifest& scalars,
@@ -182,10 +197,61 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
   return true;
 }
 
+bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
+  MOZ_ASSERT(JitOptions.dumpAOTBaselineCorpus);
+  MOZ_ASSERT(script->hasBaselineScript());
+
+  BaselineScript* bs = script->baselineScript();
+  JitCode* jitCode = bs->method();
+
+  uint32_t key = ComputeBaselineFunctionKey(script);
+
+  std::string name;
+  if (script->function()) {
+    if (JSAtom* atom = script->function()->maybePartialDisplayAtom()) {
+      UniqueChars printable = AtomToPrintableString(cx, atom);
+      if (printable) {
+        name = printable.get();
+      }
+    }
+  }
+  if (name.empty()) {
+    name = "<top-level>";
+  }
+
+  AOTBlobWriter blob(AOTBlobKind::BaselineFunction, key, kNoCorpusIndex,
+                     std::move(name));
+
+  AOTScriptManifest sm{};
+  bs->fillAOTManifest(&sm, &blob);
+  sm.codeSize = jitCode->instructionsSize();
+  sm.headerSize = jitCode->headerSize();
+  sm.nargs = script->function() ? uint16_t(script->function()->nargs()) : 0;
+  sm.nfixed = uint16_t(script->nfixed());
+  sm.scopeKind = uint8_t(script->outermostScope()->kind());
+
+  if (!blob.writeCode(jitCode->raw(), jitCode->instructionsSize())) {
+    return false;
+  }
+  if (!blob.writeManifest(sm)) {
+    return false;
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "AOT baseline corpus recorded key=%u size=%u nargs=%u scope=%u '%s'",
+          key, sm.codeSize, sm.nargs, sm.scopeKind, blob.name().c_str());
+
+  if (!sSavedBaselineBlobs.append(std::move(blob))) {
+    return false;
+  }
+  return true;
+}
+
 bool DumpAOTContainer(JSContext* cx) {
   MOZ_ASSERT(JitOptions.dumpAOTBaseline ||
              JitOptions.dumpAOTSelfHosted ||
-             JitOptions.dumpAOTICs);
+             JitOptions.dumpAOTICs ||
+             JitOptions.dumpAOTBaselineCorpus);
 
   const char* outPath = kAOTOutputPath;
   AOTContainerWriter container;
@@ -238,6 +304,18 @@ bool DumpAOTContainer(JSContext* cx) {
   auto icBlobs = TakeSavedICBlobs();
   for (auto& icBlob : icBlobs) {
     if (!container.addBlob(std::move(icBlob))) return false;
+  }
+
+  {
+    uint32_t corpusCount = sSavedBaselineBlobs.length();
+    for (auto& blob : sSavedBaselineBlobs) {
+      if (!container.addBlob(std::move(blob))) return false;
+    }
+    sSavedBaselineBlobs.clearAndFree();
+    if (corpusCount > 0) {
+      JitSpew(JitSpew_BaselineAOT,
+              "Baseline corpus: %u blob(s) added to container", corpusCount);
+    }
   }
 
   if (container.blobCount() == 0) {
@@ -464,6 +542,134 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
 
   AOT_TIMER_END(sh, "aot-load", "selfhosted", " bytes=%u hash=%u",
                 reader->entry()->codeSize, nameHash);
+
+  return true;
+}
+
+bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
+  if (script->outermostScope()->kind() != ScopeKind::Global) {
+    return false;
+  }
+  if (script->isDebuggee()) {
+    return false;
+  }
+
+  auto container = AOTContainerReader::fromEmbedded();
+  if (!container) {
+    return false;
+  }
+
+  uint32_t key = ComputeBaselineFunctionKey(script);
+  auto reader = container->getBlob(AOTBlobKind::BaselineFunction, key);
+  if (!reader) {
+    return false;
+  }
+
+  if (reader->entry()->manifestSize != sizeof(AOTScriptManifest)) {
+    JitSpew(JitSpew_BaselineAOT,
+            "ERROR: Baseline corpus manifest size mismatch (expected %zu, "
+            "got %u). Stale AOT container?",
+            sizeof(AOTScriptManifest), reader->entry()->manifestSize);
+    return false;
+  }
+
+  AOTScriptManifest manifest = reader->readManifest<AOTScriptManifest>();
+
+  // Reject on compat mismatch. Collision on the 32-bit key with a different
+  // script layout is the only realistic path here.
+  uint16_t nargs = script->function() ? uint16_t(script->function()->nargs())
+                                      : 0;
+  if (manifest.nargs != nargs ||
+      manifest.nfixed != uint16_t(script->nfixed()) ||
+      manifest.scopeKind != uint8_t(script->outermostScope()->kind())) {
+    JitSpew(JitSpew_BaselineAOT,
+            "AOT baseline corpus compat mismatch key=%u "
+            "(want nargs=%u nfixed=%u scope=%u, got %u/%u/%u)",
+            key, nargs, unsigned(script->nfixed()),
+            unsigned(script->outermostScope()->kind()),
+            manifest.nargs, manifest.nfixed, manifest.scopeKind);
+    return false;
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "AOT baseline corpus HIT key=%u codeSize=%u script=%s:%u",
+          key, reader->entry()->codeSize, script->filename(),
+          script->lineno());
+
+  JitCode* code = AllocateAOTCode(
+      cx, reader->entry(), GetAOTTextBase(), CodeKind::Baseline);
+  if (!code) {
+    return false;
+  }
+
+  BaselineScript* bs = BaselineScript::New(
+      cx, manifest.warmUpCheckPrologueOffset,
+      manifest.profilerEnterToggleOffset,
+      manifest.profilerExitToggleOffset,
+      manifest.retAddrEntryCount, manifest.osrEntryCount,
+      manifest.debugTrapEntryCount, manifest.resumeEntryCount);
+  if (!bs) {
+    return false;
+  }
+  bs->setMethod(code);
+
+  auto retAddrs   = reader->readMetadataArray<RetAddrEntry>(manifest.retAddrEntryCount);
+  auto osrEntries = reader->readMetadataArray<BaselineScript::OSREntry>(manifest.osrEntryCount);
+  auto debugTraps = reader->readMetadataArray<BaselineScript::DebugTrapEntry>(manifest.debugTrapEntryCount);
+  auto resumeOffsets = reader->readMetadataArray<uint32_t>(manifest.resumeEntryCount);
+
+  if (!retAddrs.empty())     bs->copyRetAddrEntries(retAddrs.data());
+  if (!osrEntries.empty())   bs->copyOSREntries(osrEntries.data());
+  if (!debugTraps.empty())   bs->copyDebugTrapEntries(debugTraps.data());
+  if (!resumeOffsets.empty()) bs->copyResumeEntries(resumeOffsets.data());
+
+  mozilla::Maybe<JitContext> jctx;
+  if (!MaybeGetJitContext()) {
+    jctx.emplace(cx);
+  }
+  JitRuntime* jrt = cx->runtime()->jitRuntime();
+  JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
+                                               AOTSelfHostedPassReg);
+  if (!preamble) {
+    return false;
+  }
+  JitRuntime::AOTPreambleEntry pe = { code->raw(), preamble };
+  if (!jrt->aotPreambles_.append(pe)) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+
+  script->jitScript()->setBaselineScript(script, bs);
+
+  {
+    JitcodeGlobalTable* globalTable =
+        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+    if (!globalTable->lookup(code->raw())) {
+      UniqueChars str =
+          GeckoProfilerRuntime::allocProfileString(cx, script);
+      if (!str) {
+        return false;
+      }
+
+      auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
+          cx, code, code->raw(), code->rawEnd(), std::move(str));
+      if (!profEntry) {
+        return false;
+      }
+
+      if (!globalTable->addEntry(std::move(profEntry))) {
+        ReportOutOfMemory(cx);
+        return false;
+      }
+      code->setHasBytecodeMap();
+    }
+  }
+
+  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
+          cx->runtime())) {
+    AutoWritableJitCode awjc(bs->method());
+    bs->toggleProfilerInstrumentation(true);
+  }
 
   return true;
 }

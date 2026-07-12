@@ -12378,7 +12378,8 @@ static int Shell(JSContext* cx, OptionParser* op) {
 #ifdef ENABLE_JS_AOT
     if (jit::JitOptions.dumpAOTBaseline ||
         jit::JitOptions.dumpAOTSelfHosted ||
-        jit::JitOptions.dumpAOTICs) {
+        jit::JitOptions.dumpAOTICs ||
+        jit::JitOptions.dumpAOTBaselineCorpus) {
       if (!jit::DumpAOTContainer(cx)) {
         return EXIT_FAILURE;
       }
@@ -13073,10 +13074,12 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "aot-dump-baseline", "Dump baseline interpreter binary for AOT patching.") ||
       !op.addBoolOption('\0', "aot-dump-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
       !op.addBoolOption('\0', "aot-dump-ics", "Dump AOT IC stubs as binary blobs into the container.") ||
+      !op.addBoolOption('\0', "aot-dump-baseline-corpus", "Dump AOT-compiled guest baseline functions triggered during execution.") ||
       !op.addBoolOption('\0', "aot", "Use all AOT compiled artifacts.") ||
       !op.addBoolOption('\0', "aot-baseline", "Use AOT baseline interpreter.") ||
       !op.addBoolOption('\0', "aot-self-hosted", "Use AOT self-hosted functions.") ||
       !op.addBoolOption('\0', "aot-ics", "Use AOT inline caches.") ||
+      !op.addBoolOption('\0', "aot-baseline-corpus", "Install AOT baseline functions from corpus on baseline entry.") ||
       !op.addBoolOption('\0', "aot-ics-enforce", "Disable runtime IC codegen; use only AOT stubs or fallback.") ||
       !op.addBoolOption('\0', "no-aot-ic-hints", "Do not eagerly attach hinted AOT IC stubs at initICEntries.") ||
 #endif
@@ -14213,10 +14216,14 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("aot-dump-ics")) {
     jit::JitOptions.dumpAOTICs = true;
   }
+  if (op.getBoolOption("aot-dump-baseline-corpus")) {
+    jit::JitOptions.dumpAOTBaselineCorpus = true;
+  }
   if (op.getBoolOption("aot")) {
     jit::JitOptions.useAOTBaseline = true;
     jit::JitOptions.useAOTSelfHosted = true;
     jit::JitOptions.useAOTICs = true;
+    jit::JitOptions.useAOTBaselineCorpus = true;
   }
   if (op.getBoolOption("aot-baseline")) {
     jit::JitOptions.useAOTBaseline = true;
@@ -14226,6 +14233,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("aot-ics")) {
     jit::JitOptions.useAOTICs = true;
+  }
+  if (op.getBoolOption("aot-baseline-corpus")) {
+    jit::JitOptions.useAOTBaselineCorpus = true;
   }
   if (op.getBoolOption("aot-ics-enforce")) {
     jit::JitOptions.useAOTICs = true;

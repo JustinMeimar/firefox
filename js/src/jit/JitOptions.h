@@ -75,8 +75,10 @@ struct DefaultJitOptions {
 #endif
   bool dumpAOTBaseline;
   bool dumpAOTSelfHosted;
+  bool dumpAOTBaselineCorpus;
   bool useAOTBaseline;
   bool useAOTSelfHosted;
+  bool useAOTBaselineCorpus;
   bool useAOTICs;
   bool enforceAOTICs;
   bool useAOTICHints;

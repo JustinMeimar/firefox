@@ -57,9 +57,16 @@ struct AOTScriptManifest {
   uint32_t resumeEntryCount = 0;
   uint32_t codeSize = 0;
   uint32_t headerSize = 0;
+  // Compat tuple: unused by SelfHostedFunction, checked at install
+  // for BaselineFunction to reject scripts with mismatched shape.
+  uint16_t nargs = 0;
+  uint16_t nfixed = 0;
+  uint8_t scopeKind = 0;
+  uint8_t pad0 = 0;
+  uint16_t pad1 = 0;
 };
 
-static_assert(sizeof(AOTScriptManifest) == 36,
+static_assert(sizeof(AOTScriptManifest) == 44,
               "AOTScriptManifest layout changed; bump AOT_CONTAINER_MAGIC or "
               "add migration logic");
 
@@ -90,6 +97,12 @@ static_assert(sizeof(AOTICStubManifest) == 16,
 [[nodiscard]] bool LoadAOTSelfHosted(JSContext* cx,
                                      HandleScript script,
                                      Handle<JSAtom*> name);
+
+[[nodiscard]] bool LoadAOTBaselineFunction(JSContext* cx,
+                                           HandleScript script);
+
+[[nodiscard]] bool RecordAOTBaselineFunction(JSContext* cx,
+                                             HandleScript script);
 
 [[nodiscard]] bool DumpAOTContainer(JSContext* cx);
 

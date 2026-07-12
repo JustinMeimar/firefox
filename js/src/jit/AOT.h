@@ -52,7 +52,7 @@ static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 static constexpr uint32_t kNoCorpusIndex = UINT32_MAX; // Used for IC hints
 static constexpr uint32_t kAOTAlignment = 16;
-static constexpr uint32_t AOT_CONTAINER_VERSION = 4;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 5;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 
 
@@ -102,6 +102,7 @@ enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
   SelfHostedFunction = 1,
   InlineCacheStub = 2,
+  BaselineFunction = 3,
 };
 
 // The container is a flat binary with a fixed header, a directory

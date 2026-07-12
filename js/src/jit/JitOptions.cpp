@@ -139,9 +139,11 @@ DefaultJitOptions::DefaultJitOptions() {
 
   SET_DEFAULT(dumpAOTBaseline, false);
   SET_DEFAULT(dumpAOTSelfHosted, false);
+  SET_DEFAULT(dumpAOTBaselineCorpus, false);
 
   SET_DEFAULT(useAOTBaseline, false);
   SET_DEFAULT(useAOTSelfHosted, false);
+  SET_DEFAULT(useAOTBaselineCorpus, false);
   SET_DEFAULT(useAOTICs, false);
   SET_DEFAULT(enforceAOTICs, false);
   SET_DEFAULT(useAOTICHints, true);
