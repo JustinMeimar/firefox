@@ -2425,35 +2425,27 @@ void js::jit::FillAOTICs(JSContext* cx) {
                            /* nameHash = */ 0, uint32_t(corpusIdx),
                            "IC_" + std::to_string(sSavedICBlobs.length()));
 
-        if (!blob.writeCode(code->raw(), code->instructionsSize())) {
-          continue;
-        }
-
-        AOTICStubManifest manifest{};
-        manifest.kind = stubInfo->kind();
-        manifest.makesGCCalls = stubInfo->makesGCCalls() ? 1 : 0;
-        manifest.stubDataOffset = stubInfo->stubDataOffset();
-        manifest.localTracingSlots = code->localTracingSlots();
-        manifest.pad = 0;
-        manifest.cacheIRCodeLength = stubInfo->codeLength();
-
         uint32_t numFields = 0;
         while (stubInfo->fieldType(numFields) != StubField::Type::Limit) {
           numFields++;
         }
-        manifest.numStubFields = numFields;
 
-        if (!blob.writeManifest(manifest)) {
-          continue;
-        }
+        AOTPayload_InlineCacheStub payload;
+        payload.manifest.kind = stubInfo->kind();
+        payload.manifest.makesGCCalls = stubInfo->makesGCCalls() ? 1 : 0;
+        payload.manifest.stubDataOffset = stubInfo->stubDataOffset();
+        payload.manifest.localTracingSlots = code->localTracingSlots();
+        payload.manifest.pad = 0;
+        payload.manifest.cacheIRCodeLength = stubInfo->codeLength();
+        payload.manifest.numStubFields = numFields;
 
-        if (!blob.writeRawMetadata(stubInfo->code(),
-                                   stubInfo->codeLength())) {
-          continue;
-        }
+        payload.code = mozilla::Span(code->raw(), code->instructionsSize());
+        payload.cacheIRCode =
+            mozilla::Span(stubInfo->code(), stubInfo->codeLength());
+        payload.fieldTypes = mozilla::Span(
+            stubInfo->code() + stubInfo->codeLength(), size_t(numFields));
 
-        const uint8_t* fieldStart = stubInfo->code() + stubInfo->codeLength();
-        if (!blob.writeRawMetadata(fieldStart, numFields)) {
+        if (!EncodeAOTBlob_InlineCacheStub(blob, payload)) {
           continue;
         }
 
@@ -2465,7 +2457,7 @@ void js::jit::FillAOTICs(JSContext* cx) {
                 unsigned(code->instructionsSize()),
                 unsigned(stubInfo->codeLength()),
                 numFields,
-                manifest.makesGCCalls ? "  [gc]" : "");
+                payload.manifest.makesGCCalls ? "  [gc]" : "");
 
         (void)sSavedICBlobs.append(std::move(blob));
       }

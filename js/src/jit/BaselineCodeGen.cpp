@@ -7408,7 +7408,13 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 
 #ifdef ENABLE_JS_AOT
 bool BaselineInterpreterGenerator::writeAOTBaseline(JSContext* cx, JitCode* code) {
-  AOTInterpManifest s;
+  const auto& debugInstr = handler.debugInstrumentationOffsets();
+  const auto& debugTraps = debugTrapOffsets_;
+  const auto& coverage = handler.codeCoverageOffsets();
+  const auto& icReturns = handler.icReturnOffsets();
+
+  AOTPayload_BaselineInterpreter payload;
+  auto& s = payload.manifest;
   s.InterpretOp = interpretOpOffset_;
   s.InterpretOpNoDebugTrap = interpretOpNoDebugTrapOffset_;
   s.BailoutPrologue = bailoutPrologueOffset_.offset();
@@ -7418,22 +7424,20 @@ bool BaselineInterpreterGenerator::writeAOTBaseline(JSContext* cx, JitCode* code
   s.CallVMDebugPrologue = handler.callVMOffsets().debugPrologueOffset;
   s.CallVMDebugEpilogue = handler.callVMOffsets().debugEpilogueOffset;
   s.CallVMDebugAfterYield = handler.callVMOffsets().debugAfterYieldOffset;
-  s.DebugInstrumentationCount = handler.debugInstrumentationOffsets().length();
-  s.DebugTrapCount = debugTrapOffsets_.length();
-  s.CodeCoverageCount = handler.codeCoverageOffsets().length();
-  s.ICReturnCount = handler.icReturnOffsets().length();
+  s.DebugInstrumentationCount = debugInstr.length();
+  s.DebugTrapCount = debugTraps.length();
+  s.CodeCoverageCount = coverage.length();
+  s.ICReturnCount = icReturns.length();
 
-  const auto& debugInstr = handler.debugInstrumentationOffsets();
-  const auto& debugTraps = debugTrapOffsets_;
-  const auto& coverage = handler.codeCoverageOffsets();
-  const auto& icReturns = handler.icReturnOffsets();
+  uint8_t* codeStart = code->raw();
+  size_t codeSize = code->rawEnd() - codeStart;
+  payload.code = mozilla::Span(codeStart, codeSize);
+  payload.debugInstr = mozilla::Span(debugInstr.begin(), debugInstr.length());
+  payload.debugTraps = mozilla::Span(debugTraps.begin(), debugTraps.length());
+  payload.coverage = mozilla::Span(coverage.begin(), coverage.length());
+  payload.icReturns = mozilla::Span(icReturns.begin(), icReturns.length());
 
-  return BuildAndSaveInterpBlob(
-      code, s,
-      mozilla::Span(debugInstr.begin(), debugInstr.length()),
-      mozilla::Span(debugTraps.begin(), debugTraps.length()),
-      mozilla::Span(coverage.begin(), coverage.length()),
-      mozilla::Span(icReturns.begin(), icReturns.length()));
+  return BuildAndSaveInterpBlob(code, payload);
 }
 
 #endif

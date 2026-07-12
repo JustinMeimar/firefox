@@ -1435,15 +1435,15 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
 
 #ifdef ENABLE_JS_AOT
 
-bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code,
-                                      AOTBlobReader& reader) {
+bool BaselineInterpreter::initFromAOT(
+    JSContext* cx, JitCode* code,
+    const AOTPayload_BaselineInterpreter& payload) {
   static_assert(sizeof(ICReturnOffset) == 8,
                 "ICReturnOffset must be 8 bytes");
 
   code_ = code;
 
-  AOTInterpManifest s = reader.readManifest<AOTInterpManifest>();
-
+  const auto& s = payload.manifest;
   interpretOpOffset_ = s.InterpretOp;
   interpretOpNoDebugTrapOffset_ = s.InterpretOpNoDebugTrap;
   bailoutPrologueOffset_ = s.BailoutPrologue;
@@ -1454,15 +1454,14 @@ bool BaselineInterpreter::initFromAOT(JSContext* cx, JitCode* code,
   callVMOffsets_.debugEpilogueOffset = s.CallVMDebugEpilogue;
   callVMOffsets_.debugAfterYieldOffset = s.CallVMDebugAfterYield;
 
-  auto debugInstr = reader.readMetadataArray<uint32_t>(s.DebugInstrumentationCount);
-  auto debugTraps = reader.readMetadataArray<uint32_t>(s.DebugTrapCount);
-  auto coverage   = reader.readMetadataArray<uint32_t>(s.CodeCoverageCount);
-  auto icReturns  = reader.readMetadataArray<ICReturnOffset>(s.ICReturnCount);
-
-  if (!debugInstrumentationOffsets_.append(debugInstr.data(), debugInstr.size()) ||
-      !debugTrapOffsets_.append(debugTraps.data(), debugTraps.size()) ||
-      !codeCoverageOffsets_.append(coverage.data(), coverage.size()) ||
-      !icReturnOffsets_.append(icReturns.data(), icReturns.size())) {
+  if (!debugInstrumentationOffsets_.append(payload.debugInstr.data(),
+                                            payload.debugInstr.size()) ||
+      !debugTrapOffsets_.append(payload.debugTraps.data(),
+                                 payload.debugTraps.size()) ||
+      !codeCoverageOffsets_.append(payload.coverage.data(),
+                                    payload.coverage.size()) ||
+      !icReturnOffsets_.append(payload.icReturns.data(),
+                                payload.icReturns.size())) {
     JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT metadata vectors");
     return false;
   }
@@ -1479,35 +1478,14 @@ void BaselineScript::copyResumeEntries(const uint32_t* offsets) {
   }
 }
 
-void BaselineScript::fillAOTManifest(
-    AOTScriptManifest* sm,
-    AOTBlobWriter* blob) {
-  sm->warmUpCheckPrologueOffset = warmUpCheckPrologueOffset_;
-  sm->profilerEnterToggleOffset = profilerEnterToggleOffset_;
-  sm->profilerExitToggleOffset = profilerExitToggleOffset_;
-  sm->retAddrEntryCount = retAddrEntries().size();
-  sm->osrEntryCount = osrEntries().size();
-  sm->debugTrapEntryCount = debugTrapEntries().size();
-  sm->resumeEntryCount = resumeEntryList().size();
-  // Compat tuple populated by the caller if it has the JSScript.
-  sm->nargs = 0;
-  sm->nfixed = 0;
-  sm->scopeKind = 0;
-
-  // Serialize resume entries as native offsets from method_->raw() so they
-  // can be relocated on load. Unreachable entries were stored as nullptr;
-  // preserve them by encoding as UINT32_MAX.
-  mozilla::Vector<uint32_t, 0, SystemAllocPolicy> resumeOffsets;
-  MOZ_ALWAYS_TRUE(resumeOffsets.reserve(resumeEntryList().size()));
+bool BaselineScript::aotResumeOffsets(
+    mozilla::Vector<uint32_t, 0, SystemAllocPolicy>& out) {
+  if (!out.reserve(resumeEntryList().size())) return false;
   uint8_t* base = method_->raw();
   for (uint8_t* entry : resumeEntryList()) {
-    resumeOffsets.infallibleAppend(entry ? uint32_t(entry - base) : UINT32_MAX);
+    out.infallibleAppend(entry ? uint32_t(entry - base) : UINT32_MAX);
   }
-
-  MOZ_ALWAYS_TRUE(blob->writeMetadata(
-      retAddrEntries(), osrEntries(), debugTrapEntries(),
-      mozilla::Span<const uint32_t>(resumeOffsets.begin(),
-                                    resumeOffsets.length())));
+  return true;
 }
 
 #endif

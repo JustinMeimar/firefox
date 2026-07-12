@@ -52,8 +52,11 @@ static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 static constexpr uint32_t kNoCorpusIndex = UINT32_MAX; // Used for IC hints
 static constexpr uint32_t kAOTAlignment = 16;
-static constexpr uint32_t AOT_CONTAINER_VERSION = 5;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 7;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
+
+// The container fingerprint POD (AOTCodegenOptions) is schema-defined
+// in jit/AOTBlobSchema.yaml and emitted into jit/AOTBlobGenerated.h.
 
 
 enum class AOTSlot : uint32_t {
@@ -105,13 +108,21 @@ enum class AOTBlobKind : uint32_t {
   BaselineFunction = 3,
 };
 
-// The container is a flat binary with a fixed header, a directory
-// of blob entries, and the blob payloads (code, manifest, metadata).
+// The container is a flat binary. Layout:
+//   AOTContainerHeader          (16 bytes)
+//   fingerprint bytes           (header.fingerprintSize bytes)
+//   [padding to kAOTAlignment]
+//   AOTBlobDirectoryEntry[]     (header.blobCount entries)
+//   [padding]
+//   { manifest, metadata }*     (per blob, at offsets in directory)
+//
+// Fingerprint lives in the header region and is verified inside
+// AOTContainerReader::fromEmbedded before any blob is exposed.
 struct AOTContainerHeader {
   uint32_t magic;
   uint32_t version;
   uint32_t blobCount;
-  uint32_t padding;
+  uint32_t fingerprintSize;
 };
 
 static_assert(sizeof(AOTContainerHeader) == 16,
@@ -157,16 +168,35 @@ inline const AOTContainerHeader* GetAOTContainerHeader() {
   return hdr;
 }
 
+// Offset of the blob directory from the container base. Header +
+// fingerprint bytes + alignment padding.
+inline size_t AOTBlobDirectoryOffset(const AOTContainerHeader* hdr) {
+  size_t raw = sizeof(AOTContainerHeader) + hdr->fingerprintSize;
+  return (raw + (kAOTAlignment - 1)) & ~size_t(kAOTAlignment - 1);
+}
+
 inline const AOTBlobDirectoryEntry* GetAOTBlobDirectory() {
   const auto* hdr = GetAOTContainerHeader();
   if (!hdr) return nullptr;
   return reinterpret_cast<const AOTBlobDirectoryEntry*>(
-      GetAOTContainer() + sizeof(AOTContainerHeader));
+      GetAOTContainer() + AOTBlobDirectoryOffset(hdr));
+}
+
+// Pointer to fingerprint bytes in the header region, and their length.
+inline const uint8_t* GetAOTContainerFingerprint(size_t* outLen) {
+  const auto* hdr = GetAOTContainerHeader();
+  if (!hdr) {
+    *outLen = 0;
+    return nullptr;
+  }
+  *outLen = hdr->fingerprintSize;
+  return GetAOTContainer() + sizeof(AOTContainerHeader);
 }
 
 [[nodiscard]] JitCode* AllocateAOTCode(
     JSContext* cx, const AOTBlobDirectoryEntry* entry,
     uint8_t* textBase, CodeKind codeKind);
+
 
 class AOTIndirectionTable {
  public:
@@ -395,6 +425,31 @@ class AOTContainerReader {
           containerBase_ + dir_[i].manifestOffset,
           containerBase_ + dir_[i].metadataOffset);
       fn(reader);
+      found = true;
+    }
+    return found;
+  }
+
+  // Iterate every blob matching (kind, nameHash). Correctness never
+  // depends on the hash being unique: callers must verify content
+  // (memcmp / manifest fields) before installing.
+  template <typename Fn>
+  bool forEachBlobWithHash(AOTBlobKind kind, uint32_t nameHash,
+                           Fn&& fn) const {
+    bool found = false;
+    for (uint32_t i = 0; i < blobCount_; i++) {
+      if (dir_[i].kind != kind) continue;
+      if (dir_[i].nameHash != nameHash) continue;
+      if (dir_[i].codeSize == 0 && dir_[i].manifestSize == 0 &&
+          dir_[i].metadataSize == 0) {
+        continue;
+      }
+      AOTBlobReader reader(
+          &dir_[i],
+          textBase_ + dir_[i].codeOffset,
+          containerBase_ + dir_[i].manifestOffset,
+          containerBase_ + dir_[i].metadataOffset);
+      if (fn(reader)) return true;
       found = true;
     }
     return found;

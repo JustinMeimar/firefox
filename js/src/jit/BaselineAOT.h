@@ -12,6 +12,7 @@
 #include <string>
 
 #include "jit/AOT.h"
+#include "jit/AOTBlobGenerated.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIR.h"
 #include "js/Vector.h"
@@ -21,75 +22,11 @@ namespace js::jit {
 static constexpr const char* kAOTOutputPath =
     "js/src/jit/AOTBaseline.S";
 
-// [SMDOC] AOT Baseline Interpreter Manifest
-//
-// Fixed-size header serialized alongside the interpreter code blob.
-struct AOTInterpManifest {
-  uint32_t InterpretOp = 0;
-  uint32_t InterpretOpNoDebugTrap = 0;
-  uint32_t BailoutPrologue = 0;
-  uint32_t ProfilerEnterToggle = 0;
-  uint32_t ProfilerExitToggle = 0;
-  uint32_t DebugTrapHandler = 0;
-  uint32_t CallVMDebugPrologue = 0;
-  uint32_t CallVMDebugEpilogue = 0;
-  uint32_t CallVMDebugAfterYield = 0;
-  uint32_t DebugInstrumentationCount = 0;
-  uint32_t DebugTrapCount = 0;
-  uint32_t CodeCoverageCount = 0;
-  uint32_t ICReturnCount = 0;
-};
-
-static_assert(sizeof(AOTInterpManifest) == 52,
-              "AOTInterpManifest layout changed; bump AOT_CONTAINER_MAGIC or "
-              "add migration logic");
-
-// [SMDOC] AOT Baseline Compilation (Self-Hosted) Manifest
-//
-// Per-script manifest for AOT-compiled self-hosted functions.
-struct AOTScriptManifest {
-  uint32_t warmUpCheckPrologueOffset = 0;
-  uint32_t profilerEnterToggleOffset = 0;
-  uint32_t profilerExitToggleOffset = 0;
-  uint32_t retAddrEntryCount = 0;
-  uint32_t osrEntryCount = 0;
-  uint32_t debugTrapEntryCount = 0;
-  uint32_t resumeEntryCount = 0;
-  uint32_t codeSize = 0;
-  uint32_t headerSize = 0;
-  // Compat tuple: unused by SelfHostedFunction, checked at install
-  // for BaselineFunction to reject scripts with mismatched shape.
-  uint16_t nargs = 0;
-  uint16_t nfixed = 0;
-  uint8_t scopeKind = 0;
-  uint8_t pad0 = 0;
-  uint16_t pad1 = 0;
-};
-
-static_assert(sizeof(AOTScriptManifest) == 44,
-              "AOTScriptManifest layout changed; bump AOT_CONTAINER_MAGIC or "
-              "add migration logic");
-
-struct AOTICStubManifest {
-  CacheKind kind = {};
-  uint8_t makesGCCalls = 0;
-  uint8_t stubDataOffset = 0;
-  uint8_t localTracingSlots = 0;
-  uint8_t pad = 0;
-  uint32_t cacheIRCodeLength = 0;
-  uint32_t numStubFields = 0;
-};
-
-static_assert(sizeof(AOTICStubManifest) == 16,
-              "AOTICStubManifest layout changed; bump AOT_CONTAINER_MAGIC or "
-              "add migration logic");
+// All AOT blob POD types (manifest, payload) and their Encode/Decode
+// helpers live in AOTBlobGenerated.h (generated from AOTBlobSchema.yaml).
 
 [[nodiscard]] bool BuildAndSaveInterpBlob(
-    JitCode* code, const AOTInterpManifest& scalars,
-    mozilla::Span<const uint32_t> debugInstr,
-    mozilla::Span<const uint32_t> debugTraps,
-    mozilla::Span<const uint32_t> coverage,
-    mozilla::Span<const BaselineInterpreter::ICReturnOffset> icReturns);
+    JitCode* code, const AOTPayload_BaselineInterpreter& payload);
 
 [[nodiscard]] bool LoadAOTInterpFromContainer(
     JSContext* cx, BaselineInterpreter& interpreter);

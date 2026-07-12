@@ -315,6 +315,13 @@ GeneratedFile(
 
 if CONFIG["ENABLE_JS_AOT"]:
     GeneratedFile(
+        "AOTBlobGenerated.h",
+        script="GenerateAOTBlobFiles.py",
+        inputs=["AOTBlobSchema.yaml"],
+    )
+
+if CONFIG["ENABLE_JS_AOT"]:
+    GeneratedFile(
         "CacheIRAOTGenerated.h",
         script="GenerateCacheIRFiles.py",
         entry_point="generate_aot_ics_header",

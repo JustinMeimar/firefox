@@ -37,7 +37,6 @@ namespace jit {
 
 class AOTBlobReader;
 class AOTBlobWriter;
-struct AOTScriptManifest;
 class BaselineFrame;
 class ExceptionBailoutInfo;
 class IonCompileTask;
@@ -385,8 +384,34 @@ class alignas(uintptr_t) BaselineScript final
   size_t allocBytes() const { return allocBytes_; }
 
 #ifdef ENABLE_JS_AOT
-  void fillAOTManifest(struct AOTScriptManifest* sm,
-                       AOTBlobWriter* blob);
+  uint32_t warmUpCheckPrologueOffset() const {
+    return warmUpCheckPrologueOffset_;
+  }
+  uint32_t profilerEnterToggleOffset() const {
+    return profilerEnterToggleOffset_;
+  }
+  uint32_t profilerExitToggleOffset() const {
+    return profilerExitToggleOffset_;
+  }
+
+  mozilla::Span<const RetAddrEntry> aotRetAddrEntries() {
+    auto s = retAddrEntries();
+    return {s.data(), s.size()};
+  }
+  mozilla::Span<const OSREntry> aotOSREntries() {
+    auto s = osrEntries();
+    return {s.data(), s.size()};
+  }
+  mozilla::Span<const DebugTrapEntry> aotDebugTrapEntries() {
+    auto s = debugTrapEntries();
+    return {s.data(), s.size()};
+  }
+
+  // Serialize resume entries as native offsets from method_->raw() so
+  // they can be relocated on load. Unreachable entries were stored as
+  // nullptr; encoded here as UINT32_MAX.
+  [[nodiscard]] bool aotResumeOffsets(
+      mozilla::Vector<uint32_t, 0, SystemAllocPolicy>& out);
 #endif
 };
 static_assert(
@@ -566,8 +591,9 @@ class BaselineInterpreter {
             const CallVMOffsets& callVMOffsets);
 
 #ifdef ENABLE_JS_AOT
-  [[nodiscard]] bool initFromAOT(JSContext* cx, JitCode* code,
-                                  AOTBlobReader& reader);
+  [[nodiscard]] bool initFromAOT(
+      JSContext* cx, JitCode* code,
+      const struct AOTPayload_BaselineInterpreter& payload);
   bool loadedFromAOT() const { return loadedFromAOT_; }
 #endif
 

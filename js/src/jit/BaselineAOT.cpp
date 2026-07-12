@@ -6,9 +6,11 @@
 
 #include "jit/BaselineAOT.h"
 
+#include "mozilla/HashFunctions.h"
 #include "mozilla/Sprintf.h"
 
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 
 #include "frontend/CompilationStencil.h"
@@ -84,47 +86,94 @@ static mozilla::Maybe<AOTBlobWriter> sSavedInterpreterBlob;
 
 static Vector<AOTBlobWriter, 0, SystemAllocPolicy> sSavedBaselineBlobs;
 
-static uint32_t ComputeBaselineFunctionKey(JSScript* script) {
-  uint32_t h = uint32_t(script->sharedData()->hash());
-  uint16_t nargs = script->function() ? uint16_t(script->function()->nargs())
-                                      : 0;
+// Magic prefix on the per-blob canonical byte string. Distinct from
+// AOT_CONTAINER_MAGIC so a truncated read of canonical bytes cannot be
+// confused with a container header.
+static constexpr uint32_t kBaselineCanonicalMagic = 0x424C4E63;  // 'BLNc'
+
+// Mutable-flag bits that BaselineCodeGen reads. Grow this alongside
+// the codegen change that introduces a new read. Referenced only by
+// ComputeBaselineCanonical; kept as a named constant so extensions land
+// in an obvious place.
+[[maybe_unused]] static constexpr uint32_t kCodegenMutableFlagsMask =
+    uint32_t(MutableScriptFlagsEnum::HasDebugScript);
+
+static bool ComputeBaselineCanonical(
+    JSScript* script,
+    Vector<uint8_t, 0, SystemAllocPolicy>& out) {
+  auto append = [&](const void* p, size_t n) {
+    return out.append(reinterpret_cast<const uint8_t*>(p), n);
+  };
+
+  auto immData = script->immutableScriptData()->immutableData();
+  auto gcThings = script->gcthings();
+
+  uint32_t magic = kBaselineCanonicalMagic;
+  uint32_t immFlags = script->immutableFlags().toRaw();
+  uint32_t mutFlagsMask =
+      script->hasDebugScript()
+          ? uint32_t(MutableScriptFlagsEnum::HasDebugScript)
+          : 0u;
+  uint32_t funFlags =
+      script->function()
+          ? uint32_t(script->function()->flags().toRaw())
+          : 0u;
+  uint16_t nargs =
+      script->function() ? uint16_t(script->function()->nargs())
+                         : uint16_t(0);
   uint16_t nfixed = uint16_t(script->nfixed());
+  uint32_t nslots = uint32_t(script->nslots());
+  uint32_t numICEntries = uint32_t(script->numICEntries());
+  uint32_t immDataSize = uint32_t(immData.size());
+  uint32_t gcThingKindsSize = uint32_t(gcThings.size());
   uint8_t scopeKind = uint8_t(script->outermostScope()->kind());
-  h ^= (uint32_t(nargs) << 16) ^ uint32_t(nfixed);
-  h ^= uint32_t(scopeKind) << 8;
-  return h;
+  uint8_t hasNonSyntactic = script->hasNonSyntacticScope() ? 1 : 0;
+  uint8_t isFunction = script->function() ? 1 : 0;
+  uint8_t reserved = 0;
+
+  if (!append(&magic, sizeof(magic))) return false;
+  if (!append(&immFlags, sizeof(immFlags))) return false;
+  if (!append(&mutFlagsMask, sizeof(mutFlagsMask))) return false;
+  if (!append(&funFlags, sizeof(funFlags))) return false;
+  if (!append(&nargs, sizeof(nargs))) return false;
+  if (!append(&nfixed, sizeof(nfixed))) return false;
+  if (!append(&nslots, sizeof(nslots))) return false;
+  if (!append(&numICEntries, sizeof(numICEntries))) return false;
+  if (!append(&immDataSize, sizeof(immDataSize))) return false;
+  if (!append(&gcThingKindsSize, sizeof(gcThingKindsSize))) return false;
+  if (!append(&scopeKind, sizeof(scopeKind))) return false;
+  if (!append(&hasNonSyntactic, sizeof(hasNonSyntactic))) return false;
+  if (!append(&isFunction, sizeof(isFunction))) return false;
+  if (!append(&reserved, sizeof(reserved))) return false;
+
+  if (immDataSize && !append(immData.data(), immDataSize)) {
+    return false;
+  }
+
+  for (const auto& gct : gcThings) {
+    uint8_t k = uint8_t(gct.kind());
+    if (!append(&k, sizeof(k))) return false;
+  }
+
+  return true;
 }
 
-bool BuildAndSaveInterpBlob(
-    JitCode* code, const AOTInterpManifest& scalars,
-    mozilla::Span<const uint32_t> debugInstr,
-    mozilla::Span<const uint32_t> debugTraps,
-    mozilla::Span<const uint32_t> coverage,
-    mozilla::Span<const BaselineInterpreter::ICReturnOffset> icReturns) {
-  uint8_t* codeStart = code->raw();
-  size_t codeSize = code->rawEnd() - codeStart;
-
+bool BuildAndSaveInterpBlob(JitCode* code,
+                            const AOTPayload_BaselineInterpreter& payload) {
   sSavedInterpreterBlob.reset();
   sSavedInterpreterBlob.emplace(AOTBlobKind::BaselineInterpreter,
                                 /* nameHash = */ 0, kNoCorpusIndex,
                                 "BaselineInterpreter");
 
   AOTBlobWriter& blob = *sSavedInterpreterBlob;
-  if (!blob.writeCode(codeStart, codeSize)) return false;
-  if (!blob.writeManifest(scalars)) return false;
-  if (!blob.writeMetadata(debugInstr, debugTraps, coverage, icReturns)) {
+  if (!EncodeAOTBlob_BaselineInterpreter(blob, payload)) {
     return false;
   }
 
   JitSpew(JitSpew_BaselineAOT,
-          "Saved interpreter blob: code=%zu manifest=%zu metadata=%zu",
-          codeSize, sizeof(scalars),
-          debugInstr.size() * sizeof(uint32_t) +
-              debugTraps.size() * sizeof(uint32_t) +
-              coverage.size() * sizeof(uint32_t) +
-              icReturns.size() *
-                  sizeof(BaselineInterpreter::ICReturnOffset));
-
+          "Saved interpreter blob: code=%zu manifest=%zu",
+          payload.code.size(),
+          sizeof(AOTManifest_BaselineInterpreter));
   return true;
 }
 
@@ -179,15 +228,31 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
   BaselineScript* bs = script->baselineScript();
   JitCode* jitCode = bs->method();
 
-  AOTScriptManifest sm{};
-  bs->fillAOTManifest(&sm, blobOut);
+  Vector<uint32_t, 0, SystemAllocPolicy> resumeOffsets;
+  if (!bs->aotResumeOffsets(resumeOffsets)) return false;
+
+  AOTPayload_SelfHostedFunction payload;
+  auto& sm = payload.manifest;
+  sm.warmUpCheckPrologueOffset = bs->warmUpCheckPrologueOffset();
+  sm.profilerEnterToggleOffset = bs->profilerEnterToggleOffset();
+  sm.profilerExitToggleOffset = bs->profilerExitToggleOffset();
+  sm.retAddrEntryCount = bs->aotRetAddrEntries().size();
+  sm.osrEntryCount = bs->aotOSREntries().size();
+  sm.debugTrapEntryCount = bs->aotDebugTrapEntries().size();
+  sm.resumeEntryCount = resumeOffsets.length();
   sm.codeSize = jitCode->instructionsSize();
   sm.headerSize = jitCode->headerSize();
 
-  if (!blobOut->writeCode(jitCode->raw(), jitCode->instructionsSize())) {
+  payload.code = mozilla::Span(jitCode->raw(), jitCode->instructionsSize());
+  payload.retAddrs = bs->aotRetAddrEntries();
+  payload.osrEntries = bs->aotOSREntries();
+  payload.debugTraps = bs->aotDebugTrapEntries();
+  payload.resumeOffsets = mozilla::Span<const uint32_t>(
+      resumeOffsets.begin(), resumeOffsets.length());
+
+  if (!EncodeAOTBlob_SelfHostedFunction(*blobOut, payload)) {
     return false;
   }
-  if (!blobOut->writeManifest(sm)) return false;
 
   JitSpew(JitSpew_BaselineAOT,
           "AOT Compiled '%-22s' size=%5ub  callSites=%3u  osr=%u",
@@ -204,7 +269,12 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   BaselineScript* bs = script->baselineScript();
   JitCode* jitCode = bs->method();
 
-  uint32_t key = ComputeBaselineFunctionKey(script);
+  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
+  if (!ComputeBaselineCanonical(script, canonical)) {
+    return false;
+  }
+  uint32_t key =
+      uint32_t(mozilla::HashBytes(canonical.begin(), canonical.length()));
 
   std::string name;
   if (script->function()) {
@@ -222,24 +292,45 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   AOTBlobWriter blob(AOTBlobKind::BaselineFunction, key, kNoCorpusIndex,
                      std::move(name));
 
-  AOTScriptManifest sm{};
-  bs->fillAOTManifest(&sm, &blob);
+  Vector<uint32_t, 0, SystemAllocPolicy> resumeOffsets;
+  if (!bs->aotResumeOffsets(resumeOffsets)) {
+    return false;
+  }
+
+  AOTPayload_BaselineFunction payload;
+  auto& sm = payload.manifest;
+  sm.warmUpCheckPrologueOffset = bs->warmUpCheckPrologueOffset();
+  sm.profilerEnterToggleOffset = bs->profilerEnterToggleOffset();
+  sm.profilerExitToggleOffset = bs->profilerExitToggleOffset();
+  sm.retAddrEntryCount = bs->aotRetAddrEntries().size();
+  sm.osrEntryCount = bs->aotOSREntries().size();
+  sm.debugTrapEntryCount = bs->aotDebugTrapEntries().size();
+  sm.resumeEntryCount = resumeOffsets.length();
   sm.codeSize = jitCode->instructionsSize();
   sm.headerSize = jitCode->headerSize();
+  sm.canonicalSize = uint32_t(canonical.length());
   sm.nargs = script->function() ? uint16_t(script->function()->nargs()) : 0;
   sm.nfixed = uint16_t(script->nfixed());
   sm.scopeKind = uint8_t(script->outermostScope()->kind());
 
-  if (!blob.writeCode(jitCode->raw(), jitCode->instructionsSize())) {
-    return false;
-  }
-  if (!blob.writeManifest(sm)) {
+  payload.code = mozilla::Span(jitCode->raw(), jitCode->instructionsSize());
+  payload.retAddrs = bs->aotRetAddrEntries();
+  payload.osrEntries = bs->aotOSREntries();
+  payload.debugTraps = bs->aotDebugTrapEntries();
+  payload.resumeOffsets = mozilla::Span<const uint32_t>(
+      resumeOffsets.begin(), resumeOffsets.length());
+  payload.canonical = mozilla::Span<const uint8_t>(
+      canonical.begin(), canonical.length());
+
+  if (!EncodeAOTBlob_BaselineFunction(blob, payload)) {
     return false;
   }
 
   JitSpew(JitSpew_BaselineAOT,
-          "AOT baseline corpus recorded key=%u size=%u nargs=%u scope=%u '%s'",
-          key, sm.codeSize, sm.nargs, sm.scopeKind, blob.name().c_str());
+          "AOT baseline corpus recorded key=%u size=%u canonical=%u "
+          "nargs=%u scope=%u '%s'",
+          key, sm.codeSize, sm.canonicalSize, sm.nargs, sm.scopeKind,
+          blob.name().c_str());
 
   if (!sSavedBaselineBlobs.append(std::move(blob))) {
     return false;
@@ -360,11 +451,13 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
     return false;
   }
 
-  if (reader->entry()->manifestSize != sizeof(AOTInterpManifest)) {
+  AOTPayload_BaselineInterpreter payload;
+  if (!DecodeAOTBlob_BaselineInterpreter(*reader, &payload)) {
     JitSpew(JitSpew_BaselineAOT,
-            "ERROR: Interpreter manifest size mismatch (expected %zu, got %u). "
-            "Stale AOT container?",
-            sizeof(AOTInterpManifest), reader->entry()->manifestSize);
+            "ERROR: Interpreter blob decode failed (manifest expected %zu, "
+            "got %u). Stale AOT container?",
+            sizeof(AOTManifest_BaselineInterpreter),
+            reader->entry()->manifestSize);
     return false;
   }
 
@@ -391,7 +484,7 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
     return false;
   }
 
-  if (!interpreter.initFromAOT(cx, code, *reader)) {
+  if (!interpreter.initFromAOT(cx, code, payload)) {
     JitSpew(JitSpew_BaselineAOT,
             "ERROR: Failed to initialize from AOT symbols");
     return false;
@@ -455,15 +548,16 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
           "Loading AOT self-hosted function (nameHash=%u, codeSize=%u)",
           nameHash, reader->entry()->codeSize);
 
-  if (reader->entry()->manifestSize != sizeof(AOTScriptManifest)) {
+  AOTPayload_SelfHostedFunction payload;
+  if (!DecodeAOTBlob_SelfHostedFunction(*reader, &payload)) {
     JitSpew(JitSpew_BaselineAOT,
-            "ERROR: Script manifest size mismatch (expected %zu, got %u). "
-            "Stale AOT container?",
-            sizeof(AOTScriptManifest), reader->entry()->manifestSize);
+            "ERROR: SelfHostedFunction manifest size mismatch (expected %zu, "
+            "got %u). Stale AOT container?",
+            sizeof(AOTManifest_SelfHostedFunction),
+            reader->entry()->manifestSize);
     return false;
   }
-
-  AOTScriptManifest manifest = reader->readManifest<AOTScriptManifest>();
+  const auto& manifest = payload.manifest;
 
   JitCode* code = AllocateAOTCode(
       cx, reader->entry(), GetAOTTextBase(), CodeKind::Baseline);
@@ -482,15 +576,18 @@ bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
   }
   bs->setMethod(code);
 
-  auto retAddrs   = reader->readMetadataArray<RetAddrEntry>(manifest.retAddrEntryCount);
-  auto osrEntries = reader->readMetadataArray<BaselineScript::OSREntry>(manifest.osrEntryCount);
-  auto debugTraps = reader->readMetadataArray<BaselineScript::DebugTrapEntry>(manifest.debugTrapEntryCount);
-  auto resumeOffsets = reader->readMetadataArray<uint32_t>(manifest.resumeEntryCount);
-
-  if (!retAddrs.empty())     bs->copyRetAddrEntries(retAddrs.data());
-  if (!osrEntries.empty())   bs->copyOSREntries(osrEntries.data());
-  if (!debugTraps.empty())   bs->copyDebugTrapEntries(debugTraps.data());
-  if (!resumeOffsets.empty()) bs->copyResumeEntries(resumeOffsets.data());
+  if (!payload.retAddrs.empty()) {
+    bs->copyRetAddrEntries(payload.retAddrs.data());
+  }
+  if (!payload.osrEntries.empty()) {
+    bs->copyOSREntries(payload.osrEntries.data());
+  }
+  if (!payload.debugTraps.empty()) {
+    bs->copyDebugTrapEntries(payload.debugTraps.data());
+  }
+  if (!payload.resumeOffsets.empty()) {
+    bs->copyResumeEntries(payload.resumeOffsets.data());
+  }
 
   mozilla::Maybe<JitContext> jctx;
   if (!MaybeGetJitContext()) {
@@ -559,119 +656,134 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
     return false;
   }
 
-  uint32_t key = ComputeBaselineFunctionKey(script);
-  auto reader = container->getBlob(AOTBlobKind::BaselineFunction, key);
-  if (!reader) {
+  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
+  if (!ComputeBaselineCanonical(script, canonical)) {
     return false;
   }
+  uint32_t key =
+      uint32_t(mozilla::HashBytes(canonical.begin(), canonical.length()));
 
-  if (reader->entry()->manifestSize != sizeof(AOTScriptManifest)) {
-    JitSpew(JitSpew_BaselineAOT,
-            "ERROR: Baseline corpus manifest size mismatch (expected %zu, "
-            "got %u). Stale AOT container?",
-            sizeof(AOTScriptManifest), reader->entry()->manifestSize);
+  bool installed = false;
+  bool failed = false;
+
+  container->forEachBlobWithHash(
+      AOTBlobKind::BaselineFunction, key,
+      [&](AOTBlobReader& reader) -> bool {
+        AOTPayload_BaselineFunction payload;
+        if (!DecodeAOTBlob_BaselineFunction(reader, &payload)) {
+          JitSpew(JitSpew_BaselineAOT,
+                  "AOT baseline corpus manifest size mismatch key=%u", key);
+          return false;
+        }
+        const auto& manifest = payload.manifest;
+
+        if (payload.canonical.size() != canonical.length() ||
+            memcmp(payload.canonical.data(), canonical.begin(),
+                   canonical.length()) != 0) {
+          JitSpew(JitSpew_BaselineAOT,
+                  "AOT baseline corpus canonical mismatch key=%u "
+                  "(stored=%zu live=%zu)",
+                  key, payload.canonical.size(), canonical.length());
+          return false;
+        }
+
+        JitSpew(JitSpew_BaselineAOT,
+                "AOT baseline corpus HIT key=%u codeSize=%u script=%s:%u",
+                key, reader.entry()->codeSize, script->filename(),
+                script->lineno());
+
+        JitCode* code = AllocateAOTCode(
+            cx, reader.entry(), GetAOTTextBase(), CodeKind::Baseline);
+        if (!code) {
+          failed = true;
+          return true;
+        }
+
+        BaselineScript* bs = BaselineScript::New(
+            cx, manifest.warmUpCheckPrologueOffset,
+            manifest.profilerEnterToggleOffset,
+            manifest.profilerExitToggleOffset,
+            manifest.retAddrEntryCount, manifest.osrEntryCount,
+            manifest.debugTrapEntryCount, manifest.resumeEntryCount);
+        if (!bs) {
+          failed = true;
+          return true;
+        }
+        bs->setMethod(code);
+
+        if (!payload.retAddrs.empty()) {
+          bs->copyRetAddrEntries(payload.retAddrs.data());
+        }
+        if (!payload.osrEntries.empty()) {
+          bs->copyOSREntries(payload.osrEntries.data());
+        }
+        if (!payload.debugTraps.empty()) {
+          bs->copyDebugTrapEntries(payload.debugTraps.data());
+        }
+        if (!payload.resumeOffsets.empty()) {
+          bs->copyResumeEntries(payload.resumeOffsets.data());
+        }
+
+        mozilla::Maybe<JitContext> jctx;
+        if (!MaybeGetJitContext()) {
+          jctx.emplace(cx);
+        }
+        JitRuntime* jrt = cx->runtime()->jitRuntime();
+        JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
+                                                     AOTSelfHostedPassReg);
+        if (!preamble) {
+          failed = true;
+          return true;
+        }
+        JitRuntime::AOTPreambleEntry pe = {code->raw(), preamble};
+        if (!jrt->aotPreambles_.append(pe)) {
+          ReportOutOfMemory(cx);
+          failed = true;
+          return true;
+        }
+
+        script->jitScript()->setBaselineScript(script, bs);
+
+        {
+          JitcodeGlobalTable* globalTable =
+              cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+          if (!globalTable->lookup(code->raw())) {
+            UniqueChars str =
+                GeckoProfilerRuntime::allocProfileString(cx, script);
+            if (!str) {
+              failed = true;
+              return true;
+            }
+            auto profEntry =
+                MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
+                    cx, code, code->raw(), code->rawEnd(), std::move(str));
+            if (!profEntry) {
+              failed = true;
+              return true;
+            }
+            if (!globalTable->addEntry(std::move(profEntry))) {
+              ReportOutOfMemory(cx);
+              failed = true;
+              return true;
+            }
+            code->setHasBytecodeMap();
+          }
+        }
+
+        if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
+                cx->runtime())) {
+          AutoWritableJitCode awjc(bs->method());
+          bs->toggleProfilerInstrumentation(true);
+        }
+
+        installed = true;
+        return true;
+      });
+
+  if (failed) {
     return false;
   }
-
-  AOTScriptManifest manifest = reader->readManifest<AOTScriptManifest>();
-
-  // Reject on compat mismatch. Collision on the 32-bit key with a different
-  // script layout is the only realistic path here.
-  uint16_t nargs = script->function() ? uint16_t(script->function()->nargs())
-                                      : 0;
-  if (manifest.nargs != nargs ||
-      manifest.nfixed != uint16_t(script->nfixed()) ||
-      manifest.scopeKind != uint8_t(script->outermostScope()->kind())) {
-    JitSpew(JitSpew_BaselineAOT,
-            "AOT baseline corpus compat mismatch key=%u "
-            "(want nargs=%u nfixed=%u scope=%u, got %u/%u/%u)",
-            key, nargs, unsigned(script->nfixed()),
-            unsigned(script->outermostScope()->kind()),
-            manifest.nargs, manifest.nfixed, manifest.scopeKind);
-    return false;
-  }
-
-  JitSpew(JitSpew_BaselineAOT,
-          "AOT baseline corpus HIT key=%u codeSize=%u script=%s:%u",
-          key, reader->entry()->codeSize, script->filename(),
-          script->lineno());
-
-  JitCode* code = AllocateAOTCode(
-      cx, reader->entry(), GetAOTTextBase(), CodeKind::Baseline);
-  if (!code) {
-    return false;
-  }
-
-  BaselineScript* bs = BaselineScript::New(
-      cx, manifest.warmUpCheckPrologueOffset,
-      manifest.profilerEnterToggleOffset,
-      manifest.profilerExitToggleOffset,
-      manifest.retAddrEntryCount, manifest.osrEntryCount,
-      manifest.debugTrapEntryCount, manifest.resumeEntryCount);
-  if (!bs) {
-    return false;
-  }
-  bs->setMethod(code);
-
-  auto retAddrs   = reader->readMetadataArray<RetAddrEntry>(manifest.retAddrEntryCount);
-  auto osrEntries = reader->readMetadataArray<BaselineScript::OSREntry>(manifest.osrEntryCount);
-  auto debugTraps = reader->readMetadataArray<BaselineScript::DebugTrapEntry>(manifest.debugTrapEntryCount);
-  auto resumeOffsets = reader->readMetadataArray<uint32_t>(manifest.resumeEntryCount);
-
-  if (!retAddrs.empty())     bs->copyRetAddrEntries(retAddrs.data());
-  if (!osrEntries.empty())   bs->copyOSREntries(osrEntries.data());
-  if (!debugTraps.empty())   bs->copyDebugTrapEntries(debugTraps.data());
-  if (!resumeOffsets.empty()) bs->copyResumeEntries(resumeOffsets.data());
-
-  mozilla::Maybe<JitContext> jctx;
-  if (!MaybeGetJitContext()) {
-    jctx.emplace(cx);
-  }
-  JitRuntime* jrt = cx->runtime()->jitRuntime();
-  JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
-                                               AOTSelfHostedPassReg);
-  if (!preamble) {
-    return false;
-  }
-  JitRuntime::AOTPreambleEntry pe = { code->raw(), preamble };
-  if (!jrt->aotPreambles_.append(pe)) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  script->jitScript()->setBaselineScript(script, bs);
-
-  {
-    JitcodeGlobalTable* globalTable =
-        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
-    if (!globalTable->lookup(code->raw())) {
-      UniqueChars str =
-          GeckoProfilerRuntime::allocProfileString(cx, script);
-      if (!str) {
-        return false;
-      }
-
-      auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
-          cx, code, code->raw(), code->rawEnd(), std::move(str));
-      if (!profEntry) {
-        return false;
-      }
-
-      if (!globalTable->addEntry(std::move(profEntry))) {
-        ReportOutOfMemory(cx);
-        return false;
-      }
-      code->setHasBytecodeMap();
-    }
-  }
-
-  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
-          cx->runtime())) {
-    AutoWritableJitCode awjc(bs->method());
-    bs->toggleProfilerInstrumentation(true);
-  }
-
-  return true;
+  return installed;
 }
 
 bool LoadAOTICStubs(JSContext* cx) {
@@ -695,24 +807,18 @@ bool LoadAOTICStubs(JSContext* cx) {
   container->forEachBlob(AOTBlobKind::InlineCacheStub,
       [&](AOTBlobReader& reader) {
     totalCount++;
-    if (reader.entry()->manifestSize != sizeof(AOTICStubManifest)) {
+    AOTPayload_InlineCacheStub payload;
+    if (!DecodeAOTBlob_InlineCacheStub(reader, &payload)) {
       return;
     }
-
-    AOTICStubManifest manifest =
-        reader.readManifest<AOTICStubManifest>();
-
-    auto cacheIRCode = reader.readMetadataArray<uint8_t>(
-        manifest.cacheIRCodeLength);
-    auto fieldTypes  = reader.readMetadataArray<uint8_t>(
-        manifest.numStubFields);
+    const auto& manifest = payload.manifest;
 
     CacheIRStubInfo* stubInfo = CacheIRStubInfo::NewFromSerialized(
         manifest.kind, ICStubEngine::Baseline,
         manifest.makesGCCalls != 0,
         manifest.stubDataOffset,
-        cacheIRCode.data(), cacheIRCode.size(),
-        fieldTypes.data(), fieldTypes.size());
+        payload.cacheIRCode.data(), payload.cacheIRCode.size(),
+        payload.fieldTypes.data(), payload.fieldTypes.size());
     if (!stubInfo) {
       return;
     }

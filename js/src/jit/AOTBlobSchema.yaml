@@ -1,0 +1,136 @@
+# [SMDOC] AOT Blob Schema
+# =======================
+# Parsed by GenerateAOTBlobFiles.py at build time to produce
+# jit/AOTBlobGenerated.h. This is the single source of truth for AOT
+# blob layout: manifest struct, decoded payload view, and cursor-based
+# Encode/Decode functions all fall out of this schema.
+#
+# Field types:
+#   u8  / u16 / u32   -> uint8_t / uint16_t / uint32_t
+#   raw               -> pass-through C++ type, size must be given
+#
+# Metadata arrays:
+#   name        - field name on AOTPayload_<Kind>
+#   element     - C++ type of each element (must be trivially copyable)
+#   count_from  - manifest field name that stores the array length
+#
+# Adding a blob kind: append a new entry under `blobs:` and bump
+# AOT_CONTAINER_VERSION in AOT.h. The build fails at the manifestSize
+# check on the next load if you forget the version bump.
+
+container:
+  # Documentation only; the constants live in AOT.h so C++ code has
+  # them without depending on generated files. Kept here as reminder.
+  magic: 0x414F5443    # 'AOTC'
+  version: 7
+  fingerprint:
+    parts:
+      - {kind: buildid,  source: "wasm::GetOptimizedEncodingBuildId"}
+      - {kind: struct,   ref: AOTCodegenOptions}
+
+structs:
+  AOTCodegenOptions:
+    doc: "Codegen-relevant JitOptions snapshot. Grows with each new field BaselineCodeGen reads."
+    fields:
+      - {name: disableInlining,              type: u8}
+      - {name: spectreObjectMitigations,     type: u8}
+      - {name: spectreStringMitigations,     type: u8}
+      - {name: baselineBatching,             type: u8}
+      - {name: baselineJitWarmUpThreshold,   type: u32}
+      - {name: baselineQueueCapacity,        type: u32}
+      - {name: trialInliningWarmUpThreshold, type: u32}
+      - {name: reserved,                     type: u32}
+
+blobs:
+  BaselineInterpreter:
+    kind_id: 0
+    doc: "Singleton baseline interpreter blob."
+    manifest:
+      - {name: InterpretOp,               type: u32}
+      - {name: InterpretOpNoDebugTrap,    type: u32}
+      - {name: BailoutPrologue,           type: u32}
+      - {name: ProfilerEnterToggle,       type: u32}
+      - {name: ProfilerExitToggle,        type: u32}
+      - {name: DebugTrapHandler,          type: u32}
+      - {name: CallVMDebugPrologue,       type: u32}
+      - {name: CallVMDebugEpilogue,       type: u32}
+      - {name: CallVMDebugAfterYield,     type: u32}
+      - {name: DebugInstrumentationCount, type: u32}
+      - {name: DebugTrapCount,            type: u32}
+      - {name: CodeCoverageCount,         type: u32}
+      - {name: ICReturnCount,             type: u32}
+    metadata:
+      - {name: debugInstr, element: "uint32_t", count_from: DebugInstrumentationCount}
+      - {name: debugTraps, element: "uint32_t", count_from: DebugTrapCount}
+      - {name: coverage,   element: "uint32_t", count_from: CodeCoverageCount}
+      - {name: icReturns,  element: "js::jit::BaselineInterpreter::ICReturnOffset",
+                           count_from: ICReturnCount}
+
+  SelfHostedFunction:
+    kind_id: 1
+    doc: "Per-script AOT baseline code for a self-hosted builtin."
+    manifest:
+      - {name: warmUpCheckPrologueOffset, type: u32}
+      - {name: profilerEnterToggleOffset, type: u32}
+      - {name: profilerExitToggleOffset,  type: u32}
+      - {name: retAddrEntryCount,         type: u32}
+      - {name: osrEntryCount,             type: u32}
+      - {name: debugTrapEntryCount,       type: u32}
+      - {name: resumeEntryCount,          type: u32}
+      - {name: codeSize,                  type: u32}
+      - {name: headerSize,                type: u32}
+    metadata:
+      - {name: retAddrs,      element: "js::jit::RetAddrEntry",
+                              count_from: retAddrEntryCount}
+      - {name: osrEntries,    element: "js::jit::BaselineScript::OSREntry",
+                              count_from: osrEntryCount}
+      - {name: debugTraps,    element: "js::jit::BaselineScript::DebugTrapEntry",
+                              count_from: debugTrapEntryCount}
+      - {name: resumeOffsets, element: "uint32_t",
+                              count_from: resumeEntryCount}
+
+  InlineCacheStub:
+    kind_id: 2
+    doc: "Per-hint AOT CacheIR stub code."
+    manifest:
+      - {name: kind,              type: raw, cpp_type: "js::jit::CacheKind", size: 1}
+      - {name: makesGCCalls,      type: u8}
+      - {name: stubDataOffset,    type: u8}
+      - {name: localTracingSlots, type: u8}
+      - {name: pad,               type: u8}
+      - {name: cacheIRCodeLength, type: u32}
+      - {name: numStubFields,     type: u32}
+    metadata:
+      - {name: cacheIRCode, element: "uint8_t", count_from: cacheIRCodeLength}
+      - {name: fieldTypes,  element: "uint8_t", count_from: numStubFields}
+
+  BaselineFunction:
+    kind_id: 3
+    doc: "Per-script AOT baseline code for a guest script (baseline corpus)."
+    manifest:
+      - {name: warmUpCheckPrologueOffset, type: u32}
+      - {name: profilerEnterToggleOffset, type: u32}
+      - {name: profilerExitToggleOffset,  type: u32}
+      - {name: retAddrEntryCount,         type: u32}
+      - {name: osrEntryCount,             type: u32}
+      - {name: debugTrapEntryCount,       type: u32}
+      - {name: resumeEntryCount,          type: u32}
+      - {name: codeSize,                  type: u32}
+      - {name: headerSize,                type: u32}
+      - {name: canonicalSize,             type: u32}
+      - {name: nargs,                     type: u16}
+      - {name: nfixed,                    type: u16}
+      - {name: scopeKind,                 type: u8}
+      - {name: pad0,                      type: u8}
+      - {name: pad1,                      type: u16}
+    metadata:
+      - {name: retAddrs,      element: "js::jit::RetAddrEntry",
+                              count_from: retAddrEntryCount}
+      - {name: osrEntries,    element: "js::jit::BaselineScript::OSREntry",
+                              count_from: osrEntryCount}
+      - {name: debugTraps,    element: "js::jit::BaselineScript::DebugTrapEntry",
+                              count_from: debugTrapEntryCount}
+      - {name: resumeOffsets, element: "uint32_t",
+                              count_from: resumeEntryCount}
+      - {name: canonical,     element: "uint8_t",
+                              count_from: canonicalSize}
