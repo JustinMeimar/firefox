@@ -1,33 +1,40 @@
 # [SMDOC] AOT Blob Schema
 # =======================
 # Parsed by GenerateAOTBlobFiles.py at build time to produce
-# jit/AOTBlobGenerated.h. This is the single source of truth for AOT
-# blob layout: manifest struct, decoded payload view, and cursor-based
-# Encode/Decode functions all fall out of this schema.
+# jit/AOTBlobGenerated.h. Single source of truth for AOT blob layout:
+# the fixed-size POD (`fields`), variable-size element arrays (`arrays`),
+# and the Encode/Decode helpers all fall out of this schema.
+#
+# `fields` vs `arrays`:
+#   - `fields` is a fixed-size, trivially-copyable POD read first at
+#     decode time. It carries scalars including the counts that size
+#     each array.
+#   - `arrays` are variable-length sequences appended after the fields
+#     POD. Each array's element count comes from a field named by
+#     `count_from`.
 #
 # Field types:
 #   u8  / u16 / u32   -> uint8_t / uint16_t / uint32_t
 #   raw               -> pass-through C++ type, size must be given
 #
-# Metadata arrays:
+# Array descriptor:
 #   name        - field name on AOTPayload_<Kind>
 #   element     - C++ type of each element (must be trivially copyable)
-#   count_from  - manifest field name that stores the array length
+#   count_from  - `fields` member that stores the array length
 #
-# Scope: this schema describes layout only (manifest struct, metadata
-# array order + element types, static-assert sizes). C++-side
-# population of a payload from live VM objects is *not* schematised;
-# it belongs in C++. Do not add fields here that embed C++ expressions.
+# Scope: this schema describes layout only. C++-side population of a
+# payload from live VM objects is *not* schematised; it belongs in C++.
+# Do not add fields here that embed C++ expressions.
 #
 # Adding a blob kind: append a new entry under `blobs:` and bump
-# AOT_CONTAINER_VERSION in AOT.h. The build fails at the manifestSize
+# AOT_CONTAINER_VERSION in AOT.h. The build fails at the fieldsSize
 # check on the next load if you forget the version bump.
 
 container:
   # Documentation only; the constants live in AOT.h so C++ code has
   # them without depending on generated files. Kept here as reminder.
   magic: 0x414F5443    # 'AOTC'
-  version: 8
+  version: 9
   fingerprint:
     parts:
       - {kind: buildid,  source: "wasm::GetOptimizedEncodingBuildId"}
@@ -50,7 +57,7 @@ blobs:
   BaselineInterpreter:
     kind_id: 0
     doc: "Singleton baseline interpreter blob."
-    manifest:
+    fields:
       - {name: InterpretOp,               type: u32}
       - {name: InterpretOpNoDebugTrap,    type: u32}
       - {name: BailoutPrologue,           type: u32}
@@ -64,7 +71,7 @@ blobs:
       - {name: DebugTrapCount,            type: u32}
       - {name: CodeCoverageCount,         type: u32}
       - {name: ICReturnCount,             type: u32}
-    metadata:
+    arrays:
       - {name: debugInstr, element: "uint32_t", count_from: DebugInstrumentationCount}
       - {name: debugTraps, element: "uint32_t", count_from: DebugTrapCount}
       - {name: coverage,   element: "uint32_t", count_from: CodeCoverageCount}
@@ -72,9 +79,9 @@ blobs:
                            count_from: ICReturnCount}
 
   InlineCacheStub:
-    kind_id: 2
+    kind_id: 1
     doc: "Per-hint AOT CacheIR stub code."
-    manifest:
+    fields:
       - {name: kind,              type: raw, cpp_type: "js::jit::CacheKind", size: 1}
       - {name: makesGCCalls,      type: u8}
       - {name: stubDataOffset,    type: u8}
@@ -82,17 +89,17 @@ blobs:
       - {name: pad,               type: u8}
       - {name: cacheIRCodeLength, type: u32}
       - {name: numStubFields,     type: u32}
-    metadata:
+    arrays:
       - {name: cacheIRCode, element: "uint8_t", count_from: cacheIRCodeLength}
       - {name: fieldTypes,  element: "uint8_t", count_from: numStubFields}
 
   BaselineFunction:
-    kind_id: 3
+    kind_id: 2
     doc: |
       Per-script AOT baseline code. Covers both self-hosted builtins and
       guest scripts; identity is by canonical byte content, not by the
       script's origin.
-    manifest:
+    fields:
       - {name: warmUpCheckPrologueOffset, type: u32}
       - {name: profilerEnterToggleOffset, type: u32}
       - {name: profilerExitToggleOffset,  type: u32}
@@ -108,7 +115,7 @@ blobs:
       - {name: scopeKind,                 type: u8}
       - {name: pad0,                      type: u8}
       - {name: pad1,                      type: u16}
-    metadata:
+    arrays:
       - {name: retAddrs,      element: "js::jit::RetAddrEntry",
                               count_from: retAddrEntryCount}
       - {name: osrEntries,    element: "js::jit::BaselineScript::OSREntry",

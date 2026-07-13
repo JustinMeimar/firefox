@@ -2431,13 +2431,13 @@ void js::jit::FillAOTICs(JSContext* cx) {
         }
 
         AOTPayload_InlineCacheStub payload;
-        payload.manifest.kind = stubInfo->kind();
-        payload.manifest.makesGCCalls = stubInfo->makesGCCalls() ? 1 : 0;
-        payload.manifest.stubDataOffset = stubInfo->stubDataOffset();
-        payload.manifest.localTracingSlots = code->localTracingSlots();
-        payload.manifest.pad = 0;
-        payload.manifest.cacheIRCodeLength = stubInfo->codeLength();
-        payload.manifest.numStubFields = numFields;
+        payload.fields.kind = stubInfo->kind();
+        payload.fields.makesGCCalls = stubInfo->makesGCCalls() ? 1 : 0;
+        payload.fields.stubDataOffset = stubInfo->stubDataOffset();
+        payload.fields.localTracingSlots = code->localTracingSlots();
+        payload.fields.pad = 0;
+        payload.fields.cacheIRCodeLength = stubInfo->codeLength();
+        payload.fields.numStubFields = numFields;
 
         payload.code = mozilla::Span(code->raw(), code->instructionsSize());
         payload.cacheIRCode =
@@ -2457,7 +2457,7 @@ void js::jit::FillAOTICs(JSContext* cx) {
                 unsigned(code->instructionsSize()),
                 unsigned(stubInfo->codeLength()),
                 numFields,
-                payload.manifest.makesGCCalls ? "  [gc]" : "");
+                payload.fields.makesGCCalls ? "  [gc]" : "");
 
         (void)sSavedICBlobs.append(std::move(blob));
       }

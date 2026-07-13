@@ -3,7 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 # Parses jit/AOTBlobSchema.yaml and emits jit/AOTBlobGenerated.h with
-# manifest structs, decoded-payload views, and Encode/Decode helpers
+# fields structs, decoded-payload views, and Encode/Decode helpers
 # for every declared AOT blob kind.
 
 import io
@@ -91,17 +91,17 @@ def emit_pod_struct(name, fields, doc=None):
     return "\n".join(lines) + "\n"
 
 
-def emit_payload_struct(name, manifest_type, metadata):
+def emit_payload_struct(name, fields_type, arrays):
     lines = [f"struct {name} {{"]
-    lines.append(f"  {manifest_type} manifest;")
+    lines.append(f"  {fields_type} fields;")
     lines.append("  mozilla::Span<const uint8_t> code;")
-    for m in metadata:
-        lines.append(f"  mozilla::Span<const {m['element']}> {m['name']};")
+    for a in arrays:
+        lines.append(f"  mozilla::Span<const {a['element']}> {a['name']};")
     lines.append("};")
     return "\n".join(lines) + "\n"
 
 
-def emit_encode(kind_name, payload_type, metadata):
+def emit_encode(kind_name, payload_type, arrays):
     lines = [
         f"[[nodiscard]] inline bool EncodeAOTBlob_{kind_name}(",
         f"    AOTBlobWriter& blob, const {payload_type}& p) {{",
@@ -109,49 +109,49 @@ def emit_encode(kind_name, payload_type, metadata):
         "      !blob.writeCode(p.code.data(), p.code.size())) {",
         "    return false;",
         "  }",
-        "  if (!blob.writeManifest(p.manifest)) return false;",
+        "  if (!blob.writeFields(p.fields)) return false;",
     ]
-    for m in metadata:
+    for a in arrays:
         lines.append(
-            f"  if (!blob.writeMetadataArray(p.{m['name']})) return false;"
+            f"  if (!blob.writeArray(p.{a['name']})) return false;"
         )
     lines += ["  return true;", "}"]
     return "\n".join(lines) + "\n"
 
 
-def emit_decode(kind_name, manifest_type, payload_type, metadata):
+def emit_decode(kind_name, fields_type, payload_type, arrays):
     lines = [
         f"[[nodiscard]] inline bool DecodeAOTBlob_{kind_name}(",
         f"    AOTBlobReader& reader, {payload_type}* out) {{",
-        f"  if (reader.entry()->manifestSize != sizeof({manifest_type})) {{",
+        f"  if (reader.entry()->fieldsSize != sizeof({fields_type})) {{",
         "    return false;",
         "  }",
-        f"  out->manifest = reader.readManifest<{manifest_type}>();",
+        f"  out->fields = reader.readFields<{fields_type}>();",
         "  out->code = reader.code();",
     ]
-    for m in metadata:
+    for a in arrays:
         lines.append(
-            f"  out->{m['name']} = reader.readMetadataArray<{m['element']}>("
-            f"out->manifest.{m['count_from']});"
+            f"  out->{a['name']} = reader.readArray<{a['element']}>("
+            f"out->fields.{a['count_from']});"
         )
     lines += ["  return true;", "}"]
     return "\n".join(lines) + "\n"
 
 
 def emit_blob(kind_name, blob):
-    manifest_type = f"AOTManifest_{kind_name}"
+    fields_type = f"AOTFields_{kind_name}"
     payload_type = f"AOTPayload_{kind_name}"
-    metadata = blob.get("metadata", [])
+    arrays = blob.get("arrays", [])
 
     out = [f"// -------- Blob: {kind_name} (kind_id={blob['kind_id']}) --------"]
     if blob.get("doc"):
         for line in blob["doc"].splitlines():
             out.append(f"// {line}" if line else "//")
     out.append("")
-    out.append(emit_pod_struct(manifest_type, blob["manifest"]))
-    out.append(emit_payload_struct(payload_type, manifest_type, metadata))
-    out.append(emit_encode(kind_name, payload_type, metadata))
-    out.append(emit_decode(kind_name, manifest_type, payload_type, metadata))
+    out.append(emit_pod_struct(fields_type, blob["fields"]))
+    out.append(emit_payload_struct(payload_type, fields_type, arrays))
+    out.append(emit_encode(kind_name, payload_type, arrays))
+    out.append(emit_decode(kind_name, fields_type, payload_type, arrays))
     return "\n".join(out)
 
 

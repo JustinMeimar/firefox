@@ -127,8 +127,8 @@ bool AOTContainerWriter::finalize(std::ostream& out) {
     e.nameHash = blob.nameHash();
     e.corpusIndex = blob.corpusIndex();
     e.codeSize = blob.codeBytes().size();
-    e.manifestSize = blob.manifestBytes().size();
-    e.metadataSize = blob.metadataBytes().size();
+    e.fieldsSize = blob.fieldsBytes().size();
+    e.arraysSize = blob.arraysBytes().size();
 
     textCursor = js::AlignBytes(textCursor, kAOTAlignment);
     e.codeOffset = textCursor;
@@ -143,15 +143,12 @@ bool AOTContainerWriter::finalize(std::ostream& out) {
       dirOffset + blobCount * sizeof(AOTBlobDirectoryEntry);
   uint32_t rodataDataStart = js::AlignBytes(dirEnd, kAOTAlignment);
 
-  uint32_t metaCursor = rodataDataStart;
+  uint32_t dataCursor = rodataDataStart;
   for (uint32_t i = 0; i < blobCount; i++) {
-    dirEntries[i].manifestOffset = metaCursor;
-    metaCursor += dirEntries[i].manifestSize;
-
-    dirEntries[i].metadataOffset = metaCursor;
-    metaCursor += dirEntries[i].metadataSize;
-
-    metaCursor = js::AlignBytes(metaCursor, kAOTAlignment);
+    dirEntries[i].dataOffset = dataCursor;
+    dataCursor += dirEntries[i].fieldsSize;
+    dataCursor += dirEntries[i].arraysSize;
+    dataCursor = js::AlignBytes(dataCursor, kAOTAlignment);
   }
 
   AOTContainerHeader hdr{};
@@ -224,22 +221,23 @@ bool AOTContainerWriter::finalize(std::ostream& out) {
   for (uint32_t i = 0; i < blobCount; i++) {
     const auto& blob = blobs_[i];
 
-    out << "// --- Manifest/Metadata " << i << " " << blob.name() << " ---\n";
+    out << "// --- Fields/Arrays " << i << " " << blob.name() << " ---\n";
 
-    out << "bl_aot_" << blob.name() << "_manifest:\n";
-    auto manifestBytes = blob.manifestBytes();
-    if (!manifestBytes.empty()) {
-      emitAsmBytes(out, manifestBytes.data(), manifestBytes.size());
+    out << "bl_aot_" << blob.name() << "_fields:\n";
+    auto fieldsBytes = blob.fieldsBytes();
+    if (!fieldsBytes.empty()) {
+      emitAsmBytes(out, fieldsBytes.data(), fieldsBytes.size());
     }
 
-    out << "bl_aot_" << blob.name() << "_metadata:\n";
-    auto metadataBytes = blob.metadataBytes();
-    if (!metadataBytes.empty()) {
-      emitAsmBytes(out, metadataBytes.data(), metadataBytes.size());
+    out << "bl_aot_" << blob.name() << "_arrays:\n";
+    auto arraysBytes = blob.arraysBytes();
+    if (!arraysBytes.empty()) {
+      emitAsmBytes(out, arraysBytes.data(), arraysBytes.size());
     }
 
     if (i + 1 < blobCount) {
-      uint32_t curPos = dirEntries[i].metadataOffset + metadataBytes.size();
+      uint32_t curPos = dirEntries[i].dataOffset + dirEntries[i].fieldsSize +
+                        arraysBytes.size();
       uint32_t nextAligned = js::AlignBytes(curPos, kAOTAlignment);
       if (nextAligned > curPos) {
         out << "// --- Inter-blob padding ---\n";
@@ -358,22 +356,13 @@ mozilla::Maybe<AOTContainerReader> AOTContainerReader::fromEmbedded() {
 
 mozilla::Maybe<AOTBlobReader> AOTContainerReader::getBlob(
     AOTBlobKind kind, uint32_t nameHash) const {
-  for (uint32_t i = 0; i < blobCount_; i++) {
-    if (dir_[i].kind != kind) continue;
-    if (nameHash != 0 && dir_[i].nameHash != nameHash) continue;
-    // NOTE(aot): Skip directory entries with zero-sized payloads. These
-    // are holes left behind by partial dumps.
-    if (dir_[i].codeSize == 0 && dir_[i].manifestSize == 0 &&
-        dir_[i].metadataSize == 0) {
-      continue;
-    }
-    return mozilla::Some(AOTBlobReader(
-        &dir_[i],
-        textBase_ + dir_[i].codeOffset,
-        containerBase_ + dir_[i].manifestOffset,
-        containerBase_ + dir_[i].metadataOffset));
-  }
-  return mozilla::Nothing();
+  mozilla::Maybe<AOTBlobReader> found;
+  visitBlobs(kind, [&](AOTBlobReader& reader) {
+    if (nameHash != 0 && reader.entry()->nameHash != nameHash) return false;
+    found.emplace(reader);
+    return true;
+  });
+  return found;
 }
 
 }  // namespace js::jit

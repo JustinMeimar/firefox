@@ -1443,7 +1443,7 @@ bool BaselineInterpreter::initFromAOT(
 
   code_ = code;
 
-  const auto& s = payload.manifest;
+  const auto& s = payload.fields;
   interpretOpOffset_ = s.InterpretOp;
   interpretOpNoDebugTrapOffset_ = s.InterpretOpNoDebugTrap;
   bailoutPrologueOffset_ = s.BailoutPrologue;
@@ -1462,7 +1462,7 @@ bool BaselineInterpreter::initFromAOT(
                                     payload.coverage.size()) ||
       !icReturnOffsets_.append(payload.icReturns.data(),
                                 payload.icReturns.size())) {
-    JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT metadata vectors");
+    JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to load AOT array vectors");
     return false;
   }
 

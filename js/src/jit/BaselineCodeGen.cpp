@@ -7414,7 +7414,7 @@ bool BaselineInterpreterGenerator::writeAOTBaseline(JSContext* cx, JitCode* code
   const auto& icReturns = handler.icReturnOffsets();
 
   AOTPayload_BaselineInterpreter payload;
-  auto& s = payload.manifest;
+  auto& s = payload.fields;
   s.InterpretOp = interpretOpOffset_;
   s.InterpretOpNoDebugTrap = interpretOpNoDebugTrapOffset_;
   s.BailoutPrologue = bailoutPrologueOffset_.offset();
@@ -7437,7 +7437,7 @@ bool BaselineInterpreterGenerator::writeAOTBaseline(JSContext* cx, JitCode* code
   payload.coverage = mozilla::Span(coverage.begin(), coverage.length());
   payload.icReturns = mozilla::Span(icReturns.begin(), icReturns.length());
 
-  return BuildAndSaveInterpBlob(code, payload);
+  return BuildAndSaveInterpBlob(payload);
 }
 
 #endif
@@ -7544,7 +7544,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 
 #ifdef ENABLE_JS_AOT
     if (JitOptions.dumpAOTBaseline && !writeAOTBaseline(cx, code)) {
-      JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT manifest");
+      JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT fields");
       return false;
     }
 #endif

@@ -22,11 +22,11 @@ namespace js::jit {
 static constexpr const char* kAOTOutputPath =
     "js/src/jit/AOTBaseline.S";
 
-// All AOT blob POD types (manifest, payload) and their Encode/Decode
+// All AOT blob POD types (fields, payload) and their Encode/Decode
 // helpers live in AOTBlobGenerated.h (generated from AOTBlobSchema.yaml).
 
 [[nodiscard]] bool BuildAndSaveInterpBlob(
-    JitCode* code, const AOTPayload_BaselineInterpreter& payload);
+    const AOTPayload_BaselineInterpreter& payload);
 
 [[nodiscard]] bool LoadAOTInterpFromContainer(
     JSContext* cx, BaselineInterpreter& interpreter);
