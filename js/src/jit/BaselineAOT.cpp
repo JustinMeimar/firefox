@@ -99,6 +99,10 @@ static constexpr uint32_t kBaselineCanonicalMagic = 0x424C4E63;  // 'BLNc'
 // Wire format is the append order below. Adding, reordering, or
 // resizing any field silently invalidates every existing corpus; bump
 // AOT_CONTAINER_VERSION alongside such changes.
+uint32_t ComputeBaselineProbeHash(JSScript* script) {
+  return uint32_t(script->sharedData()->hash());
+}
+
 static bool ComputeBaselineCanonical(
     JSScript* script,
     Vector<uint8_t, 0, SystemAllocPolicy>& out) {
@@ -222,12 +226,14 @@ static bool ComputeBaselineCanonical(
   return bs;
 }
 
-[[nodiscard]] static bool GenerateAOTPreambleFor(JSContext* cx, JitCode* code) {
+bool EnsureAOTPreambleFor(JSContext* cx, JitCode* code) {
+  JitRuntime* jrt = cx->runtime()->jitRuntime();
+  if (jrt->lookupAOTPreamble(code->raw())) return true;
+
   mozilla::Maybe<JitContext> jctx;
   if (!MaybeGetJitContext()) {
     jctx.emplace(cx);
   }
-  JitRuntime* jrt = cx->runtime()->jitRuntime();
   JitCode* preamble =
       jrt->generateAOTPreamble(cx, code->raw(), AOTSelfHostedPassReg);
   if (!preamble) return false;
@@ -282,7 +288,9 @@ static void MaybeToggleProfilerForAOTBaseline(JSContext* cx,
   BaselineScript* bs = NewAOTBaselineScript(cx, code, payload);
   if (!bs) return false;
 
-  if (!GenerateAOTPreambleFor(cx, code)) return false;
+  if (!EnsureAOTPreambleFor(cx, code)) return false;
+  bs->setAOTPreambleEntry(
+      cx->runtime()->jitRuntime()->lookupAOTPreamble(code->raw()));
 
   script->jitScript()->setBaselineScript(script, bs);
 
@@ -365,8 +373,7 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
   mozilla::Span<const uint8_t> canonicalSpan(canonical.begin(),
                                              canonical.length());
 
-  blobOut->setNameHash(uint32_t(mozilla::HashBytes(
-      canonicalSpan.data(), canonicalSpan.size())));
+  blobOut->setNameHash(ComputeBaselineProbeHash(script));
 
   if (!EncodeBaselineFunctionBlob(script, canonicalSpan, bs, *blobOut)) {
     return false;
@@ -377,6 +384,18 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
           nameStr.get(), bs->method()->instructionsSize(),
           bs->aotRetAddrEntries().size(), bs->aotOSREntries().size());
   return true;
+}
+
+bool IsAOTBaselineFunctionRecorded(JSContext* cx, JSScript* script) {
+  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
+  if (!ComputeBaselineCanonical(script, canonical)) {
+    return false;
+  }
+  uint32_t key = uint32_t(
+      mozilla::HashBytes(canonical.begin(), canonical.length()));
+  return cx->runtime()
+      ->jitRuntime()
+      ->aotDump_.recordedBaselineCanonicals.has(key);
 }
 
 bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
@@ -391,8 +410,14 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   }
   mozilla::Span<const uint8_t> canonicalSpan(canonical.begin(),
                                              canonical.length());
-  uint32_t key = uint32_t(
+  uint32_t dedupKey = uint32_t(
       mozilla::HashBytes(canonicalSpan.data(), canonicalSpan.size()));
+
+  auto& accum = cx->runtime()->jitRuntime()->aotDump_;
+  auto ptr = accum.recordedBaselineCanonicals.lookupForAdd(dedupKey);
+  if (ptr) {
+    return true;
+  }
 
   std::string name;
   if (script->function()) {
@@ -404,26 +429,28 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
     }
   }
   if (name.empty()) {
-    name = "<top-level>";
+    name = "top_level";
   }
 
-  AOTBlobWriter blob(AOTBlobKind::BaselineFunction, key, kNoCorpusIndex,
-                     std::move(name));
+  uint32_t probeHash = ComputeBaselineProbeHash(script);
+  AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash,
+                     kNoCorpusIndex, std::move(name));
 
   if (!EncodeBaselineFunctionBlob(script, canonicalSpan, bs, blob)) {
     return false;
   }
 
   JitSpew(JitSpew_BaselineAOT,
-          "AOT baseline corpus recorded key=%u size=%zu canonical=%zu "
-          "nargs=%u scope=%u '%s'",
-          key, bs->method()->instructionsSize(), canonicalSpan.size(),
+          "AOT baseline corpus recorded probe=%u dedup=%u size=%zu "
+          "canonical=%zu nargs=%u scope=%u '%s'",
+          probeHash, dedupKey, bs->method()->instructionsSize(),
+          canonicalSpan.size(),
           script->function() ? unsigned(script->function()->nargs()) : 0u,
           unsigned(script->outermostScope()->kind()),
           blob.name().c_str());
 
-  auto& accum = cx->runtime()->jitRuntime()->aotDump_;
   if (!accum.baselineFunctionBlobs.append(std::move(blob))) return false;
+  if (!accum.recordedBaselineCanonicals.add(ptr, dedupKey)) return false;
   return true;
 }
 
@@ -604,21 +631,25 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
   auto container = AOTContainerReader::fromEmbedded();
   if (!container) return false;
 
+  uint32_t probe = ComputeBaselineProbeHash(script);
+  if (!container->hasBaselineProbe(probe)) {
+    return false;
+  }
+
   Vector<uint8_t, 0, SystemAllocPolicy> canonical;
   if (!ComputeBaselineCanonical(script, canonical)) return false;
-  uint32_t key =
-      uint32_t(mozilla::HashBytes(canonical.begin(), canonical.length()));
 
   enum class InstallResult { NoMatch, Installed, Failed };
   InstallResult result = InstallResult::NoMatch;
 
   container->forEachBlobWithHash(
-      AOTBlobKind::BaselineFunction, key,
+      AOTBlobKind::BaselineFunction, probe,
       [&](AOTBlobReader& reader) -> bool {
         AOTPayload_BaselineFunction payload;
         if (!DecodeAOTBlob_BaselineFunction(reader, &payload)) {
           JitSpew(JitSpew_BaselineAOT,
-                  "AOT baseline function fields size mismatch key=%u", key);
+                  "AOT baseline function fields size mismatch probe=%u",
+                  probe);
           return false;
         }
 
@@ -626,15 +657,15 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
             memcmp(payload.canonical.data(), canonical.begin(),
                    canonical.length()) != 0) {
           JitSpew(JitSpew_BaselineAOT,
-                  "AOT baseline function canonical mismatch key=%u "
+                  "AOT baseline function canonical mismatch probe=%u "
                   "(stored=%zu live=%zu)",
-                  key, payload.canonical.size(), canonical.length());
+                  probe, payload.canonical.size(), canonical.length());
           return false;
         }
 
         JitSpew(JitSpew_BaselineAOT,
-                "AOT baseline function HIT key=%u codeSize=%u script=%s:%u",
-                key, reader.entry()->codeSize, script->filename(),
+                "AOT baseline function HIT probe=%u codeSize=%u script=%s:%u",
+                probe, reader.entry()->codeSize, script->filename(),
                 script->lineno());
 
         result = InstallBaselineScriptPayload(cx, script, reader.entry(),

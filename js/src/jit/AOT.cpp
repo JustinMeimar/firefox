@@ -23,7 +23,6 @@
 #include "js/BuildId.h"
 #include "vm/JSContext.h"
 #include "vm/Runtime.h"       // js::GetBuildId
-#include "wasm/WasmCompile.h" // wasm::ObservedCPUFeatures
 
 #include "vm/Realm-inl.h"
 
@@ -97,6 +96,30 @@ static void emitAsmBytes(std::ostream& out, const uint8_t* data, size_t len) {
     }
     out << "\n";
   }
+}
+
+// Blob display names come from JS atoms (e.g. "Scheduler.prototype.run",
+// "$RegExpFlagsGetter", "set") and are not safe to embed verbatim as
+// assembler symbols: `.` / `$` are fragile in GAS, and duplicate display
+// names collide (219 distinct `GameBoyCore.prototype.OPCODE` scripts in a
+// single corpus). Labels here are cosmetic — the loader consumes the
+// container header + directory, not per-blob symbols — so we prefix with
+// the blob index for uniqueness and sanitize the tail for readability.
+static std::string SanitizeBlobLabel(const std::string& name, uint32_t index) {
+  std::string out;
+  out.reserve(name.size() + 12);
+  char idxBuf[16];
+  SprintfLiteral(idxBuf, "%u_", index);
+  out += idxBuf;
+  for (char c : name) {
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9') || c == '_') {
+      out += c;
+    } else {
+      out += '_';
+    }
+  }
+  return out;
 }
 
 static void emitAsmZeroPadding(std::ostream& out, size_t len) {
@@ -175,8 +198,9 @@ bool AOTContainerWriter::finalize(std::ostream& out) {
       emitAsmZeroPadding(out, padBefore);
     }
 
+    std::string label = SanitizeBlobLabel(blob.name(), i);
     out << "// --- Code blob " << i << " " << blob.name() << " ---\n";
-    out << "bl_aot_" << blob.name() << "_code:\n";
+    out << "bl_aot_" << label << "_code:\n";
     auto codeBytes = blob.codeBytes();
     if (!codeBytes.empty()) {
       emitAsmBytes(out, codeBytes.data(), codeBytes.size());
@@ -221,15 +245,16 @@ bool AOTContainerWriter::finalize(std::ostream& out) {
   for (uint32_t i = 0; i < blobCount; i++) {
     const auto& blob = blobs_[i];
 
+    std::string label = SanitizeBlobLabel(blob.name(), i);
     out << "// --- Fields/Arrays " << i << " " << blob.name() << " ---\n";
 
-    out << "bl_aot_" << blob.name() << "_fields:\n";
+    out << "bl_aot_" << label << "_fields:\n";
     auto fieldsBytes = blob.fieldsBytes();
     if (!fieldsBytes.empty()) {
       emitAsmBytes(out, fieldsBytes.data(), fieldsBytes.size());
     }
 
-    out << "bl_aot_" << blob.name() << "_arrays:\n";
+    out << "bl_aot_" << label << "_arrays:\n";
     auto arraysBytes = blob.arraysBytes();
     if (!arraysBytes.empty()) {
       emitAsmBytes(out, arraysBytes.data(), arraysBytes.size());
@@ -269,15 +294,12 @@ static AOTCodegenOptions SnapshotAOTCodegenOptions() {
 // Layout of the container fingerprint region (immediately after
 // AOTContainerHeader):
 //   [u32]        version (AOT_CONTAINER_VERSION)
-//   [u32]        cpuFingerprint (wasm::ObservedCPUFeatures: arch + CPU bits)
 //   [u32]        buildIdLen
 //   [buildIdLen] embedder build ID bytes (js::GetBuildId)
-//   [struct]     AOTCodegenOptions (20 bytes)
+//   [struct]     AOTCodegenOptions
 //
-// Intentionally does NOT use wasm::GetOptimizedEncodingBuildId: that
-// mixes in wasm huge-memory settings (--disable-wasm-huge-memory
-// toggles the bit at runtime) which have no bearing on baseline
-// codegen. Baseline AOT only cares about build + CPU + codegen options.
+// Prototype scope: CPU features are implicit in the shell binary that
+// carries the AOT blob, so no separate CPU fingerprint is stored.
 static bool ComputeAOTContainerFingerprint(
     Vector<uint8_t, 0, SystemAllocPolicy>& out) {
   JS::BuildIdCharVector buildId;
@@ -286,7 +308,6 @@ static bool ComputeAOTContainerFingerprint(
   }
 
   uint32_t version = AOT_CONTAINER_VERSION;
-  uint32_t cpuFingerprint = wasm::ObservedCPUFeatures();
   uint32_t buildIdLen = uint32_t(buildId.length());
   AOTCodegenOptions opts = SnapshotAOTCodegenOptions();
 
@@ -295,7 +316,6 @@ static bool ComputeAOTContainerFingerprint(
   };
 
   if (!appendBytes(&version, sizeof(version))) return false;
-  if (!appendBytes(&cpuFingerprint, sizeof(cpuFingerprint))) return false;
   if (!appendBytes(&buildIdLen, sizeof(buildIdLen))) return false;
   if (buildIdLen && !appendBytes(buildId.begin(), buildIdLen)) {
     return false;
@@ -327,6 +347,7 @@ static bool VerifyContainerHeaderFingerprint(
 /* static */
 mozilla::Maybe<AOTContainerReader> AOTContainerReader::fromEmbedded() {
   static mozilla::Maybe<bool> sFingerprintOK;
+  static mozilla::Maybe<AOTContainerReader::ProbeSet> sBaselineProbes;
 
   if (GetAOTContainerSize() < sizeof(AOTContainerHeader)) {
     return mozilla::Nothing();
@@ -350,8 +371,22 @@ mozilla::Maybe<AOTContainerReader> AOTContainerReader::fromEmbedded() {
   const auto* dir = reinterpret_cast<const AOTBlobDirectoryEntry*>(
       GetAOTContainer() + AOTBlobDirectoryOffset(hdr));
 
+  if (!sBaselineProbes) {
+    AOTContainerReader::ProbeSet probes;
+    for (uint32_t i = 0; i < hdr->blobCount; i++) {
+      if (dir[i].kind != AOTBlobKind::BaselineFunction) continue;
+      if (dir[i].codeSize == 0 && dir[i].fieldsSize == 0 &&
+          dir[i].arraysSize == 0) {
+        continue;
+      }
+      (void)probes.put(dir[i].nameHash);
+    }
+    sBaselineProbes = mozilla::Some(std::move(probes));
+  }
+
   return mozilla::Some(AOTContainerReader(
-      dir, GetAOTContainer(), GetAOTTextBase(), hdr->blobCount));
+      dir, GetAOTContainer(), GetAOTTextBase(), hdr->blobCount,
+      sBaselineProbes.ptr()));
 }
 
 mozilla::Maybe<AOTBlobReader> AOTContainerReader::getBlob(

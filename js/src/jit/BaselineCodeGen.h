@@ -435,8 +435,13 @@ class BaselineCompilerHandler {
   }
 
   bool realmIndependentJitcode() const {
-      return (JS::Prefs::experimental_self_hosted_cache() || isAOT_) &&
-           script()->selfHosted();
+    // AOT-context codegen must be replayable on any matching JSScript in
+    // any realm, so it is always realm-independent. The experimental
+    // self-hosted cache is a separate flavor of the same requirement,
+    // restricted to self-hosted scripts.
+    return isAOT_ ||
+           (JS::Prefs::experimental_self_hosted_cache() &&
+            script()->selfHosted());
   }
 
   bool needsProfilerCallSiteInstrumentation() const { return true; }

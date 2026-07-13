@@ -470,12 +470,14 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
 
   TempAllocator temp(&cx->tempLifoAlloc());
 
-  // Self-hosted scripts are compiled realm-independent under two modes: the
-  // self-hosted cache experiment, and AOT dump. Both need a null realm on
+  // AOT dump (any script) and the self-hosted-cache experiment (self-hosted
+  // scripts only) both require realm-independent codegen so the emitted
+  // bytes are replayable on any matching JSScript. Install a null realm on
   // the masm so realm-baked references get caught.
   const bool realmIndependentCodegen =
-      script->selfHosted() &&
-      (isAOTDump || JS::Prefs::experimental_self_hosted_cache());
+      isAOTDump ||
+      (script->selfHosted() &&
+       JS::Prefs::experimental_self_hosted_cache());
   mozilla::Maybe<JSAutoNullableRealm> ar;
   if (realmIndependentCodegen) {
     ar.emplace(cx, nullptr);
@@ -591,26 +593,34 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
-  // Only top-level global, non-debuggee scripts feed the corpus today.
-  // The canonical hash and blob format already carry scopeKind (see
-  // ComputeBaselineCanonical in BaselineAOT.cpp), so widening to
-  // function-scope scripts is a policy change here, not a format change.
-  // Debuggees are excluded because their trap edits invalidate the
-  // canonical-equal replay contract.
-  bool aotEligible = !script->isDebuggee() &&
-                     script->outermostScope()->kind() == ScopeKind::Global;
+  // Any non-debuggee script is eligible. The canonical hash and blob
+  // format carry scopeKind (see ComputeBaselineCanonical in
+  // BaselineAOT.cpp) so function-scope and global-scope records don't
+  // alias. Debuggees are excluded because their trap edits invalidate
+  // the canonical-equal replay contract.
+  bool aotEligible = !script->isDebuggee();
   if (JitOptions.useAOTBaselineCorpus && aotEligible) {
     if (LoadAOTBaselineFunction(cx, script)) {
       return Method_Compiled;
     }
   }
-  if (JitOptions.dumpAOTBaselineCorpus && aotEligible) {
+  if (JitOptions.dumpAOTBaselineCorpus && aotEligible &&
+      !IsAOTBaselineFunctionRecorded(cx, script)) {
+    // Compile under AOT context so the emitted bytes are realm-independent
+    // and replayable on any matching JSScript. Install an AOT preamble on
+    // the resulting code so JSScript::updateJitCodeRaw routes callers
+    // through a trampoline that loads AOTSelfHostedPassReg — the same
+    // dispatch used by the load path via InstallBaselineScriptPayload.
     MethodStatus status = BaselineCompile(cx, script, options,
                                           /*isAOTDump=*/true);
     if (status == Method_Compiled) {
-      // Discard writer OOM: dumpAOTBaselineCorpus is a research-only
-      // path and must not fail an otherwise-successful compile.
       (void)RecordAOTBaselineFunction(cx, script);
+      BaselineScript* bs = script->baselineScript();
+      JitCode* code = bs->method();
+      if (!EnsureAOTPreambleFor(cx, code)) return Method_Error;
+      bs->setAOTPreambleEntry(
+          cx->runtime()->jitRuntime()->lookupAOTPreamble(code->raw()));
+      script->updateJitCodeRaw(cx->runtime());
     }
     return status;
   }

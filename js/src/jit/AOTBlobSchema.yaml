@@ -29,8 +29,8 @@
 # Bump AOT_CONTAINER_VERSION in AOT.h for any wire-format change:
 # adding a blob kind, adding/reordering/resizing a field in an existing
 # blob, changing a field type, adding an array, or renaming an array's
-# count_from. The build fails at the fieldsSize check on the next load
-# if the version isn't bumped.
+# count_from. When the version isn't bumped, the build fails at the
+# fieldsSize check on the next load.
 #
 # Container magic, version, and fingerprint layout live in
 # jit/AOT.h and jit/AOTContainerWriter. Not duplicated here.

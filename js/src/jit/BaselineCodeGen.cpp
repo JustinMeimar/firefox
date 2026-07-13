@@ -2949,6 +2949,7 @@ bool BaselineInterpreterCodeGen::emit_Symbol() {
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emit_Object() {
   if (handler.realmIndependentJitcode()) {
+    frame.syncStack(0);
     Register scratch1 = R0.scratchReg();
     Register scratch2 = R1.scratchReg();
     loadScriptGCThing(ScriptGCThingType::Object, scratch1, scratch2);

@@ -38,8 +38,26 @@ static constexpr const char* kAOTOutputPath =
 [[nodiscard]] bool LoadAOTBaselineFunction(JSContext* cx,
                                            HandleScript script);
 
+// O(1) probe key: the container's BaselineFunction blob nameHash. Two
+// scripts sharing a SharedImmutableScriptData collide here, which is
+// fine -- the canonical memcmp inside LoadAOTBaselineFunction is the
+// ground-truth verify.
+uint32_t ComputeBaselineProbeHash(JSScript* script);
+
 [[nodiscard]] bool RecordAOTBaselineFunction(JSContext* cx,
                                              HandleScript script);
+
+// Cheap dedup check: does the accumulator already contain a baseline
+// blob for this script's canonical hash? Used by the guest baseline
+// corpus path to avoid re-AOT-compiling the same script every warmup.
+bool IsAOTBaselineFunctionRecorded(JSContext* cx, JSScript* script);
+
+// Ensure the runtime has an AOT preamble for `code`. Idempotent: on repeat
+// calls for the same code, this is a no-op. Required so
+// JSScript::updateJitCodeRaw routes callers through a trampoline that
+// loads AOTSelfHostedPassReg with the runtime's indirection-table base
+// before entering the realm-independent baseline body.
+[[nodiscard]] bool EnsureAOTPreambleFor(JSContext* cx, JitCode* code);
 
 [[nodiscard]] bool DumpAOTContainer(JSContext* cx);
 

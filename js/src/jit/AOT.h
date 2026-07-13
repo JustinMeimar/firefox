@@ -8,6 +8,7 @@
 #define jit_AOT_h
 
 
+#include "mozilla/HashTable.h"
 #include "mozilla/Maybe.h"
 #include <cstdint>
 #include <cstring>
@@ -60,7 +61,7 @@ static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 static constexpr uint32_t kNoCorpusIndex = UINT32_MAX; // Used for IC hints
 static constexpr uint32_t kAOTAlignment = 16;
-static constexpr uint32_t AOT_CONTAINER_VERSION = 9;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 11;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 
 // Bump AOT_CONTAINER_VERSION on any change to the wire format:
@@ -68,6 +69,11 @@ static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 // (see AOTBlobSchema.yaml), AOTSlot enum renumbering, or fingerprint
 // contents. A stale container that matches the old magic but not the new
 // layout otherwise deserializes into garbage.
+//
+// v11: BaselineFunction blobs' `nameHash` is the O(1) probe key
+// (SharedImmutableScriptData::hash(); see ComputeBaselineProbeHash in
+// BaselineAOT), not a hash of the canonical bytes. The canonical-bytes
+// memcmp inside the blob remains the ground-truth verify.
 
 // The container fingerprint POD (AOTCodegenOptions) is schema-defined
 // in jit/AOTBlobSchema.yaml and emitted into jit/AOTBlobGenerated.h.
@@ -401,19 +407,32 @@ class AOTBlobReader {
 // Wraps the embedded AOT container.  Provides lookup by blob kind
 // and optional name hash, returning typed AOTBlobReader instances.
 class AOTContainerReader {
+ public:
+  using ProbeSet =
+      mozilla::HashSet<uint32_t, mozilla::DefaultHasher<uint32_t>,
+                       SystemAllocPolicy>;
+
+ private:
   const AOTBlobDirectoryEntry* dir_;
   const uint8_t* containerBase_;
   const uint8_t* textBase_;
   uint32_t blobCount_;
+  // Populated once at fromEmbedded() time from every BaselineFunction
+  // blob's nameHash (v11: SharedImmutableScriptData::hash()). Used as
+  // the O(1) miss check in LoadAOTBaselineFunction so scripts absent
+  // from the corpus never pay ComputeBaselineCanonical.
+  const ProbeSet* baselineProbes_;
 
   AOTContainerReader(const AOTBlobDirectoryEntry* dir,
                      const uint8_t* containerBase,
                      const uint8_t* textBase,
-                     uint32_t blobCount)
+                     uint32_t blobCount,
+                     const ProbeSet* baselineProbes)
     : dir_(dir),
       containerBase_(containerBase),
       textBase_(textBase),
-      blobCount_(blobCount) {}
+      blobCount_(blobCount),
+      baselineProbes_(baselineProbes) {}
 
   AOTBlobReader makeReader(uint32_t i) const {
     const uint8_t* fieldsBase = containerBase_ + dir_[i].dataOffset;
@@ -469,6 +488,10 @@ class AOTContainerReader {
       if (reader.entry()->nameHash != nameHash) return false;
       return bool(fn(reader));
     });
+  }
+
+  bool hasBaselineProbe(uint32_t probeHash) const {
+    return baselineProbes_ && baselineProbes_->has(probeHash);
   }
 };
 

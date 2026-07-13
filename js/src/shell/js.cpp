@@ -12375,17 +12375,6 @@ static int Shell(JSContext* cx, OptionParser* op) {
 
     JSAutoRealm ar(cx, glob);
 
-#ifdef ENABLE_JS_AOT
-    if (jit::JitOptions.dumpAOTBaseline ||
-        jit::JitOptions.dumpAOTSelfHosted ||
-        jit::JitOptions.dumpAOTICs ||
-        jit::JitOptions.dumpAOTBaselineCorpus) {
-      if (!jit::DumpAOTContainer(cx)) {
-        return EXIT_FAILURE;
-      }
-    }
-#endif
-
     ShellContext* sc = GetShellContext(cx);
     if (!sc->moduleLoader && !InitModuleLoader(cx, *op)) {
       return EXIT_FAILURE;
@@ -12405,6 +12394,23 @@ static int Shell(JSContext* cx, OptionParser* op) {
         result = EXITCODE_RUNTIME_ERROR;
       }
     }
+
+#ifdef ENABLE_JS_AOT
+    // Run the AOT container dump after ProcessArgs so the guest baseline
+    // corpus (populated during script execution via
+    // RecordAOTBaselineFunction) is included. The interpreter blob,
+    // IC blobs, and self-hosted blobs are all populated by earlier
+    // phases (JIT init / FillAOTICs / an explicit self-hosted walk
+    // inside DumpAOTContainer) so they don't depend on this ordering.
+    if (jit::JitOptions.dumpAOTBaseline ||
+        jit::JitOptions.dumpAOTSelfHosted ||
+        jit::JitOptions.dumpAOTICs ||
+        jit::JitOptions.dumpAOTBaselineCorpus) {
+      if (!jit::DumpAOTContainer(cx)) {
+        return EXIT_FAILURE;
+      }
+    }
+#endif
 
     /*
      * The job queue must be drained even on error to finish outstanding async

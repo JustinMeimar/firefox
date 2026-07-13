@@ -192,6 +192,17 @@ class alignas(uintptr_t) BaselineScript final
   // Code pointer containing the actual method.
   HeapPtr<JitCode*> method_{nullptr};
 
+#ifdef ENABLE_JS_AOT
+  // Cached entry address for callers that would otherwise bypass
+  // JSScript::jitCodeRaw_ (e.g. loadJitCodeRawNoIon under trial
+  // inlining): equal to method_->raw() by default, but replaced with
+  // the AOT preamble's raw address once EnsureAOTPreambleFor runs.
+  // Callers that read this field always enter through the preamble
+  // when one exists, so the AOTSelfHostedPassReg convention holds
+  // regardless of which code path resolved the target.
+  uint8_t* entryPointRaw_{nullptr};
+#endif
+
   // An ion compilation that is ready, but isn't linked yet.
   MainThreadData<IonCompileTask*> pendingIonCompileTask_{nullptr};
 
@@ -298,6 +309,17 @@ class alignas(uintptr_t) BaselineScript final
     return offsetof(BaselineScript, method_);
   }
 
+#ifdef ENABLE_JS_AOT
+  static inline size_t offsetOfEntryPointRaw() {
+    return offsetof(BaselineScript, entryPointRaw_);
+  }
+  uint8_t* entryPointRaw() const { return entryPointRaw_; }
+  void setAOTPreambleEntry(uint8_t* preamble) {
+    MOZ_ASSERT(preamble);
+    entryPointRaw_ = preamble;
+  }
+#endif
+
   void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                               size_t* data) const {
     *data += mallocSizeOf(this);
@@ -316,6 +338,11 @@ class alignas(uintptr_t) BaselineScript final
   void setMethod(JitCode* code) {
     MOZ_ASSERT(!method_);
     method_ = code;
+#ifdef ENABLE_JS_AOT
+    // Default entry point is the code body; EnsureAOTPreambleFor may
+    // overwrite this with the preamble address later.
+    entryPointRaw_ = code->raw();
+#endif
   }
 
   bool containsCodeAddress(uint8_t* addr) const {

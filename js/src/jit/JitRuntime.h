@@ -276,10 +276,19 @@ class JitRuntime {
     Vector<AOTBlobWriter, 0, SystemAllocPolicy> baselineFunctionBlobs;
     Vector<AOTBlobWriter, 0, SystemAllocPolicy> icStubBlobs;
 
+    // Canonical hashes of baseline functions already appended to
+    // baselineFunctionBlobs during this run. Guards against re-recording
+    // (and re-AOT-compiling) the same script every time its warmup
+    // counter re-crosses the threshold after the AOT-emitted baseline
+    // is discarded.
+    HashSet<uint32_t, mozilla::DefaultHasher<uint32_t>, SystemAllocPolicy>
+        recordedBaselineCanonicals;
+
     void clear() {
       interpreterBlob.reset();
       baselineFunctionBlobs.clearAndFree();
       icStubBlobs.clearAndFree();
+      recordedBaselineCanonicals.clearAndCompact();
     }
   };
   AOTDumpAccumulator aotDump_;
