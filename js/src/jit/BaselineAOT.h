@@ -84,10 +84,11 @@ void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
 void DumpAOTBaselineFunctionToDir(const char* dir, uint32_t canonicalHash,
                                   const AOTBlobWriter& blob);
 
-// Dump one baseline function blob to $AOT_BASELINE_DUMP_MISSING_DIR
-// (for `collect-baselines` accrual) and, when the baseline PGO channel
-// is on, to $JS_AOT_PGO_DIR (for SelectAOTCorpus.py). Both are no-ops
-// when their respective directories are unset.
+// Dump one baseline function blob to the corpus dir when
+// --aot-baseline-corpus-enforce is set (target dir defaults to
+// js/src/baselines, overridable with AOT_BASELINE_CORPUS_DIR), and to
+// $JS_AOT_PGO_DIR when the baseline PGO channel is on. Both branches
+// are independent no-ops when their respective triggers are unset.
 void MaybeDumpBaselineFunctionForPGO(uint32_t canonicalHash,
                                      const AOTBlobWriter& blob);
 

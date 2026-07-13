@@ -76,7 +76,7 @@ void MacroAssembler::emitAOTStoreFrameTableBase(Register passReg,
                                                 const Address& dst) {
   if (MOZ_UNLIKELY(isAOT())) {
     storePtr(passReg, dst);
-  } else if (JitOptions.aotNeedsIndirectionTable()) {
+  } else if (JitOptions.aotNeedsFrameTableSlot()) {
     movePtr(ImmPtr(runtime()
                        ->jitRuntime()
                        ->aotIndirectionTable()
@@ -87,7 +87,7 @@ void MacroAssembler::emitAOTStoreFrameTableBase(Register passReg,
 }
 
 void MacroAssembler::emitAOTCopyFrameTableBaseFromCaller(Register scratch) {
-  if (!isAOT() && !JitOptions.aotNeedsIndirectionTable()) {
+  if (!isAOT() && !JitOptions.aotNeedsFrameTableSlot()) {
     return;
   }
   // Called from the generator resume path in BaselineCodeGen; the outer

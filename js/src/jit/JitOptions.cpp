@@ -140,6 +140,7 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(dumpAOTBaseline, false);
   SET_DEFAULT(dumpAOTSelfHosted, false);
   SET_DEFAULT(dumpAOTBaselineCorpus, false);
+  SET_DEFAULT(enforceAOTBaselineCorpus, false);
 
   SET_DEFAULT(useAOTBaseline, false);
   SET_DEFAULT(useAOTSelfHosted, false);

@@ -13080,12 +13080,13 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "aot-dump-baseline", "Dump baseline interpreter binary for AOT patching.") ||
       !op.addBoolOption('\0', "aot-dump-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
       !op.addBoolOption('\0', "aot-dump-ics", "Dump AOT IC stubs as binary blobs into the container.") ||
-      !op.addBoolOption('\0', "aot-dump-baseline-corpus", "Dump AOT-compiled guest baseline functions triggered during execution.") ||
+      !op.addBoolOption('\0', "aot-dump-baseline-corpus", "Emit the AOT container from BL-*.bin files in the baseline corpus dir. Symmetric to --aot-dump-ics.") ||
       !op.addBoolOption('\0', "aot", "Use all AOT compiled artifacts.") ||
       !op.addBoolOption('\0', "aot-baseline", "Use AOT baseline interpreter.") ||
       !op.addBoolOption('\0', "aot-self-hosted", "Use AOT self-hosted functions.") ||
       !op.addBoolOption('\0', "aot-ics", "Use AOT inline caches.") ||
       !op.addBoolOption('\0', "aot-baseline-corpus", "Install AOT baseline functions from corpus on baseline entry.") ||
+      !op.addBoolOption('\0', "aot-baseline-corpus-enforce", "Record AOT-compiled guest baseline functions during execution into the baseline corpus dir. Symmetric to --aot-ics-enforce.") ||
       !op.addBoolOption('\0', "aot-ics-enforce", "Disable runtime IC codegen; use only AOT stubs or fallback.") ||
       !op.addBoolOption('\0', "no-aot-ic-hints", "Do not eagerly attach hinted AOT IC stubs at initICEntries.") ||
 #endif
@@ -14242,6 +14243,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("aot-baseline-corpus")) {
     jit::JitOptions.useAOTBaselineCorpus = true;
+  }
+  if (op.getBoolOption("aot-baseline-corpus-enforce")) {
+    jit::JitOptions.enforceAOTBaselineCorpus = true;
   }
   if (op.getBoolOption("aot-ics-enforce")) {
     jit::JitOptions.useAOTICs = true;

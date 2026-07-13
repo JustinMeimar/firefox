@@ -76,6 +76,7 @@ struct DefaultJitOptions {
   bool dumpAOTBaseline;
   bool dumpAOTSelfHosted;
   bool dumpAOTBaselineCorpus;
+  bool enforceAOTBaselineCorpus;
   bool useAOTBaseline;
   bool useAOTSelfHosted;
   bool useAOTBaselineCorpus;
@@ -192,8 +193,20 @@ struct DefaultJitOptions {
   bool eagerIonCompilation() const { return normalIonWarmUpThreshold == 0; }
 
 #ifdef ENABLE_JS_AOT
+  // True when a codegen mode may emit AOT-context IC stubs (looked up
+  // via the atoms JitZone). Gates both FillAOTICs and the AOT stub
+  // lookup at BaselineCacheIRCompiler entry.
   bool aotNeedsIndirectionTable() const {
     return useAOTBaseline || useAOTSelfHosted || useAOTICs || dumpAOTICs;
+  }
+  // True when *any* AOT-mode baseline code may execute in this runtime.
+  // Such code reads its indirection base from the baseline frame slot,
+  // so the slot must be initialized by every frame that could reach it
+  // (baseline interp frames included). Cheaper predicate than the IC
+  // one -- adding a corpus flag here does not activate FillAOTICs.
+  bool aotNeedsFrameTableSlot() const {
+    return aotNeedsIndirectionTable() || enforceAOTBaselineCorpus ||
+           useAOTBaselineCorpus;
   }
   bool aotHintsEnabled() const {
     return useAOTICs && useAOTICHints;

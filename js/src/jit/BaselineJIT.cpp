@@ -604,7 +604,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
       return Method_Compiled;
     }
   }
-  if (JitOptions.dumpAOTBaselineCorpus && aotEligible &&
+  if (JitOptions.enforceAOTBaselineCorpus && aotEligible &&
       !IsAOTBaselineFunctionRecorded(cx, script)) {
     // Compile under AOT context so the emitted bytes are realm-independent
     // and replayable on any matching JSScript. Install an AOT preamble on

@@ -7,6 +7,7 @@
 #include "jit/BaselineAOT.h"
 
 #include "mozilla/HashFunctions.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/Sprintf.h"
 
 #include <cstdint>
@@ -132,10 +133,19 @@ void DumpAOTBaselineFunctionToDir(const char* dir, uint32_t canonicalHash,
   fclose(f);
 }
 
+// Resolve the baseline corpus directory once. AOT_BASELINE_CORPUS_DIR
+// overrides the checked-in default (js/src/baselines) for both the
+// record side (RecordAOTBaselineFunction -> BL-*.bin) and the dump side
+// (DumpAOTContainer merge).
+static const char* BaselineCorpusDir() {
+  if (const char* env = getenv("AOT_BASELINE_CORPUS_DIR")) return env;
+  return "js/src/baselines";
+}
+
 void MaybeDumpBaselineFunctionForPGO(uint32_t canonicalHash,
                                      const AOTBlobWriter& blob) {
-  if (const char* dir = getenv("AOT_BASELINE_DUMP_MISSING_DIR")) {
-    DumpAOTBaselineFunctionToDir(dir, canonicalHash, blob);
+  if (JitOptions.enforceAOTBaselineCorpus) {
+    DumpAOTBaselineFunctionToDir(BaselineCorpusDir(), canonicalHash, blob);
   }
   if (gAOTInstr.enabled(AOTInstr_Baseline) && gAOTInstr.pgoDumpDir) {
     DumpAOTBaselineFunctionToDir(gAOTInstr.pgoDumpDir, canonicalHash, blob);
@@ -512,7 +522,7 @@ bool IsAOTBaselineFunctionRecorded(JSContext* cx, JSScript* script) {
 }
 
 bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
-  MOZ_ASSERT(JitOptions.dumpAOTBaselineCorpus);
+  MOZ_ASSERT(JitOptions.enforceAOTBaselineCorpus);
   MOZ_ASSERT(script->hasBaselineScript());
 
   BaselineScript* bs = script->baselineScript();
@@ -572,6 +582,36 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
 
   if (!accum.baselineFunctionBlobs.append(std::move(blob))) return false;
   if (!accum.recordedBaselineCanonicals.add(ptr, dedupKey)) return false;
+  return true;
+}
+
+[[nodiscard]] static bool MergeBaselineCorpusDir(
+    const char* corpusDir, JitRuntime::AOTDumpAccumulator& accum,
+    AOTContainerWriter& container, uint32_t& diskAdded,
+    uint32_t& diskSkipped) {
+  DIR* d = opendir(corpusDir);
+  if (!d) return true;
+  auto cleanup = mozilla::MakeScopeExit([&] { closedir(d); });
+  while (struct dirent* ent = readdir(d)) {
+    unsigned canonHash = 0;
+    if (sscanf(ent->d_name, "BL-%u.bin", &canonHash) != 1) continue;
+    if (accum.recordedBaselineCanonicals.has(uint32_t(canonHash))) {
+      diskSkipped++;
+      continue;
+    }
+    char path[600];
+    SprintfLiteral(path, "%s/%s", corpusDir, ent->d_name);
+    uint32_t fileCanonical = 0;
+    AOTBlobWriter blob(AOTBlobKind::BaselineFunction, 0, kNoCorpusIndex,
+                       std::string());
+    if (!LoadAOTBaselineBlobFromFile(path, &fileCanonical, &blob)) {
+      diskSkipped++;
+      continue;
+    }
+    if (!accum.recordedBaselineCanonicals.put(fileCanonical)) return false;
+    if (!container.addBlob(std::move(blob))) return false;
+    diskAdded++;
+  }
   return true;
 }
 
@@ -644,38 +684,15 @@ bool DumpAOTContainer(JSContext* cx) {
 
     // Merge the checked-in BL-*.bin corpus, deduping by canonical hash
     // against anything recorded in-memory this run. A stale-version file
-    // is skipped rather than aborting the dump.
-    const char* corpusDir = "js/src/baselines";
-    if (const char* env = getenv("AOT_BASELINE_CORPUS_DIR")) corpusDir = env;
+    // is skipped rather than aborting the dump. Only performed when the
+    // caller explicitly asked to dump the baseline corpus.
+    const char* corpusDir = BaselineCorpusDir();
     uint32_t diskAdded = 0, diskSkipped = 0;
-    if (DIR* d = opendir(corpusDir)) {
-      while (struct dirent* ent = readdir(d)) {
-        unsigned canonHash = 0;
-        if (sscanf(ent->d_name, "BL-%u.bin", &canonHash) != 1) continue;
-        if (accum.recordedBaselineCanonicals.has(uint32_t(canonHash))) {
-          diskSkipped++;
-          continue;
-        }
-        char path[600];
-        SprintfLiteral(path, "%s/%s", corpusDir, ent->d_name);
-        uint32_t fileCanonical = 0;
-        AOTBlobWriter blob(AOTBlobKind::BaselineFunction, 0, kNoCorpusIndex,
-                           std::string());
-        if (!LoadAOTBaselineBlobFromFile(path, &fileCanonical, &blob)) {
-          diskSkipped++;
-          continue;
-        }
-        if (!accum.recordedBaselineCanonicals.put(fileCanonical)) {
-          closedir(d);
-          return false;
-        }
-        if (!container.addBlob(std::move(blob))) {
-          closedir(d);
-          return false;
-        }
-        diskAdded++;
+    if (JitOptions.dumpAOTBaselineCorpus) {
+      if (!MergeBaselineCorpusDir(corpusDir, accum, container, diskAdded,
+                                  diskSkipped)) {
+        return false;
       }
-      closedir(d);
     }
 
     if (inMemCount > 0 || diskAdded > 0 || diskSkipped > 0) {
