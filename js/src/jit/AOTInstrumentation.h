@@ -44,6 +44,7 @@ enum AOTInstrCh : uint32_t {
   AOTInstr_Lifecycle = 1 << 1,
   AOTInstr_Timing    = 1 << 2,
   AOTInstr_BLInterp  = 1 << 3,
+  AOTInstr_Baseline  = 1 << 4,
   AOTInstr_All       = 0xFFFFFFFF,
 };
 
@@ -77,14 +78,15 @@ struct AOTInstrumentation {
       if (strstr(env, "lifecycle")) channels |= AOTInstr_Lifecycle;
       if (strstr(env, "timing")) channels |= AOTInstr_Timing;
       if (strstr(env, "blinterp")) channels |= AOTInstr_BLInterp;
+      if (strstr(env, "baseline")) channels |= AOTInstr_Baseline;
       if (!channels) channels = AOTInstr_All;
     }
-    if (channels & AOTInstr_IC) {
+    if (channels & (AOTInstr_IC | AOTInstr_Baseline)) {
       pgoDumpDir = getenv("JS_AOT_PGO_DIR");
       if (pgoDumpDir && *pgoDumpDir) {
         if (mkdir(pgoDumpDir, 0755) != 0 && errno != EEXIST) {
           fprintf(stderr,
-                  "AOT: mkdir %s (JS_AOT_PGO_DIR) failed: %s -- IC stub "
+                  "AOT: mkdir %s (JS_AOT_PGO_DIR) failed: %s -- PGO "
                   "dumps disabled.\n",
                   pgoDumpDir, strerror(errno));
           pgoDumpDir = nullptr;
@@ -92,8 +94,8 @@ struct AOTInstrumentation {
       } else {
         pgoDumpDir = nullptr;
         fprintf(stderr,
-                "AOT: IC channel enabled but JS_AOT_PGO_DIR is unset -- "
-                "IC stub dumps disabled.\n");
+                "AOT: PGO channel enabled but JS_AOT_PGO_DIR is unset -- "
+                "PGO dumps disabled.\n");
       }
     }
 #ifndef JS_STANDALONE

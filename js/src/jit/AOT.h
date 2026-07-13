@@ -302,6 +302,14 @@ class AOTBlobWriter {
     return writeRawBytes(code_, data, len);
   }
 
+  bool writeFieldsRaw(const uint8_t* data, size_t len) {
+    return writeRawBytes(fields_, data, len);
+  }
+
+  bool writeArraysRaw(const uint8_t* data, size_t len) {
+    return writeRawBytes(arrays_, data, len);
+  }
+
   size_t codeSize() const { return code_.length(); }
 
   template <typename T>

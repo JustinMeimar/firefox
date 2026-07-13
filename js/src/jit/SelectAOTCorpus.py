@@ -28,11 +28,15 @@ RE_IC_ATTACH = re.compile(
     r"\s+pc=(\d+)"
 )
 
+RE_BASELINE_RECORD = re.compile(
+    r"baseline-record hash=(\d+)\s+size=(\d+)\s+canonical=\d+\s+name=(\S+)"
+)
+
 RE_TS = re.compile(r"^ts=\d+\s+")
 
 
-def parse_profile(path):
-    """Parse one profile log.
+def parse_ic_profile(path):
+    """Parse one IC frequency profile.
 
     Returns:
       freq:  Counter[(kind, hash) -> count]              -- corpus selection
@@ -60,7 +64,31 @@ def parse_profile(path):
     return freq, sizes, sites
 
 
-def select_corpus(profiles, budget):
+def parse_baseline_profile(path):
+    """Parse one baseline-record log.
+
+    A record line is emitted every time RecordAOTBaselineFunction accepts
+    a new canonical, so freq is 1-per-line here. sizes carries the JitCode
+    body size (matches the knapsack weight the container will pay).
+    'kind' is fixed to "baseline" so the (kind, hash) key shape lines up
+    with the IC path. No sites dict -- baseline has no eager-attach hints.
+    """
+    freq = Counter()
+    sizes = {}
+    with open(path) as f:
+        for line in f:
+            line = RE_TS.sub("", line)
+            m = RE_BASELINE_RECORD.match(line)
+            if not m:
+                continue
+            h, code_bytes, _name = m.groups()
+            key = ("baseline", int(h))
+            freq[key] += 1
+            sizes[key] = int(code_bytes)
+    return freq, sizes, {}
+
+
+def select_corpus(profiles, budget, kind):
     """
     Algorithm 1: SelectAOTCorpus.
 
@@ -74,11 +102,13 @@ def select_corpus(profiles, budget):
     Also returns the union of observed (script, pc) sites per stub, for
     eager-attach hint emission.
     """
+    parse = parse_ic_profile if kind == "ic" else parse_baseline_profile
+
     all_freqs = []
     sizes = {}
     all_sites = defaultdict(set)
     for path in profiles:
-        freq, sz, sites = parse_profile(path)
+        freq, sz, sites = parse(path)
         all_freqs.append(freq)
         sizes.update(sz)
         for key, s in sites.items():
@@ -138,44 +168,57 @@ def write_hints_tbl(path, selected, sites):
     return len(hints), len({h[0] for h in hints})
 
 
-def find_dump_files(dump_dir):
+def find_dump_files(dump_dir, prefix):
     mapping = {}
     for entry in Path(dump_dir).iterdir():
-        if not entry.name.startswith("IC-"):
+        if not entry.name.startswith(prefix):
             continue
-        parts = entry.name.split("-", 2)
-        if len(parts) >= 2:
-            try:
-                mapping[int(parts[1])] = entry
-            except ValueError:
-                pass
+        stem = entry.name[len(prefix):]
+        # Strip an optional ".bin" tail (baseline uses BL-<h>.bin; IC-<h>
+        # is bare). Trim on the first "-" too, in case future filenames
+        # ever grow a suffix.
+        stem = stem.split(".", 1)[0].split("-", 1)[0]
+        try:
+            mapping[int(stem)] = entry
+        except ValueError:
+            pass
     return mapping
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PGO IC corpus selector (Algorithm 1)")
+    parser = argparse.ArgumentParser(description="PGO corpus selector (Algorithm 1)")
+    parser.add_argument("--kind", choices=("ic", "baseline"), default="ic",
+                        help="Corpus kind: ic (default) or baseline")
     parser.add_argument("--profiles", nargs="+", required=True,
-                        help="IC frequency profile logs (one per workload)")
+                        help="Frequency profile logs (one per workload)")
     parser.add_argument("--budget", type=int, required=True,
                         help="Byte budget B for selected corpus")
     parser.add_argument("--dump-dir",
-                        help="Directory containing IC-<hash> dump files")
-    parser.add_argument("--output-dir", default="js/src/ics",
-                        help="Output directory for selected corpus")
+                        help="Directory containing per-item dump files")
+    parser.add_argument("--output-dir",
+                        help="Output directory for selected corpus "
+                             "(defaults: js/src/ics or js/src/baselines)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print selection without writing files")
     args = parser.parse_args()
 
-    selected, density, sizes, sites = select_corpus(args.profiles, args.budget)
+    if args.output_dir is None:
+        args.output_dir = "js/src/ics" if args.kind == "ic" else "js/src/baselines"
+
+    file_prefix = "IC-" if args.kind == "ic" else "BL-"
+
+    selected, density, sizes, sites = select_corpus(
+        args.profiles, args.budget, args.kind)
 
     if not selected:
-        print("No stubs selected.", file=sys.stderr)
+        print("No entries selected.", file=sys.stderr)
         sys.exit(1)
 
     total_bytes = sum(sizes.get(k, 0) for k in selected)
     ranked = sorted(selected, key=lambda k: density[k], reverse=True)
 
-    print(f"Selected {len(selected)} stubs, {total_bytes} / {args.budget} bytes")
+    print(f"Selected {len(selected)} {args.kind} entries, "
+          f"{total_bytes} / {args.budget} bytes")
     for i, key in enumerate(ranked):
         kind, h = key
         print(f"  {i+1:4d}. {kind:12s} hash={h:>10d}  "
@@ -184,11 +227,11 @@ def main():
     if args.dry_run or not args.dump_dir:
         return
 
-    dump_files = find_dump_files(args.dump_dir)
+    dump_files = find_dump_files(args.dump_dir, file_prefix)
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    for existing in out.glob("IC-*"):
+    for existing in out.glob(f"{file_prefix}*"):
         existing.unlink()
 
     copied, missing = 0, 0
@@ -202,9 +245,11 @@ def main():
 
     print(f"\nPopulated {out}: {copied} files copied, {missing} missing")
 
-    hints_path = out / "AOTHints.tbl"
-    n_hints, n_scripts = write_hints_tbl(hints_path, selected, sites)
-    print(f"Wrote {hints_path}: {n_hints} hints across {n_scripts} scripts")
+    # Eager-attach hints are IC-specific; baseline has no hint story yet.
+    if args.kind == "ic":
+        hints_path = out / "AOTHints.tbl"
+        n_hints, n_scripts = write_hints_tbl(hints_path, selected, sites)
+        print(f"Wrote {hints_path}: {n_hints} hints across {n_scripts} scripts")
 
 
 if __name__ == "__main__":

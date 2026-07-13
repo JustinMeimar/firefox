@@ -78,6 +78,19 @@ void DumpAOTICStubToDir(const char* dir, CacheKind kind,
 void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
                             bool isAOTFill);
 
+// Write one baseline function blob to <dir>/BL-<canonicalHash>.bin.
+// Filename is content-addressed so re-runs are idempotent. Silently
+// no-ops on fopen failure, matching DumpAOTICStubToDir.
+void DumpAOTBaselineFunctionToDir(const char* dir, uint32_t canonicalHash,
+                                  const AOTBlobWriter& blob);
+
+// Dump one baseline function blob to $AOT_BASELINE_DUMP_MISSING_DIR
+// (for `collect-baselines` accrual) and, when the baseline PGO channel
+// is on, to $JS_AOT_PGO_DIR (for SelectAOTCorpus.py). Both are no-ops
+// when their respective directories are unset.
+void MaybeDumpBaselineFunctionForPGO(uint32_t canonicalHash,
+                                     const AOTBlobWriter& blob);
+
 #endif  // ENABLE_JS_AOT
 
 }  // namespace js::jit

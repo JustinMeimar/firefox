@@ -11,7 +11,9 @@
 
 #include <cstdint>
 #include <cstring>
+#include <dirent.h>
 #include <fstream>
+#include <sys/types.h>
 
 #include "frontend/CompilationStencil.h"
 #include "gc/Zone.h"
@@ -80,6 +82,117 @@ void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
     return;
   }
   DumpAOTICStubToDir(gAOTInstr.pgoDumpDir, kind, writer);
+}
+
+// BL-<hash>.bin wire format. Written by DumpAOTBaselineFunctionToDir and
+// consumed by LoadAOTBaselineBlobFromFile in DumpAOTContainer. Tied to
+// AOT_CONTAINER_VERSION: a stale file is skipped rather than crashing
+// the dump, so a version bump does not require sweeping the corpus dir.
+static constexpr uint32_t kBaselineBlobFileMagic = 0x424C4277;  // 'BLBw'
+
+void DumpAOTBaselineFunctionToDir(const char* dir, uint32_t canonicalHash,
+                                  const AOTBlobWriter& blob) {
+  char filename[600];
+  SprintfLiteral(filename, "%s/BL-%u.bin", dir, unsigned(canonicalHash));
+
+  FILE* f = fopen(filename, "wb");
+  if (!f) {
+    fprintf(stderr, "DumpAOTBaselineFunctionToDir: fopen %s failed: %s\n",
+            filename, strerror(errno));
+    return;
+  }
+
+  auto writeU32 = [&](uint32_t v) { fwrite(&v, sizeof(v), 1, f); };
+  auto writeBytes = [&](const void* p, size_t n) {
+    if (n) fwrite(p, 1, n, f);
+  };
+
+  const auto& name = blob.name();
+  auto code = blob.codeBytes();
+  auto fields = blob.fieldsBytes();
+  auto arrays = blob.arraysBytes();
+  uint8_t kind = uint8_t(blob.kind());
+
+  writeU32(kBaselineBlobFileMagic);
+  writeU32(AOT_CONTAINER_VERSION);
+  writeU32(uint32_t(kind));
+  writeU32(blob.nameHash());
+  writeU32(blob.corpusIndex());
+  writeU32(canonicalHash);
+  writeU32(uint32_t(name.size()));
+  writeBytes(name.data(), name.size());
+  writeU32(uint32_t(code.size()));
+  writeBytes(code.data(), code.size());
+  writeU32(uint32_t(fields.size()));
+  writeBytes(fields.data(), fields.size());
+  writeU32(uint32_t(arrays.size()));
+  writeBytes(arrays.data(), arrays.size());
+
+  fflush(f);
+  fclose(f);
+}
+
+void MaybeDumpBaselineFunctionForPGO(uint32_t canonicalHash,
+                                     const AOTBlobWriter& blob) {
+  if (const char* dir = getenv("AOT_BASELINE_DUMP_MISSING_DIR")) {
+    DumpAOTBaselineFunctionToDir(dir, canonicalHash, blob);
+  }
+  if (gAOTInstr.enabled(AOTInstr_Baseline) && gAOTInstr.pgoDumpDir) {
+    DumpAOTBaselineFunctionToDir(gAOTInstr.pgoDumpDir, canonicalHash, blob);
+  }
+}
+
+// Reconstruct an AOTBlobWriter from a BL-*.bin file previously written
+// by DumpAOTBaselineFunctionToDir. Returns false (leaving `outBlob`
+// unspecified) on stale-version, truncation, or magic mismatch; callers
+// treat that as a skip, not a hard error.
+[[nodiscard]] static bool LoadAOTBaselineBlobFromFile(
+    const char* path, uint32_t* outCanonicalHash, AOTBlobWriter* outBlob) {
+  FILE* f = fopen(path, "rb");
+  if (!f) return false;
+
+  auto readU32 = [&](uint32_t* v) {
+    return fread(v, sizeof(*v), 1, f) == 1;
+  };
+
+  uint32_t magic, version, kindU32, nameHash, corpusIndex, canonicalHash;
+  uint32_t nameLen, codeLen, fieldsLen, arraysLen;
+
+  bool ok = readU32(&magic) && magic == kBaselineBlobFileMagic &&
+            readU32(&version) && version == AOT_CONTAINER_VERSION &&
+            readU32(&kindU32) &&
+            kindU32 == uint32_t(AOTBlobKind::BaselineFunction) &&
+            readU32(&nameHash) && readU32(&corpusIndex) &&
+            readU32(&canonicalHash) && readU32(&nameLen);
+
+  std::string name;
+  if (ok && nameLen > 0) {
+    name.resize(nameLen);
+    ok = fread(name.data(), 1, nameLen, f) == nameLen;
+  }
+
+  Vector<uint8_t, 0, SystemAllocPolicy> codeBuf, fieldsBuf, arraysBuf;
+  auto slurp = [&](Vector<uint8_t, 0, SystemAllocPolicy>& buf, uint32_t len) {
+    if (!buf.resize(len)) return false;
+    return len == 0 || fread(buf.begin(), 1, len, f) == len;
+  };
+
+  ok = ok && readU32(&codeLen) && slurp(codeBuf, codeLen) &&
+       readU32(&fieldsLen) && slurp(fieldsBuf, fieldsLen) &&
+       readU32(&arraysLen) && slurp(arraysBuf, arraysLen);
+
+  fclose(f);
+  if (!ok) return false;
+
+  *outBlob = AOTBlobWriter(AOTBlobKind::BaselineFunction, nameHash,
+                           corpusIndex, std::move(name));
+  if (!outBlob->writeCode(codeBuf.begin(), codeBuf.length()) ||
+      !outBlob->writeFieldsRaw(fieldsBuf.begin(), fieldsBuf.length()) ||
+      !outBlob->writeArraysRaw(arraysBuf.begin(), arraysBuf.length())) {
+    return false;
+  }
+  *outCanonicalHash = canonicalHash;
+  return true;
 }
 
 // Magic prefix on the per-blob canonical byte string. Distinct from
@@ -449,6 +562,14 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
           unsigned(script->outermostScope()->kind()),
           blob.name().c_str());
 
+  MaybeDumpBaselineFunctionForPGO(dedupKey, blob);
+
+  AOT_INSTR(AOTInstr_Baseline,
+            "baseline-record hash=%u size=%u canonical=%u name=%s\n",
+            unsigned(dedupKey),
+            unsigned(bs->method()->instructionsSize()),
+            unsigned(canonicalSpan.size()), blob.name().c_str());
+
   if (!accum.baselineFunctionBlobs.append(std::move(blob))) return false;
   if (!accum.recordedBaselineCanonicals.add(ptr, dedupKey)) return false;
   return true;
@@ -515,14 +636,53 @@ bool DumpAOTContainer(JSContext* cx) {
   accum.icStubBlobs.clearAndFree();
 
   {
-    uint32_t corpusCount = accum.baselineFunctionBlobs.length();
+    uint32_t inMemCount = accum.baselineFunctionBlobs.length();
     for (auto& blob : accum.baselineFunctionBlobs) {
       if (!container.addBlob(std::move(blob))) return false;
     }
     accum.baselineFunctionBlobs.clearAndFree();
-    if (corpusCount > 0) {
+
+    // Merge the checked-in BL-*.bin corpus, deduping by canonical hash
+    // against anything recorded in-memory this run. A stale-version file
+    // is skipped rather than aborting the dump.
+    const char* corpusDir = "js/src/baselines";
+    if (const char* env = getenv("AOT_BASELINE_CORPUS_DIR")) corpusDir = env;
+    uint32_t diskAdded = 0, diskSkipped = 0;
+    if (DIR* d = opendir(corpusDir)) {
+      while (struct dirent* ent = readdir(d)) {
+        unsigned canonHash = 0;
+        if (sscanf(ent->d_name, "BL-%u.bin", &canonHash) != 1) continue;
+        if (accum.recordedBaselineCanonicals.has(uint32_t(canonHash))) {
+          diskSkipped++;
+          continue;
+        }
+        char path[600];
+        SprintfLiteral(path, "%s/%s", corpusDir, ent->d_name);
+        uint32_t fileCanonical = 0;
+        AOTBlobWriter blob(AOTBlobKind::BaselineFunction, 0, kNoCorpusIndex,
+                           std::string());
+        if (!LoadAOTBaselineBlobFromFile(path, &fileCanonical, &blob)) {
+          diskSkipped++;
+          continue;
+        }
+        if (!accum.recordedBaselineCanonicals.put(fileCanonical)) {
+          closedir(d);
+          return false;
+        }
+        if (!container.addBlob(std::move(blob))) {
+          closedir(d);
+          return false;
+        }
+        diskAdded++;
+      }
+      closedir(d);
+    }
+
+    if (inMemCount > 0 || diskAdded > 0 || diskSkipped > 0) {
       JitSpew(JitSpew_BaselineAOT,
-              "Baseline corpus: %u blob(s) added to container", corpusCount);
+              "Baseline corpus: in-memory=%u disk-added=%u disk-skipped=%u "
+              "(dir=%s)",
+              inMemCount, diskAdded, diskSkipped, corpusDir);
     }
   }
 
