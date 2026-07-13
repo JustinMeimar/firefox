@@ -26,19 +26,14 @@
 # payload from live VM objects is *not* schematised; it belongs in C++.
 # Do not add fields here that embed C++ expressions.
 #
-# Adding a blob kind: append a new entry under `blobs:` and bump
-# AOT_CONTAINER_VERSION in AOT.h. The build fails at the fieldsSize
-# check on the next load if you forget the version bump.
-
-container:
-  # Documentation only; the constants live in AOT.h so C++ code has
-  # them without depending on generated files. Kept here as reminder.
-  magic: 0x414F5443    # 'AOTC'
-  version: 9
-  fingerprint:
-    parts:
-      - {kind: buildid,  source: "wasm::GetOptimizedEncodingBuildId"}
-      - {kind: struct,   ref: AOTCodegenOptions}
+# Bump AOT_CONTAINER_VERSION in AOT.h for any wire-format change:
+# adding a blob kind, adding/reordering/resizing a field in an existing
+# blob, changing a field type, adding an array, or renaming an array's
+# count_from. The build fails at the fieldsSize check on the next load
+# if the version isn't bumped.
+#
+# Container magic, version, and fingerprint layout live in
+# jit/AOT.h and jit/AOTContainerWriter. Not duplicated here.
 
 structs:
   AOTCodegenOptions:
@@ -113,6 +108,9 @@ blobs:
       - {name: nargs,                     type: u16}
       - {name: nfixed,                    type: u16}
       - {name: scopeKind,                 type: u8}
+      # scopeKind (u8) + pad0 (u8) + pad1 (u16) = 4 bytes, aligning the
+      # trailing array section to a 4-byte boundary. Hand-counted; adjust
+      # when adding fields above.
       - {name: pad0,                      type: u8}
       - {name: pad1,                      type: u16}
     arrays:

@@ -252,6 +252,11 @@ bool JitRuntime::initialize(JSContext* cx) {
   }
 
 #ifdef ENABLE_JS_AOT
+  // InterpretOp is populated here (not in populateAOTIndirectionTable
+  // above) because baselineInterpreter_.interpretOpAddr() only becomes
+  // valid after GenerateBaselineInterpreter runs a few lines up.
+  // AOTSlots.tbl carries `AOT_SLOT(InterpretOp, nullptr)` as a slot
+  // placeholder; this is the matching populate site.
   if (IsBaselineInterpreterEnabled()) {
     aotIndirectionTable_.set(
         AOTSlot::InterpretOp,

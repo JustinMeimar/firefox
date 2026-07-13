@@ -591,6 +591,12 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
+  // Only top-level global, non-debuggee scripts feed the corpus today.
+  // The canonical hash and blob format already carry scopeKind (see
+  // ComputeBaselineCanonical in BaselineAOT.cpp), so widening to
+  // function-scope scripts is a policy change here, not a format change.
+  // Debuggees are excluded because their trap edits invalidate the
+  // canonical-equal replay contract.
   bool aotEligible = !script->isDebuggee() &&
                      script->outermostScope()->kind() == ScopeKind::Global;
   if (JitOptions.useAOTBaselineCorpus && aotEligible) {
@@ -602,6 +608,8 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     MethodStatus status = BaselineCompile(cx, script, options,
                                           /*isAOTDump=*/true);
     if (status == Method_Compiled) {
+      // Discard writer OOM: dumpAOTBaselineCorpus is a research-only
+      // path and must not fail an otherwise-successful compile.
       (void)RecordAOTBaselineFunction(cx, script);
     }
     return status;

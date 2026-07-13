@@ -63,6 +63,11 @@ def field_cpp_type(f):
     raise ValueError(f["type"])
 
 
+# Reproduces the C++ aggregate layout rule: natural alignment per field,
+# trailing padding to max_align. Load-bearing because we memcpy into the
+# POD from the container; any mismatch with the C++ compiler's sizeof
+# breaks decode silently. Safety net: the static_assert emitted by
+# emit_pod_struct catches drift at compile time.
 def struct_sizeof(fields):
     offset = 0
     max_align = 1
@@ -101,6 +106,11 @@ def emit_payload_struct(name, fields_type, arrays):
     return "\n".join(lines) + "\n"
 
 
+# Emitted Encode/Decode helpers fix the wire order as
+# code + fields + arrays[]. This must match AOTContainerReader::makeReader
+# in AOT.h, which computes fieldsBase and arraysBase from directory
+# offsets; changes to one side must land with matching changes on the
+# other (and a AOT_CONTAINER_VERSION bump).
 def emit_encode(kind_name, payload_type, arrays):
     lines = [
         f"[[nodiscard]] inline bool EncodeAOTBlob_{kind_name}(",

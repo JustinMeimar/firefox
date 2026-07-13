@@ -21,6 +21,22 @@
 #include "threading/Mutex.h"
 #include "vm/MutexIDs.h"
 
+// Research instrumentation for the FrostMonkey paper; not intended for
+// production. Env vars read at init():
+//
+//   JS_AOT_INSTR      "1" or "all" enables every channel. Otherwise a
+//                     substring match against the channel names
+//                     {ic, lifecycle, timing, blinterp}; a match that
+//                     resolves to no channels falls back to all. Unset
+//                     leaves instrumentation disabled.
+//
+//   JS_AOT_INSTR_FILE Output path; ".$PID" is appended. Falls back to
+//                     stderr if unset or fopen fails.
+//
+//   JS_AOT_PGO_DIR    Directory for IC stub dumps. Required when the ic
+//                     channel is on; IC dumps are disabled with a
+//                     warning if unset or mkdir fails.
+
 namespace js::jit {
 
 enum AOTInstrCh : uint32_t {
@@ -30,9 +46,6 @@ enum AOTInstrCh : uint32_t {
   AOTInstr_BLInterp  = 1 << 3,
   AOTInstr_All       = 0xFFFFFFFF,
 };
-
-// NOTE(aot): Research instrumentation used for the FrostMonkey paper.
-// Not intended for production use.
 
 struct AOTInstrumentation {
   uint32_t channels = 0;

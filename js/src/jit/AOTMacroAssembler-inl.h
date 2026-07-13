@@ -14,11 +14,11 @@ namespace js::jit {
 
 #ifdef ENABLE_JS_AOT
 
-// Only tolerate literal `ImmPtr` values up to this value being baked into
-// the AOT JIT code. Uses for passing nullptr through the `ImmPtr` interface
-// occasionally occur, same with `SpecialScriptBit`, both of which we don't
-// want to crash upon for failing to match in the indirection table.
-static constexpr uintptr_t kAOTBakeableSentinelLimit = 16;
+// Immediate pointer values below this threshold are treated as
+// sentinel constants (nullptr, SpecialScriptBit, etc.) and are
+// baked in directly rather than routed through the indirection
+// table. Real runtime pointers are always >= this threshold.
+  static constexpr uintptr_t kAOTBakeableSentinelLimit = 16;
 
 #  define AOT_CRASH_ON_UNKNOWN_PTR(kind, val)                             \
     do {                                                                  \
@@ -31,6 +31,14 @@ static constexpr uintptr_t kAOTBakeableSentinelLimit = 16;
     } while (0)
 #endif
 
+// Each Ptr-flavored overload below repeats the same isAOT()/findSlot
+// check rather than sharing a helper, because the slot-found action
+// varies: movePtr emits the slot value into the destination register;
+// loadPtr emits then dereferences; storePtr and jump need a
+// ScratchRegisterScope, since their register operand is the value or
+// code being written, not a slot-load target. movePtr(ImmGCPtr) also
+// falls through to a relocatable move on a miss (script-specific atoms),
+// while the rest crash via AOT_CRASH_ON_UNKNOWN_PTR.
 inline void MacroAssembler::loadRuntime(Register reg) {
   movePtr(ImmPtr(runtime()), reg);
 }

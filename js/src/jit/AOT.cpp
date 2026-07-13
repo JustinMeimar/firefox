@@ -357,7 +357,7 @@ mozilla::Maybe<AOTContainerReader> AOTContainerReader::fromEmbedded() {
 mozilla::Maybe<AOTBlobReader> AOTContainerReader::getBlob(
     AOTBlobKind kind, uint32_t nameHash) const {
   mozilla::Maybe<AOTBlobReader> found;
-  visitBlobs(kind, [&](AOTBlobReader& reader) {
+  anyBlob(kind, [&](AOTBlobReader& reader) {
     if (nameHash != 0 && reader.entry()->nameHash != nameHash) return false;
     found.emplace(reader);
     return true;

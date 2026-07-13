@@ -21,15 +21,16 @@ namespace js::jit {
 
 // [SMDOC] AOT JIT Code
 //
-// When built with `ENABLE_JS_AOT`, SpiderMonkey can emit relocatable JIT
-// code for the baseline interpreter, inline cache stubs orself-hosted
+// When built with `ENABLE_JS_AOT`, SpiderMonkey emits relocatable JIT
+// code for the baseline interpreter, inline cache stubs, and self-hosted
 // builtins.
 //
-// An AOT container refers to the assembly scaffold which is filled with
-// AOT artifacts, called "Blobs". A single IC, baseline interpreter, or
-// self hosted function constitutes an AOT blob. Each blob is packed as
-// { code, fields POD, element arrays }. The container writes a directory
-// entry describing the code offset/size, and the shared data offset with
+// An AOT container is a flat binary blob, embedded into the shell via
+// AOTBaselineStub.S and mmapped at runtime. Its payload is a sequence of
+// AOT artifacts (Blobs). A single IC, baseline interpreter, or
+// self-hosted function is one blob. Each blob is packed as
+// { code, fields POD, element arrays }; the container writes a directory
+// entry describing the code offset/size and the shared data offset with
 // per-blob fields and arrays sizes. From there, AOT artifacts can be
 // reconstructed and deserialized into their respective C++ classes, only
 // this time with a JitCode backed by static memory rather than dynamic
@@ -37,13 +38,20 @@ namespace js::jit {
 //
 // To make JIT code relocatable, all uses of `ImmPtr` are intercepted
 // inside a set of common masm interfaces then compared against a set of
-// expected pointers enumerated in `AOTSlot`. If the pointer can be
-// identified, the masm emits an indirection to attain the pointer via
-// the &AOTIndirectionTable, stored in the BaselineFrame. This incurs a
-// cost of two loads to attain any runtime pointer, but allows the
-// generated code to be independent from any particular runtime. The
-// buffer can then be dumped, serialized into an assembly scaffold, and
-// reattached as a build input.
+// expected pointers enumerated in `AOTSlot`. On a match, the masm emits
+// an indirection to load the pointer through the `AOTIndirectionTable`
+// owned by JitRuntime.
+//
+// Table access, per call path:
+//   Baseline frame:      frame slot -> table base -> slot value
+//                        (BaselineFrame::reverseOffsetOfAOTTableBase())
+//   Baseline stub frame: frame slot -> table base -> slot value
+//                        (BaselineStubFrameLayout::AOTTableOffsetFromFP)
+// Both are two loads. The frame slot is seeded at prologue from
+// AOTTablePassReg, which the AOT preamble (JitRuntime::generateAOTPreamble)
+// stashes with &aotIndirectionTable before jumping to the entry. Pinning
+// AOTTablePassReg through emit (to reach one load) is future work; today
+// the register is only live from preamble to prologue.
 
 extern const double MathRandomScaleInv;
 class JitCode;
@@ -54,6 +62,12 @@ static constexpr uint32_t kNoCorpusIndex = UINT32_MAX; // Used for IC hints
 static constexpr uint32_t kAOTAlignment = 16;
 static constexpr uint32_t AOT_CONTAINER_VERSION = 9;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
+
+// Bump AOT_CONTAINER_VERSION on any change to the wire format:
+// AOTContainerHeader, AOTBlobDirectoryEntry, the fields POD of any blob
+// (see AOTBlobSchema.yaml), AOTSlot enum renumbering, or fingerprint
+// contents. A stale container that matches the old magic but not the new
+// layout otherwise deserializes into garbage.
 
 // The container fingerprint POD (AOTCodegenOptions) is schema-defined
 // in jit/AOTBlobSchema.yaml and emitted into jit/AOTBlobGenerated.h.
@@ -142,6 +156,9 @@ struct AOTBlobDirectoryEntry {
 static_assert(sizeof(AOTBlobDirectoryEntry) == 32,
               "AOTBlobDirectoryEntry must be 32 bytes");
 
+// These symbols are defined by AOTBaselineStub.S, regenerated with
+// `--aot-dump-baseline --aot-dump-self-hosted`. Pre-bootstrap the stub is
+// empty and the runtime consumers must handle a zero-sized container.
 extern "C" {
   extern const uint8_t bl_aot_container_start[];
   extern const uint8_t bl_aot_container_end[];
@@ -224,9 +241,12 @@ class AOTIndirectionTable {
   uintptr_t slots_[uint32_t(AOTSlot::Count)] = {};
 };
 
-// AOTContext switches codegen to emit position independent code
-// via indirection through the indirection tabel. This class is Stack-allocated
-// by the caller and passed to MacroAssembler.
+// Switches codegen to emit position-independent code that routes runtime
+// pointers through the indirection table. Its presence on the
+// MacroAssembler is the mode switch: `isAOT()` returns true whenever an
+// AOTContext is attached. Stack-allocate at the top of a codegen scope
+// and pass to MacroAssembler; prefer AutoAOTCodegen (AutoAOTCodegen.h),
+// which handles the RAII attach/detach.
 class AOTContext {
  public:
   explicit AOTContext(AOTIndirectionTable* table) : table_(table) {}
@@ -408,11 +428,13 @@ class AOTContainerReader {
     return e.codeSize == 0 && e.fieldsSize == 0 && e.arraysSize == 0;
   }
 
-  // Iterate all present blobs of the given kind. fn returns true to stop
-  // iteration early; false to keep going. Returns true if iteration was
-  // stopped by fn, false if the range was exhausted.
+  // Two-tier traversal: this private helper is a bool-returning
+  // any_of over blobs of the given kind (`fn` returns true to short-
+  // circuit, and the return value is true iff `fn` short-circuited);
+  // the public `forEachBlob`/`forEachBlobWithHash` are void-returning
+  // wrappers that swallow the bool for simple traversal.
   template <typename Fn>
-  bool visitBlobs(AOTBlobKind kind, Fn&& fn) const {
+  bool anyBlob(AOTBlobKind kind, Fn&& fn) const {
     for (uint32_t i = 0; i < blobCount_; i++) {
       if (dir_[i].kind != kind) continue;
       if (isEmpty(dir_[i])) continue;
@@ -430,7 +452,7 @@ class AOTContainerReader {
 
   template <typename Fn>
   void forEachBlob(AOTBlobKind kind, Fn&& fn) const {
-    visitBlobs(kind, [&](AOTBlobReader& reader) {
+    anyBlob(kind, [&](AOTBlobReader& reader) {
       fn(reader);
       return false;
     });
@@ -443,7 +465,7 @@ class AOTContainerReader {
   template <typename Fn>
   void forEachBlobWithHash(AOTBlobKind kind, uint32_t nameHash,
                            Fn&& fn) const {
-    visitBlobs(kind, [&](AOTBlobReader& reader) {
+    anyBlob(kind, [&](AOTBlobReader& reader) {
       if (reader.entry()->nameHash != nameHash) return false;
       return bool(fn(reader));
     });

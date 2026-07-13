@@ -30,8 +30,10 @@ namespace js::jit {
 //   AutoAOTCodegen aot(masm, cx);
 //   // ... codegen ...
 //
-// Nested scopes are disallowed. The scope must be installed before any code
-// is emitted (asserted).
+// Nested scopes are disallowed, and the scope must be installed before
+// any code is emitted. Both are enforced by MacroAssembler::setAOTContext
+// (balanced install/uninstall assert, and currentOffset() == 0 assert),
+// which the ctor below calls.
 class MOZ_STACK_CLASS AutoAOTCodegen {
  public:
   AutoAOTCodegen(MacroAssembler& masm, JSContext* cx)

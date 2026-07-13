@@ -233,13 +233,17 @@ class JitRuntime {
   MainThreadData<uint32_t> disallowArbitraryCode_{false};
 #endif
 
+#ifdef ENABLE_JS_AOT
   AOTIndirectionTable aotIndirectionTable_;
 
-#ifdef ENABLE_JS_AOT
   // Preamble prepended to the AOT baseline interpreter entry for
   // setting up indirection table mechanism.
   WriteOnceData<JitCode*> aotInterpPreamble_{nullptr};
 
+  // The AOT dump/load subsystem (BaselineAOT.cpp,
+  // BaselineCacheIRCompiler.cpp) touches the fields below directly - they
+  // are co-owned in practice. Kept as public-by-convention rather than
+  // wrapped in accessors that would just forward Vector/HashSet ops.
   public:
   // NOTE(aot): Stored as JitCode* so the GC keeps each preamble alive.
   struct AOTPreambleEntry { uint8_t* aotCode; JitCode* preamble; };
@@ -266,8 +270,7 @@ class JitRuntime {
       staticCodeProfilerOn_;
 
   // Transient state accumulated during --aot-dump-* runs. Drained and
-  // cleared by BaselineAOT::DumpAOTContainer. Same public-by-convention
-  // shape as aotPreambles_ above.
+  // cleared by BaselineAOT::DumpAOTContainer.
   struct AOTDumpAccumulator {
     mozilla::Maybe<AOTBlobWriter> interpreterBlob;
     Vector<AOTBlobWriter, 0, SystemAllocPolicy> baselineFunctionBlobs;
@@ -456,13 +459,13 @@ class JitRuntime {
                                trampolineCode(enterJITOffset_).value);
   }
 
+#ifdef ENABLE_JS_AOT
   AOTIndirectionTable& aotIndirectionTable() { return aotIndirectionTable_; }
   const AOTIndirectionTable& aotIndirectionTable() const {
     return aotIndirectionTable_;
   }
-  static size_t offsetOfAOTIndirectionTable() {
-    return offsetof(JitRuntime, aotIndirectionTable_);
-  }
+#endif
+
   // Return the registers from the native caller frame of the given JIT frame.
   // Nothing{} if frameStackAddress is NOT pointing at a native-to-JIT entry
   // frame, or if the information is not accessible/implemented on this

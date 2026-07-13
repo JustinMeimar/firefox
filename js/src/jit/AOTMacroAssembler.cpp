@@ -14,10 +14,6 @@
 #include "jit/MacroAssembler-inl.h"
 #include "vm/JSObject-inl.h"
 
-// NOTE(Justin): This file is separate from MacroAssembler.cpp purely for
-// convenience. The interfaces here all belong to `MacroAssembler` and
-// could be moved into the primary source file eventually.
-
 using namespace js;
 using namespace js::jit;
 
@@ -94,8 +90,9 @@ void MacroAssembler::emitAOTCopyFrameTableBaseFromCaller(Register scratch) {
   if (!isAOT() && !JitOptions.aotNeedsIndirectionTable()) {
     return;
   }
-  // Assumes FramePointer points at the current BaselineFrame and the
-  // caller's FP is at [FramePointer + 0].
+  // Called from the generator resume path in BaselineCodeGen; the outer
+  // prologue guarantees FramePointer points at the current BaselineFrame
+  // and the caller's FP is at [FramePointer + 0].
   loadPtr(Address(FramePointer, 0), scratch);
   loadPtr(Address(scratch, BaselineFrame::reverseOffsetOfAOTTableBase()),
           scratch);

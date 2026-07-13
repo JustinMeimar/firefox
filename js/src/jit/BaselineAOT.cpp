@@ -87,6 +87,18 @@ void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
 // confused with a container header.
 static constexpr uint32_t kBaselineCanonicalMagic = 0x424C4E63;  // 'BLNc'
 
+// Canonical bytes identify a script for AOT baseline matching: two
+// scripts hash equal iff their baseline codegen output would be
+// byte-identical. HasDebugScript is masked in because it toggles trap
+// emission; other mutable flags don't affect codegen. Debuggee scripts
+// are filtered upstream (see BaselineJIT.cpp:aotEligible and
+// LoadAOTBaselineFunction below) so debuggee-ness is not encoded here.
+// Only gcthing kinds are hashed, not pointers - pointers vary by realm
+// and are routed through the indirection table at load time.
+//
+// Wire format is the append order below. Adding, reordering, or
+// resizing any field silently invalidates every existing corpus; bump
+// AOT_CONTAINER_VERSION alongside such changes.
 static bool ComputeBaselineCanonical(
     JSScript* script,
     Vector<uint8_t, 0, SystemAllocPolicy>& out) {
@@ -147,9 +159,10 @@ static bool ComputeBaselineCanonical(
   return true;
 }
 
-// Serialize a live BaselineScript into a BaselineFunction blob.
-// Owns the resume-offset buffer and payload internally; caller only
-// supplies the canonical bytes (which come from ComputeBaselineCanonical).
+// canonical must be ComputeBaselineCanonical(script) for the same
+// script; otherwise the blob fails canonical-match on load.
+// TODO(Justin): promote this contract to a DEBUG-only recompute +
+// memcmp assert so it stops being a prose promise.
 [[nodiscard]] static bool EncodeBaselineFunctionBlob(
     HandleScript script, mozilla::Span<const uint8_t> canonical,
     BaselineScript* bs, AOTBlobWriter& blob) {
@@ -187,14 +200,10 @@ static bool ComputeBaselineCanonical(
   return EncodeAOTBlob_BaselineFunction(blob, payload);
 }
 
-// Install a decoded BaselineFunction payload on the given JSScript.
-// Allocates JitCode, creates BaselineScript, copies arrays, generates
-// the AOT preamble, registers in JitcodeGlobalTable, and toggles the
-// profiler. Used by both the self-hosted delazify hook and the guest
-// baseline compile hook.
 [[nodiscard]] static BaselineScript* NewAOTBaselineScript(
     JSContext* cx, JitCode* code,
     const AOTPayload_BaselineFunction& payload) {
+
   const auto& f = payload.fields;
   BaselineScript* bs = BaselineScript::New(
       cx, f.warmUpCheckPrologueOffset, f.profilerEnterToggleOffset,
@@ -260,6 +269,8 @@ static void MaybeToggleProfilerForAOTBaseline(JSContext* cx,
   bs->toggleProfilerInstrumentation(true);
 }
 
+// Install a decoded BaselineFunction payload on the given JSScript.
+// Called by both self-hosted delazify and guest baseline compile.
 [[nodiscard]] static bool InstallBaselineScriptPayload(
     JSContext* cx, HandleScript script,
     const AOTBlobDirectoryEntry* entry,
@@ -697,15 +708,14 @@ bool LoadAOTICStubs(JSContext* cx) {
       return;
     }
 
-    // Register the (JitCode, CacheIRStubInfo) pair against its corpus index
-    // so eager-attach hints in initICEntries() can look it up. stubInfo was
-    // moved into the primary map above; re-fetch the canonical pointer.
+    // Register the (JitCode, CacheIRStubInfo) pair against its corpus
+    // index so eager-attach hints in initICEntries() can look it up.
+    // stubInfo's allocation is now owned by the map (via key's UniquePtr)
+    // but the raw pointer remains valid; setAOTStubEntry stores it
+    // non-owningly.
     uint32_t corpusIdx = reader.entry()->corpusIndex;
-    CacheIRStubInfo* installed = nullptr;
-    (void)jitZone->getBaselineCacheIRStubCode(lookup, &installed);
-    MOZ_ASSERT(installed);
     if (corpusIdx == kNoCorpusIndex ||
-        !jitZone->setAOTStubEntry(corpusIdx, code, installed)) {
+        !jitZone->setAOTStubEntry(corpusIdx, code, stubInfo)) {
       // Non-fatal: the primary code map still works; only hints for this
       // stub become no-ops.
       JitSpew(JitSpew_BaselineAOT,

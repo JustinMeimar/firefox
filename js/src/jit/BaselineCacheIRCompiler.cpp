@@ -2071,6 +2071,13 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #endif
 
 #ifdef ENABLE_JS_AOT
+  // AOT_ICS_DUMP_MISSING_DIR = <path> - dump the CacheIR body of any
+  //   stub the AOT corpus is missing, so it can be added on the next
+  //   record run.
+  // AOT_ICS_KEEP_GOING = <any>  - don't crash when a stub is missing,
+  //   fall back to freshly compiled IC. Used to gather a full missing
+  //   set in one invocation instead of crash-restart cycles. Used for
+  //   accruing a corpus.
   if (JitOptions.enforceAOTICs && !stubInfo && !isAOTFill) {
     if (const char* dir = getenv("AOT_ICS_DUMP_MISSING_DIR")) {
       DumpAOTICStubToDir(dir, kind, writer);
