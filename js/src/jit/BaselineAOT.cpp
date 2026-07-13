@@ -615,8 +615,8 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
   uint32_t key =
       uint32_t(mozilla::HashBytes(canonical.begin(), canonical.length()));
 
-  bool installed = false;
-  bool failed = false;
+  enum class InstallResult { NoMatch, Installed, Failed };
+  InstallResult result = InstallResult::NoMatch;
 
   container->forEachBlobWithHash(
       AOTBlobKind::BaselineFunction, key,
@@ -643,17 +643,14 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
                 key, reader.entry()->codeSize, script->filename(),
                 script->lineno());
 
-        if (!InstallBaselineScriptPayload(cx, script, reader.entry(),
-                                          payload)) {
-          failed = true;
-        } else {
-          installed = true;
-        }
+        result = InstallBaselineScriptPayload(cx, script, reader.entry(),
+                                              payload)
+                     ? InstallResult::Installed
+                     : InstallResult::Failed;
         return true;
       });
 
-  if (failed) return false;
-  return installed;
+  return result == InstallResult::Installed;
 }
 
 bool LoadAOTICStubs(JSContext* cx) {
