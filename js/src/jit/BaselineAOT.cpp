@@ -540,23 +540,6 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
     return false;
   }
 
-  if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
-          cx, DebugTrapHandlerKind::Interpreter)) {
-    return false;
-  }
-  if (!cx->runtime()->jitRuntime()->ensureDebugTrapHandler(
-          cx, DebugTrapHandlerKind::Compiler)) {
-    return false;
-  }
-
-  AOTIndirectionTable& table = cx->runtime()->jitRuntime()->aotIndirectionTable();
-  table.set(AOTSlot::DebugTrapInterpreter,
-            uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
-                DebugTrapHandlerKind::Interpreter)->raw()));
-  table.set(AOTSlot::DebugTrapCompiler,
-            uintptr_t(cx->runtime()->jitRuntime()->debugTrapHandler(
-                DebugTrapHandlerKind::Compiler)->raw()));
-
   JitCode* code = AllocateAOTCode(
       cx, reader->entry(), GetAOTTextBase(), CodeKind::Other);
   if (!code) {
