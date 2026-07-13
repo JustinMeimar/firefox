@@ -26,7 +26,7 @@ static constexpr const char* kAOTOutputPath =
 // helpers live in AOTBlobGenerated.h (generated from AOTBlobSchema.yaml).
 
 [[nodiscard]] bool BuildAndSaveInterpBlob(
-    const AOTPayload_BaselineInterpreter& payload);
+    JSContext* cx, const AOTPayload_BaselineInterpreter& payload);
 
 [[nodiscard]] bool LoadAOTInterpFromContainer(
     JSContext* cx, BaselineInterpreter& interpreter);
@@ -44,8 +44,6 @@ static constexpr const char* kAOTOutputPath =
 [[nodiscard]] bool DumpAOTContainer(JSContext* cx);
 
 [[nodiscard]] bool LoadAOTICStubs(JSContext* cx);
-
-Vector<AOTBlobWriter, 0, SystemAllocPolicy> TakeSavedICBlobs();
 
 class CacheIRWriter;
 

@@ -397,9 +397,8 @@ static constexpr OpToFallbackKindTable FallbackKindTable;
 
 #ifdef ENABLE_JS_AOT
 
-// [SMDOC] AOT IC Hinting
+// AOT IC Hinting Pipeline:
 //
-// Pipeline:
 //   1. A PGO run with JS_AOT_PGO_DIR=<dir> dumps every compiled IC stub and
 //      appends one line per attach (script, pc, stubHash) to <dir>/AOTHints.tbl.
 //
@@ -418,7 +417,7 @@ static constexpr OpToFallbackKindTable FallbackKindTable;
 //
 //   * Only non-parametic stubs are candidates for IC hinting. These stubs are
 //     those which have no dynamic StubData fields. Dynamic fields pose
-//     a problem for eager IC attachment: stub field arguments are only
+//     a problem for eager IC attachment since stub field arguments are only
 //     realized in the fallback routine upon a miss. The fallback is precisely
 //     what we aim to avoid with eager attachment, so this causes a chicken
 //     egg problem. Thankfully non-parametric stubs make up some ~30% of

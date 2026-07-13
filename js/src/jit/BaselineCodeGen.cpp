@@ -7413,31 +7413,36 @@ bool BaselineInterpreterGenerator::writeAOTBaseline(JSContext* cx, JitCode* code
   const auto& coverage = handler.codeCoverageOffsets();
   const auto& icReturns = handler.icReturnOffsets();
 
-  AOTPayload_BaselineInterpreter payload;
-  auto& s = payload.fields;
-  s.InterpretOp = interpretOpOffset_;
-  s.InterpretOpNoDebugTrap = interpretOpNoDebugTrapOffset_;
-  s.BailoutPrologue = bailoutPrologueOffset_.offset();
-  s.ProfilerEnterToggle = profilerEnterFrameToggleOffset_.offset();
-  s.ProfilerExitToggle = profilerExitFrameToggleOffset_.offset();
-  s.DebugTrapHandler = debugTrapHandlerOffset_;
-  s.CallVMDebugPrologue = handler.callVMOffsets().debugPrologueOffset;
-  s.CallVMDebugEpilogue = handler.callVMOffsets().debugEpilogueOffset;
-  s.CallVMDebugAfterYield = handler.callVMOffsets().debugAfterYieldOffset;
-  s.DebugInstrumentationCount = debugInstr.length();
-  s.DebugTrapCount = debugTraps.length();
-  s.CodeCoverageCount = coverage.length();
-  s.ICReturnCount = icReturns.length();
-
   uint8_t* codeStart = code->raw();
   size_t codeSize = code->rawEnd() - codeStart;
-  payload.code = mozilla::Span(codeStart, codeSize);
-  payload.debugInstr = mozilla::Span(debugInstr.begin(), debugInstr.length());
-  payload.debugTraps = mozilla::Span(debugTraps.begin(), debugTraps.length());
-  payload.coverage = mozilla::Span(coverage.begin(), coverage.length());
-  payload.icReturns = mozilla::Span(icReturns.begin(), icReturns.length());
 
-  return BuildAndSaveInterpBlob(payload);
+  AOTPayload_BaselineInterpreter payload{
+      .fields = {
+          .InterpretOp = interpretOpOffset_,
+          .InterpretOpNoDebugTrap = interpretOpNoDebugTrapOffset_,
+          .BailoutPrologue = uint32_t(bailoutPrologueOffset_.offset()),
+          .ProfilerEnterToggle =
+              uint32_t(profilerEnterFrameToggleOffset_.offset()),
+          .ProfilerExitToggle =
+              uint32_t(profilerExitFrameToggleOffset_.offset()),
+          .DebugTrapHandler = debugTrapHandlerOffset_,
+          .CallVMDebugPrologue = handler.callVMOffsets().debugPrologueOffset,
+          .CallVMDebugEpilogue = handler.callVMOffsets().debugEpilogueOffset,
+          .CallVMDebugAfterYield =
+              handler.callVMOffsets().debugAfterYieldOffset,
+          .DebugInstrumentationCount = uint32_t(debugInstr.length()),
+          .DebugTrapCount = uint32_t(debugTraps.length()),
+          .CodeCoverageCount = uint32_t(coverage.length()),
+          .ICReturnCount = uint32_t(icReturns.length()),
+      },
+      .code = mozilla::Span(codeStart, codeSize),
+      .debugInstr = mozilla::Span(debugInstr.begin(), debugInstr.length()),
+      .debugTraps = mozilla::Span(debugTraps.begin(), debugTraps.length()),
+      .coverage = mozilla::Span(coverage.begin(), coverage.length()),
+      .icReturns = mozilla::Span(icReturns.begin(), icReturns.length()),
+  };
+
+  return BuildAndSaveInterpBlob(cx, payload);
 }
 
 #endif

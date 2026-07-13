@@ -2379,15 +2379,10 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
 
 #ifdef ENABLE_JS_AOT
 
-static Vector<AOTBlobWriter, 0, SystemAllocPolicy> sSavedICBlobs;
-
-Vector<AOTBlobWriter, 0, SystemAllocPolicy> js::jit::TakeSavedICBlobs() {
-  return std::move(sSavedICBlobs);
-}
-
 void js::jit::FillAOTICs(JSContext* cx) {
   MOZ_ASSERT(cx->inAtomsZone());
   JitZone* jitZone = cx->zone()->getOrCreateJitZone(cx);
+  auto& savedICs = cx->runtime()->jitRuntime()->aotDump_.icStubBlobs;
   if (JitOptions.aotNeedsIndirectionTable()) {
     auto stubs = GetAOTStubs();
     for (size_t corpusIdx = 0; corpusIdx < stubs.size(); corpusIdx++) {
@@ -2423,55 +2418,57 @@ void js::jit::FillAOTICs(JSContext* cx) {
       if (JitOptions.dumpAOTICs && code && stubInfo) {
         AOTBlobWriter blob(AOTBlobKind::InlineCacheStub,
                            /* nameHash = */ 0, uint32_t(corpusIdx),
-                           "IC_" + std::to_string(sSavedICBlobs.length()));
+                           "IC_" + std::to_string(savedICs.length()));
 
         uint32_t numFields = 0;
         while (stubInfo->fieldType(numFields) != StubField::Type::Limit) {
           numFields++;
         }
 
-        AOTPayload_InlineCacheStub payload;
-        payload.fields.kind = stubInfo->kind();
-        payload.fields.makesGCCalls = stubInfo->makesGCCalls() ? 1 : 0;
-        payload.fields.stubDataOffset = stubInfo->stubDataOffset();
-        payload.fields.localTracingSlots = code->localTracingSlots();
-        payload.fields.pad = 0;
-        payload.fields.cacheIRCodeLength = stubInfo->codeLength();
-        payload.fields.numStubFields = numFields;
-
-        payload.code = mozilla::Span(code->raw(), code->instructionsSize());
-        payload.cacheIRCode =
-            mozilla::Span(stubInfo->code(), stubInfo->codeLength());
-        payload.fieldTypes = mozilla::Span(
-            stubInfo->code() + stubInfo->codeLength(), size_t(numFields));
+        AOTPayload_InlineCacheStub payload{
+            .fields = {
+                .kind = stubInfo->kind(),
+                .makesGCCalls = uint8_t(stubInfo->makesGCCalls() ? 1 : 0),
+                .stubDataOffset = uint8_t(stubInfo->stubDataOffset()),
+                .localTracingSlots = uint8_t(code->localTracingSlots()),
+                .pad = 0,
+                .cacheIRCodeLength = stubInfo->codeLength(),
+                .numStubFields = numFields,
+            },
+            .code = mozilla::Span(code->raw(), code->instructionsSize()),
+            .cacheIRCode =
+                mozilla::Span(stubInfo->code(), stubInfo->codeLength()),
+            .fieldTypes = mozilla::Span(stubInfo->code() + stubInfo->codeLength(),
+                                        size_t(numFields)),
+        };
 
         if (!EncodeAOTBlob_InlineCacheStub(blob, payload)) {
           continue;
         }
 
-        fprintf(stdout,
-                "[BaselineAOT] AOT IC #%-3zu  kind=%-20s  size=%5ub"
-                "  cacheIR=%3ub  fields=%u%s\n",
-                sSavedICBlobs.length(),
+        JitSpew(JitSpew_BaselineAOT,
+                "AOT IC #%-3zu kind=%-20s size=%zub cacheIR=%ub fields=%u%s",
+                savedICs.length(),
                 CacheKindNames[uint8_t(stubInfo->kind())],
-                unsigned(code->instructionsSize()),
-                unsigned(stubInfo->codeLength()),
-                numFields,
-                payload.fields.makesGCCalls ? "  [gc]" : "");
+                code->instructionsSize(), unsigned(stubInfo->codeLength()),
+                numFields, payload.fields.makesGCCalls ? "  [gc]" : "");
 
-        (void)sSavedICBlobs.append(std::move(blob));
+        if (!savedICs.append(std::move(blob))) {
+          ReportOutOfMemory(cx);
+          return;
+        }
       }
     }
   }
 
   if (JitOptions.dumpAOTICs) {
     size_t totalBytes = 0;
-    for (auto& b : sSavedICBlobs) {
+    for (auto& b : savedICs) {
       totalBytes += b.codeSize();
     }
-    fprintf(stdout,
-            "[BaselineAOT] Dumped %zu AOT IC stubs (%zu bytes total)\n",
-            sSavedICBlobs.length(), totalBytes);
+    JitSpew(JitSpew_BaselineAOT,
+            "Dumped %zu AOT IC stubs (%zu bytes total)",
+            savedICs.length(), totalBytes);
   }
 }
 #endif

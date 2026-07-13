@@ -82,21 +82,10 @@ void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
   DumpAOTICStubToDir(gAOTInstr.pgoDumpDir, kind, writer);
 }
 
-static mozilla::Maybe<AOTBlobWriter> sSavedInterpreterBlob;
-
-static Vector<AOTBlobWriter, 0, SystemAllocPolicy> sSavedBaselineBlobs;
-
 // Magic prefix on the per-blob canonical byte string. Distinct from
 // AOT_CONTAINER_MAGIC so a truncated read of canonical bytes cannot be
 // confused with a container header.
 static constexpr uint32_t kBaselineCanonicalMagic = 0x424C4E63;  // 'BLNc'
-
-// Mutable-flag bits that BaselineCodeGen reads. Grow this alongside
-// the codegen change that introduces a new read. Referenced only by
-// ComputeBaselineCanonical; kept as a named constant so extensions land
-// in an obvious place.
-[[maybe_unused]] static constexpr uint32_t kCodegenMutableFlagsMask =
-    uint32_t(MutableScriptFlagsEnum::HasDebugScript);
 
 static bool ComputeBaselineCanonical(
     JSScript* script,
@@ -168,29 +157,32 @@ static bool ComputeBaselineCanonical(
   if (!bs->aotResumeOffsets(resumeBuf)) return false;
 
   JitCode* jitCode = bs->method();
-  AOTPayload_BaselineFunction payload;
-  auto& m = payload.fields;
-  m.warmUpCheckPrologueOffset = bs->warmUpCheckPrologueOffset();
-  m.profilerEnterToggleOffset = bs->profilerEnterToggleOffset();
-  m.profilerExitToggleOffset  = bs->profilerExitToggleOffset();
-  m.retAddrEntryCount   = bs->aotRetAddrEntries().size();
-  m.osrEntryCount       = bs->aotOSREntries().size();
-  m.debugTrapEntryCount = bs->aotDebugTrapEntries().size();
-  m.resumeEntryCount    = resumeBuf.length();
-  m.codeSize            = jitCode->instructionsSize();
-  m.headerSize          = jitCode->headerSize();
-  m.canonicalSize       = uint32_t(canonical.size());
-  m.nargs = script->function() ? uint16_t(script->function()->nargs()) : 0;
-  m.nfixed = uint16_t(script->nfixed());
-  m.scopeKind = uint8_t(script->outermostScope()->kind());
-
-  payload.code = mozilla::Span(jitCode->raw(), jitCode->instructionsSize());
-  payload.retAddrs   = bs->aotRetAddrEntries();
-  payload.osrEntries = bs->aotOSREntries();
-  payload.debugTraps = bs->aotDebugTrapEntries();
-  payload.resumeOffsets = mozilla::Span<const uint32_t>(
-      resumeBuf.begin(), resumeBuf.length());
-  payload.canonical = canonical;
+  AOTPayload_BaselineFunction payload{
+      .fields = {
+          .warmUpCheckPrologueOffset = bs->warmUpCheckPrologueOffset(),
+          .profilerEnterToggleOffset = bs->profilerEnterToggleOffset(),
+          .profilerExitToggleOffset = bs->profilerExitToggleOffset(),
+          .retAddrEntryCount = uint32_t(bs->aotRetAddrEntries().size()),
+          .osrEntryCount = uint32_t(bs->aotOSREntries().size()),
+          .debugTrapEntryCount = uint32_t(bs->aotDebugTrapEntries().size()),
+          .resumeEntryCount = uint32_t(resumeBuf.length()),
+          .codeSize = uint32_t(jitCode->instructionsSize()),
+          .headerSize = uint32_t(jitCode->headerSize()),
+          .canonicalSize = uint32_t(canonical.size()),
+          .nargs = script->function()
+                       ? uint16_t(script->function()->nargs())
+                       : uint16_t(0),
+          .nfixed = uint16_t(script->nfixed()),
+          .scopeKind = uint8_t(script->outermostScope()->kind()),
+      },
+      .code = mozilla::Span(jitCode->raw(), jitCode->instructionsSize()),
+      .retAddrs = bs->aotRetAddrEntries(),
+      .osrEntries = bs->aotOSREntries(),
+      .debugTraps = bs->aotDebugTrapEntries(),
+      .resumeOffsets = mozilla::Span<const uint32_t>(resumeBuf.begin(),
+                                                     resumeBuf.length()),
+      .canonical = canonical,
+  };
 
   return EncodeAOTBlob_BaselineFunction(blob, payload);
 }
@@ -200,85 +192,103 @@ static bool ComputeBaselineCanonical(
 // the AOT preamble, registers in JitcodeGlobalTable, and toggles the
 // profiler. Used by both the self-hosted delazify hook and the guest
 // baseline compile hook.
-[[nodiscard]] static bool InstallBaselineScriptPayload(
-    JSContext* cx, HandleScript script,
-    const AOTBlobDirectoryEntry* entry,
+[[nodiscard]] static BaselineScript* NewAOTBaselineScript(
+    JSContext* cx, JitCode* code,
     const AOTPayload_BaselineFunction& payload) {
-  const auto& m = payload.fields;
-
-  JitCode* code = AllocateAOTCode(cx, entry, GetAOTTextBase(),
-                                  CodeKind::Baseline);
-  if (!code) return false;
-
+  const auto& f = payload.fields;
   BaselineScript* bs = BaselineScript::New(
-      cx, m.warmUpCheckPrologueOffset,
-      m.profilerEnterToggleOffset, m.profilerExitToggleOffset,
-      m.retAddrEntryCount, m.osrEntryCount,
-      m.debugTrapEntryCount, m.resumeEntryCount);
-  if (!bs) return false;
+      cx, f.warmUpCheckPrologueOffset, f.profilerEnterToggleOffset,
+      f.profilerExitToggleOffset, f.retAddrEntryCount, f.osrEntryCount,
+      f.debugTrapEntryCount, f.resumeEntryCount);
+  if (!bs) return nullptr;
   bs->setMethod(code);
-
-  if (!payload.retAddrs.empty()) {
-    bs->copyRetAddrEntries(payload.retAddrs.data());
-  }
-  if (!payload.osrEntries.empty()) {
-    bs->copyOSREntries(payload.osrEntries.data());
-  }
+  if (!payload.retAddrs.empty()) bs->copyRetAddrEntries(payload.retAddrs.data());
+  if (!payload.osrEntries.empty()) bs->copyOSREntries(payload.osrEntries.data());
   if (!payload.debugTraps.empty()) {
     bs->copyDebugTrapEntries(payload.debugTraps.data());
   }
   if (!payload.resumeOffsets.empty()) {
     bs->copyResumeEntries(payload.resumeOffsets.data());
   }
+  return bs;
+}
 
+[[nodiscard]] static bool GenerateAOTPreambleFor(JSContext* cx, JitCode* code) {
   mozilla::Maybe<JitContext> jctx;
   if (!MaybeGetJitContext()) {
     jctx.emplace(cx);
   }
   JitRuntime* jrt = cx->runtime()->jitRuntime();
-  JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
-                                               AOTSelfHostedPassReg);
+  JitCode* preamble =
+      jrt->generateAOTPreamble(cx, code->raw(), AOTSelfHostedPassReg);
   if (!preamble) return false;
-  JitRuntime::AOTPreambleEntry pe = {code->raw(), preamble};
-  if (!jrt->aotPreambles_.append(pe)) {
+  if (!jrt->aotPreambles_.append(
+          JitRuntime::AOTPreambleEntry{code->raw(), preamble})) {
     ReportOutOfMemory(cx);
     return false;
   }
-
-  script->jitScript()->setBaselineScript(script, bs);
-
-  JitcodeGlobalTable* globalTable =
-      cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
-  if (!globalTable->lookup(code->raw())) {
-    UniqueChars str = GeckoProfilerRuntime::allocProfileString(cx, script);
-    if (!str) return false;
-    auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
-        cx, code, code->raw(), code->rawEnd(), std::move(str));
-    if (!profEntry) return false;
-    if (!globalTable->addEntry(std::move(profEntry))) {
-      ReportOutOfMemory(cx);
-      return false;
-    }
-    code->setHasBytecodeMap();
-  }
-
-  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
-          cx->runtime())) {
-    AutoWritableJitCode awjc(bs->method());
-    bs->toggleProfilerInstrumentation(true);
-  }
-
   return true;
 }
 
-bool BuildAndSaveInterpBlob(const AOTPayload_BaselineInterpreter& payload) {
-  sSavedInterpreterBlob.reset();
-  sSavedInterpreterBlob.emplace(AOTBlobKind::BaselineInterpreter,
-                                /* nameHash = */ 0, kNoCorpusIndex,
-                                "BaselineInterpreter");
+[[nodiscard]] static bool RegisterAOTBaselineForProfiler(JSContext* cx,
+                                                        HandleScript script,
+                                                        JitCode* code) {
+  JitcodeGlobalTable* globalTable =
+      cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+  if (globalTable->lookup(code->raw())) return true;
 
-  AOTBlobWriter& blob = *sSavedInterpreterBlob;
-  if (!EncodeAOTBlob_BaselineInterpreter(blob, payload)) {
+  UniqueChars str = GeckoProfilerRuntime::allocProfileString(cx, script);
+  if (!str) return false;
+  auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
+      cx, code, code->raw(), code->rawEnd(), std::move(str));
+  if (!profEntry) return false;
+  if (!globalTable->addEntry(std::move(profEntry))) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  code->setHasBytecodeMap();
+  return true;
+}
+
+static void MaybeToggleProfilerForAOTBaseline(JSContext* cx,
+                                              BaselineScript* bs) {
+  if (!cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
+          cx->runtime())) {
+    return;
+  }
+  AutoWritableJitCode awjc(bs->method());
+  bs->toggleProfilerInstrumentation(true);
+}
+
+[[nodiscard]] static bool InstallBaselineScriptPayload(
+    JSContext* cx, HandleScript script,
+    const AOTBlobDirectoryEntry* entry,
+    const AOTPayload_BaselineFunction& payload) {
+  JitCode* code =
+      AllocateAOTCode(cx, entry, GetAOTTextBase(), CodeKind::Baseline);
+  if (!code) return false;
+
+  BaselineScript* bs = NewAOTBaselineScript(cx, code, payload);
+  if (!bs) return false;
+
+  if (!GenerateAOTPreambleFor(cx, code)) return false;
+
+  script->jitScript()->setBaselineScript(script, bs);
+
+  if (!RegisterAOTBaselineForProfiler(cx, script, code)) return false;
+
+  MaybeToggleProfilerForAOTBaseline(cx, bs);
+  return true;
+}
+
+bool BuildAndSaveInterpBlob(JSContext* cx,
+                            const AOTPayload_BaselineInterpreter& payload) {
+  auto& saved = cx->runtime()->jitRuntime()->aotDump_.interpreterBlob;
+  saved.reset();
+  saved.emplace(AOTBlobKind::BaselineInterpreter,
+                /* nameHash = */ 0, kNoCorpusIndex, "BaselineInterpreter");
+
+  if (!EncodeAOTBlob_BaselineInterpreter(*saved, payload)) {
     return false;
   }
 
@@ -401,7 +411,8 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
           unsigned(script->outermostScope()->kind()),
           blob.name().c_str());
 
-  if (!sSavedBaselineBlobs.append(std::move(blob))) return false;
+  auto& accum = cx->runtime()->jitRuntime()->aotDump_;
+  if (!accum.baselineFunctionBlobs.append(std::move(blob))) return false;
   return true;
 }
 
@@ -413,10 +424,11 @@ bool DumpAOTContainer(JSContext* cx) {
 
   const char* outPath = kAOTOutputPath;
   AOTContainerWriter container;
+  auto& accum = cx->runtime()->jitRuntime()->aotDump_;
 
-  if (sSavedInterpreterBlob) {
-    if (!container.addBlob(std::move(*sSavedInterpreterBlob))) return false;
-    sSavedInterpreterBlob.reset();
+  if (accum.interpreterBlob) {
+    if (!container.addBlob(std::move(*accum.interpreterBlob))) return false;
+    accum.interpreterBlob.reset();
   }
 
   if (JitOptions.dumpAOTSelfHosted) {
@@ -459,17 +471,17 @@ bool DumpAOTContainer(JSContext* cx) {
     }
   }
 
-  auto icBlobs = TakeSavedICBlobs();
-  for (auto& icBlob : icBlobs) {
+  for (auto& icBlob : accum.icStubBlobs) {
     if (!container.addBlob(std::move(icBlob))) return false;
   }
+  accum.icStubBlobs.clearAndFree();
 
   {
-    uint32_t corpusCount = sSavedBaselineBlobs.length();
-    for (auto& blob : sSavedBaselineBlobs) {
+    uint32_t corpusCount = accum.baselineFunctionBlobs.length();
+    for (auto& blob : accum.baselineFunctionBlobs) {
       if (!container.addBlob(std::move(blob))) return false;
     }
-    sSavedBaselineBlobs.clearAndFree();
+    accum.baselineFunctionBlobs.clearAndFree();
     if (corpusCount > 0) {
       JitSpew(JitSpew_BaselineAOT,
               "Baseline corpus: %u blob(s) added to container", corpusCount);

@@ -61,10 +61,8 @@ static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 
 enum class AOTSlot : uint32_t {
 #define AOT_SLOT(name, ...) name,
-#define AOT_SLOT_TRAMPOLINE(name) name,
 #include "jit/AOTSlots.tbl"
 #undef AOT_SLOT
-#undef AOT_SLOT_TRAMPOLINE
   NamedSlot_End,
   VMWrapper_Begin = NamedSlot_End,
   VMWrapper_End = VMWrapper_Begin + kAOTMaxVMWrappers,
@@ -86,10 +84,8 @@ inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
 inline const char* AOTSlotName(AOTSlot slot) {
   switch (slot) {
 #define AOT_SLOT(name, ...) case AOTSlot::name: return #name;
-#define AOT_SLOT_TRAMPOLINE(name) case AOTSlot::name: return #name;
 #include "jit/AOTSlots.tbl"
 #undef AOT_SLOT
-#undef AOT_SLOT_TRAMPOLINE
     default:
       break;
   }

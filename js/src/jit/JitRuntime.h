@@ -265,12 +265,28 @@ class JitRuntime {
   // ToggleProfilerInstrumentation is idempotent across sibling JitCodes.
   HashSet<uint8_t*, mozilla::DefaultHasher<uint8_t*>, SystemAllocPolicy>
       staticCodeProfilerOn_;
+
+  // Transient state accumulated during --aot-dump-* runs. Drained and
+  // cleared by BaselineAOT::DumpAOTContainer. Same public-by-convention
+  // shape as aotPreambles_ above.
+  struct AOTDumpAccumulator {
+    mozilla::Maybe<AOTBlobWriter> interpreterBlob;
+    Vector<AOTBlobWriter, 0, SystemAllocPolicy> baselineFunctionBlobs;
+    Vector<AOTBlobWriter, 0, SystemAllocPolicy> icStubBlobs;
+
+    void clear() {
+      interpreterBlob.reset();
+      baselineFunctionBlobs.clearAndFree();
+      icStubBlobs.clearAndFree();
+    }
+  };
+  AOTDumpAccumulator aotDump_;
+
   private:
 #endif
 
 #ifdef ENABLE_JS_AOT
   void populateAOTIndirectionTable(JSContext* cx);
-  [[nodiscard]] bool populateAOTTrampolineSlots(JSContext* cx);
 #endif
 
   bool generateTrampolines(JSContext* cx);

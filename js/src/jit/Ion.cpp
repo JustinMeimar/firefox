@@ -136,12 +136,16 @@ JitRuntime::~JitRuntime() {
 void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   JSRuntime* rt = cx->runtime();
 
+  // Trap handlers are referenced by the .tbl expressions below; the
+  // caller (JitRuntime::initialize) is responsible for generating them
+  // first. A nullptr here would silently corrupt the reverse lookup.
+  MOZ_RELEASE_ASSERT(debugTrapHandler(DebugTrapHandlerKind::Interpreter));
+  MOZ_RELEASE_ASSERT(debugTrapHandler(DebugTrapHandlerKind::Compiler));
+
 #define AOT_SLOT(name, expr) \
   aotIndirectionTable_.set(AOTSlot::name, uintptr_t(expr));
-#define AOT_SLOT_TRAMPOLINE(name) /* populated in populateAOTTrampolineSlots */
 #include "jit/AOTSlots.tbl"
 #undef AOT_SLOT
-#undef AOT_SLOT_TRAMPOLINE
 
   uint32_t abiIdx = 0;
   auto setABI = [&](auto fp) {
@@ -161,16 +165,20 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
        i <= uint8_t(UnaryMathFunction::Round); i++) {
     setABI(GetUnaryMathFunctionPtr(UnaryMathFunction(i)));
   }
-  constexpr Scalar::Type atomicTypes[] = {
-      Scalar::Int8, Scalar::Uint8, Scalar::Int16,
+
+  static constexpr Scalar::Type kAtomicsTypes[] = {
+      Scalar::Int8,   Scalar::Uint8, Scalar::Int16,
       Scalar::Uint16, Scalar::Int32, Scalar::Uint32};
-  for (auto ty : atomicTypes) { setABI(AtomicsCompareExchange(ty)); }
-  for (auto ty : atomicTypes) { setABI(AtomicsExchange(ty)); }
-  for (auto ty : atomicTypes) { setABI(AtomicsAdd(ty)); }
-  for (auto ty : atomicTypes) { setABI(AtomicsSub(ty)); }
-  for (auto ty : atomicTypes) { setABI(AtomicsAnd(ty)); }
-  for (auto ty : atomicTypes) { setABI(AtomicsOr(ty)); }
-  for (auto ty : atomicTypes) { setABI(AtomicsXor(ty)); }
+  auto emitAtomicsGroup = [&](auto fn) {
+    for (Scalar::Type ty : kAtomicsTypes) setABI(fn(ty));
+  };
+  emitAtomicsGroup(AtomicsCompareExchange);
+  emitAtomicsGroup(AtomicsExchange);
+  emitAtomicsGroup(AtomicsAdd);
+  emitAtomicsGroup(AtomicsSub);
+  emitAtomicsGroup(AtomicsAnd);
+  emitAtomicsGroup(AtomicsOr);
+  emitAtomicsGroup(AtomicsXor);
 
   setABI(ArrayConstructor);
 #define EMIT_TA_CTOR(_, T, N) setABI(TypedArrayConstructorNative(Scalar::N));
@@ -178,33 +186,6 @@ void JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
 #undef EMIT_TA_CTOR
 
   MOZ_ASSERT(abiIdx <= kAOTMaxABIFunctions);
-}
-
-
-bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {
-
-#define SET(slot, val) aotIndirectionTable_.set(AOTSlot::slot, uintptr_t(val))
-  SET(ProfilerExitFrameTail, getProfilerExitFrameTail().value);
-  SET(DoubleToInt32Stub,     getDoubleToInt32ValueStub().value);
-  SET(ExceptionTail,         getExceptionTail().value);
-  SET(PreBarrier_Value,      preBarrier(MIRType::Value).value);
-  SET(PreBarrier_String,     preBarrier(MIRType::String).value);
-  SET(PreBarrier_Object,     preBarrier(MIRType::Object).value);
-  SET(PreBarrier_Shape,      preBarrier(MIRType::Shape).value);
-  SET(PreBarrier_WasmAnyRef, preBarrier(MIRType::WasmAnyRef).value);
-
-  // NOTE(aot): The AOT relocation stream references both debug trap
-  // handlers. Ensure they are generated before populating their
-  // indirection slots, so the reverse lookup does not see nullptr.
-  if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Interpreter) ||
-      !ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Compiler)) {
-    return false;
-  }
-  SET(DebugTrapInterpreter,
-      debugTrapHandler(DebugTrapHandlerKind::Interpreter)->raw());
-  SET(DebugTrapCompiler,
-      debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw());
-#undef SET
 
   size_t n = functionWrapperOffsets_.length();
   for (size_t i = 0; i < n; i++) {
@@ -212,7 +193,6 @@ bool JitRuntime::populateAOTTrampolineSlots(JSContext* cx) {
         AOTSlotForVMWrapper(i),
         uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
   }
-  return true;
 }
 #endif  // ENABLE_JS_AOT
 
@@ -236,18 +216,19 @@ bool JitRuntime::initialize(JSContext* cx) {
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
 
-#ifdef ENABLE_JS_AOT
-  populateAOTIndirectionTable(cx);
-#endif
-
   if (!generateTrampolines(cx)) {
     return false;
   }
 
 #ifdef ENABLE_JS_AOT
-  if (!populateAOTTrampolineSlots(cx)) {
+  // Debug trap handlers are referenced from the AOT indirection table;
+  // ensure they are generated before populateAOTIndirectionTable reads
+  // their addresses.
+  if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Interpreter) ||
+      !ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Compiler)) {
     return false;
   }
+  populateAOTIndirectionTable(cx);
 #endif
 
   if (!generateBaselineICFallbackCode(cx)) {

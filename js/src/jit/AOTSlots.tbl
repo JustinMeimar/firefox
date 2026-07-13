@@ -14,15 +14,16 @@ AOT_SLOT(ContextRealm,           reinterpret_cast<uint8_t*>(cx) + JSContext::off
 AOT_SLOT(WellKnownSymbols,       rt->wellKnownSymbols.ref())
 AOT_SLOT(LastBufferedCell,       rt->gc.addressOfLastBufferedWholeCell())
 AOT_SLOT(ProfilerEnabled,        rt->geckoProfiler().addressOfEnabled())
-AOT_SLOT_TRAMPOLINE(ProfilerExitFrameTail)
-AOT_SLOT_TRAMPOLINE(DoubleToInt32Stub)
+AOT_SLOT(ProfilerExitFrameTail,  getProfilerExitFrameTail().value)
+AOT_SLOT(DoubleToInt32Stub,      getDoubleToInt32ValueStub().value)
 AOT_SLOT(MegamorphicCache,       &rt->caches().megamorphicCache)
 AOT_SLOT(MegamorphicSetPropCache, rt->caches().megamorphicSetPropCache.get())
 AOT_SLOT(StringToAtomCache,      &rt->caches().stringToAtomCache)
-AOT_SLOT_TRAMPOLINE(ExceptionTail)
-AOT_SLOT_TRAMPOLINE(DebugTrapInterpreter)
-AOT_SLOT_TRAMPOLINE(DebugTrapCompiler)
-AOT_SLOT_TRAMPOLINE(InterpretOp)
+AOT_SLOT(ExceptionTail,          getExceptionTail().value)
+AOT_SLOT(DebugTrapInterpreter,   debugTrapHandler(DebugTrapHandlerKind::Interpreter)->raw())
+AOT_SLOT(DebugTrapCompiler,      debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw())
+// InterpretOp is set after GenerateBaselineInterpreter (see JitRuntime::initialize).
+AOT_SLOT(InterpretOp,            nullptr)
 AOT_SLOT(NurseryPosition,        rt->gc.addressOfNurseryPosition())
 AOT_SLOT(NurseryAllocatedSites,  rt->gc.addressOfNurseryAllocatedSites())
 AOT_SLOT(JitStackLimit,          cx->addressOfJitStackLimit())
@@ -30,13 +31,13 @@ AOT_SLOT(JitStackLimit,          cx->addressOfJitStackLimit())
 AOT_SLOT(GCZealModeBits,         rt->gc.addressOfZealModeBits())
 #endif
 
-// --- Pre-barriers (trampoline-dependent) ---
+// --- Pre-barriers ---
 
-AOT_SLOT_TRAMPOLINE(PreBarrier_Value)
-AOT_SLOT_TRAMPOLINE(PreBarrier_String)
-AOT_SLOT_TRAMPOLINE(PreBarrier_Object)
-AOT_SLOT_TRAMPOLINE(PreBarrier_Shape)
-AOT_SLOT_TRAMPOLINE(PreBarrier_WasmAnyRef)
+AOT_SLOT(PreBarrier_Value,       preBarrier(MIRType::Value).value)
+AOT_SLOT(PreBarrier_String,      preBarrier(MIRType::String).value)
+AOT_SLOT(PreBarrier_Object,      preBarrier(MIRType::Object).value)
+AOT_SLOT(PreBarrier_Shape,       preBarrier(MIRType::Shape).value)
+AOT_SLOT(PreBarrier_WasmAnyRef,  preBarrier(MIRType::WasmAnyRef).value)
 
 // --- Atoms ---
 
@@ -65,7 +66,7 @@ AOT_SLOT(Class_ImmutableDataView,            &ImmutableDataViewObject::class_)
 AOT_SLOT(Class_ResizableDataView,            &ResizableDataViewObject::class_)
 AOT_SLOT(Class_MappedArguments,              &MappedArgumentsObject::class_)
 AOT_SLOT(Class_UnmappedArguments,            &UnmappedArgumentsObject::class_)
-AOT_SLOT(Class_BoundFunction,               &BoundFunctionObject::class_)
+AOT_SLOT(Class_BoundFunction,                &BoundFunctionObject::class_)
 AOT_SLOT(Class_PropertyIterator,             &PropertyIteratorObject::class_)
 AOT_SLOT(Class_Set,                          &SetObject::class_)
 AOT_SLOT(Class_Map,                          &MapObject::class_)
