@@ -236,10 +236,9 @@ class JitRuntime {
   AOTIndirectionTable aotIndirectionTable_;
 
 #ifdef ENABLE_JS_AOT
-  // NOTE(aot): Small trampoline that loads &aotIndirectionTable into
-  // AOTTablePassReg and jumps to the baseline interpreter blob entry.
+  // Preamble prepended to the AOT baseline interpreter entry for
+  // setting up indirection table mechanism.
   WriteOnceData<JitCode*> aotInterpPreamble_{nullptr};
-  [[nodiscard]] bool generateAOTInterpPreamble(JSContext* cx);
 
   public:
   // NOTE(aot): Stored as JitCode* so the GC keeps each preamble alive.
@@ -414,10 +413,12 @@ class JitRuntime {
     return baselineInterpreter_;
   }
 
-  // NOTE(aot): Emit a two-instruction preamble that loads the
-  // indirection table base into passReg and jumps to target. The
-  // interpreter uses the callee-saved AOTTablePassReg (r12).
-  // Self-hosted code uses the volatile AOTSelfHostedPassReg (r11).
+  // Emit a two-instruction shim that hoists &aotIndirectionTable into
+  // passReg and jumps to target. Prepended to every AOT entry point so
+  // the runtime-specific table pointer reaches the blob without
+  // patching the shared static code. Returned JitCode must be owned
+  // by the caller.
+  // NOTE(Justin): passReg only defined for x64 as r12 currently.
   JitCode* generateAOTPreamble(JSContext* cx, void* target, Register passReg);
 
   uint8_t* baselineInterpreterEntryAddr() const {

@@ -259,7 +259,9 @@ bool JitRuntime::initialize(JSContext* cx) {
   }
 
   if (baselineInterpreter_.loadedFromAOT()) {
-    if (!generateAOTInterpPreamble(cx)) {
+    aotInterpPreamble_ = generateAOTPreamble(
+        cx, baselineInterpreter_.codeRaw(), AOTTablePassReg);
+    if (!aotInterpPreamble_) {
       return false;
     }
   }
@@ -285,16 +287,6 @@ JitCode* JitRuntime::generateAOTPreamble(JSContext* cx, void* target,
 
   Linker linker(masm);
   return linker.newCode(cx, CodeKind::Other);
-}
-
-bool JitRuntime::generateAOTInterpPreamble(JSContext* cx) {
-  JitCode* code = generateAOTPreamble(cx, baselineInterpreter_.codeRaw(),
-                                      AOTTablePassReg);
-  if (!code) {
-    return false;
-  }
-  aotInterpPreamble_ = code;
-  return true;
 }
 #endif
 
