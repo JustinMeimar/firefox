@@ -7450,7 +7450,11 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
       MOZ_ASSERT(interpreter.loadedFromAOT());
       return true;
     }
-    MOZ_CRASH("AOT interp load failed but --aot=interp was requested");
+    // AOT interp load can legitimately fail when JitOptions differ from
+    // the dump-time snapshot (e.g. --fast-warmup shifts thresholds baked
+    // into the emitted code). Fall through to freshly generated code.
+    JitSpew(JitSpew_BaselineAOT,
+            "AOT interp load unavailable; regenerating");
   }
 #endif
 

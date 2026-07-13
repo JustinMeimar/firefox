@@ -158,6 +158,109 @@ static bool ComputeBaselineCanonical(
   return true;
 }
 
+// Populate a BaselineFunction payload from a live compiled BaselineScript.
+// Handles the leading shared prefix; caller supplies the tail (canonical,
+// nargs/nfixed/scopeKind) which isn't derivable from BaselineScript alone.
+[[nodiscard]] static bool PopulatePayloadFromBaselineScript(
+    BaselineScript* bs, JitCode* jitCode,
+    Vector<uint32_t, 0, SystemAllocPolicy>& resumeBuf,
+    AOTPayload_BaselineFunction& out) {
+  if (!bs->aotResumeOffsets(resumeBuf)) return false;
+  auto& m = out.manifest;
+  m.warmUpCheckPrologueOffset = bs->warmUpCheckPrologueOffset();
+  m.profilerEnterToggleOffset = bs->profilerEnterToggleOffset();
+  m.profilerExitToggleOffset  = bs->profilerExitToggleOffset();
+  m.retAddrEntryCount   = bs->aotRetAddrEntries().size();
+  m.osrEntryCount       = bs->aotOSREntries().size();
+  m.debugTrapEntryCount = bs->aotDebugTrapEntries().size();
+  m.resumeEntryCount    = resumeBuf.length();
+  m.codeSize            = jitCode->instructionsSize();
+  m.headerSize          = jitCode->headerSize();
+  out.code       = mozilla::Span(jitCode->raw(), jitCode->instructionsSize());
+  out.retAddrs   = bs->aotRetAddrEntries();
+  out.osrEntries = bs->aotOSREntries();
+  out.debugTraps = bs->aotDebugTrapEntries();
+  out.resumeOffsets = mozilla::Span<const uint32_t>(
+      resumeBuf.begin(), resumeBuf.length());
+  return true;
+}
+
+// Install a decoded BaselineFunction payload on the given JSScript.
+// Allocates JitCode, creates BaselineScript, copies metadata, generates
+// the AOT preamble, registers in JitcodeGlobalTable, and toggles the
+// profiler. Used by both the self-hosted delazify hook and the guest
+// baseline compile hook.
+[[nodiscard]] static bool InstallBaselineScriptPayload(
+    JSContext* cx, HandleScript script,
+    const AOTBlobDirectoryEntry* entry,
+    const AOTPayload_BaselineFunction& payload) {
+  const auto& m = payload.manifest;
+
+  JitCode* code = AllocateAOTCode(cx, entry, GetAOTTextBase(),
+                                  CodeKind::Baseline);
+  if (!code) return false;
+
+  BaselineScript* bs = BaselineScript::New(
+      cx, m.warmUpCheckPrologueOffset,
+      m.profilerEnterToggleOffset, m.profilerExitToggleOffset,
+      m.retAddrEntryCount, m.osrEntryCount,
+      m.debugTrapEntryCount, m.resumeEntryCount);
+  if (!bs) return false;
+  bs->setMethod(code);
+
+  if (!payload.retAddrs.empty()) {
+    bs->copyRetAddrEntries(payload.retAddrs.data());
+  }
+  if (!payload.osrEntries.empty()) {
+    bs->copyOSREntries(payload.osrEntries.data());
+  }
+  if (!payload.debugTraps.empty()) {
+    bs->copyDebugTrapEntries(payload.debugTraps.data());
+  }
+  if (!payload.resumeOffsets.empty()) {
+    bs->copyResumeEntries(payload.resumeOffsets.data());
+  }
+
+  mozilla::Maybe<JitContext> jctx;
+  if (!MaybeGetJitContext()) {
+    jctx.emplace(cx);
+  }
+  JitRuntime* jrt = cx->runtime()->jitRuntime();
+  JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
+                                               AOTSelfHostedPassReg);
+  if (!preamble) return false;
+  JitRuntime::AOTPreambleEntry pe = {code->raw(), preamble};
+  if (!jrt->aotPreambles_.append(pe)) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+
+  script->jitScript()->setBaselineScript(script, bs);
+
+  JitcodeGlobalTable* globalTable =
+      cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+  if (!globalTable->lookup(code->raw())) {
+    UniqueChars str = GeckoProfilerRuntime::allocProfileString(cx, script);
+    if (!str) return false;
+    auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
+        cx, code, code->raw(), code->rawEnd(), std::move(str));
+    if (!profEntry) return false;
+    if (!globalTable->addEntry(std::move(profEntry))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+    code->setHasBytecodeMap();
+  }
+
+  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
+          cx->runtime())) {
+    AutoWritableJitCode awjc(bs->method());
+    bs->toggleProfilerInstrumentation(true);
+  }
+
+  return true;
+}
+
 bool BuildAndSaveInterpBlob(JitCode* code,
                             const AOTPayload_BaselineInterpreter& payload) {
   sSavedInterpreterBlob.reset();
@@ -228,37 +331,33 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
   BaselineScript* bs = script->baselineScript();
   JitCode* jitCode = bs->method();
 
-  Vector<uint32_t, 0, SystemAllocPolicy> resumeOffsets;
-  if (!bs->aotResumeOffsets(resumeOffsets)) return false;
+  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
+  if (!ComputeBaselineCanonical(script, canonical)) return false;
 
-  AOTPayload_SelfHostedFunction payload;
-  auto& sm = payload.manifest;
-  sm.warmUpCheckPrologueOffset = bs->warmUpCheckPrologueOffset();
-  sm.profilerEnterToggleOffset = bs->profilerEnterToggleOffset();
-  sm.profilerExitToggleOffset = bs->profilerExitToggleOffset();
-  sm.retAddrEntryCount = bs->aotRetAddrEntries().size();
-  sm.osrEntryCount = bs->aotOSREntries().size();
-  sm.debugTrapEntryCount = bs->aotDebugTrapEntries().size();
-  sm.resumeEntryCount = resumeOffsets.length();
-  sm.codeSize = jitCode->instructionsSize();
-  sm.headerSize = jitCode->headerSize();
-
-  payload.code = mozilla::Span(jitCode->raw(), jitCode->instructionsSize());
-  payload.retAddrs = bs->aotRetAddrEntries();
-  payload.osrEntries = bs->aotOSREntries();
-  payload.debugTraps = bs->aotDebugTrapEntries();
-  payload.resumeOffsets = mozilla::Span<const uint32_t>(
-      resumeOffsets.begin(), resumeOffsets.length());
-
-  if (!EncodeAOTBlob_SelfHostedFunction(*blobOut, payload)) {
+  AOTPayload_BaselineFunction payload;
+  Vector<uint32_t, 0, SystemAllocPolicy> resumeBuf;
+  if (!PopulatePayloadFromBaselineScript(bs, jitCode, resumeBuf, payload)) {
     return false;
   }
+  payload.manifest.canonicalSize = uint32_t(canonical.length());
+  payload.manifest.nargs =
+      script->function() ? uint16_t(script->function()->nargs()) : 0;
+  payload.manifest.nfixed = uint16_t(script->nfixed());
+  payload.manifest.scopeKind = uint8_t(script->outermostScope()->kind());
+  payload.canonical = mozilla::Span<const uint8_t>(
+      canonical.begin(), canonical.length());
+
+  // Store canonical hash as directory nameHash for O(1) lookup.
+  blobOut->setNameHash(
+      uint32_t(mozilla::HashBytes(canonical.begin(), canonical.length())));
+
+  if (!EncodeAOTBlob_BaselineFunction(*blobOut, payload)) return false;
 
   JitSpew(JitSpew_BaselineAOT,
           "AOT Compiled '%-22s' size=%5ub  callSites=%3u  osr=%u",
-          nameStr.get(), sm.codeSize, sm.retAddrEntryCount,
-          sm.osrEntryCount);
-
+          nameStr.get(), payload.manifest.codeSize,
+          payload.manifest.retAddrEntryCount,
+          payload.manifest.osrEntryCount);
   return true;
 }
 
@@ -292,49 +391,29 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   AOTBlobWriter blob(AOTBlobKind::BaselineFunction, key, kNoCorpusIndex,
                      std::move(name));
 
-  Vector<uint32_t, 0, SystemAllocPolicy> resumeOffsets;
-  if (!bs->aotResumeOffsets(resumeOffsets)) {
+  AOTPayload_BaselineFunction payload;
+  Vector<uint32_t, 0, SystemAllocPolicy> resumeBuf;
+  if (!PopulatePayloadFromBaselineScript(bs, jitCode, resumeBuf, payload)) {
     return false;
   }
-
-  AOTPayload_BaselineFunction payload;
-  auto& sm = payload.manifest;
-  sm.warmUpCheckPrologueOffset = bs->warmUpCheckPrologueOffset();
-  sm.profilerEnterToggleOffset = bs->profilerEnterToggleOffset();
-  sm.profilerExitToggleOffset = bs->profilerExitToggleOffset();
-  sm.retAddrEntryCount = bs->aotRetAddrEntries().size();
-  sm.osrEntryCount = bs->aotOSREntries().size();
-  sm.debugTrapEntryCount = bs->aotDebugTrapEntries().size();
-  sm.resumeEntryCount = resumeOffsets.length();
-  sm.codeSize = jitCode->instructionsSize();
-  sm.headerSize = jitCode->headerSize();
-  sm.canonicalSize = uint32_t(canonical.length());
-  sm.nargs = script->function() ? uint16_t(script->function()->nargs()) : 0;
-  sm.nfixed = uint16_t(script->nfixed());
-  sm.scopeKind = uint8_t(script->outermostScope()->kind());
-
-  payload.code = mozilla::Span(jitCode->raw(), jitCode->instructionsSize());
-  payload.retAddrs = bs->aotRetAddrEntries();
-  payload.osrEntries = bs->aotOSREntries();
-  payload.debugTraps = bs->aotDebugTrapEntries();
-  payload.resumeOffsets = mozilla::Span<const uint32_t>(
-      resumeOffsets.begin(), resumeOffsets.length());
+  payload.manifest.canonicalSize = uint32_t(canonical.length());
+  payload.manifest.nargs =
+      script->function() ? uint16_t(script->function()->nargs()) : 0;
+  payload.manifest.nfixed = uint16_t(script->nfixed());
+  payload.manifest.scopeKind = uint8_t(script->outermostScope()->kind());
   payload.canonical = mozilla::Span<const uint8_t>(
       canonical.begin(), canonical.length());
 
-  if (!EncodeAOTBlob_BaselineFunction(blob, payload)) {
-    return false;
-  }
+  if (!EncodeAOTBlob_BaselineFunction(blob, payload)) return false;
 
   JitSpew(JitSpew_BaselineAOT,
           "AOT baseline corpus recorded key=%u size=%u canonical=%u "
           "nargs=%u scope=%u '%s'",
-          key, sm.codeSize, sm.canonicalSize, sm.nargs, sm.scopeKind,
+          key, payload.manifest.codeSize, payload.manifest.canonicalSize,
+          payload.manifest.nargs, payload.manifest.scopeKind,
           blob.name().c_str());
 
-  if (!sSavedBaselineBlobs.append(std::move(blob))) {
-    return false;
-  }
+  if (!sSavedBaselineBlobs.append(std::move(blob))) return false;
   return true;
 }
 
@@ -377,9 +456,9 @@ bool DumpAOTContainer(JSContext* cx) {
         continue;
       }
 
-      AOTBlobWriter blob(AOTBlobKind::SelfHostedFunction,
-                         mozilla::HashString(nameStr.get()),
-                         kNoCorpusIndex, std::string(nameStr.get()));
+      AOTBlobWriter blob(AOTBlobKind::BaselineFunction,
+                         /* nameHash = */ 0, kNoCorpusIndex,
+                         std::string(nameStr.get()));
       if (!compileAOTSelfHosted(cx, atom, &blob)) {
         skipped++;
         continue;
@@ -525,141 +604,14 @@ bool LoadAOTInterpFromContainer(JSContext* cx,
   return true;
 }
 
-bool LoadAOTSelfHosted(JSContext* cx, HandleScript script,
-                       Handle<JSAtom*> name) {
-  AOT_TIMER_BEGIN(sh);
-
-  JS::AutoCheckCannotGC nogc;
-  uint32_t nameHash = name->hasLatin1Chars()
-      ? mozilla::HashStringKnownLength(name->latin1Chars(nogc), name->length())
-      : mozilla::HashStringKnownLength(name->twoByteChars(nogc), name->length());
-
-  auto container = AOTContainerReader::fromEmbedded();
-  if (!container) {
-    return false;
-  }
-
-  auto reader = container->getBlob(AOTBlobKind::SelfHostedFunction, nameHash);
-  if (!reader) {
-    return false;
-  }
-
-  JitSpew(JitSpew_BaselineAOT,
-          "Loading AOT self-hosted function (nameHash=%u, codeSize=%u)",
-          nameHash, reader->entry()->codeSize);
-
-  AOTPayload_SelfHostedFunction payload;
-  if (!DecodeAOTBlob_SelfHostedFunction(*reader, &payload)) {
-    JitSpew(JitSpew_BaselineAOT,
-            "ERROR: SelfHostedFunction manifest size mismatch (expected %zu, "
-            "got %u). Stale AOT container?",
-            sizeof(AOTManifest_SelfHostedFunction),
-            reader->entry()->manifestSize);
-    return false;
-  }
-  const auto& manifest = payload.manifest;
-
-  JitCode* code = AllocateAOTCode(
-      cx, reader->entry(), GetAOTTextBase(), CodeKind::Baseline);
-  if (!code) {
-    return false;
-  }
-
-  BaselineScript* bs = BaselineScript::New(
-      cx, manifest.warmUpCheckPrologueOffset,
-      manifest.profilerEnterToggleOffset,
-      manifest.profilerExitToggleOffset,
-      manifest.retAddrEntryCount, manifest.osrEntryCount,
-      manifest.debugTrapEntryCount, manifest.resumeEntryCount);
-  if (!bs) {
-    return false;
-  }
-  bs->setMethod(code);
-
-  if (!payload.retAddrs.empty()) {
-    bs->copyRetAddrEntries(payload.retAddrs.data());
-  }
-  if (!payload.osrEntries.empty()) {
-    bs->copyOSREntries(payload.osrEntries.data());
-  }
-  if (!payload.debugTraps.empty()) {
-    bs->copyDebugTrapEntries(payload.debugTraps.data());
-  }
-  if (!payload.resumeOffsets.empty()) {
-    bs->copyResumeEntries(payload.resumeOffsets.data());
-  }
-
-  mozilla::Maybe<JitContext> jctx;
-  if (!MaybeGetJitContext()) {
-    jctx.emplace(cx);
-  }
-  JitRuntime* jrt = cx->runtime()->jitRuntime();
-  JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
-                                                AOTSelfHostedPassReg);
-  if (!preamble) {
-    return false;
-  }
-  JitRuntime::AOTPreambleEntry pe = { code->raw(), preamble };
-  if (!jrt->aotPreambles_.append(pe)) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  script->jitScript()->setBaselineScript(script, bs);
-
-  {
-    JitcodeGlobalTable* globalTable =
-        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
-    if (!globalTable->lookup(code->raw())) {
-      UniqueChars str =
-          GeckoProfilerRuntime::allocProfileString(cx, script);
-      if (!str) {
-        return false;
-      }
-
-      auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
-          cx, code, code->raw(), code->rawEnd(), std::move(str));
-      if (!profEntry) {
-        return false;
-      }
-
-      if (!globalTable->addEntry(std::move(profEntry))) {
-        ReportOutOfMemory(cx);
-        return false;
-      }
-      code->setHasBytecodeMap();
-    }
-  }
-
-  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
-          cx->runtime())) {
-    AutoWritableJitCode awjc(bs->method());
-    bs->toggleProfilerInstrumentation(true);
-  }
-
-  AOT_TIMER_END(sh, "aot-load", "selfhosted", " bytes=%u hash=%u",
-                reader->entry()->codeSize, nameHash);
-
-  return true;
-}
-
 bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
-  if (script->outermostScope()->kind() != ScopeKind::Global) {
-    return false;
-  }
-  if (script->isDebuggee()) {
-    return false;
-  }
+  if (script->isDebuggee()) return false;
 
   auto container = AOTContainerReader::fromEmbedded();
-  if (!container) {
-    return false;
-  }
+  if (!container) return false;
 
   Vector<uint8_t, 0, SystemAllocPolicy> canonical;
-  if (!ComputeBaselineCanonical(script, canonical)) {
-    return false;
-  }
+  if (!ComputeBaselineCanonical(script, canonical)) return false;
   uint32_t key =
       uint32_t(mozilla::HashBytes(canonical.begin(), canonical.length()));
 
@@ -672,117 +624,35 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
         AOTPayload_BaselineFunction payload;
         if (!DecodeAOTBlob_BaselineFunction(reader, &payload)) {
           JitSpew(JitSpew_BaselineAOT,
-                  "AOT baseline corpus manifest size mismatch key=%u", key);
+                  "AOT baseline function manifest size mismatch key=%u", key);
           return false;
         }
-        const auto& manifest = payload.manifest;
 
         if (payload.canonical.size() != canonical.length() ||
             memcmp(payload.canonical.data(), canonical.begin(),
                    canonical.length()) != 0) {
           JitSpew(JitSpew_BaselineAOT,
-                  "AOT baseline corpus canonical mismatch key=%u "
+                  "AOT baseline function canonical mismatch key=%u "
                   "(stored=%zu live=%zu)",
                   key, payload.canonical.size(), canonical.length());
           return false;
         }
 
         JitSpew(JitSpew_BaselineAOT,
-                "AOT baseline corpus HIT key=%u codeSize=%u script=%s:%u",
+                "AOT baseline function HIT key=%u codeSize=%u script=%s:%u",
                 key, reader.entry()->codeSize, script->filename(),
                 script->lineno());
 
-        JitCode* code = AllocateAOTCode(
-            cx, reader.entry(), GetAOTTextBase(), CodeKind::Baseline);
-        if (!code) {
+        if (!InstallBaselineScriptPayload(cx, script, reader.entry(),
+                                          payload)) {
           failed = true;
-          return true;
+        } else {
+          installed = true;
         }
-
-        BaselineScript* bs = BaselineScript::New(
-            cx, manifest.warmUpCheckPrologueOffset,
-            manifest.profilerEnterToggleOffset,
-            manifest.profilerExitToggleOffset,
-            manifest.retAddrEntryCount, manifest.osrEntryCount,
-            manifest.debugTrapEntryCount, manifest.resumeEntryCount);
-        if (!bs) {
-          failed = true;
-          return true;
-        }
-        bs->setMethod(code);
-
-        if (!payload.retAddrs.empty()) {
-          bs->copyRetAddrEntries(payload.retAddrs.data());
-        }
-        if (!payload.osrEntries.empty()) {
-          bs->copyOSREntries(payload.osrEntries.data());
-        }
-        if (!payload.debugTraps.empty()) {
-          bs->copyDebugTrapEntries(payload.debugTraps.data());
-        }
-        if (!payload.resumeOffsets.empty()) {
-          bs->copyResumeEntries(payload.resumeOffsets.data());
-        }
-
-        mozilla::Maybe<JitContext> jctx;
-        if (!MaybeGetJitContext()) {
-          jctx.emplace(cx);
-        }
-        JitRuntime* jrt = cx->runtime()->jitRuntime();
-        JitCode* preamble = jrt->generateAOTPreamble(cx, code->raw(),
-                                                     AOTSelfHostedPassReg);
-        if (!preamble) {
-          failed = true;
-          return true;
-        }
-        JitRuntime::AOTPreambleEntry pe = {code->raw(), preamble};
-        if (!jrt->aotPreambles_.append(pe)) {
-          ReportOutOfMemory(cx);
-          failed = true;
-          return true;
-        }
-
-        script->jitScript()->setBaselineScript(script, bs);
-
-        {
-          JitcodeGlobalTable* globalTable =
-              cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
-          if (!globalTable->lookup(code->raw())) {
-            UniqueChars str =
-                GeckoProfilerRuntime::allocProfileString(cx, script);
-            if (!str) {
-              failed = true;
-              return true;
-            }
-            auto profEntry =
-                MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
-                    cx, code, code->raw(), code->rawEnd(), std::move(str));
-            if (!profEntry) {
-              failed = true;
-              return true;
-            }
-            if (!globalTable->addEntry(std::move(profEntry))) {
-              ReportOutOfMemory(cx);
-              failed = true;
-              return true;
-            }
-            code->setHasBytecodeMap();
-          }
-        }
-
-        if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
-                cx->runtime())) {
-          AutoWritableJitCode awjc(bs->method());
-          bs->toggleProfilerInstrumentation(true);
-        }
-
-        installed = true;
         return true;
       });
 
-  if (failed) {
-    return false;
-  }
+  if (failed) return false;
   return installed;
 }
 

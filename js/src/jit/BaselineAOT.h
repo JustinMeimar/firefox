@@ -31,10 +31,10 @@ static constexpr const char* kAOTOutputPath =
 [[nodiscard]] bool LoadAOTInterpFromContainer(
     JSContext* cx, BaselineInterpreter& interpreter);
 
-[[nodiscard]] bool LoadAOTSelfHosted(JSContext* cx,
-                                     HandleScript script,
-                                     Handle<JSAtom*> name);
-
+// Look up an AOT BaselineFunction blob whose canonical bytes match
+// `script`. Handles both self-hosted delazified scripts and guest
+// scripts uniformly. On hit, installs the blob's baseline code on the
+// script.
 [[nodiscard]] bool LoadAOTBaselineFunction(JSContext* cx,
                                            HandleScript script);
 

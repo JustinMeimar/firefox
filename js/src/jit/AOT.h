@@ -52,7 +52,7 @@ static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 static constexpr uint32_t kNoCorpusIndex = UINT32_MAX; // Used for IC hints
 static constexpr uint32_t kAOTAlignment = 16;
-static constexpr uint32_t AOT_CONTAINER_VERSION = 7;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 8;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 
 // The container fingerprint POD (AOTCodegenOptions) is schema-defined
@@ -103,8 +103,10 @@ inline const char* AOTSlotName(AOTSlot slot) {
 
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
-  SelfHostedFunction = 1,
   InlineCacheStub = 2,
+  // Per-script AOT baseline code. Applies to both self-hosted builtins
+  // and guest scripts; identity is canonical byte content (see
+  // ComputeBaselineCanonical), so origin is irrelevant.
   BaselineFunction = 3,
 };
 
@@ -262,6 +264,7 @@ class AOTBlobWriter {
 
   AOTBlobKind kind() const { return kind_; }
   uint32_t nameHash() const { return nameHash_; }
+  void setNameHash(uint32_t h) { nameHash_ = h; }
   uint32_t corpusIndex() const { return corpusIndex_; }
   const std::string& name() const { return name_; }
   mozilla::Span<const uint8_t> codeBytes() const {

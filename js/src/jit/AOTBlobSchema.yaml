@@ -14,6 +14,11 @@
 #   element     - C++ type of each element (must be trivially copyable)
 #   count_from  - manifest field name that stores the array length
 #
+# Scope: this schema describes layout only (manifest struct, metadata
+# array order + element types, static-assert sizes). C++-side
+# population of a payload from live VM objects is *not* schematised;
+# it belongs in C++. Do not add fields here that embed C++ expressions.
+#
 # Adding a blob kind: append a new entry under `blobs:` and bump
 # AOT_CONTAINER_VERSION in AOT.h. The build fails at the manifestSize
 # check on the next load if you forget the version bump.
@@ -22,7 +27,7 @@ container:
   # Documentation only; the constants live in AOT.h so C++ code has
   # them without depending on generated files. Kept here as reminder.
   magic: 0x414F5443    # 'AOTC'
-  version: 7
+  version: 8
   fingerprint:
     parts:
       - {kind: buildid,  source: "wasm::GetOptimizedEncodingBuildId"}
@@ -66,29 +71,6 @@ blobs:
       - {name: icReturns,  element: "js::jit::BaselineInterpreter::ICReturnOffset",
                            count_from: ICReturnCount}
 
-  SelfHostedFunction:
-    kind_id: 1
-    doc: "Per-script AOT baseline code for a self-hosted builtin."
-    manifest:
-      - {name: warmUpCheckPrologueOffset, type: u32}
-      - {name: profilerEnterToggleOffset, type: u32}
-      - {name: profilerExitToggleOffset,  type: u32}
-      - {name: retAddrEntryCount,         type: u32}
-      - {name: osrEntryCount,             type: u32}
-      - {name: debugTrapEntryCount,       type: u32}
-      - {name: resumeEntryCount,          type: u32}
-      - {name: codeSize,                  type: u32}
-      - {name: headerSize,                type: u32}
-    metadata:
-      - {name: retAddrs,      element: "js::jit::RetAddrEntry",
-                              count_from: retAddrEntryCount}
-      - {name: osrEntries,    element: "js::jit::BaselineScript::OSREntry",
-                              count_from: osrEntryCount}
-      - {name: debugTraps,    element: "js::jit::BaselineScript::DebugTrapEntry",
-                              count_from: debugTrapEntryCount}
-      - {name: resumeOffsets, element: "uint32_t",
-                              count_from: resumeEntryCount}
-
   InlineCacheStub:
     kind_id: 2
     doc: "Per-hint AOT CacheIR stub code."
@@ -106,7 +88,10 @@ blobs:
 
   BaselineFunction:
     kind_id: 3
-    doc: "Per-script AOT baseline code for a guest script (baseline corpus)."
+    doc: |
+      Per-script AOT baseline code. Covers both self-hosted builtins and
+      guest scripts; identity is by canonical byte content, not by the
+      script's origin.
     manifest:
       - {name: warmUpCheckPrologueOffset, type: u32}
       - {name: profilerEnterToggleOffset, type: u32}

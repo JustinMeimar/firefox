@@ -22,7 +22,8 @@
 #include "jit/JitZone.h"
 #include "js/BuildId.h"
 #include "vm/JSContext.h"
-#include "wasm/WasmModule.h"
+#include "vm/Runtime.h"       // js::GetBuildId
+#include "wasm/WasmCompile.h" // wasm::ObservedCPUFeatures
 
 #include "vm/Realm-inl.h"
 
@@ -270,37 +271,38 @@ static AOTCodegenOptions SnapshotAOTCodegenOptions() {
 // Layout of the container fingerprint region (immediately after
 // AOTContainerHeader):
 //   [u32]        version (AOT_CONTAINER_VERSION)
+//   [u32]        cpuFingerprint (wasm::ObservedCPUFeatures: arch + CPU bits)
 //   [u32]        buildIdLen
-//   [buildIdLen] wasm::GetOptimizedEncodingBuildId bytes
+//   [buildIdLen] embedder build ID bytes (js::GetBuildId)
 //   [struct]     AOTCodegenOptions (20 bytes)
+//
+// Intentionally does NOT use wasm::GetOptimizedEncodingBuildId: that
+// mixes in wasm huge-memory settings (--disable-wasm-huge-memory
+// toggles the bit at runtime) which have no bearing on baseline
+// codegen. Baseline AOT only cares about build + CPU + codegen options.
 static bool ComputeAOTContainerFingerprint(
     Vector<uint8_t, 0, SystemAllocPolicy>& out) {
   JS::BuildIdCharVector buildId;
-  if (!wasm::GetOptimizedEncodingBuildId(&buildId)) {
+  if (!js::GetBuildId || !js::GetBuildId(&buildId)) {
     return false;
   }
 
   uint32_t version = AOT_CONTAINER_VERSION;
+  uint32_t cpuFingerprint = wasm::ObservedCPUFeatures();
   uint32_t buildIdLen = uint32_t(buildId.length());
   AOTCodegenOptions opts = SnapshotAOTCodegenOptions();
 
-  if (!out.append(reinterpret_cast<const uint8_t*>(&version),
-                  sizeof(version))) {
+  auto appendBytes = [&](const void* p, size_t n) {
+    return out.append(reinterpret_cast<const uint8_t*>(p), n);
+  };
+
+  if (!appendBytes(&version, sizeof(version))) return false;
+  if (!appendBytes(&cpuFingerprint, sizeof(cpuFingerprint))) return false;
+  if (!appendBytes(&buildIdLen, sizeof(buildIdLen))) return false;
+  if (buildIdLen && !appendBytes(buildId.begin(), buildIdLen)) {
     return false;
   }
-  if (!out.append(reinterpret_cast<const uint8_t*>(&buildIdLen),
-                  sizeof(buildIdLen))) {
-    return false;
-  }
-  if (buildIdLen &&
-      !out.append(reinterpret_cast<const uint8_t*>(buildId.begin()),
-                  buildIdLen)) {
-    return false;
-  }
-  if (!out.append(reinterpret_cast<const uint8_t*>(&opts),
-                  sizeof(opts))) {
-    return false;
-  }
+  if (!appendBytes(&opts, sizeof(opts))) return false;
   return true;
 }
 

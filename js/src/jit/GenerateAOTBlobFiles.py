@@ -77,7 +77,8 @@ def struct_sizeof(fields):
 def emit_pod_struct(name, fields, doc=None):
     lines = []
     if doc:
-        lines.append(f"// {doc}")
+        for line in doc.splitlines():
+            lines.append(f"// {line}" if line else "//")
     lines.append(f"struct {name} {{")
     for f in fields:
         lines.append(f"  {field_cpp_type(f)} {f['name']} = {{}};")
@@ -144,7 +145,8 @@ def emit_blob(kind_name, blob):
 
     out = [f"// -------- Blob: {kind_name} (kind_id={blob['kind_id']}) --------"]
     if blob.get("doc"):
-        out.append(f"// {blob['doc']}")
+        for line in blob["doc"].splitlines():
+            out.append(f"// {line}" if line else "//")
     out.append("")
     out.append(emit_pod_struct(manifest_type, blob["manifest"]))
     out.append(emit_payload_struct(payload_type, manifest_type, metadata))

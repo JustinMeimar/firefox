@@ -31,7 +31,7 @@
 #include "frontend/StencilXdr.h"  // XDRStencilEncoder, XDRStencilDecoder
 #include "gc/AllocKind.h"         // gc::AllocKind
 #include "gc/Tracer.h"            // TraceRoot
-#include "jit/BaselineAOT.h"      // jit::LoadAOTSelfHosted
+#include "jit/BaselineAOT.h"      // jit::LoadAOTBaselineFunction
 #include "jit/BaselineCompileTask.h"  // BaselineCompileTask::OffThreadBaselineCompilationAvailable
 #include "jit/BaselineJIT.h"  // jit::BaselineScript, jit::CanBaselineCompileScript
 #include "jit/JitContext.h"   // jit::MethodStatus
@@ -3143,7 +3143,7 @@ bool CompilationStencil::delazifySelfHostedFunction(
     if (!script->ensureHasJitScript(cx, keepJitScript)) {
       return false;
     }
-    if (jit::LoadAOTSelfHosted(cx, script, name)) {
+    if (jit::LoadAOTBaselineFunction(cx, script)) {
       return true;
     }
     if (cx->isExceptionPending()) {
