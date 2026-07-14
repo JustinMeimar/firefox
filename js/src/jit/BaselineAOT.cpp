@@ -440,8 +440,9 @@ bool BuildAndSaveInterpBlob(JSContext* cx,
   return true;
 }
 
-static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
-                                 AOTBlobWriter* blobOut) {
+static bool DriveSelfHostedBaselineForAOT(JSContext* cx,
+                                          Handle<JSAtom*> atom,
+                                          MutableHandleScript scriptOut) {
   Rooted<PropertyName*> name(cx, atom->asPropertyName());
   auto indexRange = cx->runtime()->getSelfHostedScriptIndexRange(name);
   if (!indexRange) {
@@ -488,23 +489,7 @@ static bool compileAOTSelfHosted(JSContext* cx, Handle<JSAtom*> atom,
   }
   MOZ_ASSERT(script->hasBaselineScript());
 
-  BaselineScript* bs = script->baselineScript();
-
-  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
-  if (!ComputeBaselineCanonical(script, canonical)) return false;
-  mozilla::Span<const uint8_t> canonicalSpan(canonical.begin(),
-                                             canonical.length());
-
-  blobOut->setNameHash(ComputeBaselineProbeHash(script));
-
-  if (!EncodeBaselineFunctionBlob(script, canonicalSpan, bs, *blobOut)) {
-    return false;
-  }
-
-  JitSpew(JitSpew_BaselineAOT,
-          "AOT Compiled '%-22s' size=%5zub  callSites=%zu  osr=%zu",
-          nameStr.get(), bs->method()->instructionsSize(),
-          bs->aotRetAddrEntries().size(), bs->aotOSREntries().size());
+  scriptOut.set(script);
   return true;
 }
 
@@ -521,7 +506,8 @@ bool IsAOTBaselineFunctionRecorded(JSContext* cx, JSScript* script) {
 }
 
 bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
-  MOZ_ASSERT(JitOptions.enforceAOTBaselineCorpus);
+  MOZ_ASSERT(JitOptions.enforceAOTBaselineCorpus ||
+             JitOptions.dumpAOTSelfHosted);
   MOZ_ASSERT(script->hasBaselineScript());
 
   BaselineScript* bs = script->baselineScript();
@@ -562,7 +548,7 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   }
 
   JitSpew(JitSpew_BaselineAOT,
-          "AOT baseline corpus recorded probe=%u dedup=%u size=%zu "
+          "AOT baseline function probe=%u dedup=%u size=%zu "
           "canonical=%zu nargs=%u scope=%u '%s'",
           probeHash, dedupKey, bs->method()->instructionsSize(),
           canonicalSpan.size(),
@@ -646,20 +632,13 @@ bool DumpAOTContainer(JSContext* cx) {
     uint32_t skipped = 0;
     for (JSAtom* rawAtom : names.get()) {
       Rooted<JSAtom*> atom(cx, rawAtom);
-      UniqueChars nameStr = AtomToPrintableString(cx, atom);
-      if (!nameStr) {
+      RootedScript script(cx);
+      if (!DriveSelfHostedBaselineForAOT(cx, atom, &script)) {
         skipped++;
         continue;
       }
-
-      AOTBlobWriter blob(AOTBlobKind::BaselineFunction,
-                         /* nameHash = */ 0, std::string(nameStr.get()));
-      if (!compileAOTSelfHosted(cx, atom, &blob)) {
-        skipped++;
-        continue;
-      }
+      if (!RecordAOTBaselineFunction(cx, script)) return false;
       compiled++;
-      if (!container.addBlob(std::move(blob))) return false;
     }
     JitSpew(JitSpew_BaselineAOT,
             "Self-hosted AOT: compiled %u, skipped %u", compiled, skipped);
