@@ -11,6 +11,7 @@
 #include "jit/CacheIRAOT.h"
 #include "jit/CacheIRSpewer.h"
 #include "jit/CacheIRWriter.h"
+#include "jit/Instr.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitZone.h"
@@ -2313,6 +2314,14 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   auto newStub = new (newStubMem) ICCacheIRStub(code, stubInfo);
   writer.copyStubData(newStub->stubDataStart());
   newStub->setTypeData(writer.typeData());
+
+  JS_INSTR(JSInstr_IC,
+           "ic-attach kind=%s code=%u hash=%u engine=baseline proc=%s\n",
+           CacheKindNames[uint8_t(kind)], unsigned(code->instructionsSize()),
+           unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
+               kind, ICStubEngine::Baseline, stubInfo->code(),
+               stubInfo->codeLength()))),
+           gJSInstr.procTag);
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   newStub->updateRawJitCode(pbl::GetICInterpreter());

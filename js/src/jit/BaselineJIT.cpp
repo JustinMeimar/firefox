@@ -19,6 +19,7 @@
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineDebugModeOSR.h"
 #include "jit/BaselineIC.h"
+#include "jit/BaselineInstr.h"
 #include "jit/CalleeToken.h"
 #include "jit/Ion.h"
 #include "jit/IonOptimizationLevels.h"
@@ -541,7 +542,11 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   if (osrSourceFrame && osrSourceFrame.isDebuggee()) {
     options.setFlag(BaselineOption::ForceDebugInstrumentation);
   }
-  return BaselineCompile(cx, script, options);
+  MethodStatus status = BaselineCompile(cx, script, options);
+  if (status == Method_Compiled) {
+    EmitBaselineCompileEvent(cx, script);
+  }
+  return status;
 }
 
 bool jit::CanBaselineInterpretScript(JSScript* script) {

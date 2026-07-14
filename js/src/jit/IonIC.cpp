@@ -6,7 +6,9 @@
 
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRGenerator.h"
+#include "jit/Instr.h"
 #include "jit/IonScript.h"
+#include "jit/JitZone.h"
 #include "jit/VMFunctions.h"
 #include "util/DiagnosticAssertions.h"
 #include "vm/EqualityOperations.h"
@@ -745,6 +747,15 @@ uint8_t* IonICStub::stubDataStart() {
 void IonIC::attachStub(IonICStub* newStub, JitCode* code) {
   MOZ_ASSERT(newStub);
   MOZ_ASSERT(code);
+
+  JS_INSTR(JSInstr_IC,
+           "ic-attach kind=%s code=%u hash=%u engine=ion proc=%s\n",
+           CacheKindNames[uint8_t(kind_)],
+           unsigned(code->instructionsSize()),
+           unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
+               kind_, ICStubEngine::IonIC, newStub->stubInfo()->code(),
+               newStub->stubInfo()->codeLength()))),
+           gJSInstr.procTag);
 
   if (firstStub_) {
     newStub->setNext(firstStub_, codeRaw_);
