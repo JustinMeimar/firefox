@@ -47,6 +47,13 @@ uint32_t ComputeBaselineProbeHash(JSScript* script);
 [[nodiscard]] bool RecordAOTBaselineFunction(JSContext* cx,
                                              HandleScript script);
 
+// Emit a `baseline-compile` line to the AOTInstr_Baseline channel when
+// enabled. Fires per successful baseline compile regardless of corpus
+// mode, so `JS_AOT_INSTR=baseline` alone yields per-workload frequency
+// logs suitable for the fossil baseline-frequency analyses. Cheap
+// no-op when the channel is off.
+void EmitBaselineCompileEvent(JSContext* cx, JSScript* script);
+
 // Cheap dedup check: does the accumulator already contain a baseline
 // blob for this script's canonical hash? Used by the guest baseline
 // corpus path to avoid re-AOT-compiling the same script every warmup.

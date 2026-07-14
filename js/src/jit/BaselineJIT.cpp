@@ -604,16 +604,13 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
       return Method_Compiled;
     }
   }
-  if (JitOptions.enforceAOTBaselineCorpus && aotEligible &&
-      !IsAOTBaselineFunctionRecorded(cx, script)) {
-    // Compile under AOT context so the emitted bytes are realm-independent
-    // and replayable on any matching JSScript. Install an AOT preamble on
-    // the resulting code so JSScript::updateJitCodeRaw routes callers
-    // through a trampoline that loads AOTSelfHostedPassReg — the same
-    // dispatch used by the load path via InstallBaselineScriptPayload.
-    MethodStatus status = BaselineCompile(cx, script, options,
-                                          /*isAOTDump=*/true);
-    if (status == Method_Compiled) {
+  bool aotDump = JitOptions.enforceAOTBaselineCorpus && aotEligible &&
+                 !IsAOTBaselineFunctionRecorded(cx, script);
+  MethodStatus status = BaselineCompile(cx, script, options,
+                                        /*isAOTDump=*/aotDump);
+  if (status == Method_Compiled) {
+    EmitBaselineCompileEvent(cx, script);
+    if (aotDump) {
       (void)RecordAOTBaselineFunction(cx, script);
       BaselineScript* bs = script->baselineScript();
       JitCode* code = bs->method();
@@ -622,10 +619,11 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
           cx->runtime()->jitRuntime()->lookupAOTPreamble(code->raw()));
       script->updateJitCodeRaw(cx->runtime());
     }
-    return status;
   }
-#endif
+  return status;
+#else
   return BaselineCompile(cx, script, options);
+#endif
 }
 
 bool jit::CanBaselineInterpretScript(JSScript* script) {

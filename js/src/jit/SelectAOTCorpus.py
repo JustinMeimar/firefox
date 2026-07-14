@@ -32,6 +32,11 @@ RE_BASELINE_RECORD = re.compile(
     r"baseline-record hash=(\d+)\s+size=(\d+)\s+canonical=\d+\s+name=(\S+)"
 )
 
+RE_BASELINE_COMPILE = re.compile(
+    r"baseline-compile hash=(\d+)\s+probe=\d+\s+code=(\d+)"
+    r"\s+canonical=\d+\s+nargs=\d+\s+scope=\d+\s+name=(\S+)"
+)
+
 RE_TS = re.compile(r"^ts=\d+\s+")
 
 
@@ -58,20 +63,24 @@ def parse_ic_profile(path):
 
 
 def parse_baseline_profile(path):
-    """Parse one baseline-record log.
+    """Parse one baseline-{record,compile} log.
 
-    A record line is emitted every time RecordAOTBaselineFunction accepts
-    a new canonical, so freq is 1-per-line here. sizes carries the JitCode
-    body size (matches the knapsack weight the container will pay).
-    'kind' is fixed to "baseline" so the (kind, hash) key shape lines up
-    with the IC path.
+    `baseline-record` is emitted per accepted canonical under corpus
+    enforce mode (freq is 1-per-line, corpus-dedup semantics).
+    `baseline-compile` is emitted per successful baseline compile when
+    the AOTInstr_Baseline channel is on, and carries the same identity
+    (hash) plus a code size; freq counts every compile so it works as
+    a frequency signal for the knapsack.
+
+    'kind' is fixed to "baseline" so the (kind, hash) key shape lines
+    up with the IC path.
     """
     freq = Counter()
     sizes = {}
     with open(path) as f:
         for line in f:
             line = RE_TS.sub("", line)
-            m = RE_BASELINE_RECORD.match(line)
+            m = RE_BASELINE_COMPILE.match(line) or RE_BASELINE_RECORD.match(line)
             if not m:
                 continue
             h, code_bytes, _name = m.groups()

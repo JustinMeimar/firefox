@@ -493,6 +493,38 @@ static bool DriveSelfHostedBaselineForAOT(JSContext* cx,
   return true;
 }
 
+void EmitBaselineCompileEvent(JSContext* cx, JSScript* script) {
+  if (!gAOTInstr.enabled(AOTInstr_Baseline)) return;
+  if (!script->hasBaselineScript()) return;
+
+  BaselineScript* bs = script->baselineScript();
+
+  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
+  if (!ComputeBaselineCanonical(script, canonical)) return;
+  uint32_t canonicalHash = uint32_t(
+      mozilla::HashBytes(canonical.begin(), canonical.length()));
+  uint32_t probeHash = ComputeBaselineProbeHash(script);
+
+  std::string name;
+  if (script->function()) {
+    if (JSAtom* atom = script->function()->maybePartialDisplayAtom()) {
+      UniqueChars printable = AtomToPrintableString(cx, atom);
+      if (printable) name = printable.get();
+    }
+  }
+  if (name.empty()) name = "top_level";
+
+  AOT_INSTR(AOTInstr_Baseline,
+            "baseline-compile hash=%u probe=%u code=%u canonical=%zu "
+            "nargs=%u scope=%u name=%s\n",
+            unsigned(canonicalHash), unsigned(probeHash),
+            unsigned(bs->method()->instructionsSize()),
+            canonical.length(),
+            script->function() ? unsigned(script->function()->nargs()) : 0u,
+            unsigned(script->outermostScope()->kind()),
+            name.c_str());
+}
+
 bool IsAOTBaselineFunctionRecorded(JSContext* cx, JSScript* script) {
   Vector<uint8_t, 0, SystemAllocPolicy> canonical;
   if (!ComputeBaselineCanonical(script, canonical)) {

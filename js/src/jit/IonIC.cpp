@@ -9,6 +9,7 @@
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRGenerator.h"
 #include "jit/IonScript.h"
+#include "jit/JitZone.h"
 #include "jit/VMFunctions.h"
 #include "util/DiagnosticAssertions.h"
 #include "vm/EqualityOperations.h"
@@ -758,9 +759,14 @@ void IonIC::attachStub(IonICStub* newStub, JitCode* code) {
   MOZ_ASSERT(newStub);
   MOZ_ASSERT(code);
 
-  AOT_INSTR(AOTInstr_IC, "ic-attach kind=%s code=%u aot=0 engine=ion proc=%s\n",
+  AOT_INSTR(AOTInstr_IC,
+            "ic-attach kind=%s code=%u aot=0 hash=%u engine=ion proc=%s\n",
             CacheKindNames[uint8_t(kind_)],
             unsigned(code->instructionsSize()),
+            unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
+                kind_, ICStubEngine::IonIC,
+                newStub->stubInfo()->code(),
+                newStub->stubInfo()->codeLength()))),
             gAOTInstr.procTag);
 
   if (firstStub_) {
