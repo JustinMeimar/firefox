@@ -39,15 +39,6 @@ mozilla::Span<const CacheIRAOTStub> GetAOTStubs();
 // NOTE(aot): Must be called while in the atoms zone. AOT ICs live there.
 void FillAOTICs(JSContext* cx);
 
-struct CacheIRAOTHint {
-  uint32_t scriptKey;
-  uint32_t pcOffset;
-  uint32_t corpusIdx;
-};
-
-mozilla::Span<const CacheIRAOTHint> GetAOTEagerICHintsForScript(
-    uint32_t scriptKey);
-
 }  // namespace js::jit
 
 #endif /* jit_CacheIRAOT_h */

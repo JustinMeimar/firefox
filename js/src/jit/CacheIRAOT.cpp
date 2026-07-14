@@ -6,8 +6,6 @@
 
 #  include "jit/CacheIRAOT.h"
 
-#  include <algorithm>
-
 #  include "jstypes.h"
 
 #  include "builtin/Math.h"
@@ -106,27 +104,6 @@ static const CacheIRAOTStub stubs[] = {JS_AOT_IC_DATA(IC_TOP)};
 
 mozilla::Span<const CacheIRAOTStub> GetAOTStubs() {
   return mozilla::Span(stubs, sizeof(stubs) / sizeof(stubs[0]));
-}
-
-#  define IC_HINT(scriptKey, pcOffset, corpusIdx) \
-    CacheIRAOTHint{scriptKey, pcOffset, corpusIdx},
-
-// NOTE(aot): Leading sentinel entry keeps the array non-empty when
-// JS_AOT_EAGER_IC_HINTS is empty. Key 0 is reserved and never queried.
-static const CacheIRAOTHint hints[] = {CacheIRAOTHint{0, 0, 0},
-                                       JS_AOT_EAGER_IC_HINTS(IC_HINT)};
-
-mozilla::Span<const CacheIRAOTHint> GetAOTEagerICHintsForScript(
-    uint32_t scriptKey) {
-  if (scriptKey == 0) {
-    return mozilla::Span<const CacheIRAOTHint>();
-  }
-  auto [lower, upper] = std::equal_range(
-      std::begin(hints), std::end(hints), CacheIRAOTHint{scriptKey, 0, 0},
-      [](const CacheIRAOTHint& a, const CacheIRAOTHint& b) {
-        return a.scriptKey < b.scriptKey;
-      });
-  return mozilla::Span(lower, upper);
 }
 
 CacheIRWriter::CacheIRWriter(JSContext* cx, const CacheIRAOTStub& stub)

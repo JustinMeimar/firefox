@@ -628,8 +628,7 @@ def generate_cacheirops_header(c_out, yaml_path):
 
 def read_aot_ics(ic_path):
     # Sorted filename order: the corpus index assigned here must be stable
-    # across builds, since the AOT container and eager hints both refer to
-    # stubs by index.
+    # across builds, since the AOT container refers to stubs by index.
     entries = []
     for name in sorted(os.listdir(ic_path)):
         if not name.startswith("IC-"):
@@ -642,54 +641,6 @@ def read_aot_ics(ic_path):
     return entries
 
 
-def read_aot_hints(ic_path, corpus):
-    """Resolve AOTHints.tbl lines (scriptKey pcOffset stubHash) against the
-    corpus. Only zero-stub-data stubs are kept: those are complete at build
-    time and safe to attach on the IC chain before any execution. Sites that
-    were polymorphic in the profile (more than one distinct stubHash) are
-    dropped entirely: a chain of pre-attached guesses cannot be transpiled
-    (empty TypeData breaks polymorphic-type inlining) and inflates dispatch
-    for at most one avoided IRGen. Returns (scriptKey, pcOffset, corpusIdx)
-    triples sorted by (scriptKey, pcOffset).
-    """
-    hints_path = os.path.join(ic_path, "AOTHints.tbl")
-    if not os.path.isfile(hints_path):
-        return []
-
-    # Corpus line format: kind, num_input_operands, num_operand_ids,
-    # num_instructions, typedata, stubdatasize, stubfields, lastused, ops.
-    tier_a_by_hash = {}
-    for idx, (name, content) in enumerate(corpus):
-        stub_hash = int(name.split("-", 2)[1])
-        # int() rejects a non-numeric column, so a reordering of the corpus
-        # line format fails the build instead of misclassifying tiers.
-        stub_data_size = int(content.split(",")[5])
-        if stub_data_size == 0:
-            tier_a_by_hash[stub_hash] = idx
-
-    # Polymorphism is judged on the full profile, before Tier A filtering:
-    # a site that also attached a Tier B stub is polymorphic even if only
-    # its Tier A hint would survive the filter below.
-    site_hashes = {}
-    with open(hints_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            script_key, pc_offset, stub_hash = (int(x) for x in line.split())
-            site_hashes.setdefault((script_key, pc_offset), set()).add(stub_hash)
-
-    hints = []
-    for (script_key, pc_offset), hashes in site_hashes.items():
-        if len(hashes) != 1:
-            continue
-        idx = tier_a_by_hash.get(next(iter(hashes)))
-        if idx is not None:
-            hints.append((script_key, pc_offset, idx))
-    hints.sort()
-    return hints
-
-
 def generate_aot_ics_header(c_out, ic_path):
     """Generate CacheIRAOTGenerated.h from the AOT IC corpus."""
 
@@ -698,11 +649,6 @@ def generate_aot_ics_header(c_out, ic_path):
     contents = "#define JS_AOT_IC_DATA(_) \\\n"
     for idx, (name, content) in enumerate(corpus):
         contents += "  _(%d, %s) \\\n" % (idx, content)
-    contents += "\n\n"
-
-    contents += "#define JS_AOT_EAGER_IC_HINTS(_) \\\n"
-    for script_key, pc_offset, idx in read_aot_hints(ic_path, corpus):
-        contents += "  _(%du, %du, %du) \\\n" % (script_key, pc_offset, idx)
     contents += "\n"
 
     generate_header(c_out, "jit_CacheIRAOTGenerated_h", contents)

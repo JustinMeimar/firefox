@@ -118,7 +118,6 @@ void DumpAOTBaselineFunctionToDir(const char* dir, uint32_t canonicalHash,
   writeU32(AOT_CONTAINER_VERSION);
   writeU32(uint32_t(kind));
   writeU32(blob.nameHash());
-  writeU32(blob.corpusIndex());
   writeU32(canonicalHash);
   writeU32(uint32_t(name.size()));
   writeBytes(name.data(), name.size());
@@ -165,15 +164,15 @@ void MaybeDumpBaselineFunctionForPGO(uint32_t canonicalHash,
     return fread(v, sizeof(*v), 1, f) == 1;
   };
 
-  uint32_t magic, version, kindU32, nameHash, corpusIndex, canonicalHash;
+  uint32_t magic, version, kindU32, nameHash, canonicalHash;
   uint32_t nameLen, codeLen, fieldsLen, arraysLen;
 
   bool ok = readU32(&magic) && magic == kBaselineBlobFileMagic &&
             readU32(&version) && version == AOT_CONTAINER_VERSION &&
             readU32(&kindU32) &&
             kindU32 == uint32_t(AOTBlobKind::BaselineFunction) &&
-            readU32(&nameHash) && readU32(&corpusIndex) &&
-            readU32(&canonicalHash) && readU32(&nameLen);
+            readU32(&nameHash) && readU32(&canonicalHash) &&
+            readU32(&nameLen);
 
   std::string name;
   if (ok && nameLen > 0) {
@@ -195,7 +194,7 @@ void MaybeDumpBaselineFunctionForPGO(uint32_t canonicalHash,
   if (!ok) return false;
 
   *outBlob = AOTBlobWriter(AOTBlobKind::BaselineFunction, nameHash,
-                           corpusIndex, std::move(name));
+                           std::move(name));
   if (!outBlob->writeCode(codeBuf.begin(), codeBuf.length()) ||
       !outBlob->writeFieldsRaw(fieldsBuf.begin(), fieldsBuf.length()) ||
       !outBlob->writeArraysRaw(arraysBuf.begin(), arraysBuf.length())) {
@@ -428,7 +427,7 @@ bool BuildAndSaveInterpBlob(JSContext* cx,
   auto& saved = cx->runtime()->jitRuntime()->aotDump_.interpreterBlob;
   saved.reset();
   saved.emplace(AOTBlobKind::BaselineInterpreter,
-                /* nameHash = */ 0, kNoCorpusIndex, "BaselineInterpreter");
+                /* nameHash = */ 0, "BaselineInterpreter");
 
   if (!EncodeAOTBlob_BaselineInterpreter(*saved, payload)) {
     return false;
@@ -556,8 +555,7 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   }
 
   uint32_t probeHash = ComputeBaselineProbeHash(script);
-  AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash,
-                     kNoCorpusIndex, std::move(name));
+  AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash, std::move(name));
 
   if (!EncodeBaselineFunctionBlob(script, canonicalSpan, bs, blob)) {
     return false;
@@ -602,8 +600,7 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
     char path[600];
     SprintfLiteral(path, "%s/%s", corpusDir, ent->d_name);
     uint32_t fileCanonical = 0;
-    AOTBlobWriter blob(AOTBlobKind::BaselineFunction, 0, kNoCorpusIndex,
-                       std::string());
+    AOTBlobWriter blob(AOTBlobKind::BaselineFunction, 0, std::string());
     if (!LoadAOTBaselineBlobFromFile(path, &fileCanonical, &blob)) {
       diskSkipped++;
       continue;
@@ -656,8 +653,7 @@ bool DumpAOTContainer(JSContext* cx) {
       }
 
       AOTBlobWriter blob(AOTBlobKind::BaselineFunction,
-                         /* nameHash = */ 0, kNoCorpusIndex,
-                         std::string(nameStr.get()));
+                         /* nameHash = */ 0, std::string(nameStr.get()));
       if (!compileAOTSelfHosted(cx, atom, &blob)) {
         skipped++;
         continue;
@@ -915,26 +911,6 @@ bool LoadAOTICStubs(JSContext* cx) {
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {
       return;
     }
-
-    // Register the (JitCode, CacheIRStubInfo) pair against its corpus
-    // index so eager-attach hints in initICEntries() can look it up.
-    // stubInfo's allocation is now owned by the map (via key's UniquePtr)
-    // but the raw pointer remains valid; setAOTStubEntry stores it
-    // non-owningly.
-    uint32_t corpusIdx = reader.entry()->corpusIndex;
-    if (corpusIdx == kNoCorpusIndex ||
-        !jitZone->setAOTStubEntry(corpusIdx, code, stubInfo)) {
-      // Non-fatal: the primary code map still works; only hints for this
-      // stub become no-ops.
-      JitSpew(JitSpew_BaselineAOT,
-              "AOTStubEntry insert failed for idx=%u", corpusIdx);
-    }
-
-    AOT_INSTR(AOTInstr_IC, "ic-corpus kind=%s hash=%u code=%u idx=%u\n",
-              CacheKindNames[uint8_t(fields.kind)],
-              unsigned(CacheIRStubKey::hash(lookup)),
-              unsigned(code->instructionsSize()),
-              corpusIdx);
 
     loadedCount++;
   });

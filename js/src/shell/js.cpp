@@ -13088,7 +13088,6 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "aot-baseline-corpus", "Install AOT baseline functions from corpus on baseline entry.") ||
       !op.addBoolOption('\0', "aot-baseline-corpus-enforce", "Record AOT-compiled guest baseline functions during execution into the baseline corpus dir. Symmetric to --aot-ics-enforce.") ||
       !op.addBoolOption('\0', "aot-ics-enforce", "Disable runtime IC codegen; use only AOT stubs or fallback.") ||
-      !op.addBoolOption('\0', "no-aot-ic-hints", "Do not eagerly attach hinted AOT IC stubs at initICEntries.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14250,9 +14249,6 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("aot-ics-enforce")) {
     jit::JitOptions.useAOTICs = true;
     jit::JitOptions.enforceAOTICs = true;
-  }
-  if (op.getBoolOption("no-aot-ic-hints")) {
-    jit::JitOptions.useAOTICHints = false;
   }
 #endif
   if (op.getBoolOption("no-ion")) {

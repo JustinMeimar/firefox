@@ -155,11 +155,6 @@ class ICStub {
   // Whether this is an ICFallbackStub or an ICCacheIRStub.
   bool isFallback_;
 
-  // Set for stubs installed by MaybeAttachAOTHintedStubs. WarpScriptOracle
-  // and ICScript::hash skip leading pre-attached stubs whose enteredCount
-  // is still 0. See [SMDOC] AOT IC Hinting in BaselineIC.cpp.
-  bool preAttached_ = false;
-
   ICStub(uint8_t* stubCode, bool isFallback)
       : stubCode_(stubCode), isFallback_(isFallback) {
 #ifndef ENABLE_PORTABLE_BASELINE_INTERP
@@ -215,9 +210,6 @@ class ICStub {
   void setEnteredCount(uint32_t count) { enteredCount_ = count; }
   void resetEnteredCount() { enteredCount_ = 0; }
 
-  bool isPreAttached() const { return preAttached_; }
-  void setPreAttached() { preAttached_ = true; }
-
   bool isStaticCode() const;
 
   uint8_t* stubCodeRaw() const { return stubCode_; }
@@ -254,11 +246,6 @@ class ICFallbackStub final : public ICStub {
 
   // Add a new stub to the IC chain terminated by this fallback stub.
   inline void addNewStub(ICEntry* icEntry, ICCacheIRStub* stub);
-
-  // Like addNewStub, but does not call state_.trackAttached(); pre-attached
-  // hint stubs are invisible to ICState and to the transpiler until they
-  // have been entered. See [SMDOC] AOT IC Hinting in BaselineIC.cpp.
-  inline void addPreAttachedStub(ICEntry* icEntry, ICCacheIRStub* stub);
 
   void discardStubs(Zone* zone, ICEntry* icEntry);
 
@@ -376,14 +363,6 @@ inline void ICFallbackStub::addNewStub(ICEntry* icEntry, ICCacheIRStub* stub) {
   stub->setNext(icEntry->firstStub());
   icEntry->setFirstStub(stub);
   state_.trackAttached();
-}
-
-inline void ICFallbackStub::addPreAttachedStub(ICEntry* icEntry,
-                                               ICCacheIRStub* stub) {
-  MOZ_ASSERT(stub->next() == nullptr);
-  stub->setPreAttached();
-  stub->setNext(icEntry->firstStub());
-  icEntry->setFirstStub(stub);
 }
 
 AllocatableGeneralRegisterSet BaselineICAvailableGeneralRegs(size_t numInputs);

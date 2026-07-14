@@ -1008,16 +1008,6 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
   const ICEntry& entry = getICEntryAndFallback(loc, &fallbackStub);
   ICStub* firstStub = entry.firstStub();
 
-#ifdef ENABLE_JS_AOT
-  // NOTE(aot): Skip leading pre-attached hints that have never been
-  // entered, so cold sites remain cold. Once a hint has been entered,
-  // it is transpiled the same as any other stub.
-  while (firstStub != fallbackStub && firstStub->isPreAttached() &&
-         firstStub->enteredCount() == 0) {
-    firstStub = firstStub->toCacheIRStub()->next();
-  }
-#endif
-
   uint32_t offset = loc.bytecodeToOffset(script_);
 
   // Set the trial inlining state directly if there is a hint cached from a

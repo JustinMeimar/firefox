@@ -59,9 +59,8 @@ class JitCode;
 
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
-static constexpr uint32_t kNoCorpusIndex = UINT32_MAX; // Used for IC hints
 static constexpr uint32_t kAOTAlignment = 16;
-static constexpr uint32_t AOT_CONTAINER_VERSION = 12;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 13;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 
 // Bump AOT_CONTAINER_VERSION on any change to the wire format:
@@ -69,6 +68,9 @@ static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 // (see AOTBlobSchema.yaml), AOTSlot enum renumbering, or fingerprint
 // contents. A stale container that matches the old magic but not the new
 // layout otherwise deserializes into garbage.
+//
+// v13: Dropped the per-directory-entry corpusIndex field used by the eager
+// IC hint prototype; AOTBlobDirectoryEntry shrinks from 32 to 28 bytes.
 //
 // v12: Removed explicit padding fields from AOTBlobSchema.yaml. Natural
 // C++ alignment produces the same trailing layout via the generator's
@@ -156,7 +158,6 @@ static_assert(sizeof(AOTContainerHeader) == 16,
 struct AOTBlobDirectoryEntry {
   AOTBlobKind kind;
   uint32_t nameHash;
-  uint32_t corpusIndex; // used only in IC hint prototype
   uint32_t codeOffset;
   uint32_t codeSize;
   uint32_t dataOffset;
@@ -164,8 +165,8 @@ struct AOTBlobDirectoryEntry {
   uint32_t arraysSize;
 };
 
-static_assert(sizeof(AOTBlobDirectoryEntry) == 32,
-              "AOTBlobDirectoryEntry must be 32 bytes");
+static_assert(sizeof(AOTBlobDirectoryEntry) == 28,
+              "AOTBlobDirectoryEntry must be 28 bytes");
 
 // These symbols are defined by AOTBaselineStub.S, regenerated with
 // `--aot-dump-blinterp --aot-dump-self-hosted`. Pre-bootstrap the stub is
@@ -271,7 +272,6 @@ class AOTContext {
 class AOTBlobWriter {
   AOTBlobKind kind_;
   uint32_t nameHash_;
-  uint32_t corpusIndex_;
   std::string name_;
   Vector<uint8_t, 0, SystemAllocPolicy> code_;
   Vector<uint8_t, 0, SystemAllocPolicy> fields_;
@@ -283,15 +283,13 @@ class AOTBlobWriter {
   }
 
  public:
-  explicit AOTBlobWriter(AOTBlobKind kind, uint32_t nameHash,
-                         uint32_t corpusIndex, std::string name);
+  explicit AOTBlobWriter(AOTBlobKind kind, uint32_t nameHash, std::string name);
   AOTBlobWriter(AOTBlobWriter&&) = default;
   AOTBlobWriter& operator=(AOTBlobWriter&&) = default;
 
   AOTBlobKind kind() const { return kind_; }
   uint32_t nameHash() const { return nameHash_; }
   void setNameHash(uint32_t h) { nameHash_ = h; }
-  uint32_t corpusIndex() const { return corpusIndex_; }
   const std::string& name() const { return name_; }
   mozilla::Span<const uint8_t> codeBytes() const {
     return {code_.begin(), code_.length()};

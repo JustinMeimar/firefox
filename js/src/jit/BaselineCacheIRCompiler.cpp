@@ -2358,25 +2358,6 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
 
   stub->addNewStub(icEntry, newStub);
 
-#ifdef ENABLE_JS_AOT
-  // NOTE(aot): Use scriptKey=0 for eval, dyngen, and inlined ICScripts.
-  // This prevents the hint lookup in initICEntries from misresolving to
-  // an unrelated script.
-  uint32_t scriptKey =
-      icScript->isInlined() ? 0 : JitHintsMap::getScriptKey(outerScript);
-
-  AOT_INSTR(AOTInstr_IC,
-            "ic-attach kind=%s code=%u aot=%d hash=%u script=%u pc=%u proc=%s\n",
-            CacheKindNames[uint8_t(kind)],
-            unsigned(code->instructionsSize()),
-            int(newStub->isStaticCode()),
-            unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
-                kind, ICStubEngine::Baseline,
-                writer.codeStart(), writer.codeLength()))),
-            scriptKey, unsigned(stub->pcOffset()),
-            gAOTInstr.procTag);
-#endif
-
   JSScript* owningScript = icScript->isInlined()
                                ? icScript->inliningRoot()->owningScript()
                                : outerScript;
@@ -2392,8 +2373,7 @@ void js::jit::FillAOTICs(JSContext* cx) {
   auto& savedICs = cx->runtime()->jitRuntime()->aotDump_.icStubBlobs;
   if (JitOptions.aotNeedsIndirectionTable()) {
     auto stubs = GetAOTStubs();
-    for (size_t corpusIdx = 0; corpusIdx < stubs.size(); corpusIdx++) {
-      const auto& stub = stubs[corpusIdx];
+    for (const auto& stub : stubs) {
       CacheIRWriter writer(cx, stub);
       if (writer.failed()) {
         jitZone->setIncompleteAOTICs();
@@ -2407,24 +2387,9 @@ void js::jit::FillAOTICs(JSContext* cx) {
         continue;
       }
 
-      if (code && stubInfo) {
-        if (!jitZone->setAOTStubEntry(uint32_t(corpusIdx), code, stubInfo)) {
-          JitSpew(JitSpew_BaselineAOT,
-                  "AOTStubEntry insert failed for idx=%zu", corpusIdx);
-        }
-
-        AOT_INSTR(AOTInstr_IC, "ic-corpus kind=%s hash=%u code=%u idx=%zu\n",
-                  CacheKindNames[uint8_t(stub.kind)],
-                  unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
-                      stub.kind, ICStubEngine::Baseline,
-                      writer.codeStart(), writer.codeLength()))),
-                  unsigned(code->instructionsSize()),
-                  corpusIdx);
-      }
-
       if (JitOptions.dumpAOTICs && code && stubInfo) {
         AOTBlobWriter blob(AOTBlobKind::InlineCacheStub,
-                           /* nameHash = */ 0, uint32_t(corpusIdx),
+                           /* nameHash = */ 0,
                            "IC_" + std::to_string(savedICs.length()));
 
         uint32_t numFields = 0;

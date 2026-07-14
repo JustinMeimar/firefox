@@ -1002,23 +1002,11 @@ JitScript* ICScript::outerJitScript() {
 // 5. The hash will change if the set of shapes stored in ShapeListSnapshot
 //    is changed by stub folding or GC (the shapes in ShapeListObject are weak
 //    pointers).
-// 6. The hash will change if the entered count of a leading AOT
-//    pre-attached stub changes from 0.
 HashNumber ICScript::hash(JSContext* cx) {
   HashNumber h = 0;
   for (size_t i = 0; i < numICEntries(); i++) {
     ICStub* stub = icEntry(i).firstStub();
     ICFallbackStub* fallback = fallbackStub(i);
-
-#ifdef ENABLE_JS_AOT
-    // NOTE(aot): Mirror WarpScriptOracle::maybeAddIcSnapshot by skipping
-    // never-entered pre-attached hints. This keeps the hash aligned with
-    // the transpiler's view of the stub chain.
-    while (!stub->isFallback() && stub->isPreAttached() &&
-           stub->enteredCount() == 0) {
-      stub = stub->toCacheIRStub()->next();
-    }
-#endif
 
     // Hash the address of the first stub.
     h = mozilla::AddToHash(h, stub);

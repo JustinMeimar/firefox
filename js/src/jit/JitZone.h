@@ -132,19 +132,6 @@ class JitZone {
                 SystemAllocPolicy, BaselineCacheIRStubCodeMapGCPolicy>;
   BaselineCacheIRStubCodeMap baselineCacheIRStubCodes_;
 
- public:
-  // Corpus-index -> stub lookup used by initICEntries() to satisfy eager
-  // IC-attach hints. Populated on the atoms JitZone. Non-owning; the
-  // canonical stubs live in baselineCacheIRStubCodes_ above and are rooted
-  // via JitRuntime::TraceAtomZoneRoots.
-  struct AOTStubEntry {
-    JitCode* code = nullptr;
-    const CacheIRStubInfo* info = nullptr;
-  };
-
- private:
-  Vector<AOTStubEntry, 0, SystemAllocPolicy> aotStubEntries_;
-
   // Executable allocator for all code except wasm code.
   MainThreadData<ExecutableAllocator> execAlloc_;
 
@@ -229,24 +216,6 @@ class JitZone {
     auto p = baselineCacheIRStubCodes_.lookupForAdd(lookup);
     MOZ_ASSERT(!p);
     return baselineCacheIRStubCodes_.add(p, std::move(key), stubCode);
-  }
-
-  [[nodiscard]] bool setAOTStubEntry(uint32_t corpusIdx, JitCode* code,
-                                     const CacheIRStubInfo* info) {
-    if (corpusIdx >= aotStubEntries_.length() &&
-        !aotStubEntries_.resize(corpusIdx + 1)) {
-      return false;
-    }
-    aotStubEntries_[corpusIdx] = AOTStubEntry{code, info};
-    return true;
-  }
-
-  const AOTStubEntry* getAOTStubEntry(uint32_t corpusIdx) const {
-    if (corpusIdx >= aotStubEntries_.length() ||
-        !aotStubEntries_[corpusIdx].code) {
-      return nullptr;
-    }
-    return &aotStubEntries_[corpusIdx];
   }
 
   CacheIRStubInfo* getIonCacheIRStubInfo(const CacheIRStubKey::Lookup& key) {

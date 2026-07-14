@@ -148,7 +148,6 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(useAOTBaselineCorpus, false);
   SET_DEFAULT(useAOTICs, false);
   SET_DEFAULT(enforceAOTICs, false);
-  SET_DEFAULT(useAOTICHints, true);
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   // Whether the Portable Baseline Interpreter is enabled.
@@ -215,9 +214,6 @@ DefaultJitOptions::DefaultJitOptions() {
   }
   if (getenv("JS_AOT_ICS_DUMP")) {
     dumpAOTICs = true;
-  }
-  if (getenv("JS_AOT_IC_HINTS_DISABLE")) {
-    useAOTICHints = false;
   }
   if (enforceAOTICs) {
     useAOTICs = true;

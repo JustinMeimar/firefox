@@ -83,7 +83,6 @@ struct DefaultJitOptions {
   bool useAOTBaselineCorpus;
   bool useAOTICs;
   bool enforceAOTICs;
-  bool useAOTICHints;
   bool baselineInterpreter;
   bool baselineJit;
   bool baselineBatching;
@@ -205,9 +204,6 @@ struct DefaultJitOptions {
   bool aotNeedsFrameTableSlot() const {
     return aotNeedsIndirectionTable() || enforceAOTBaselineCorpus ||
            useAOTBaselineCorpus;
-  }
-  bool aotHintsEnabled() const {
-    return useAOTICs && useAOTICHints;
   }
   bool aotLoadCorpusAtInit() const {
     return useAOTICs && !dumpAOTICs;

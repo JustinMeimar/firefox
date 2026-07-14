@@ -17,7 +17,7 @@ import argparse
 import re
 import shutil
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 RE_IC_ATTACH = re.compile(
@@ -41,13 +41,9 @@ def parse_ic_profile(path):
     Returns:
       freq:  Counter[(kind, hash) -> count]              -- corpus selection
       sizes: dict[(kind, hash) -> code_bytes]            -- knapsack weight
-      sites: dict[(kind, hash) -> set[(script, pc)]]     -- eager-attach hints
-             (script=0 sites are dropped: eval/dyngen/inlined ICScripts have
-              no stable identity across runs)
     """
     freq = Counter()
     sizes = {}
-    sites = {}
     with open(path) as f:
         for line in f:
             line = RE_TS.sub("", line)
@@ -58,10 +54,7 @@ def parse_ic_profile(path):
             key = (kind, int(h))
             freq[key] += 1
             sizes[key] = int(code_bytes)
-            script_i = int(script)
-            if script_i != 0:
-                sites.setdefault(key, set()).add((script_i, int(pc)))
-    return freq, sizes, sites
+    return freq, sizes
 
 
 def parse_baseline_profile(path):
@@ -71,7 +64,7 @@ def parse_baseline_profile(path):
     a new canonical, so freq is 1-per-line here. sizes carries the JitCode
     body size (matches the knapsack weight the container will pay).
     'kind' is fixed to "baseline" so the (kind, hash) key shape lines up
-    with the IC path. No sites dict -- baseline has no eager-attach hints.
+    with the IC path.
     """
     freq = Counter()
     sizes = {}
@@ -85,7 +78,7 @@ def parse_baseline_profile(path):
             key = ("baseline", int(h))
             freq[key] += 1
             sizes[key] = int(code_bytes)
-    return freq, sizes, {}
+    return freq, sizes
 
 
 def select_corpus(profiles, budget, kind):
@@ -98,21 +91,15 @@ def select_corpus(profiles, budget, kind):
         d_i  = v_i / max(size_i, 1)
 
     Greedily pick the highest-density stub that fits until budget is exhausted.
-
-    Also returns the union of observed (script, pc) sites per stub, for
-    eager-attach hint emission.
     """
     parse = parse_ic_profile if kind == "ic" else parse_baseline_profile
 
     all_freqs = []
     sizes = {}
-    all_sites = defaultdict(set)
     for path in profiles:
-        freq, sz, sites = parse(path)
+        freq, sz = parse(path)
         all_freqs.append(freq)
         sizes.update(sz)
-        for key, s in sites.items():
-            all_sites[key] |= s
 
     stubs = set()
     for freq in all_freqs:
@@ -141,31 +128,7 @@ def select_corpus(profiles, budget, kind):
         selected.add(best)
         b += sizes.get(best, 0)
 
-    return selected, density, sizes, all_sites
-
-
-def write_hints_tbl(path, selected, sites):
-    """Emit AOTHints.tbl as readable text, one hint per line:
-
-        scriptKey pcOffset stubHash
-
-    sorted by (scriptKey, pcOffset). Only sites of selected corpus stubs
-    are emitted. GenerateCacheIRFiles.py resolves stubHash to a corpus
-    index at build time and filters to zero-stub-data stubs.
-    """
-    hints = []
-    for (kind, stub_hash) in selected:
-        for (script_key, pc) in sites.get((kind, stub_hash), ()):
-            hints.append((script_key, pc, stub_hash))
-    hints.sort()
-
-    with open(path, "w") as f:
-        f.write("# AOT eager-attach IC hints, written by SelectAOTCorpus.py.\n")
-        f.write("# scriptKey pcOffset stubHash\n")
-        for script_key, pc, stub_hash in hints:
-            f.write(f"{script_key} {pc} {stub_hash}\n")
-
-    return len(hints), len({h[0] for h in hints})
+    return selected, density, sizes
 
 
 def find_dump_files(dump_dir, prefix):
@@ -207,7 +170,7 @@ def main():
 
     file_prefix = "IC-" if args.kind == "ic" else "BL-"
 
-    selected, density, sizes, sites = select_corpus(
+    selected, density, sizes = select_corpus(
         args.profiles, args.budget, args.kind)
 
     if not selected:
@@ -244,12 +207,6 @@ def main():
             missing += 1
 
     print(f"\nPopulated {out}: {copied} files copied, {missing} missing")
-
-    # Eager-attach hints are IC-specific; baseline has no hint story yet.
-    if args.kind == "ic":
-        hints_path = out / "AOTHints.tbl"
-        n_hints, n_scripts = write_hints_tbl(hints_path, selected, sites)
-        print(f"Wrote {hints_path}: {n_hints} hints across {n_scripts} scripts")
 
 
 if __name__ == "__main__":

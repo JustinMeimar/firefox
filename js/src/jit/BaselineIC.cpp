@@ -395,82 +395,6 @@ class MOZ_STATIC_CLASS OpToFallbackKindTable {
 
 static constexpr OpToFallbackKindTable FallbackKindTable;
 
-#ifdef ENABLE_JS_AOT
-
-// AOT IC Hinting Pipeline:
-//
-//   1. A PGO run with JS_AOT_PGO_DIR=<dir> dumps every compiled IC stub and
-//      appends one line per attach (script, pc, stubHash) to <dir>/AOTHints.tbl.
-//
-//   2. SelectAOTCorpus.py picks the IC corpus subject to a byte budget, and writes
-//      hints back to js/src/ics into AOTHints.tbl
-//
-//   3. GenerateCacheIRFiles.py reads AOTHints.tbl at build time and emits
-//      JS_AOT_EAGER_IC_HINTS(_) into jit/CacheIRAOTGenerated.h, which
-//      populates the sorted `hints[]` array in CacheIRAOT.cpp.
-//
-//   4. When a JitScript is first initialised, `initICEntries` calls
-//      `MaybeAttachAOTHintedStubs` at each JOF_IC bytecode. That walks the
-//      hint span for the script (sorted by pcOffset, matched via a shared
-//      cursor across the outer loop) and splices any pre-attached stubs
-//      onto the fresh ICEntry's stub chain.
-//
-//   * Only non-parametic stubs are candidates for IC hinting. These stubs are
-//     those which have no dynamic StubData fields. Dynamic fields pose
-//     a problem for eager IC attachment since stub field arguments are only
-//     realized in the fallback routine upon a miss. The fallback is precisely
-//     what we aim to avoid with eager attachment, so this causes a chicken
-//     egg problem. Thankfully non-parametric stubs make up some ~30% of
-//     Speedometer (frequency weighted).
-//
-//   * Pre-attached stubs are ICState-invisible: `addPreAttachedStub` splices
-//     without calling state_.trackAttached(), so IRGen decisions are
-//     unaffected by a mispredicted hint.
-//
-//   * Pre-attached stubs are transpiler-invisible until entered. Both
-//     WarpScriptOracle::maybeInlineIC and ICScript::hash skip leading
-//     stubs where isPreAttached() && enteredCount() == 0, so a mispredicted
-//     hint costs at most one dead guard per dispatch and does not perturb
-//     Ion type profiles. Initial prototype polluted the Warp Snapshot and caused ~10%
-//     regressions in some cases.
-
-static void MaybeAttachAOTHintedStubs(
-    JSContext* cx, JitZone* localJitZone, ICEntry& entry,
-    ICFallbackStub* fallback, uint32_t pcOffset,
-    const JitZone* atomsJitZone,
-    mozilla::Span<const CacheIRAOTHint> hints, size_t& cursor) {
-  while (cursor < hints.size() && hints[cursor].pcOffset < pcOffset) {
-    cursor++;
-  }
-  for (; cursor < hints.size() && hints[cursor].pcOffset == pcOffset;
-       cursor++) {
-    const JitZone::AOTStubEntry* aotStub =
-        atomsJitZone->getAOTStubEntry(hints[cursor].corpusIdx);
-    if (!aotStub) {
-      continue;
-    }
-    // Guard to assert we did not include any parametric IC stubs for
-    // eager attachment.
-    if (MOZ_UNLIKELY(aotStub->info->stubDataSize() != 0)) {
-      MOZ_ASSERT_UNREACHABLE("eager IC hint resolved to a Tier B stub");
-      continue;
-    }
-    void* mem = localJitZone->stubSpace()->alloc(aotStub->info->stubDataOffset());
-    if (!mem) {
-      // On OOM, stop eager attach; the fallback path still works.
-      return;
-    }
-    auto* newStub = new (mem) ICCacheIRStub(aotStub->code, aotStub->info);
-    fallback->addPreAttachedStub(&entry, newStub);
-
-    AOT_INSTR(AOTInstr_IC, "ic-preattach kind=%s idx=%u script=%u pc=%u\n",
-              CacheKindNames[uint8_t(aotStub->info->kind())],
-              hints[cursor].corpusIdx, hints[cursor].scriptKey, pcOffset);
-  }
-}
-
-#endif  // ENABLE_JS_AOT
-
 void ICScript::initICEntries(JSContext* cx, JSScript* script) {
   MOZ_ASSERT(cx->zone()->jitZone());
   MOZ_ASSERT(jit::IsBaselineInterpreterEnabled() ||
@@ -483,19 +407,6 @@ void ICScript::initICEntries(JSContext* cx, JSScript* script) {
 
   const BaselineICFallbackCode& fallbackCode =
       cx->runtime()->jitRuntime()->baselineICFallbackCode();
-
-#ifdef ENABLE_JS_AOT
-  mozilla::Span<const CacheIRAOTHint> aotHints;
-  const JitZone* atomsJitZone = nullptr;
-  if (JitOptions.aotHintsEnabled() && !isInlined() &&
-      !script->treatAsRunOnce()) {
-    aotHints = GetAOTEagerICHintsForScript(JitHintsMap::getScriptKey(script));
-    if (!aotHints.empty()) {
-      atomsJitZone = cx->runtime()->atomsZone()->jitZone();
-    }
-  }
-  size_t aotHintCursor = 0;
-#endif
 
   // For JOF_IC ops: initialize ICEntries and fallback stubs.
   for (BytecodeLocation loc : js::AllBytecodesIterable(script)) {
@@ -532,13 +443,6 @@ void ICScript::initICEntries(JSContext* cx, JSScript* script) {
     icEntryIndex++;
     new (&entryRef) ICEntry(stub);
     new (stub) ICFallbackStub(offset, stubCode);
-
-#ifdef ENABLE_JS_AOT
-    if (atomsJitZone) {
-      MaybeAttachAOTHintedStubs(cx, cx->zone()->jitZone(), entryRef, stub,
-                                offset, atomsJitZone, aotHints, aotHintCursor);
-    }
-#endif
   }
 
   // Assert all ICEntries have been initialized.
