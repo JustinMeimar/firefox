@@ -61,7 +61,7 @@ static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 static constexpr uint32_t kNoCorpusIndex = UINT32_MAX; // Used for IC hints
 static constexpr uint32_t kAOTAlignment = 16;
-static constexpr uint32_t AOT_CONTAINER_VERSION = 11;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 12;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 
 // Bump AOT_CONTAINER_VERSION on any change to the wire format:
@@ -69,6 +69,11 @@ static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 // (see AOTBlobSchema.yaml), AOTSlot enum renumbering, or fingerprint
 // contents. A stale container that matches the old magic but not the new
 // layout otherwise deserializes into garbage.
+//
+// v12: Removed explicit padding fields from AOTBlobSchema.yaml. Natural
+// C++ alignment produces the same trailing layout via the generator's
+// struct_sizeof helper; BaselineFunction's sizeof is unchanged at 48
+// bytes while InlineCacheStub shrinks from 16 to 12.
 //
 // v11: BaselineFunction blobs' `nameHash` is the O(1) probe key
 // (SharedImmutableScriptData::hash(); see ComputeBaselineProbeHash in
@@ -278,8 +283,8 @@ class AOTBlobWriter {
   }
 
  public:
-  AOTBlobWriter(AOTBlobKind kind, uint32_t nameHash, uint32_t corpusIndex,
-                std::string name);
+  explicit AOTBlobWriter(AOTBlobKind kind, uint32_t nameHash,
+                         uint32_t corpusIndex, std::string name);
   AOTBlobWriter(AOTBlobWriter&&) = default;
   AOTBlobWriter& operator=(AOTBlobWriter&&) = default;
 
@@ -298,22 +303,22 @@ class AOTBlobWriter {
     return {arrays_.begin(), arrays_.length()};
   }
 
-  bool writeCode(const uint8_t* data, size_t len) {
+  [[nodiscard]] bool writeCode(const uint8_t* data, size_t len) {
     return writeRawBytes(code_, data, len);
   }
 
-  bool writeFieldsRaw(const uint8_t* data, size_t len) {
+  [[nodiscard]] bool writeFieldsRaw(const uint8_t* data, size_t len) {
     return writeRawBytes(fields_, data, len);
   }
 
-  bool writeArraysRaw(const uint8_t* data, size_t len) {
+  [[nodiscard]] bool writeArraysRaw(const uint8_t* data, size_t len) {
     return writeRawBytes(arrays_, data, len);
   }
 
   size_t codeSize() const { return code_.length(); }
 
   template <typename T>
-  bool writeFields(const T& f) {
+  [[nodiscard]] bool writeFields(const T& f) {
     static_assert(std::is_trivially_copyable_v<T>,
                   "AOT fields POD must be trivially copyable");
     return writeRawBytes(fields_,
@@ -321,7 +326,7 @@ class AOTBlobWriter {
   }
 
   template <typename T>
-  bool writeArray(mozilla::Span<T> data) {
+  [[nodiscard]] bool writeArray(mozilla::Span<T> data) {
     static_assert(std::is_trivially_copyable_v<T>,
                   "AOT array elements must be trivially copyable");
     if (data.empty()) return true;
@@ -345,7 +350,7 @@ class AOTContainerWriter {
     return true;
   }
   uint32_t blobCount() const { return blobs_.length(); }
-  bool finalize(std::ostream& out);
+  [[nodiscard]] bool finalize(std::ostream& out);
 };
 
 

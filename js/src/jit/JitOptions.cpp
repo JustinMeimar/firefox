@@ -140,6 +140,7 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(dumpAOTBaseline, false);
   SET_DEFAULT(dumpAOTSelfHosted, false);
   SET_DEFAULT(dumpAOTBaselineCorpus, false);
+  SET_DEFAULT(dumpAOTICs, false);
   SET_DEFAULT(enforceAOTBaselineCorpus, false);
 
   SET_DEFAULT(useAOTBaseline, false);
@@ -205,8 +206,6 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(runExtraChecks, false);
 
 #ifdef ENABLE_JS_AOT
-  SET_DEFAULT(dumpAOTICs, false);
-
   if (getenv("JS_AOT_ICS")) {
     useAOTICs = true;
   }
@@ -220,11 +219,10 @@ DefaultJitOptions::DefaultJitOptions() {
   if (getenv("JS_AOT_IC_HINTS_DISABLE")) {
     useAOTICHints = false;
   }
-#endif
-
   if (enforceAOTICs) {
     useAOTICs = true;
   }
+#endif
 
   // How many invocations or loop iterations are needed before functions
   // enter the Baseline Interpreter.

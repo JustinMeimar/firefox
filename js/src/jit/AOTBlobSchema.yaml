@@ -81,7 +81,6 @@ blobs:
       - {name: makesGCCalls,      type: u8}
       - {name: stubDataOffset,    type: u8}
       - {name: localTracingSlots, type: u8}
-      - {name: pad,               type: u8}
       - {name: cacheIRCodeLength, type: u32}
       - {name: numStubFields,     type: u32}
     arrays:
@@ -108,11 +107,6 @@ blobs:
       - {name: nargs,                     type: u16}
       - {name: nfixed,                    type: u16}
       - {name: scopeKind,                 type: u8}
-      # scopeKind (u8) + pad0 (u8) + pad1 (u16) = 4 bytes, aligning the
-      # trailing array section to a 4-byte boundary. Hand-counted; adjust
-      # when adding fields above.
-      - {name: pad0,                      type: u8}
-      - {name: pad1,                      type: u16}
     arrays:
       - {name: retAddrs,      element: "js::jit::RetAddrEntry",
                               count_from: retAddrEntryCount}

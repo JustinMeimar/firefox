@@ -76,6 +76,7 @@ struct DefaultJitOptions {
   bool dumpAOTBaseline;
   bool dumpAOTSelfHosted;
   bool dumpAOTBaselineCorpus;
+  bool dumpAOTICs;
   bool enforceAOTBaselineCorpus;
   bool useAOTBaseline;
   bool useAOTSelfHosted;
@@ -136,9 +137,6 @@ struct DefaultJitOptions {
   uint32_t ionMaxLocalsAndArgsMainThread;
   uint32_t wasmBatchBaselineThreshold;
   uint32_t wasmBatchIonThreshold;
-#ifdef ENABLE_JS_AOT
-  bool dumpAOTICs;
-#endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to
   // measure the effectiveness of each mitigation with various proof of

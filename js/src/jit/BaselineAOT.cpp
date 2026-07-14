@@ -133,12 +133,12 @@ void DumpAOTBaselineFunctionToDir(const char* dir, uint32_t canonicalHash,
   fclose(f);
 }
 
-// Resolve the baseline corpus directory once. AOT_BASELINE_CORPUS_DIR
+// Resolve the baseline corpus directory once. JS_AOT_BASELINE_CORPUS_DIR
 // overrides the checked-in default (js/src/baselines) for both the
 // record side (RecordAOTBaselineFunction -> BL-*.bin) and the dump side
 // (DumpAOTContainer merge).
 static const char* BaselineCorpusDir() {
-  if (const char* env = getenv("AOT_BASELINE_CORPUS_DIR")) return env;
+  if (const char* env = getenv("JS_AOT_BASELINE_CORPUS_DIR")) return env;
   return "js/src/baselines";
 }
 

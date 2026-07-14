@@ -86,7 +86,7 @@ void DumpAOTBaselineFunctionToDir(const char* dir, uint32_t canonicalHash,
 
 // Dump one baseline function blob to the corpus dir when
 // --aot-baseline-corpus-enforce is set (target dir defaults to
-// js/src/baselines, overridable with AOT_BASELINE_CORPUS_DIR), and to
+// js/src/baselines, overridable with JS_AOT_BASELINE_CORPUS_DIR), and to
 // $JS_AOT_PGO_DIR when the baseline PGO channel is on. Both branches
 // are independent no-ops when their respective triggers are unset.
 void MaybeDumpBaselineFunctionForPGO(uint32_t canonicalHash,
