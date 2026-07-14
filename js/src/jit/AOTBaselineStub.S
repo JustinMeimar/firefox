@@ -4,10 +4,11 @@
 // The runtime detects the empty container and falls back to normal codegen.
 
 .section .text.aot,"ax",@progbits
-.balign 16
+.balign 4096
 .global bl_aot_text_start
 .global bl_aot_text_end
 bl_aot_text_start:
+.balign 4096
 bl_aot_text_end:
 
 .section .rodata

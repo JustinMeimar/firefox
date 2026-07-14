@@ -180,7 +180,7 @@ bool AOTContainerWriter::finalize(std::ostream& out) {
   out << "// " << blobCount << " blob(s)\n";
 
   out << ".section .text.aot,\"ax\",@progbits\n";
-  out << ".balign " << kAOTAlignment << "\n";
+  out << ".balign " << kAOTSectionAlignment << "\n";
   out << ".global bl_aot_text_start\n";
   out << ".global bl_aot_text_end\n";
   out << "bl_aot_text_start:\n";
@@ -203,6 +203,7 @@ bool AOTContainerWriter::finalize(std::ostream& out) {
     }
   }
 
+  out << ".balign " << kAOTSectionAlignment << "\n";
   out << "bl_aot_text_end:\n";
 
   out << ".section .rodata\n";

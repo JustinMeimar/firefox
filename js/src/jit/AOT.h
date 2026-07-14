@@ -60,31 +60,9 @@ class JitCode;
 static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 static constexpr uint32_t kAOTAlignment = 16;
+static constexpr uint32_t kAOTSectionAlignment = 4096;
 static constexpr uint32_t AOT_CONTAINER_VERSION = 13;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
-
-// Bump AOT_CONTAINER_VERSION on any change to the wire format:
-// AOTContainerHeader, AOTBlobDirectoryEntry, the fields POD of any blob
-// (see AOTBlobSchema.yaml), AOTSlot enum renumbering, or fingerprint
-// contents. A stale container that matches the old magic but not the new
-// layout otherwise deserializes into garbage.
-//
-// v13: Dropped the per-directory-entry corpusIndex field used by the eager
-// IC hint prototype; AOTBlobDirectoryEntry shrinks from 32 to 28 bytes.
-//
-// v12: Removed explicit padding fields from AOTBlobSchema.yaml. Natural
-// C++ alignment produces the same trailing layout via the generator's
-// struct_sizeof helper; BaselineFunction's sizeof is unchanged at 48
-// bytes while InlineCacheStub shrinks from 16 to 12.
-//
-// v11: BaselineFunction blobs' `nameHash` is the O(1) probe key
-// (SharedImmutableScriptData::hash(); see ComputeBaselineProbeHash in
-// BaselineAOT), not a hash of the canonical bytes. The canonical-bytes
-// memcmp inside the blob remains the ground-truth verify.
-
-// The container fingerprint POD (AOTCodegenOptions) is schema-defined
-// in jit/AOTBlobSchema.yaml and emitted into jit/AOTBlobGenerated.h.
-
 
 enum class AOTSlot : uint32_t {
 #define AOT_SLOT(name, ...) name,
