@@ -1524,9 +1524,9 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     // NOTE(aot): Emit the AOT blob on an isolated MacroAssembler, then
     // fall through to build the normal interpreter used at runtime. The
     // AOT-mode TLS indirection is unsafe in shared-library contexts.
-    if (JitOptions.dumpAOTBaseline) {
+    if (JitOptions.dumpAOTBlinterp) {
       auto clearDumpFlag = mozilla::MakeScopeExit(
-          [] { JitOptions.dumpAOTBaseline = false; });
+          [] { JitOptions.dumpAOTBlinterp = false; });
       TempAllocator dumpTemp(&cx->tempLifoAlloc());
       StackMacroAssembler dumpMasm(cx, dumpTemp);
       AutoAOTCodegen aot(dumpMasm, cx);

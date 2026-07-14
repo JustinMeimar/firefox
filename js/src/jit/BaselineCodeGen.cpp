@@ -7408,7 +7408,7 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 }
 
 #ifdef ENABLE_JS_AOT
-bool BaselineInterpreterGenerator::writeAOTBaseline(JSContext* cx, JitCode* code) {
+bool BaselineInterpreterGenerator::writeAOTBlinterp(JSContext* cx, JitCode* code) {
   const auto& debugInstr = handler.debugInstrumentationOffsets();
   const auto& debugTraps = debugTrapOffsets_;
   const auto& coverage = handler.codeCoverageOffsets();
@@ -7451,7 +7451,7 @@ bool BaselineInterpreterGenerator::writeAOTBaseline(JSContext* cx, JitCode* code
 bool BaselineInterpreterGenerator::generate(JSContext* cx,
                                             BaselineInterpreter& interpreter) {
 #ifdef ENABLE_JS_AOT
-  if (JitOptions.useAOTBaseline) {
+  if (JitOptions.useAOTBlinterp) {
     if (LoadAOTInterpFromContainer(cx, interpreter)) {
       MOZ_ASSERT(interpreter.loadedFromAOT());
       return true;
@@ -7549,7 +7549,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 #endif
 
 #ifdef ENABLE_JS_AOT
-    if (JitOptions.dumpAOTBaseline && !writeAOTBaseline(cx, code)) {
+    if (JitOptions.dumpAOTBlinterp && !writeAOTBlinterp(cx, code)) {
       JitSpew(JitSpew_BaselineAOT, "ERROR: Failed to serialize AOT fields");
       return false;
     }

@@ -73,12 +73,12 @@ struct DefaultJitOptions {
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   bool portableBaselineInterpreter;
 #endif
-  bool dumpAOTBaseline;
+  bool dumpAOTBlinterp;
   bool dumpAOTSelfHosted;
   bool dumpAOTBaselineCorpus;
   bool dumpAOTICs;
   bool enforceAOTBaselineCorpus;
-  bool useAOTBaseline;
+  bool useAOTBlinterp;
   bool useAOTSelfHosted;
   bool useAOTBaselineCorpus;
   bool useAOTICs;
@@ -195,7 +195,7 @@ struct DefaultJitOptions {
   // via the atoms JitZone). Gates both FillAOTICs and the AOT stub
   // lookup at BaselineCacheIRCompiler entry.
   bool aotNeedsIndirectionTable() const {
-    return useAOTBaseline || useAOTSelfHosted || useAOTICs || dumpAOTICs;
+    return useAOTBlinterp || useAOTSelfHosted || useAOTICs || dumpAOTICs;
   }
   // True when *any* AOT-mode baseline code may execute in this runtime.
   // Such code reads its indirection base from the baseline frame slot,

@@ -616,7 +616,7 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
 }
 
 bool DumpAOTContainer(JSContext* cx) {
-  MOZ_ASSERT(JitOptions.dumpAOTBaseline ||
+  MOZ_ASSERT(JitOptions.dumpAOTBlinterp ||
              JitOptions.dumpAOTSelfHosted ||
              JitOptions.dumpAOTICs ||
              JitOptions.dumpAOTBaselineCorpus);

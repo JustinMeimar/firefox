@@ -168,7 +168,7 @@ static_assert(sizeof(AOTBlobDirectoryEntry) == 32,
               "AOTBlobDirectoryEntry must be 32 bytes");
 
 // These symbols are defined by AOTBaselineStub.S, regenerated with
-// `--aot-dump-baseline --aot-dump-self-hosted`. Pre-bootstrap the stub is
+// `--aot-dump-blinterp --aot-dump-self-hosted`. Pre-bootstrap the stub is
 // empty and the runtime consumers must handle a zero-sized container.
 extern "C" {
   extern const uint8_t bl_aot_container_start[];

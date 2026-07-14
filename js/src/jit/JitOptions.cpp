@@ -137,13 +137,13 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether replacing Object.keys with NativeIterators is globally disabled.
   SET_DEFAULT(disableObjectKeysScalarReplacement, false);
 
-  SET_DEFAULT(dumpAOTBaseline, false);
+  SET_DEFAULT(dumpAOTBlinterp, false);
   SET_DEFAULT(dumpAOTSelfHosted, false);
   SET_DEFAULT(dumpAOTBaselineCorpus, false);
   SET_DEFAULT(dumpAOTICs, false);
   SET_DEFAULT(enforceAOTBaselineCorpus, false);
 
-  SET_DEFAULT(useAOTBaseline, false);
+  SET_DEFAULT(useAOTBlinterp, false);
   SET_DEFAULT(useAOTSelfHosted, false);
   SET_DEFAULT(useAOTBaselineCorpus, false);
   SET_DEFAULT(useAOTICs, false);

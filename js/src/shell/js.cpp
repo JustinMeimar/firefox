@@ -12402,7 +12402,7 @@ static int Shell(JSContext* cx, OptionParser* op) {
     // IC blobs, and self-hosted blobs are all populated by earlier
     // phases (JIT init / FillAOTICs / an explicit self-hosted walk
     // inside DumpAOTContainer) so they don't depend on this ordering.
-    if (jit::JitOptions.dumpAOTBaseline ||
+    if (jit::JitOptions.dumpAOTBlinterp ||
         jit::JitOptions.dumpAOTSelfHosted ||
         jit::JitOptions.dumpAOTICs ||
         jit::JitOptions.dumpAOTBaselineCorpus) {
@@ -13077,12 +13077,12 @@ bool InitOptionParser(OptionParser& op) {
                         "Disable Portable Baseline Interpreter") ||
 #endif
 #ifdef ENABLE_JS_AOT
-      !op.addBoolOption('\0', "aot-dump-baseline", "Dump baseline interpreter binary for AOT patching.") ||
+      !op.addBoolOption('\0', "aot-dump-blinterp", "Dump baseline interpreter binary for AOT patching.") ||
       !op.addBoolOption('\0', "aot-dump-self-hosted", "Dump AOT-compiled self-hosted function blobs.") ||
       !op.addBoolOption('\0', "aot-dump-ics", "Dump AOT IC stubs as binary blobs into the container.") ||
       !op.addBoolOption('\0', "aot-dump-baseline-corpus", "Emit the AOT container from BL-*.bin files in the baseline corpus dir. Symmetric to --aot-dump-ics.") ||
       !op.addBoolOption('\0', "aot", "Use all AOT compiled artifacts.") ||
-      !op.addBoolOption('\0', "aot-baseline", "Use AOT baseline interpreter.") ||
+      !op.addBoolOption('\0', "aot-blinterp", "Use AOT baseline interpreter.") ||
       !op.addBoolOption('\0', "aot-self-hosted", "Use AOT self-hosted functions.") ||
       !op.addBoolOption('\0', "aot-ics", "Use AOT inline caches.") ||
       !op.addBoolOption('\0', "aot-baseline-corpus", "Install AOT baseline functions from corpus on baseline entry.") ||
@@ -14214,8 +14214,8 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
     jit::JitOptions.baselineJit = false;
   }
 #ifdef ENABLE_JS_AOT
-  if (op.getBoolOption("aot-dump-baseline")) {
-    jit::JitOptions.dumpAOTBaseline = true;
+  if (op.getBoolOption("aot-dump-blinterp")) {
+    jit::JitOptions.dumpAOTBlinterp = true;
   }
   if (op.getBoolOption("aot-dump-self-hosted")) {
     jit::JitOptions.dumpAOTSelfHosted = true;
@@ -14227,13 +14227,13 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
     jit::JitOptions.dumpAOTBaselineCorpus = true;
   }
   if (op.getBoolOption("aot")) {
-    jit::JitOptions.useAOTBaseline = true;
+    jit::JitOptions.useAOTBlinterp = true;
     jit::JitOptions.useAOTSelfHosted = true;
     jit::JitOptions.useAOTICs = true;
     jit::JitOptions.useAOTBaselineCorpus = true;
   }
-  if (op.getBoolOption("aot-baseline")) {
-    jit::JitOptions.useAOTBaseline = true;
+  if (op.getBoolOption("aot-blinterp")) {
+    jit::JitOptions.useAOTBlinterp = true;
   }
   if (op.getBoolOption("aot-self-hosted")) {
     jit::JitOptions.useAOTSelfHosted = true;

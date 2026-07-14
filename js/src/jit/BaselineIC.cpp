@@ -139,7 +139,7 @@ AllocatableGeneralRegisterSet BaselineICAvailableGeneralRegs(size_t numInputs) {
   regs.take(ICStubReg);
 
 #ifdef ENABLE_JS_AOT
-  if (JitOptions.useAOTBaseline) {
+  if (JitOptions.useAOTBlinterp) {
     regs.take(AOTTablePassReg);
   }
 #endif

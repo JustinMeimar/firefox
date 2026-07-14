@@ -605,7 +605,7 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   uint32_t debugTrapHandlerOffset_ = 0;
 
 #ifdef ENABLE_JS_AOT
-  [[nodiscard]] bool writeAOTBaseline(JSContext* cx, JitCode* code);
+  [[nodiscard]] bool writeAOTBlinterp(JSContext* cx, JitCode* code);
 #endif
 
   BaselineInterpreterPerfSpewer perfSpewer_;
