@@ -28,6 +28,7 @@
 #include "jit/FoldLinearArithConstants.h"
 #include "jit/FoldTests.h"
 #include "jit/InlineScriptTree.h"
+#include "jit/Instr.h"
 #include "jit/InstructionReordering.h"
 #include "jit/Invalidation.h"
 #include "jit/InvalidationScriptSet.h"
@@ -115,6 +116,8 @@ uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
 
 bool JitRuntime::initialize(JSContext* cx) {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
+
+  gJSInstr.init();
 
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
