@@ -32,6 +32,8 @@
   _(WasmCodeProtected, 450)             \
                                         \
   _(WasmInitBuiltinThunks, 451)         \
+                                        \
+  _(AOTCorpusFlusher, 550)              \
   _(StringsCache, 500)                  \
   _(FutexThread, 500)                   \
   _(ProtectedRegionTree, 500)           \
@@ -42,6 +44,7 @@
   _(JitSpewGraphOutput, 500)            \
   _(PerfSpewer, 500)                    \
   _(AOTInstrumentation, 500)            \
+  _(AOTCorpusAccum, 500)                \
   _(CacheIRSpewer, 500)                 \
   _(DateTimeInfoMutex, 500)             \
   _(ProcessExecutableRegion, 500)       \

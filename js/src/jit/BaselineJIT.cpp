@@ -430,9 +430,15 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       return Method_Error;
     }
   } else {
-    // NOTE(aot): AOT dump path bypasses PrepareToCompile. The JitScript
-    // is expected to already exist.
-    MOZ_ASSERT(rooted->hasJitScript());
+    // AOT dump path skips the parts of PrepareToCompile that bake in
+    // per-realm state (coverage counts, JitHintsMap) but still needs a
+    // JitScript. The shell self-hosted driver ensures one before calling
+    // in; the browser record path can arrive here on a guest script's
+    // first baseline compile without one.
+    AutoKeepJitScripts keepJitScript(cx);
+    if (!rooted->ensureHasJitScript(cx, keepJitScript)) {
+      return Method_Error;
+    }
     if (!rooted->jitScript()->ensureHasCachedBaselineJitData(cx, rooted)) {
       return Method_Error;
     }
@@ -604,7 +610,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
       return Method_Compiled;
     }
   }
-  bool aotDump = JitOptions.enforceAOTBaselineCorpus && aotEligible &&
+  bool aotDump = JitOptions.recordAOTBaselineCorpus && aotEligible &&
                  !IsAOTBaselineFunctionRecorded(cx, script);
   MethodStatus status = BaselineCompile(cx, script, options,
                                         /*isAOTDump=*/aotDump);

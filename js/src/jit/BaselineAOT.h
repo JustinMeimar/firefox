@@ -16,6 +16,10 @@
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIR.h"
 #include "js/Vector.h"
+#include "threading/ConditionVariable.h"
+#include "threading/Mutex.h"
+#include "threading/Thread.h"
+#include "vm/MutexIDs.h"
 
 namespace js::jit {
 
@@ -91,13 +95,63 @@ void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
 void DumpAOTBaselineFunctionToDir(const char* dir, uint32_t canonicalHash,
                                   const AOTBlobWriter& blob);
 
-// Dump one baseline function blob to the corpus dir when
-// --aot-baseline-corpus-enforce is set (target dir defaults to
-// js/src/baselines, overridable with JS_AOT_BASELINE_CORPUS_DIR), and to
-// $JS_AOT_PGO_DIR when the baseline PGO channel is on. Both branches
-// are independent no-ops when their respective triggers are unset.
+// Dump one baseline function blob to $JS_AOT_PGO_DIR when the baseline
+// PGO channel is on. No-op when the channel is off.
 void MaybeDumpBaselineFunctionForPGO(uint32_t canonicalHash,
                                      const AOTBlobWriter& blob);
+
+// Content-addressed IC record entry point. Hashes the CacheIR body,
+// dedups against JitRuntime::aotDump_.recordedICStubHashes, and hands
+// the resulting blob to the AOTCorpusFlusher for background write to
+// $JS_AOT_ICS_CORPUS_DIR. Only called when JitOptions.recordAOTICs is
+// true. Non-fatal on any failure (matches the "record never crashes"
+// contract).
+void RecordAOTICStub(JSContext* cx, CacheKind kind,
+                     const CacheIRWriter& writer);
+
+// Wait for the background flusher to finish any queued writes, then
+// synchronously write any residual pending blobs. Idempotent. Called
+// from JS_ShutDown and from DumpAOTContainer before merge-from-disk.
+void DrainPendingAOTCorpus(JSContext* cx);
+
+// Owns a single background writer thread. Enqueue is O(1) under a
+// private mutex; the writer thread wakes on a condvar, snapshots the
+// queues, and writes files without holding any lock the compile thread
+// contends for. Lazily started by RecordAOTBaselineFunction /
+// RecordAOTICStub on first miss.
+class AOTCorpusFlusher {
+ public:
+  struct BaselineEntry {
+    uint32_t canonicalHash;
+    AOTBlobWriter blob;
+  };
+
+  AOTCorpusFlusher(std::string baselineDir, std::string icDir);
+  ~AOTCorpusFlusher();
+
+  [[nodiscard]] bool ensureThreadStarted();
+  void enqueueBaseline(BaselineEntry&& entry);
+  void enqueueIC(AOTBlobWriter&& blob);
+  void drainAndStop();
+
+ private:
+  static void ThreadEntry(AOTCorpusFlusher* self);
+  void writerMain();
+  void writeBatch(Vector<BaselineEntry, 0, SystemAllocPolicy>& baselineBatch,
+                  Vector<AOTBlobWriter, 0, SystemAllocPolicy>& icBatch);
+
+  std::string baselineDir_;
+  std::string icDir_;
+
+  Mutex mutex_ MOZ_UNANNOTATED{mutexid::AOTCorpusFlusher};
+  ConditionVariable cv_;
+  Vector<BaselineEntry, 0, SystemAllocPolicy> baselinePending_;
+  Vector<AOTBlobWriter, 0, SystemAllocPolicy> icPending_;
+  bool stopRequested_ = false;
+  bool threadStarted_ = false;
+  bool drained_ = false;
+  Thread thread_;
+};
 
 #endif  // ENABLE_JS_AOT
 
