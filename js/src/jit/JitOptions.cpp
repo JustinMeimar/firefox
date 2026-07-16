@@ -142,6 +142,9 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(dumpAOTBaselineCorpus, false);
   SET_DEFAULT(dumpAOTICs, false);
 
+  SET_DEFAULT(recordAOTBaselineCorpus, false);
+  SET_DEFAULT(recordAOTICs, false);
+
   SET_DEFAULT(useAOTBlinterp, false);
   SET_DEFAULT(useAOTSelfHosted, false);
   SET_DEFAULT(useAOTBaselineCorpus, false);
@@ -212,6 +215,12 @@ DefaultJitOptions::DefaultJitOptions() {
   }
   if (getenv("JS_AOT_ICS_DUMP")) {
     dumpAOTICs = true;
+  }
+  if (getenv("JS_AOT_RECORD_BASELINE")) {
+    recordAOTBaselineCorpus = true;
+  }
+  if (getenv("JS_AOT_RECORD_ICS")) {
+    recordAOTICs = true;
   }
   // enforce is strict-mode: it requires a loaded container to enforce against.
   if (enforceAOTICs) {

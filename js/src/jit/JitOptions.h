@@ -77,6 +77,8 @@ struct DefaultJitOptions {
   bool dumpAOTSelfHosted;
   bool dumpAOTBaselineCorpus;
   bool dumpAOTICs;
+  bool recordAOTBaselineCorpus;
+  bool recordAOTICs;
   bool useAOTBlinterp;
   bool useAOTSelfHosted;
   bool useAOTBaselineCorpus;

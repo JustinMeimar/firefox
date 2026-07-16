@@ -171,6 +171,7 @@ def main(c_out, yaml_path):
     body = [
         "#include <cstdint>",
         "",
+        '#include "mozilla/SHA1.h"',
         '#include "mozilla/Span.h"',
         "",
         '#include "jit/AOT.h"',

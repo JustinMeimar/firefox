@@ -103,10 +103,14 @@ blobs:
       - {name: resumeEntryCount,          type: u32}
       - {name: codeSize,                  type: u32}
       - {name: headerSize,                type: u32}
-      - {name: canonicalSize,             type: u32}
       - {name: nargs,                     type: u16}
       - {name: nfixed,                    type: u16}
       - {name: scopeKind,                 type: u8}
+      # SHA-1 of ComputeBaselineCanonical(script). Ground-truth identity
+      # check on load; supersedes storing the full canonical byte stream.
+      - {name: canonicalHash,             type: raw,
+                                          cpp_type: "mozilla::SHA1Sum::Hash",
+                                          size: 20}
     arrays:
       - {name: retAddrs,      element: "js::jit::RetAddrEntry",
                               count_from: retAddrEntryCount}
@@ -116,5 +120,3 @@ blobs:
                               count_from: debugTrapEntryCount}
       - {name: resumeOffsets, element: "uint32_t",
                               count_from: resumeEntryCount}
-      - {name: canonical,     element: "uint8_t",
-                              count_from: canonicalSize}

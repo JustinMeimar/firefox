@@ -277,19 +277,22 @@ class JitRuntime {
     Vector<AOTBlobWriter, 0, SystemAllocPolicy> baselineFunctionBlobs;
     Vector<AOTBlobWriter, 0, SystemAllocPolicy> icStubBlobs;
 
-    // Guards `recordedBaselineCanonicals`. Held across the check-then-
-    // add so parallel Baseline compile tasks can't record the same blob
-    // twice.
+    // Guards `recordedBaselineCanonicals` and `recordedICStubHashes`.
+    // Held across the check-then-add so parallel Baseline compile tasks
+    // can't record the same blob twice.
     js::Mutex mutex MOZ_UNANNOTATED{js::mutexid::AOTCorpusAccum};
 
-    HashSet<uint32_t, mozilla::DefaultHasher<uint32_t>, SystemAllocPolicy>
+    HashSet<AOTHashKey, AOTHashKeyHasher, SystemAllocPolicy>
         recordedBaselineCanonicals;
+    HashSet<AOTHashKey, AOTHashKeyHasher, SystemAllocPolicy>
+        recordedICStubHashes;
 
     void clear() {
       interpreterBlob.reset();
       baselineFunctionBlobs.clearAndFree();
       icStubBlobs.clearAndFree();
       recordedBaselineCanonicals.clearAndCompact();
+      recordedICStubHashes.clearAndCompact();
     }
   };
   AOTDumpAccumulator aotDump_;

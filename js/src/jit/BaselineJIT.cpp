@@ -612,6 +612,9 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   MethodStatus status = BaselineCompile(cx, script, options);
   if (status == Method_Compiled) {
     EmitBaselineCompileEvent(cx, script);
+    if (JitOptions.recordAOTBaselineCorpus && !script->isDebuggee()) {
+      (void)RecordAOTBaselineFunction(cx, script);
+    }
   }
   return status;
 #else

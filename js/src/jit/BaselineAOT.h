@@ -46,6 +46,13 @@ uint32_t ComputeBaselineProbeHash(JSScript* script);
 [[nodiscard]] bool RecordAOTBaselineFunction(JSContext* cx,
                                              HandleScript script);
 
+// Observation-driven IC stub recorder. Called from
+// AttachBaselineCacheIRStubLocked once a CacheIR stub has been compiled
+// or looked up. Dedup by SHA-1(cacheIR bytes + fieldTypes) so folded /
+// re-attached stubs collapse to a single blob.
+[[nodiscard]] bool RecordAOTICStub(JSContext* cx, JitCode* code,
+                                   CacheIRStubInfo* stubInfo);
+
 // Emit a `baseline-compile` line to the AOTInstr_Baseline channel when
 // enabled. Fires per successful baseline compile regardless of corpus
 // mode, so `JS_AOT_INSTR=baseline` alone yields per-workload frequency

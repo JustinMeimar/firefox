@@ -2222,6 +2222,9 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   if (!stubInfo) {
     return ICAttachResult::TooLarge;
   }
+  if (JitOptions.recordAOTICs) {
+    (void)RecordAOTICStub(cx, code, stubInfo);
+  }
 #endif
 
   ICEntry* icEntry = icScript->icEntryForStub(stub);

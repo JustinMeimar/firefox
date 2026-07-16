@@ -8,6 +8,7 @@
 #define jit_AOT_h
 
 
+#include "mozilla/HashFunctions.h"
 #include "mozilla/HashTable.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Types.h"
@@ -64,7 +65,7 @@ static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 static constexpr uint32_t kAOTAlignment = 16;
 static constexpr uint32_t kAOTSectionAlignment = 4096;
-static constexpr uint32_t AOT_CONTAINER_VERSION = 13;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 14;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 
 enum class AOTSlot : uint32_t {
@@ -112,6 +113,24 @@ enum class AOTBlobKind : uint32_t {
   // and guest scripts; identity is canonical byte content (see
   // ComputeBaselineCanonical), so origin is irrelevant.
   BaselineFunction = 2,
+};
+
+// 20-byte SHA-1 digest wrapper usable as a HashSet key. Backs
+// AOTDumpAccumulator dedup sets for baseline canonicals and IC stubs.
+struct AOTHashKey {
+  static constexpr size_t kSize = 20;
+  uint8_t bytes[kSize];
+  bool operator==(const AOTHashKey& o) const {
+    return memcmp(bytes, o.bytes, kSize) == 0;
+  }
+};
+
+struct AOTHashKeyHasher {
+  using Lookup = AOTHashKey;
+  static mozilla::HashNumber hash(const Lookup& l) {
+    return mozilla::HashBytes(l.bytes, AOTHashKey::kSize);
+  }
+  static bool match(const AOTHashKey& k, const Lookup& l) { return k == l; }
 };
 
 // The container is a flat binary. Layout:

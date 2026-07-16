@@ -6,7 +6,7 @@
 
 #include "jit/BaselineAOT.h"
 
-#include "mozilla/HashFunctions.h"
+#include "mozilla/SHA1.h"
 
 #include <cstdint>
 #include <cstring>
@@ -134,16 +134,19 @@ static bool ComputeBaselineCanonical(
   return true;
 }
 
+static void HashBaselineCanonical(mozilla::Span<const uint8_t> canonical,
+                                  mozilla::SHA1Sum::Hash& out) {
+  mozilla::SHA1Sum sha;
+  sha.update(canonical.data(), uint32_t(canonical.size()));
+  sha.finish(out);
+}
+
 // ============================================================
 // Blob Encode / Decode
 // ============================================================
 
-// canonical must be ComputeBaselineCanonical(script) for the same
-// script; otherwise the blob fails canonical-match on load.
-// TODO(Justin): promote this contract to a DEBUG-only recompute +
-// memcmp assert so it stops being a prose promise.
 [[nodiscard]] static bool EncodeBaselineFunctionBlob(
-    HandleScript script, mozilla::Span<const uint8_t> canonical,
+    HandleScript script, const mozilla::SHA1Sum::Hash& canonicalHash,
     BaselineScript* bs, AOTBlobWriter& blob) {
   Vector<uint32_t, 0, SystemAllocPolicy> resumeBuf;
   if (!bs->aotResumeOffsets(resumeBuf)) return false;
@@ -160,7 +163,6 @@ static bool ComputeBaselineCanonical(
           .resumeEntryCount = uint32_t(resumeBuf.length()),
           .codeSize = uint32_t(jitCode->instructionsSize()),
           .headerSize = uint32_t(jitCode->headerSize()),
-          .canonicalSize = uint32_t(canonical.size()),
           .nargs = script->function()
                        ? uint16_t(script->function()->nargs())
                        : uint16_t(0),
@@ -173,8 +175,9 @@ static bool ComputeBaselineCanonical(
       .debugTraps = bs->aotDebugTrapEntries(),
       .resumeOffsets = mozilla::Span<const uint32_t>(resumeBuf.begin(),
                                                      resumeBuf.length()),
-      .canonical = canonical,
   };
+  memcpy(payload.fields.canonicalHash, canonicalHash,
+         mozilla::SHA1Sum::kHashSize);
 
   return EncodeAOTBlob_BaselineFunction(blob, payload);
 }
@@ -364,8 +367,12 @@ void EmitBaselineCompileEvent(JSContext* cx, JSScript* script) {
 
   Vector<uint8_t, 0, SystemAllocPolicy> canonical;
   if (!ComputeBaselineCanonical(script, canonical)) return;
-  uint32_t canonicalHash = uint32_t(
-      mozilla::HashBytes(canonical.begin(), canonical.length()));
+  mozilla::SHA1Sum::Hash canonicalHash;
+  HashBaselineCanonical(
+      mozilla::Span<const uint8_t>(canonical.begin(), canonical.length()),
+      canonicalHash);
+  uint32_t hashPrefix;
+  memcpy(&hashPrefix, canonicalHash, sizeof(hashPrefix));
   uint32_t probeHash = ComputeBaselineProbeHash(script);
 
   std::string name;
@@ -378,9 +385,9 @@ void EmitBaselineCompileEvent(JSContext* cx, JSScript* script) {
   if (name.empty()) name = "top_level";
 
   AOT_INSTR(AOTInstr_Baseline,
-            "baseline-compile hash=%u probe=%u code=%u canonical=%zu "
+            "baseline-compile sha1=%08x probe=%u code=%u canonical=%zu "
             "nargs=%u scope=%u name=%s\n",
-            unsigned(canonicalHash), unsigned(probeHash),
+            hashPrefix, unsigned(probeHash),
             unsigned(bs->method()->instructionsSize()),
             canonical.length(),
             script->function() ? unsigned(script->function()->nargs()) : 0u,
@@ -389,7 +396,8 @@ void EmitBaselineCompileEvent(JSContext* cx, JSScript* script) {
 }
 
 bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
-  MOZ_ASSERT(JitOptions.dumpAOTSelfHosted);
+  MOZ_ASSERT(JitOptions.dumpAOTSelfHosted ||
+             JitOptions.recordAOTBaselineCorpus);
   MOZ_ASSERT(script->hasBaselineScript());
 
   BaselineScript* bs = script->baselineScript();
@@ -400,17 +408,19 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   }
   mozilla::Span<const uint8_t> canonicalSpan(canonical.begin(),
                                              canonical.length());
-  uint32_t canonicalHash = uint32_t(
-      mozilla::HashBytes(canonicalSpan.data(), canonicalSpan.size()));
+  mozilla::SHA1Sum::Hash canonicalHash;
+  HashBaselineCanonical(canonicalSpan, canonicalHash);
+  AOTHashKey key;
+  memcpy(key.bytes, canonicalHash, sizeof(canonicalHash));
 
   auto& accum = cx->runtime()->jitRuntime()->aotDump_;
   {
     LockGuard<Mutex> lock(accum.mutex);
-    auto ptr = accum.recordedBaselineCanonicals.lookupForAdd(canonicalHash);
+    auto ptr = accum.recordedBaselineCanonicals.lookupForAdd(key);
     if (ptr) {
       return true;
     }
-    if (!accum.recordedBaselineCanonicals.add(ptr, canonicalHash)) return false;
+    if (!accum.recordedBaselineCanonicals.add(ptr, key)) return false;
   }
 
   std::string name;
@@ -429,22 +439,25 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   uint32_t probeHash = ComputeBaselineProbeHash(script);
   AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash, std::move(name));
 
-  if (!EncodeBaselineFunctionBlob(script, canonicalSpan, bs, blob)) {
+  if (!EncodeBaselineFunctionBlob(script, canonicalHash, bs, blob)) {
     return false;
   }
 
+  uint32_t hashPrefix;
+  memcpy(&hashPrefix, canonicalHash, sizeof(hashPrefix));
+
   JitSpew(JitSpew_BaselineAOT,
-          "AOT baseline function probe=%u canonicalHash=%u size=%zu "
+          "AOT baseline function probe=%u sha1=%08x size=%zu "
           "canonical=%zu nargs=%u scope=%u '%s'",
-          probeHash, canonicalHash, bs->method()->instructionsSize(),
+          probeHash, hashPrefix, bs->method()->instructionsSize(),
           canonicalSpan.size(),
           script->function() ? unsigned(script->function()->nargs()) : 0u,
           unsigned(script->outermostScope()->kind()),
           blob.name().c_str());
 
   AOT_INSTR(AOTInstr_Baseline,
-            "baseline-record hash=%u size=%u canonical=%u name=%s\n",
-            unsigned(canonicalHash),
+            "baseline-record sha1=%08x size=%u canonical=%u name=%s\n",
+            hashPrefix,
             unsigned(bs->method()->instructionsSize()),
             unsigned(canonicalSpan.size()), blob.name().c_str());
 
@@ -452,11 +465,75 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   return true;
 }
 
+bool RecordAOTICStub(JSContext* cx, JitCode* code,
+                     CacheIRStubInfo* stubInfo) {
+  MOZ_ASSERT(JitOptions.recordAOTICs || JitOptions.dumpAOTICs);
+  if (!code || !stubInfo) return true;
+
+  uint32_t numFields = 0;
+  while (stubInfo->fieldType(numFields) != StubField::Type::Limit) {
+    numFields++;
+  }
+  const uint8_t* cacheIRBytes = stubInfo->code();
+  uint32_t cacheIRLen = stubInfo->codeLength();
+  const uint8_t* fieldTypeBytes = cacheIRBytes + cacheIRLen;
+
+  mozilla::SHA1Sum sha;
+  uint8_t kindByte = uint8_t(stubInfo->kind());
+  sha.update(&kindByte, sizeof(kindByte));
+  sha.update(cacheIRBytes, cacheIRLen);
+  sha.update(fieldTypeBytes, numFields);
+  mozilla::SHA1Sum::Hash hash;
+  sha.finish(hash);
+
+  AOTHashKey key;
+  memcpy(key.bytes, hash, sizeof(hash));
+
+  auto& accum = cx->runtime()->jitRuntime()->aotDump_;
+  {
+    LockGuard<Mutex> lock(accum.mutex);
+    auto ptr = accum.recordedICStubHashes.lookupForAdd(key);
+    if (ptr) return true;
+    if (!accum.recordedICStubHashes.add(ptr, key)) return false;
+  }
+
+  AOTBlobWriter blob(AOTBlobKind::InlineCacheStub,
+                     /* nameHash = */ 0,
+                     "IC_" + std::to_string(accum.icStubBlobs.length()));
+
+  AOTPayload_InlineCacheStub payload{
+      .fields = {
+          .kind = stubInfo->kind(),
+          .makesGCCalls = uint8_t(stubInfo->makesGCCalls() ? 1 : 0),
+          .stubDataOffset = uint8_t(stubInfo->stubDataOffset()),
+          .localTracingSlots = uint8_t(code->localTracingSlots()),
+          .cacheIRCodeLength = cacheIRLen,
+          .numStubFields = numFields,
+      },
+      .code = mozilla::Span(code->raw(), code->instructionsSize()),
+      .cacheIRCode = mozilla::Span(cacheIRBytes, cacheIRLen),
+      .fieldTypes = mozilla::Span(fieldTypeBytes, size_t(numFields)),
+  };
+
+  if (!EncodeAOTBlob_InlineCacheStub(blob, payload)) return false;
+
+  uint32_t hashPrefix;
+  memcpy(&hashPrefix, hash, sizeof(hashPrefix));
+  AOT_INSTR(AOTInstr_IC,
+            "ic-record sha1=%08x kind=%u code=%u cacheIR=%u fields=%u\n",
+            hashPrefix, unsigned(kindByte),
+            unsigned(code->instructionsSize()), cacheIRLen, numFields);
+
+  return accum.icStubBlobs.append(std::move(blob));
+}
+
 bool DumpAOTContainer(JSContext* cx) {
   MOZ_ASSERT(JitOptions.dumpAOTBlinterp ||
              JitOptions.dumpAOTSelfHosted ||
              JitOptions.dumpAOTICs ||
-             JitOptions.dumpAOTBaselineCorpus);
+             JitOptions.dumpAOTBaselineCorpus ||
+             JitOptions.recordAOTBaselineCorpus ||
+             JitOptions.recordAOTICs);
 
   const char* textPath = getenv("JS_AOT_TEXT_BIN");
   if (!textPath) textPath = kAOTTextBinDefault;
@@ -645,6 +722,10 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
 
   Vector<uint8_t, 0, SystemAllocPolicy> canonical;
   if (!ComputeBaselineCanonical(script, canonical)) return false;
+  mozilla::Span<const uint8_t> canonicalSpan(canonical.begin(),
+                                             canonical.length());
+  mozilla::SHA1Sum::Hash liveHash;
+  HashBaselineCanonical(canonicalSpan, liveHash);
 
   enum class InstallResult { NoMatch, Installed, Failed };
   InstallResult result = InstallResult::NoMatch;
@@ -660,13 +741,11 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
           return false;
         }
 
-        if (payload.canonical.size() != canonical.length() ||
-            memcmp(payload.canonical.data(), canonical.begin(),
-                   canonical.length()) != 0) {
+        if (memcmp(payload.fields.canonicalHash, liveHash,
+                   mozilla::SHA1Sum::kHashSize) != 0) {
           JitSpew(JitSpew_BaselineAOT,
-                  "AOT baseline function canonical mismatch probe=%u "
-                  "(stored=%zu live=%zu)",
-                  probe, payload.canonical.size(), canonical.length());
+                  "AOT baseline function canonical hash mismatch probe=%u",
+                  probe);
           return false;
         }
 
