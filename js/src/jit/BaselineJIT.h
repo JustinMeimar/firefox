@@ -193,10 +193,9 @@ class alignas(uintptr_t) BaselineScript final
   HeapPtr<JitCode*> method_{nullptr};
 
 #ifdef ENABLE_JS_AOT
-  // NOTE(Refactor): This is a bad name for a seconday entry point for the
-  // preamble which baseline functions should take in order to setup the
-  // indirection mechanism.
-  uint8_t* entryPointRaw_{nullptr};
+  // AOT preamble trampoline. Callers enter through this so realm-
+  // specific state is live before the shared blob runs.
+  uint8_t* aotPreambleTrampoline_{nullptr};
 #endif
 
   // An ion compilation that is ready, but isn't linked yet.
@@ -306,13 +305,13 @@ class alignas(uintptr_t) BaselineScript final
   }
 
 #ifdef ENABLE_JS_AOT
-  static inline size_t offsetOfEntryPointRaw() {
-    return offsetof(BaselineScript, entryPointRaw_);
+  static inline size_t offsetOfAOTPreambleTrampoline() {
+    return offsetof(BaselineScript, aotPreambleTrampoline_);
   }
-  uint8_t* entryPointRaw() const { return entryPointRaw_; }
-  void setAOTPreambleEntry(uint8_t* preamble) {
-    MOZ_ASSERT(preamble);
-    entryPointRaw_ = preamble;
+  uint8_t* aotPreambleTrampoline() const { return aotPreambleTrampoline_; }
+  void setAOTPreambleTrampoline(uint8_t* trampoline) {
+    MOZ_ASSERT(trampoline);
+    aotPreambleTrampoline_ = trampoline;
   }
 #endif
 
@@ -335,9 +334,8 @@ class alignas(uintptr_t) BaselineScript final
     MOZ_ASSERT(!method_);
     method_ = code;
 #ifdef ENABLE_JS_AOT
-    // Default entry point is the code body; EnsureAOTPreambleFor may
-    // overwrite this with the preamble address later.
-    entryPointRaw_ = code->raw();
+    // Default to the code body; overwritten with the trampoline later.
+    aotPreambleTrampoline_ = code->raw();
 #endif
   }
 
@@ -429,6 +427,8 @@ class alignas(uintptr_t) BaselineScript final
     auto s = debugTrapEntries();
     return {s.data(), s.size()};
   }
+  // NOTE(refactor): why does this method take in a vector to fill rather
+  // than reutrning a span like the others?
   // Serialize resume entries as native offsets from method_->raw() so
   // they can be relocated on load. Unreachable entries were stored as
   // nullptr; encoded here as UINT32_MAX.

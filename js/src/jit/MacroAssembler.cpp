@@ -4244,11 +4244,10 @@ void MacroAssembler::loadJitCodeRawNoIon(Register func, Register dest,
 #endif
 
 #ifdef ENABLE_JS_AOT
-  // Read the cached entry point directly. For non-AOT baselines this is
-  // method_->raw(); for AOT baselines it's the preamble address, so
-  // callers uniformly enter through the preamble even when jitCodeRaw_
-  // has been repointed at Ion.
-  loadPtr(Address(scratch, BaselineScript::offsetOfEntryPointRaw()), dest);
+  // Use the cached target so callers enter through the trampoline
+  // even after Ion has taken over the primary entry.
+  loadPtr(Address(scratch, BaselineScript::offsetOfAOTPreambleTrampoline()),
+          dest);
 #else
   loadPtr(Address(scratch, BaselineScript::offsetOfMethod()), scratch);
   loadPtr(Address(scratch, JitCode::offsetOfCode()), dest);

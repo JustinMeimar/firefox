@@ -237,30 +237,29 @@ class JitRuntime {
 #ifdef ENABLE_JS_AOT
   AOTIndirectionTable aotIndirectionTable_;
 
-  // Preamble prepended to the AOT baseline interpreter entry for
-  // setting up indirection table mechanism.
-  WriteOnceData<JitCode*> aotInterpPreamble_{nullptr};
+  WriteOnceData<JitCode*> aotInterpPreambleTrampoline_{nullptr};
 
-  // The AOT dump/load subsystem (BaselineAOT.cpp,
-  // BaselineCacheIRCompiler.cpp) touches the fields below directly - they
-  // are co-owned in practice. Kept as public-by-convention rather than
-  // wrapped in accessors that would just forward Vector/HashSet ops.
+  // Public by convention; the AOT dump/load path co-owns these.
   public:
-  // NOTE(aot): Stored as JitCode* so the GC keeps each preamble alive.
-  struct AOTPreambleEntry { uint8_t* aotCode; JitCode* preamble; };
-  Vector<AOTPreambleEntry, 0, SystemAllocPolicy> aotPreambles_;
+  // JitCode* so the GC keeps each trampoline alive.
+  struct AOTPreambleTrampolineEntry {
+    uint8_t* aotCode;
+    JitCode* trampoline;
+  };
+  Vector<AOTPreambleTrampolineEntry, 0, SystemAllocPolicy>
+      aotPreambleTrampolines_;
 
-  uint8_t* lookupAOTPreamble(uint8_t* codeRaw) const {
-    for (const auto& e : aotPreambles_) {
-      if (e.aotCode == codeRaw) return e.preamble->raw();
+  uint8_t* lookupAOTPreambleTrampoline(uint8_t* codeRaw) const {
+    for (const auto& e : aotPreambleTrampolines_) {
+      if (e.aotCode == codeRaw) return e.trampoline->raw();
     }
     return nullptr;
   }
 
-  void traceAOTPreambles(JSTracer* trc);
-  void clearAOTPreambles() {
-    aotPreambles_.clear();
-    aotInterpPreamble_ = nullptr;
+  void traceAOTPreambleTrampolines(JSTracer* trc);
+  void clearAOTPreambleTrampolines() {
+    aotPreambleTrampolines_.clear();
+    aotInterpPreambleTrampoline_ = nullptr;
   }
 
   // Multiple per-realm JitCodes can point at the same AOT static .text
@@ -277,9 +276,7 @@ class JitRuntime {
     Vector<AOTBlobWriter, 0, SystemAllocPolicy> baselineFunctionBlobs;
     Vector<AOTBlobWriter, 0, SystemAllocPolicy> icStubBlobs;
 
-    // Guards `recordedBaselineIdentities` and `recordedICStubHashes`.
-    // Held across the check-then-add so parallel Baseline compile tasks
-    // can't record the same blob twice.
+    // Held across check-then-add so parallel compiles don't double-record.
     js::Mutex mutex MOZ_UNANNOTATED{js::mutexid::AOTCorpusAccum};
 
     HashSet<AOTHashKey, AOTHashKeyHasher, SystemAllocPolicy>
@@ -435,12 +432,13 @@ class JitRuntime {
   // patching the shared static code. Returned JitCode must be owned
   // by the caller.
   // NOTE(Justin): passReg only defined for x64 as r12 currently.
-  JitCode* generateAOTPreamble(JSContext* cx, void* target, Register passReg);
+  JitCode* generateAOTPreambleTrampoline(JSContext* cx, void* target,
+                                         Register passReg);
 
   uint8_t* baselineInterpreterEntryAddr() const {
 #ifdef ENABLE_JS_AOT
-    if (aotInterpPreamble_.ref()) {
-      return aotInterpPreamble_.ref()->raw();
+    if (aotInterpPreambleTrampoline_.ref()) {
+      return aotInterpPreambleTrampoline_.ref()->raw();
     }
 #endif
     return baselineInterpreter_.codeRaw();

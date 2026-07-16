@@ -3416,9 +3416,9 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
     setJitCodeRaw(ion->method()->raw());
   } else if (hasBaselineScript()) {
 #ifdef ENABLE_JS_AOT
-    if (uint8_t* preamble = rt->jitRuntime()->lookupAOTPreamble(
+    if (uint8_t* trampoline = rt->jitRuntime()->lookupAOTPreambleTrampoline(
             baselineScript()->method()->raw())) {
-      setJitCodeRaw(preamble);
+      setJitCodeRaw(trampoline);
     } else
 #endif
     setJitCodeRaw(baselineScript()->method()->raw());

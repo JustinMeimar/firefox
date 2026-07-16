@@ -53,8 +53,9 @@ namespace js::jit {
 //   Baseline stub frame: frame slot -> table base -> slot value
 //                        (BaselineStubFrameLayout::AOTTableOffsetFromFP)
 // Both are two loads. The frame slot is seeded at prologue from
-// AOTTablePassReg, which the AOT preamble (JitRuntime::generateAOTPreamble)
-// stashes with &aotIndirectionTable before jumping to the entry. Pinning
+// AOTTablePassReg, which the AOT preamble trampoline
+// (JitRuntime::generateAOTPreambleTrampoline) stashes with
+// &aotIndirectionTable before jumping to the entry. Pinning
 // AOTTablePassReg through emit (to reach one load) is future work; today
 // the register is only live from preamble to prologue.
 

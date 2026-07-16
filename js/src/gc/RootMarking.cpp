@@ -341,7 +341,7 @@ void js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc,
 
 #ifdef ENABLE_JS_AOT
     if (rt->hasJitRuntime()) {
-      rt->jitRuntime()->traceAOTPreambles(trc);
+      rt->jitRuntime()->traceAOTPreambleTrampolines(trc);
     }
 #endif
 
@@ -439,7 +439,7 @@ void js::gc::GCRuntime::finishRoots() {
 
 #ifdef ENABLE_JS_AOT
   if (rt->hasJitRuntime()) {
-    rt->jitRuntime()->clearAOTPreambles();
+    rt->jitRuntime()->clearAOTPreambleTrampolines();
   }
 #endif
 

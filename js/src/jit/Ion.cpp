@@ -265,9 +265,9 @@ bool JitRuntime::initialize(JSContext* cx) {
   }
 
   if (baselineInterpreter_.loadedFromAOT()) {
-    aotInterpPreamble_ = generateAOTPreamble(
+    aotInterpPreambleTrampoline_ = generateAOTPreambleTrampoline(
         cx, baselineInterpreter_.codeRaw(), AOTTablePassReg);
-    if (!aotInterpPreamble_) {
+    if (!aotInterpPreambleTrampoline_) {
       return false;
     }
   }
@@ -282,11 +282,11 @@ bool JitRuntime::initialize(JSContext* cx) {
 }
 
 #ifdef ENABLE_JS_AOT
-JitCode* JitRuntime::generateAOTPreamble(JSContext* cx, void* target,
-                                         Register passReg) {
+JitCode* JitRuntime::generateAOTPreambleTrampoline(JSContext* cx, void* target,
+                                                   Register passReg) {
   TempAllocator temp(&cx->tempLifoAlloc());
   StackMacroAssembler masm(cx, temp);
-  AutoCreatedBy acb(masm, "JitRuntime::generateAOTPreamble");
+  AutoCreatedBy acb(masm, "JitRuntime::generateAOTPreambleTrampoline");
 
   masm.movePtr(ImmPtr(aotIndirectionTable_.baseAddress()), passReg);
   masm.jump(ImmPtr(target));
@@ -536,9 +536,9 @@ uint8_t* jit::LazyLinkTopActivation(JSContext* cx,
 }
 
 #ifdef ENABLE_JS_AOT
-void JitRuntime::traceAOTPreambles(JSTracer* trc) {
-  for (auto& e : aotPreambles_) {
-    TraceRoot(trc, &e.preamble, "aot-selfhosted-preamble");
+void JitRuntime::traceAOTPreambleTrampolines(JSTracer* trc) {
+  for (auto& e : aotPreambleTrampolines_) {
+    TraceRoot(trc, &e.trampoline, "aot-preamble-trampoline");
   }
 }
 #endif

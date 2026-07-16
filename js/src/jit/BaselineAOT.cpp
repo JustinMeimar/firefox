@@ -49,24 +49,16 @@ namespace js::jit {
 // Script Identity
 // ============================================================
 
-// Fast O(1) probe key used to bucket blobs in the container directory.
-// SharedImmutableScriptData is deduplicated across scripts, so two
-// scripts with identical bytecode collide here; HashBaselineIdentity
-// below is the collision-safe verify.
+// Fast probe key. Collides for scripts sharing bytecode; disambiguated
+// by the identity hash below on the load path.
 uint32_t ComputeBaselineProbeHash(JSScript* script) {
   return uint32_t(script->sharedData()->hash());
 }
 
-// SHA-1 of the subset of JSScript state the baseline compiler reads.
 // Two scripts hash equal iff a baseline blob compiled for one is
-// byte-compatible with the other. Only gcthing *kinds* are hashed, not
-// pointers: pointers vary by realm and go through the indirection table
-// at load time. Debuggees are filtered upstream so no mutable flag
-// survives here.
-//
-// Wire format is the update() order below. Any change to which fields
-// are hashed, their order, or their widths silently invalidates every
-// existing corpus; bump AOT_CONTAINER_VERSION alongside such changes.
+// byte-compatible with the other. Any change to what is hashed, its
+// order, or its widths invalidates existing corpora, so bump the
+// container version alongside.
 static void HashBaselineIdentity(JSScript* script,
                                  mozilla::SHA1Sum::Hash& out) {
   mozilla::SHA1Sum sha;
@@ -98,9 +90,8 @@ static void HashBaselineIdentity(JSScript* script,
   u(&hasNonSyntactic, sizeof(hasNonSyntactic));
   u(&isFunction, sizeof(isFunction));
 
-  // gcThings first, length-prefixed so its boundary with the trailing
-  // immData bytes is unambiguous. immData is variable-length but last,
-  // so its length is implicit in the total SHA-1 input length.
+  // Length-prefixed so the boundary with the trailing variable-length
+  // stream is unambiguous.
   auto gcThings = script->gcthings();
   uint32_t gcThingCount = uint32_t(gcThings.size());
   u(&gcThingCount, sizeof(gcThingCount));
@@ -122,7 +113,7 @@ static void HashBaselineIdentity(JSScript* script,
 // ============================================================
 
 
-// NOTE_REFACTOR: AFAICT this is used only when recording a baseline function.
+// NOTE(Refactor): AFAICT this is used only when recording a baseline function.
 // What is the off process / on file represetnation o f a baseline function we
 // will use for this AOT system? Will it be .js, will it be textual bytecode?
 // It most definitely can not be the .bin we have now,
@@ -190,19 +181,19 @@ static void HashBaselineIdentity(JSScript* script,
 // Install Path
 // ============================================================
 
-bool EnsureAOTPreambleFor(JSContext* cx, JitCode* code) {
+bool EnsureAOTPreambleTrampolineFor(JSContext* cx, JitCode* code) {
   JitRuntime* jrt = cx->runtime()->jitRuntime();
-  if (jrt->lookupAOTPreamble(code->raw())) return true;
+  if (jrt->lookupAOTPreambleTrampoline(code->raw())) return true;
 
   mozilla::Maybe<JitContext> jctx;
   if (!MaybeGetJitContext()) {
     jctx.emplace(cx);
   }
-  JitCode* preamble =
-      jrt->generateAOTPreamble(cx, code->raw(), AOTSelfHostedPassReg);
-  if (!preamble) return false;
-  if (!jrt->aotPreambles_.append(
-          JitRuntime::AOTPreambleEntry{code->raw(), preamble})) {
+  JitCode* trampoline =
+      jrt->generateAOTPreambleTrampoline(cx, code->raw(), AOTSelfHostedPassReg);
+  if (!trampoline) return false;
+  if (!jrt->aotPreambleTrampolines_.append(
+          JitRuntime::AOTPreambleTrampolineEntry{code->raw(), trampoline})) {
     ReportOutOfMemory(cx);
     return false;
   }
@@ -252,9 +243,9 @@ static void MaybeToggleProfilerForAOTBaseline(JSContext* cx,
   BaselineScript* bs = NewAOTBaselineScript(cx, code, payload);
   if (!bs) return false;
 
-  if (!EnsureAOTPreambleFor(cx, code)) return false;
-  bs->setAOTPreambleEntry(
-      cx->runtime()->jitRuntime()->lookupAOTPreamble(code->raw()));
+  if (!EnsureAOTPreambleTrampolineFor(cx, code)) return false;
+  bs->setAOTPreambleTrampoline(
+      cx->runtime()->jitRuntime()->lookupAOTPreambleTrampoline(code->raw()));
 
   script->jitScript()->setBaselineScript(script, bs);
 
