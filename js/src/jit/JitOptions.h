@@ -77,8 +77,6 @@ struct DefaultJitOptions {
   bool dumpAOTSelfHosted;
   bool dumpAOTBaselineCorpus;
   bool dumpAOTICs;
-  bool recordAOTBaselineCorpus;
-  bool recordAOTICs;
   bool useAOTBlinterp;
   bool useAOTSelfHosted;
   bool useAOTBaselineCorpus;
@@ -203,8 +201,7 @@ struct DefaultJitOptions {
   // (baseline interp frames included). Cheaper predicate than the IC
   // one -- adding a corpus flag here does not activate FillAOTICs.
   bool aotNeedsFrameTableSlot() const {
-    return aotNeedsIndirectionTable() || recordAOTBaselineCorpus ||
-           useAOTBaselineCorpus;
+    return aotNeedsIndirectionTable() || useAOTBaselineCorpus;
   }
   bool aotLoadCorpusAtInit() const {
     return useAOTICs && !dumpAOTICs;

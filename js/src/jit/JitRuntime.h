@@ -47,7 +47,6 @@ enum class ArraySortKind;
 
 namespace jit {
 
-class AOTCorpusFlusher;
 class FrameSizeClass;
 class Label;
 class MacroAssembler;
@@ -272,39 +271,26 @@ class JitRuntime {
       staticCodeProfilerOn_;
 
   // Transient state accumulated during --aot-dump-* runs. Drained and
-  // cleared by BaselineAOT::DumpAOTContainer. Also used by the
-  // record-on-miss path: `mutex` guards the dedup sets and `corpusFlusher`
-  // owns a background thread that writes new blobs to the corpus dir.
+  // cleared by BaselineAOT::DumpAOTContainer.
   struct AOTDumpAccumulator {
-    // Shell dump-mode storage. Populated on JIT compile threads; drained
-    // synchronously by DumpAOTContainer at shell exit. Not touched by
-    // the record path.
     mozilla::Maybe<AOTBlobWriter> interpreterBlob;
     Vector<AOTBlobWriter, 0, SystemAllocPolicy> baselineFunctionBlobs;
     Vector<AOTBlobWriter, 0, SystemAllocPolicy> icStubBlobs;
 
-    // Guards both dedup sets below. Held across the check-then-add so
-    // parallel Baseline/Ion tasks can't record the same blob twice.
+    // Guards `recordedBaselineCanonicals`. Held across the check-then-
+    // add so parallel Baseline compile tasks can't record the same blob
+    // twice.
     js::Mutex mutex MOZ_UNANNOTATED{js::mutexid::AOTCorpusAccum};
 
     HashSet<uint32_t, mozilla::DefaultHasher<uint32_t>, SystemAllocPolicy>
         recordedBaselineCanonicals;
 
-    // Symmetric IC dedup set: hash of CacheIR body -> already-recorded.
-    HashSet<uint32_t, mozilla::DefaultHasher<uint32_t>, SystemAllocPolicy>
-        recordedICStubHashes;
-
-    // Lazily started on first miss when a recordAOT<X> flag is set.
-    // Owns a background writer thread; enqueue is O(1) under a private
-    // lock, so JIT compile threads never touch disk.
-    js::UniquePtr<AOTCorpusFlusher> corpusFlusher;
-
-    // Out-of-line so callers of ~AOTDumpAccumulator (transitively, of
-    // ~JitRuntime) don't need the complete AOTCorpusFlusher type.
-    AOTDumpAccumulator();
-    ~AOTDumpAccumulator();
-
-    void clear();
+    void clear() {
+      interpreterBlob.reset();
+      baselineFunctionBlobs.clearAndFree();
+      icStubBlobs.clearAndFree();
+      recordedBaselineCanonicals.clearAndCompact();
+    }
   };
   AOTDumpAccumulator aotDump_;
 

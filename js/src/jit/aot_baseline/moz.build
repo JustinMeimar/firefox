@@ -5,5 +5,8 @@
 SharedLibrary("aot_baseline")
 
 SOURCES += [
-    "../AOTBaseline.S",
+    "AOTBaselineIncbin.S",
 ]
+
+DEFINES["AOT_BASELINE_TEXT_BIN"] = '"%s/AOTBaselineText.bin"' % SRCDIR
+DEFINES["AOT_BASELINE_CONTAINER_BIN"] = '"%s/AOTBaselineContainer.bin"' % SRCDIR

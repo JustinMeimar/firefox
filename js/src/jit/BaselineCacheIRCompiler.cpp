@@ -2071,17 +2071,8 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 #endif
 
 #ifdef ENABLE_JS_AOT
-  // recordAOTICs: hand every unique CacheIR pattern the workload compiles
-  // to the background flusher, whether the lookup above hit the AOT
-  // container, hit the local zone, or missed entirely. Per-process dedup
-  // (recordedICStubHashes) ensures each hash writes at most one file.
-  // Gated only on !isAOTFill so the AOT-fill pass at init doesn't re-emit
-  // the corpus back to disk.
-  if (!isAOTFill && JitOptions.recordAOTICs) {
-    RecordAOTICStub(cx, kind, writer);
-  }
   // enforceAOTICs is strict-mode validation: crash on any AOT miss so a
-  // corpus gap is impossible to ignore. Orthogonal to record.
+  // corpus gap is impossible to ignore.
   if (!stubInfo && !isAOTFill && JitOptions.enforceAOTICs) {
     MOZ_CRASH_UNSAFE_PRINTF(
         "enforce-aot-ics: no AOT stub for kind=%s (hash=%u)",
@@ -2128,10 +2119,6 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {
       return false;
     }
-
-#ifdef ENABLE_JS_AOT
-    MaybeDumpICStubForPGO(kind, writer, isAOTFill);
-#endif
 
     AOT_TIMER_END(icLookup, "jit-gen", "ics", " bytes=%u kind=%s",
                   unsigned(code->instructionsSize()),

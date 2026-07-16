@@ -7,14 +7,10 @@
 #include "jit/BaselineAOT.h"
 
 #include "mozilla/HashFunctions.h"
-#include "mozilla/ScopeExit.h"
-#include "mozilla/Sprintf.h"
 
 #include <cstdint>
 #include <cstring>
-#include <dirent.h>
 #include <fstream>
-#include <sys/types.h>
 
 #include "frontend/CompilationStencil.h"
 #include "gc/Zone.h"
@@ -24,20 +20,14 @@
 #include "jit/BaselineCodeGen.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIRCompiler.h"
-#include "jit/CacheIRSpewer.h"
-#include "jit/CacheIRWriter.h"
-#include "jit/IonTypes.h"
 #include "jit/JitCode.h"
 #include "jit/JitcodeMap.h"
 #include "jit/JitContext.h"
-#include "jit/JitHints.h"
 #include "jit/JitOptions.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/JitZone.h"
-#include "jit/ProcessExecutableMemory.h"
 #include "jit/VMFunctions.h"
-#include "js/Printer.h"
 #include "vm/JSAtomUtils.h"
 #include "vm/JSContext.h"
 #include "vm/JSFunction.h"
@@ -55,373 +45,9 @@ namespace js::jit {
 
 #ifdef ENABLE_JS_AOT
 
-void DumpAOTICStubToDir(const char* dir, CacheKind kind,
-                        const CacheIRWriter& writer) {
-  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
-                                writer.codeStart(), writer.codeLength());
-  HashNumber h = CacheIRStubKey::hash(lookup);
-
-  char filename[600];
-  SprintfLiteral(filename, "%s/IC-%u", dir, unsigned(h));
-
-  FILE* f = fopen(filename, "w");
-  if (!f) {
-    fprintf(stderr, "DumpAOTICStubToDir: fopen %s failed: %s\n", filename,
-            strerror(errno));
-    return;
-  }
-  {
-    Fprinter printer(f);
-    SpewCacheIROpsAsAOT(printer, kind, writer);
-  }
-  fflush(f);
-  fclose(f);
-}
-
-void MaybeDumpICStubForPGO(CacheKind kind, const CacheIRWriter& writer,
-                           bool isAOTFill) {
-  if (isAOTFill || !gAOTInstr.enabled(AOTInstr_IC) ||
-      !gAOTInstr.pgoDumpDir) {
-    return;
-  }
-  DumpAOTICStubToDir(gAOTInstr.pgoDumpDir, kind, writer);
-}
-
-// BL-<hash>.bin wire format. Written by DumpAOTBaselineFunctionToDir and
-// consumed by LoadAOTBaselineBlobFromFile in DumpAOTContainer. Tied to
-// AOT_CONTAINER_VERSION: a stale file is skipped rather than crashing
-// the dump, so a version bump does not require sweeping the corpus dir.
-static constexpr uint32_t kBaselineBlobFileMagic = 0x424C4277;  // 'BLBw'
-
-void DumpAOTBaselineFunctionToDir(const char* dir, uint32_t canonicalHash,
-                                  const AOTBlobWriter& blob) {
-  char filename[600];
-  SprintfLiteral(filename, "%s/BL-%u.bin", dir, unsigned(canonicalHash));
-
-  FILE* f = fopen(filename, "wb");
-  if (!f) {
-    fprintf(stderr, "DumpAOTBaselineFunctionToDir: fopen %s failed: %s\n",
-            filename, strerror(errno));
-    return;
-  }
-
-  auto writeU32 = [&](uint32_t v) { fwrite(&v, sizeof(v), 1, f); };
-  auto writeBytes = [&](const void* p, size_t n) {
-    if (n) fwrite(p, 1, n, f);
-  };
-
-  const auto& name = blob.name();
-  auto code = blob.codeBytes();
-  auto fields = blob.fieldsBytes();
-  auto arrays = blob.arraysBytes();
-  uint8_t kind = uint8_t(blob.kind());
-
-  writeU32(kBaselineBlobFileMagic);
-  writeU32(AOT_CONTAINER_VERSION);
-  writeU32(uint32_t(kind));
-  writeU32(blob.nameHash());
-  writeU32(canonicalHash);
-  writeU32(uint32_t(name.size()));
-  writeBytes(name.data(), name.size());
-  writeU32(uint32_t(code.size()));
-  writeBytes(code.data(), code.size());
-  writeU32(uint32_t(fields.size()));
-  writeBytes(fields.data(), fields.size());
-  writeU32(uint32_t(arrays.size()));
-  writeBytes(arrays.data(), arrays.size());
-
-  fflush(f);
-  fclose(f);
-}
-
-// Resolve the baseline corpus directory once. JS_AOT_BASELINE_CORPUS_DIR
-// overrides the checked-in default (js/src/baselines) for the record
-// side (AOTCorpusFlusher -> BL-*.bin) and the dump side (DumpAOTContainer
-// merge).
-static const char* BaselineCorpusDir() {
-  if (const char* env = getenv("JS_AOT_BASELINE_CORPUS_DIR")) return env;
-  return "js/src/baselines";
-}
-
-void MaybeDumpBaselineFunctionForPGO(uint32_t canonicalHash,
-                                     const AOTBlobWriter& blob) {
-  if (gAOTInstr.enabled(AOTInstr_Baseline) && gAOTInstr.pgoDumpDir) {
-    DumpAOTBaselineFunctionToDir(gAOTInstr.pgoDumpDir, canonicalHash, blob);
-  }
-}
-
-static const char* ICStubRecordDir() {
-  if (const char* env = getenv("JS_AOT_ICS_CORPUS_DIR")) return env;
-  return "js/src/ics";
-}
-
-}  // namespace js::jit
-
-// The AOTDumpAccumulator's UniquePtr<AOTCorpusFlusher> member requires
-// the complete flusher type at the accumulator's destructor. Defining
-// the accumulator's ctor/dtor here (where AOTCorpusFlusher is complete)
-// keeps that requirement out of every JitRuntime.h consumer.
-js::jit::JitRuntime::AOTDumpAccumulator::AOTDumpAccumulator() = default;
-js::jit::JitRuntime::AOTDumpAccumulator::~AOTDumpAccumulator() = default;
-
-void js::jit::JitRuntime::AOTDumpAccumulator::clear() {
-  interpreterBlob.reset();
-  baselineFunctionBlobs.clearAndFree();
-  icStubBlobs.clearAndFree();
-  recordedBaselineCanonicals.clearAndCompact();
-  recordedICStubHashes.clearAndCompact();
-}
-
-namespace js::jit {
-
-// Serialize a CacheIR stub to the text form consumed by
-// SelectAOTCorpus.py, so the on-thread step is a cheap memory-copy and
-// the flusher never has to touch CacheIRWriter state.
-static std::string SerializeCacheIRStub(JSContext* cx, CacheKind kind,
-                                        const CacheIRWriter& writer) {
-  Sprinter sprinter(cx, /* shouldReportOOM = */ false);
-  if (!sprinter.init()) return {};
-  SpewCacheIROpsAsAOT(sprinter, kind, writer);
-  UniqueChars s = sprinter.release();
-  if (!s) return {};
-  return std::string(s.get());
-}
-
-AOTCorpusFlusher::AOTCorpusFlusher(std::string baselineDir, std::string icDir)
-    : baselineDir_(std::move(baselineDir)),
-      icDir_(std::move(icDir)) {}
-
-AOTCorpusFlusher::~AOTCorpusFlusher() { drainAndStop(); }
-
-/* static */ void AOTCorpusFlusher::ThreadEntry(AOTCorpusFlusher* self) {
-  self->writerMain();
-}
-
-bool AOTCorpusFlusher::ensureThreadStarted() {
-  LockGuard<Mutex> lock(mutex_);
-  if (threadStarted_) return true;
-  if (!thread_.init(&AOTCorpusFlusher::ThreadEntry, this)) return false;
-  threadStarted_ = true;
-  return true;
-}
-
-void AOTCorpusFlusher::enqueueBaseline(BaselineEntry&& entry) {
-  {
-    LockGuard<Mutex> lock(mutex_);
-    if (!baselinePending_.append(std::move(entry))) return;
-  }
-  cv_.notify_one();
-}
-
-void AOTCorpusFlusher::enqueueIC(AOTBlobWriter&& blob) {
-  {
-    LockGuard<Mutex> lock(mutex_);
-    if (!icPending_.append(std::move(blob))) return;
-  }
-  cv_.notify_one();
-}
-
-void AOTCorpusFlusher::drainAndStop() {
-  bool needsJoin = false;
-  {
-    LockGuard<Mutex> lock(mutex_);
-    if (drained_) return;
-    stopRequested_ = true;
-    needsJoin = threadStarted_;
-  }
-  cv_.notify_all();
-
-  if (needsJoin) {
-    thread_.join();
-  } else {
-    // Thread never started; flush any residuals synchronously so the
-    // caller gets the same "everything on disk" guarantee.
-    Vector<BaselineEntry, 0, SystemAllocPolicy> baselineBatch;
-    Vector<AOTBlobWriter, 0, SystemAllocPolicy> icBatch;
-    {
-      LockGuard<Mutex> lock(mutex_);
-      std::swap(baselinePending_, baselineBatch);
-      std::swap(icPending_, icBatch);
-    }
-    writeBatch(baselineBatch, icBatch);
-  }
-
-  LockGuard<Mutex> lock(mutex_);
-  drained_ = true;
-}
-
-void AOTCorpusFlusher::writerMain() {
-  Vector<BaselineEntry, 0, SystemAllocPolicy> baselineBatch;
-  Vector<AOTBlobWriter, 0, SystemAllocPolicy> icBatch;
-
-  while (true) {
-    {
-      LockGuard<Mutex> lock(mutex_);
-      while (!stopRequested_ && baselinePending_.empty() &&
-             icPending_.empty()) {
-        cv_.wait(lock);
-      }
-      std::swap(baselinePending_, baselineBatch);
-      std::swap(icPending_, icBatch);
-      if (stopRequested_ && baselineBatch.empty() && icBatch.empty()) {
-        return;
-      }
-    }
-    writeBatch(baselineBatch, icBatch);
-    baselineBatch.clearAndFree();
-    icBatch.clearAndFree();
-  }
-}
-
-void AOTCorpusFlusher::writeBatch(
-    Vector<BaselineEntry, 0, SystemAllocPolicy>& baselineBatch,
-    Vector<AOTBlobWriter, 0, SystemAllocPolicy>& icBatch) {
-  for (auto& e : baselineBatch) {
-    DumpAOTBaselineFunctionToDir(baselineDir_.c_str(), e.canonicalHash,
-                                 e.blob);
-  }
-  for (auto& text : icBatch) {
-    // IC blobs carry the pre-serialized text in the `code` buffer and
-    // the content hash in `nameHash`. This is the flusher-side wire
-    // format set up by RecordAOTICStub.
-    char filename[600];
-    SprintfLiteral(filename, "%s/IC-%u", icDir_.c_str(),
-                   unsigned(text.nameHash()));
-    FILE* f = fopen(filename, "w");
-    if (!f) continue;
-    auto bytes = text.codeBytes();
-    if (bytes.size()) fwrite(bytes.data(), 1, bytes.size(), f);
-    fclose(f);
-  }
-}
-
-// Lazily creates the shared background flusher on first record. Returns
-// nullptr on OOM or thread-spawn failure. Access is serialized under
-// accum.mutex so racing compile threads cannot double-initialize.
-// Uses system allocation (js_new) so it can be called from JIT compile
-// paths that assert NoGC / NoException on the JSContext.
-[[nodiscard]] static AOTCorpusFlusher* EnsureCorpusFlusher(JSContext* cx) {
-  auto& accum = cx->runtime()->jitRuntime()->aotDump_;
-  LockGuard<Mutex> lock(accum.mutex);
-  if (accum.corpusFlusher) return accum.corpusFlusher.get();
-  const char* blDir = BaselineCorpusDir();
-  const char* icDir = ICStubRecordDir();
-  AOTCorpusFlusher* raw = js_new<AOTCorpusFlusher>(blDir, icDir);
-  if (!raw) return nullptr;
-  js::UniquePtr<AOTCorpusFlusher> flusher(raw);
-  if (!flusher->ensureThreadStarted()) return nullptr;
-  accum.corpusFlusher = std::move(flusher);
-  JitSpew(JitSpew_BaselineAOT,
-          "flusher started baselines=%s ics=%s", blDir, icDir);
-  return accum.corpusFlusher.get();
-}
-
-void RecordAOTICStub(JSContext* cx, CacheKind kind,
-                     const CacheIRWriter& writer) {
-  if (writer.failed()) {
-    JitSpew(JitSpew_BaselineAOT, "ic-record skip=writer-failed kind=%s",
-            CacheKindNames[uint8_t(kind)]);
-    return;
-  }
-
-  CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
-                                writer.codeStart(), writer.codeLength());
-  uint32_t h = uint32_t(CacheIRStubKey::hash(lookup));
-
-  auto& accum = cx->runtime()->jitRuntime()->aotDump_;
-  {
-    LockGuard<Mutex> lock(accum.mutex);
-    auto ptr = accum.recordedICStubHashes.lookupForAdd(h);
-    if (ptr) return;
-    if (!accum.recordedICStubHashes.add(ptr, h)) return;
-  }
-
-  std::string text = SerializeCacheIRStub(cx, kind, writer);
-  if (text.empty()) {
-    JitSpew(JitSpew_BaselineAOT,
-            "ic-record skip=serialize-failed hash=%u kind=%s",
-            unsigned(h), CacheKindNames[uint8_t(kind)]);
-    return;
-  }
-
-  AOTCorpusFlusher* flusher = EnsureCorpusFlusher(cx);
-  if (!flusher) {
-    JitSpew(JitSpew_BaselineAOT,
-            "ic-record skip=no-flusher hash=%u", unsigned(h));
-    return;
-  }
-
-  AOTBlobWriter payload(AOTBlobKind::InlineCacheStub, h, std::string());
-  if (!payload.writeCode(reinterpret_cast<const uint8_t*>(text.data()),
-                         text.size())) {
-    JitSpew(JitSpew_BaselineAOT,
-            "ic-record skip=writecode-failed hash=%u bytes=%zu",
-            unsigned(h), text.size());
-    return;
-  }
-  JitSpew(JitSpew_BaselineAOT, "ic-record hash=%u kind=%s bytes=%zu",
-          unsigned(h), CacheKindNames[uint8_t(kind)], text.size());
-  flusher->enqueueIC(std::move(payload));
-}
-
-void DrainPendingAOTCorpus(JSContext* cx) {
-  auto& accum = cx->runtime()->jitRuntime()->aotDump_;
-  if (!accum.corpusFlusher) return;
-  accum.corpusFlusher->drainAndStop();
-}
-
-// Reconstruct an AOTBlobWriter from a BL-*.bin file previously written
-// by DumpAOTBaselineFunctionToDir. Returns false (leaving `outBlob`
-// unspecified) on stale-version, truncation, or magic mismatch; callers
-// treat that as a skip, not a hard error.
-[[nodiscard]] static bool LoadAOTBaselineBlobFromFile(
-    const char* path, uint32_t* outCanonicalHash, AOTBlobWriter* outBlob) {
-  FILE* f = fopen(path, "rb");
-  if (!f) return false;
-
-  auto readU32 = [&](uint32_t* v) {
-    return fread(v, sizeof(*v), 1, f) == 1;
-  };
-
-  uint32_t magic, version, kindU32, nameHash, canonicalHash;
-  uint32_t nameLen, codeLen, fieldsLen, arraysLen;
-
-  bool ok = readU32(&magic) && magic == kBaselineBlobFileMagic &&
-            readU32(&version) && version == AOT_CONTAINER_VERSION &&
-            readU32(&kindU32) &&
-            kindU32 == uint32_t(AOTBlobKind::BaselineFunction) &&
-            readU32(&nameHash) && readU32(&canonicalHash) &&
-            readU32(&nameLen);
-
-  std::string name;
-  if (ok && nameLen > 0) {
-    name.resize(nameLen);
-    ok = fread(name.data(), 1, nameLen, f) == nameLen;
-  }
-
-  Vector<uint8_t, 0, SystemAllocPolicy> codeBuf, fieldsBuf, arraysBuf;
-  auto slurp = [&](Vector<uint8_t, 0, SystemAllocPolicy>& buf, uint32_t len) {
-    if (!buf.resize(len)) return false;
-    return len == 0 || fread(buf.begin(), 1, len, f) == len;
-  };
-
-  ok = ok && readU32(&codeLen) && slurp(codeBuf, codeLen) &&
-       readU32(&fieldsLen) && slurp(fieldsBuf, fieldsLen) &&
-       readU32(&arraysLen) && slurp(arraysBuf, arraysLen);
-
-  fclose(f);
-  if (!ok) return false;
-
-  *outBlob = AOTBlobWriter(AOTBlobKind::BaselineFunction, nameHash,
-                           std::move(name));
-  if (!outBlob->writeCode(codeBuf.begin(), codeBuf.length()) ||
-      !outBlob->writeFieldsRaw(fieldsBuf.begin(), fieldsBuf.length()) ||
-      !outBlob->writeArraysRaw(arraysBuf.begin(), arraysBuf.length())) {
-    return false;
-  }
-  *outCanonicalHash = canonicalHash;
-  return true;
-}
+// ============================================================
+// Names & Hashing
+// ============================================================
 
 // Magic prefix on the per-blob canonical byte string. Distinct from
 // AOT_CONTAINER_MAGIC so a truncated read of canonical bytes cannot be
@@ -443,6 +69,10 @@ static constexpr uint32_t kBaselineCanonicalMagic = 0x424C4E63;  // 'BLNc'
 uint32_t ComputeBaselineProbeHash(JSScript* script) {
   return uint32_t(script->sharedData()->hash());
 }
+
+// ============================================================
+// Canonical Serialization
+// ============================================================
 
 static bool ComputeBaselineCanonical(
     JSScript* script,
@@ -503,6 +133,10 @@ static bool ComputeBaselineCanonical(
 
   return true;
 }
+
+// ============================================================
+// Blob Encode / Decode
+// ============================================================
 
 // canonical must be ComputeBaselineCanonical(script) for the same
 // script; otherwise the blob fails canonical-match on load.
@@ -566,6 +200,10 @@ static bool ComputeBaselineCanonical(
   }
   return bs;
 }
+
+// ============================================================
+// Install Path
+// ============================================================
 
 bool EnsureAOTPreambleFor(JSContext* cx, JitCode* code) {
   JitRuntime* jrt = cx->runtime()->jitRuntime();
@@ -642,6 +280,10 @@ static void MaybeToggleProfilerForAOTBaseline(JSContext* cx,
   MaybeToggleProfilerForAOTBaseline(cx, bs);
   return true;
 }
+
+// ============================================================
+// Dump Orchestration
+// ============================================================
 
 bool BuildAndSaveInterpBlob(JSContext* cx,
                             const AOTPayload_BaselineInterpreter& payload) {
@@ -746,21 +388,8 @@ void EmitBaselineCompileEvent(JSContext* cx, JSScript* script) {
             name.c_str());
 }
 
-bool IsAOTBaselineFunctionRecorded(JSContext* cx, JSScript* script) {
-  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
-  if (!ComputeBaselineCanonical(script, canonical)) {
-    return false;
-  }
-  uint32_t key = uint32_t(
-      mozilla::HashBytes(canonical.begin(), canonical.length()));
-  return cx->runtime()
-      ->jitRuntime()
-      ->aotDump_.recordedBaselineCanonicals.has(key);
-}
-
 bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
-  MOZ_ASSERT(JitOptions.recordAOTBaselineCorpus ||
-             JitOptions.dumpAOTSelfHosted);
+  MOZ_ASSERT(JitOptions.dumpAOTSelfHosted);
   MOZ_ASSERT(script->hasBaselineScript());
 
   BaselineScript* bs = script->baselineScript();
@@ -771,17 +400,17 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   }
   mozilla::Span<const uint8_t> canonicalSpan(canonical.begin(),
                                              canonical.length());
-  uint32_t dedupKey = uint32_t(
+  uint32_t canonicalHash = uint32_t(
       mozilla::HashBytes(canonicalSpan.data(), canonicalSpan.size()));
 
   auto& accum = cx->runtime()->jitRuntime()->aotDump_;
   {
     LockGuard<Mutex> lock(accum.mutex);
-    auto ptr = accum.recordedBaselineCanonicals.lookupForAdd(dedupKey);
+    auto ptr = accum.recordedBaselineCanonicals.lookupForAdd(canonicalHash);
     if (ptr) {
       return true;
     }
-    if (!accum.recordedBaselineCanonicals.add(ptr, dedupKey)) return false;
+    if (!accum.recordedBaselineCanonicals.add(ptr, canonicalHash)) return false;
   }
 
   std::string name;
@@ -805,66 +434,21 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   }
 
   JitSpew(JitSpew_BaselineAOT,
-          "AOT baseline function probe=%u dedup=%u size=%zu "
+          "AOT baseline function probe=%u canonicalHash=%u size=%zu "
           "canonical=%zu nargs=%u scope=%u '%s'",
-          probeHash, dedupKey, bs->method()->instructionsSize(),
+          probeHash, canonicalHash, bs->method()->instructionsSize(),
           canonicalSpan.size(),
           script->function() ? unsigned(script->function()->nargs()) : 0u,
           unsigned(script->outermostScope()->kind()),
           blob.name().c_str());
 
-  MaybeDumpBaselineFunctionForPGO(dedupKey, blob);
-
   AOT_INSTR(AOTInstr_Baseline,
             "baseline-record hash=%u size=%u canonical=%u name=%s\n",
-            unsigned(dedupKey),
+            unsigned(canonicalHash),
             unsigned(bs->method()->instructionsSize()),
             unsigned(canonicalSpan.size()), blob.name().c_str());
 
-  // Split between two paths:
-  //  - Shell dump mode retains the blob in accum so DumpAOTContainer can
-  //    drain it at exit.
-  //  - Browser record mode moves the blob into the background flusher so
-  //    the compile thread never touches disk.
-  //  AOTBlobWriter is move-only, so at most one path takes it.
-  if (JitOptions.dumpAOTBaselineCorpus || JitOptions.dumpAOTBlinterp ||
-      JitOptions.dumpAOTSelfHosted || JitOptions.dumpAOTICs) {
-    if (!accum.baselineFunctionBlobs.append(std::move(blob))) return false;
-  } else if (JitOptions.recordAOTBaselineCorpus) {
-    AOTCorpusFlusher* flusher = EnsureCorpusFlusher(cx);
-    if (!flusher) return false;
-    flusher->enqueueBaseline(
-        AOTCorpusFlusher::BaselineEntry{dedupKey, std::move(blob)});
-  }
-  return true;
-}
-
-[[nodiscard]] static bool MergeBaselineCorpusDir(
-    const char* corpusDir, JitRuntime::AOTDumpAccumulator& accum,
-    AOTContainerWriter& container, uint32_t& diskAdded,
-    uint32_t& diskSkipped) {
-  DIR* d = opendir(corpusDir);
-  if (!d) return true;
-  auto cleanup = mozilla::MakeScopeExit([&] { closedir(d); });
-  while (struct dirent* ent = readdir(d)) {
-    unsigned canonHash = 0;
-    if (sscanf(ent->d_name, "BL-%u.bin", &canonHash) != 1) continue;
-    if (accum.recordedBaselineCanonicals.has(uint32_t(canonHash))) {
-      diskSkipped++;
-      continue;
-    }
-    char path[600];
-    SprintfLiteral(path, "%s/%s", corpusDir, ent->d_name);
-    uint32_t fileCanonical = 0;
-    AOTBlobWriter blob(AOTBlobKind::BaselineFunction, 0, std::string());
-    if (!LoadAOTBaselineBlobFromFile(path, &fileCanonical, &blob)) {
-      diskSkipped++;
-      continue;
-    }
-    if (!accum.recordedBaselineCanonicals.put(fileCanonical)) return false;
-    if (!container.addBlob(std::move(blob))) return false;
-    diskAdded++;
-  }
+  if (!accum.baselineFunctionBlobs.append(std::move(blob))) return false;
   return true;
 }
 
@@ -874,7 +458,10 @@ bool DumpAOTContainer(JSContext* cx) {
              JitOptions.dumpAOTICs ||
              JitOptions.dumpAOTBaselineCorpus);
 
-  const char* outPath = kAOTOutputPath;
+  const char* textPath = getenv("JS_AOT_TEXT_BIN");
+  if (!textPath) textPath = kAOTTextBinDefault;
+  const char* containerPath = getenv("JS_AOT_CONTAINER_BIN");
+  if (!containerPath) containerPath = kAOTContainerBinDefault;
   AOTContainerWriter container;
   auto& accum = cx->runtime()->jitRuntime()->aotDump_;
 
@@ -927,28 +514,9 @@ bool DumpAOTContainer(JSContext* cx) {
     }
     accum.baselineFunctionBlobs.clearAndFree();
 
-    // Drain any pending flusher writes before we scan the corpus dir, so
-    // in-flight blobs from this run are picked up by MergeBaselineCorpusDir.
-    DrainPendingAOTCorpus(cx);
-
-    // Merge the checked-in BL-*.bin corpus, deduping by canonical hash
-    // against anything recorded in-memory this run. A stale-version file
-    // is skipped rather than aborting the dump. Only performed when the
-    // caller explicitly asked to dump the baseline corpus.
-    const char* corpusDir = BaselineCorpusDir();
-    uint32_t diskAdded = 0, diskSkipped = 0;
-    if (JitOptions.dumpAOTBaselineCorpus) {
-      if (!MergeBaselineCorpusDir(corpusDir, accum, container, diskAdded,
-                                  diskSkipped)) {
-        return false;
-      }
-    }
-
-    if (inMemCount > 0 || diskAdded > 0 || diskSkipped > 0) {
-      JitSpew(JitSpew_BaselineAOT,
-              "Baseline corpus: in-memory=%u disk-added=%u disk-skipped=%u "
-              "(dir=%s)",
-              inMemCount, diskAdded, diskSkipped, corpusDir);
+    if (inMemCount > 0) {
+      JitSpew(JitSpew_BaselineAOT, "Baseline corpus: in-memory=%u",
+              inMemCount);
     }
   }
 
@@ -957,24 +525,37 @@ bool DumpAOTContainer(JSContext* cx) {
     return true;
   }
 
-  std::ofstream out(outPath, std::ios::trunc);
-  if (!out.is_open()) {
-    JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.", outPath);
+  std::ofstream textOut(textPath, std::ios::trunc | std::ios::binary);
+  if (!textOut.is_open()) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.", textPath);
+    return false;
+  }
+  std::ofstream containerOut(containerPath,
+                             std::ios::trunc | std::ios::binary);
+  if (!containerOut.is_open()) {
+    JitSpew(JitSpew_BaselineAOT, "Failed to open %s for writing.",
+            containerPath);
     return false;
   }
 
-  if (!container.finalize(out)) {
+  if (!container.finalize(textOut, containerOut)) {
     return false;
   }
 
-  out.close();
+  textOut.close();
+  containerOut.close();
 
-  JitSpew(JitSpew_BaselineAOT, "Wrote AOT container with %u blob(s) to %s",
-          container.blobCount(), outPath);
+  JitSpew(JitSpew_BaselineAOT,
+          "Wrote AOT container with %u blob(s): text=%s container=%s",
+          container.blobCount(), textPath, containerPath);
   JitSpew(JitSpew_BaselineAOT, "Rebuild the engine to use AOT mode.");
 
   return true;
 }
+
+// ============================================================
+// Load Entry Points
+// ============================================================
 
 bool LoadAOTInterpFromContainer(JSContext* cx,
                                 BaselineInterpreter& interpreter) {

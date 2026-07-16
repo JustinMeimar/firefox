@@ -33,7 +33,6 @@
                                         \
   _(WasmInitBuiltinThunks, 451)         \
                                         \
-  _(AOTCorpusFlusher, 550)              \
   _(StringsCache, 500)                  \
   _(FutexThread, 500)                   \
   _(ProtectedRegionTree, 500)           \

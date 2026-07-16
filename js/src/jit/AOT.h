@@ -28,7 +28,9 @@ namespace js::jit {
 // builtins.
 //
 // An AOT container is a flat binary blob, embedded into the shell via
-// AOTBaselineStub.S and mmapped at runtime. Its payload is a sequence of
+// aot_baseline/AOTBaselineIncbin.S (which .incbin's two build products,
+// AOTBaselineText.bin and AOTBaselineContainer.bin) and mmapped at
+// runtime. Its payload is a sequence of
 // AOT artifacts (Blobs). A single IC, baseline interpreter, or
 // self-hosted function is one blob. Each blob is packed as
 // { code, fields POD, element arrays }; the container writes a directory
@@ -147,9 +149,11 @@ struct AOTBlobDirectoryEntry {
 static_assert(sizeof(AOTBlobDirectoryEntry) == 28,
               "AOTBlobDirectoryEntry must be 28 bytes");
 
-// These symbols are defined by AOTBaselineStub.S, regenerated with
-// `--aot-dump-blinterp --aot-dump-self-hosted`. Pre-bootstrap the stub is
-// empty and the runtime consumers must handle a zero-sized container.
+// These symbols are defined by aot_baseline/AOTBaselineIncbin.S, which
+// `.incbin`s AOTBaselineText.bin and AOTBaselineContainer.bin (produced
+// by `--aot-dump-blinterp --aot-dump-self-hosted`). Pre-bootstrap the
+// .bin files are empty and the runtime consumers must handle a
+// zero-sized container.
 extern "C" {
   extern MOZ_EXPORT const uint8_t bl_aot_container_start[];
   extern MOZ_EXPORT const uint8_t bl_aot_container_end[];
@@ -313,9 +317,12 @@ class AOTBlobWriter {
   }
 };
 
-// Builds the multi-blob AOT container and emits the assembly .S file.
-// Blobs are added via addBlob() which returns a movable AOTBlobWriter.
-// Call finalize() after all blobs are populated.
+// Builds the multi-blob AOT container and writes two raw binaries:
+//   textOut     -> .text.aot payload (concatenated blob code)
+//   containerOut -> .rodata payload (header + fingerprint + directory +
+//                                    per-blob fields/arrays)
+// Both are consumed by aot_baseline/AOTBaselineIncbin.S via .incbin at
+// build time.
 class AOTContainerWriter {
   Vector<AOTBlobWriter, 0, SystemAllocPolicy> blobs_;
 
@@ -327,7 +334,8 @@ class AOTContainerWriter {
     return true;
   }
   uint32_t blobCount() const { return blobs_.length(); }
-  [[nodiscard]] bool finalize(std::ostream& out);
+  [[nodiscard]] bool finalize(std::ostream& textOut,
+                              std::ostream& containerOut);
 };
 
 

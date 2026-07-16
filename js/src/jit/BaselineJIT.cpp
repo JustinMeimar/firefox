@@ -604,27 +604,14 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   // BaselineAOT.cpp) so function-scope and global-scope records don't
   // alias. Debuggees are excluded because their trap edits invalidate
   // the canonical-equal replay contract.
-  bool aotEligible = !script->isDebuggee();
-  if (JitOptions.useAOTBaselineCorpus && aotEligible) {
+  if (JitOptions.useAOTBaselineCorpus && !script->isDebuggee()) {
     if (LoadAOTBaselineFunction(cx, script)) {
       return Method_Compiled;
     }
   }
-  bool aotDump = JitOptions.recordAOTBaselineCorpus && aotEligible &&
-                 !IsAOTBaselineFunctionRecorded(cx, script);
-  MethodStatus status = BaselineCompile(cx, script, options,
-                                        /*isAOTDump=*/aotDump);
+  MethodStatus status = BaselineCompile(cx, script, options);
   if (status == Method_Compiled) {
     EmitBaselineCompileEvent(cx, script);
-    if (aotDump) {
-      (void)RecordAOTBaselineFunction(cx, script);
-      BaselineScript* bs = script->baselineScript();
-      JitCode* code = bs->method();
-      if (!EnsureAOTPreambleFor(cx, code)) return Method_Error;
-      bs->setAOTPreambleEntry(
-          cx->runtime()->jitRuntime()->lookupAOTPreamble(code->raw()));
-      script->updateJitCodeRaw(cx->runtime());
-    }
   }
   return status;
 #else

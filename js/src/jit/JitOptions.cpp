@@ -141,8 +141,6 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(dumpAOTSelfHosted, false);
   SET_DEFAULT(dumpAOTBaselineCorpus, false);
   SET_DEFAULT(dumpAOTICs, false);
-  SET_DEFAULT(recordAOTBaselineCorpus, false);
-  SET_DEFAULT(recordAOTICs, false);
 
   SET_DEFAULT(useAOTBlinterp, false);
   SET_DEFAULT(useAOTSelfHosted, false);
@@ -212,14 +210,10 @@ DefaultJitOptions::DefaultJitOptions() {
   if (getenv("JS_AOT_ICS_ENFORCE")) {
     enforceAOTICs = true;
   }
-  if (getenv("JS_AOT_ICS_RECORD")) {
-    recordAOTICs = true;
-  }
   if (getenv("JS_AOT_ICS_DUMP")) {
     dumpAOTICs = true;
   }
   // enforce is strict-mode: it requires a loaded container to enforce against.
-  // record is orthogonal: it captures misses without touching the load path.
   if (enforceAOTICs) {
     useAOTICs = true;
   }

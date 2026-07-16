@@ -13086,8 +13086,6 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "aot-self-hosted", "Use AOT self-hosted functions.") ||
       !op.addBoolOption('\0', "aot-ics", "Use AOT inline caches.") ||
       !op.addBoolOption('\0', "aot-baseline-corpus", "Install AOT baseline functions from corpus on baseline entry.") ||
-      !op.addBoolOption('\0', "aot-record-baseline-corpus", "Record AOT-compiled guest baseline functions during execution into the baseline corpus dir. Non-fatal on miss; symmetric with --aot-record-ics.") ||
-      !op.addBoolOption('\0', "aot-record-ics", "Record missing IC stubs into the ICs corpus dir. Non-fatal on miss; corpus dir defaults to js/src/ics, overridable with JS_AOT_ICS_CORPUS_DIR.") ||
       !op.addBoolOption('\0', "aot-ics-enforce", "Strict mode: crash on any IC miss. Implies --aot-ics. Use for corpus validation.") ||
 #endif
       !op.addIntOption(
@@ -14243,12 +14241,6 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("aot-baseline-corpus")) {
     jit::JitOptions.useAOTBaselineCorpus = true;
-  }
-  if (op.getBoolOption("aot-record-baseline-corpus")) {
-    jit::JitOptions.recordAOTBaselineCorpus = true;
-  }
-  if (op.getBoolOption("aot-record-ics")) {
-    jit::JitOptions.recordAOTICs = true;
   }
   if (op.getBoolOption("aot-ics-enforce")) {
     jit::JitOptions.useAOTICs = true;

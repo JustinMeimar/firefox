@@ -126,15 +126,6 @@ JitRuntime::~JitRuntime() {
 
   MOZ_ASSERT(ionFreeTaskBatch_.ref().empty());
 
-#ifdef ENABLE_JS_AOT
-  // Stop the corpus flusher's writer thread and drain any remaining
-  // queued blobs to disk. Safe to call unconditionally; a no-op when
-  // the flusher was never started.
-  if (aotDump_.corpusFlusher) {
-    aotDump_.corpusFlusher->drainAndStop();
-  }
-#endif
-
   // By this point, the jitcode global table should be empty.
   MOZ_ASSERT_IF(jitcodeGlobalTable_, jitcodeGlobalTable_->empty());
   js_delete(jitcodeGlobalTable_.ref());
