@@ -8,6 +8,9 @@ if CONFIG["JS_BUNDLED_EDITLINE"]:
     USE_LIBS += ["editline"]
 USE_LIBS += ["static:js"]
 
+if CONFIG["ENABLE_JS_AOT"]:
+    USE_LIBS += ["aot_baseline"]
+
 include("../js-compileflags.mozbuild")
 include("../js-config.mozbuild")
 include("../js-cxxflags.mozbuild")
@@ -62,4 +65,11 @@ if CONFIG["OS_ARCH"] == "WASI":
 if CONFIG["OS_TARGET"] == "Android":
     LDFLAGS += [
         "-Wl,-rpath=$ORIGIN",
+    ]
+
+# AOT builds ship libaot_baseline.so next to the shell; give the shell an
+# origin-relative rpath so it can be launched without LD_LIBRARY_PATH.
+if CONFIG["ENABLE_JS_AOT"] and CONFIG["OS_TARGET"] == "Linux":
+    LDFLAGS += [
+        "-Wl,-rpath,$ORIGIN",
     ]

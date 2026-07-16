@@ -21,6 +21,7 @@
 #include "jit/AOT.h"
 #include "jit/AOTInstrumentation.h"
 #include "jit/AutoWritableJitCode.h"
+#include "jit/BaselineCodeGen.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRSpewer.h"
@@ -633,6 +634,8 @@ static void MaybeToggleProfilerForAOTBaseline(JSContext* cx,
       cx->runtime()->jitRuntime()->lookupAOTPreamble(code->raw()));
 
   script->jitScript()->setBaselineScript(script, bs);
+
+  FinalizeInstalledBaselineScript(script);
 
   if (!RegisterAOTBaselineForProfiler(cx, script, code)) return false;
 

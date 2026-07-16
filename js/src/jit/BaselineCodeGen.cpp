@@ -397,7 +397,7 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
   handler.maybeDisableIon();
 
   // AllocSites must be allocated on the main thread.
-  handler.createAllocSites();
+  FinalizeInstalledBaselineScript(handler.script());
 
   // Always register a native => bytecode mapping entry, since profiler can be
   // turned on with baseline jitcode on stack, and baseline jitcode cannot be
@@ -750,16 +750,21 @@ static void CreateAllocSitesForICChain(JSScript* script, uint32_t entryIndex,
   }
 }
 
-void BaselineCompilerHandler::createAllocSites() {
-  ICScript* icScript = script()->jitScript()->icScript();
-  gc::AutoMarkingLock lock(script()->zone(), icScript->markingLock());
+void FinalizeInstalledBaselineScript(JSScript* script) {
+  JitScript* jitScript = script->jitScript();
+  ICScript* icScript = jitScript->icScript();
+  gc::AutoMarkingLock lock(script->zone(), icScript->markingLock());
 
-  for (uint32_t allocSiteIndex : allocSiteIndices_) {
-    CreateAllocSitesForICChain(script(), allocSiteIndex, lock);
+  for (uint32_t i = 0, n = jitScript->numICEntries(); i < n; i++) {
+    uint32_t pcOffset = jitScript->fallbackStub(i)->pcOffset();
+    if (!BytecodeOpCanHaveAllocSite(JSOp(*script->offsetToPC(pcOffset)))) {
+      continue;
+    }
+    CreateAllocSitesForICChain(script, i, lock);
   }
 
-  if (needsEnvAllocSite_) {
-    icScript->ensureEnvAllocSite(script(), lock);
+  if (script->needsFunctionEnvironmentObjects()) {
+    icScript->ensureEnvAllocSite(script, lock);
   }
 }
 
@@ -786,11 +791,6 @@ bool BaselineCompilerCodeGen::emitNextIC() {
 
   MOZ_ASSERT(stub->pcOffset() == pcOffset);
   MOZ_ASSERT(BytecodeOpHasIC(JSOp(*handler.pc())));
-
-  if (BytecodeOpCanHaveAllocSite(JSOp(*handler.pc())) &&
-      !handler.addAllocSiteIndex(entryIndex)) {
-    return false;
-  }
 
   // Load stub pointer into ICStubReg.
   masm.loadPtr(frame.addressOfICScript(), ICStubReg);
@@ -1545,7 +1545,7 @@ bool BaselineCompilerCodeGen::initEnvironmentChain() {
     masm.loadFunctionFromCalleeToken(frame.addressOfCalleeToken(), callee);
 
     AllocSiteInput site;
-    if (handler.addEnvAllocSite()) {
+    if (handler.usesEnvAllocSite()) {
       siteRegister = regs.takeAny();
       masm.loadPtr(frame.addressOfICScript(), temp);
       masm.loadPtr(Address(temp, ICScript::offsetOfEnvAllocSite()),

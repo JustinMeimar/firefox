@@ -10,6 +10,7 @@
 
 #include "mozilla/HashTable.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Types.h"
 #include <cstdint>
 #include <cstring>
 #include <iosfwd>
@@ -150,10 +151,10 @@ static_assert(sizeof(AOTBlobDirectoryEntry) == 28,
 // `--aot-dump-blinterp --aot-dump-self-hosted`. Pre-bootstrap the stub is
 // empty and the runtime consumers must handle a zero-sized container.
 extern "C" {
-  extern const uint8_t bl_aot_container_start[];
-  extern const uint8_t bl_aot_container_end[];
-  extern uint8_t bl_aot_text_start[];
-  extern uint8_t bl_aot_text_end[];
+  extern MOZ_EXPORT const uint8_t bl_aot_container_start[];
+  extern MOZ_EXPORT const uint8_t bl_aot_container_end[];
+  extern MOZ_EXPORT uint8_t bl_aot_text_start[];
+  extern MOZ_EXPORT uint8_t bl_aot_text_end[];
 }
 
 inline const uint8_t* GetAOTContainer() { return bl_aot_container_start; }

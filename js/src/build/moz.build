@@ -53,6 +53,9 @@ USE_LIBS += [
     "nspr",
 ]
 
+if CONFIG["ENABLE_JS_AOT"]:
+    USE_LIBS += ["aot_baseline"]
+
 if not CONFIG["USE_LIBZ_RS"]:
     USE_LIBS += [
         "zlib",

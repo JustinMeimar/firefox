@@ -107,11 +107,6 @@ def Libxul(name, output_category=None):
     if name == "xul-gtest" and CONFIG["MOZ_LTO_FAT"]:
         LDFLAGS += ["-fno-lto"]
 
-    # Place the AOT baseline blob in its own PT_LOAD segment so it shows up as
-    # a distinct region in /proc/PID/smaps for RSS/USS/PSS accounting.
-    if CONFIG["ENABLE_JS_AOT"] and CONFIG["OS_TARGET"] == "Linux":
-        LDFLAGS += ["-Wl,-T,%s/js/src/jit/aot.ld" % TOPSRCDIR]
-
 
 # The real libxul definition is in ./build/moz.build, but we define a
 # xul library here such that # FINAL_LIBRARY = 'xul' refers to here, which
@@ -152,6 +147,9 @@ TEST_DIRS += ["gtest"]
 USE_LIBS += [
     "js",
 ]
+
+if CONFIG["ENABLE_JS_AOT"]:
+    USE_LIBS += ["aot_baseline"]
 
 USE_LIBS += [
     "abseil",

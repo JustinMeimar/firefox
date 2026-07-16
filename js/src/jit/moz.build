@@ -267,11 +267,11 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
 if CONFIG["ENABLE_JS_AOT"]:
     SOURCES += [
         "AOT.cpp",
-        "AOTBaseline.S",
         "AOTMacroAssembler.cpp",
         "BaselineAOT.cpp",
         "CacheIRAOT.cpp",
     ]
+    DIRS += ["aot_baseline"]
 
 
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml

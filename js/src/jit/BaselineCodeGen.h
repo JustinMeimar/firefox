@@ -291,7 +291,6 @@ class BaselineCodeGen {
 };
 
 using RetAddrEntryVector = js::Vector<RetAddrEntry, 16, SystemAllocPolicy>;
-using AllocSiteIndexVector = js::Vector<uint32_t, 16, SystemAllocPolicy>;
 
 // Interface used by BaselineCodeGen for BaselineCompiler.
 class BaselineCompilerHandler {
@@ -303,7 +302,6 @@ class BaselineCompilerHandler {
 #endif
   FixedList<Label> labels_;
   RetAddrEntryVector retAddrEntries_;
-  AllocSiteIndexVector allocSiteIndices_;
 
   // Native code offsets for OSR at JSOp::LoopHead ops.
   using OSREntryVector =
@@ -334,7 +332,6 @@ class BaselineCompilerHandler {
 
   bool compilingOffThread_ = false;
 
-  bool needsEnvAllocSite_ = false;
   bool isAOT_ = false;
 
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
@@ -421,18 +418,10 @@ class BaselineCompilerHandler {
 
   void maybeDisableIon();
 
-  [[nodiscard]] bool addAllocSiteIndex(uint32_t entryIndex) {
-    return allocSiteIndices_.append(entryIndex);
-  }
-  void createAllocSites();
-
   bool compilingOffThread() const { return compilingOffThread_; }
   void setCompilingOffThread() { compilingOffThread_ = true; }
 
-  bool addEnvAllocSite() {
-    needsEnvAllocSite_ = true;
-    return true;
-  }
+  bool usesEnvAllocSite() const { return true; }
 
   bool realmIndependentJitcode() const {
     // AOT-context codegen must be replayable on any matching JSScript in
@@ -574,7 +563,7 @@ class BaselineInterpreterHandler {
   bool canHaveFixedSlots() const { return true; }
   JSObject* maybeGlobalLexicalEnvironment() const { return nullptr; }
 
-  bool addEnvAllocSite() { return false; }  // Not supported.
+  bool usesEnvAllocSite() const { return false; }  // Not supported.
 
   bool realmIndependentJitcode() const { return true; }
 
@@ -622,6 +611,13 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
 
   void emitOutOfLineCodeCoverageInstrumentation();
 };
+
+// Interpreter -> baseline JIT transition: rewrite Unknown AllocSites left
+// by interp-phase stubs into per-script sites, and set the env AllocSite
+// if the script needs function environment objects. Main thread; silent
+// on OOM. Shared by BaselineCompile and the AOT install path.
+// TODO(aot): maybeDisableIon() / BytecodeAnalysis parity is still missing.
+void FinalizeInstalledBaselineScript(JSScript* script);
 
 }  // namespace jit
 }  // namespace js
