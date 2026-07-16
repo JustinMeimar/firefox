@@ -599,11 +599,11 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
-  // Any non-debuggee script is eligible. The canonical hash and blob
-  // format carry scopeKind (see ComputeBaselineCanonical in
-  // BaselineAOT.cpp) so function-scope and global-scope records don't
-  // alias. Debuggees are excluded because their trap edits invalidate
-  // the canonical-equal replay contract.
+  // Any non-debuggee script is eligible. The identity hash carries
+  // scopeKind (see HashBaselineIdentity in BaselineAOT.cpp) so
+  // function-scope and global-scope records don't alias. Debuggees are
+  // excluded because their trap edits invalidate the identity-equal
+  // replay contract.
   if (JitOptions.useAOTBaselineCorpus && !script->isDebuggee()) {
     if (LoadAOTBaselineFunction(cx, script)) {
       return Method_Compiled;

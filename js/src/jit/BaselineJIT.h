@@ -193,13 +193,9 @@ class alignas(uintptr_t) BaselineScript final
   HeapPtr<JitCode*> method_{nullptr};
 
 #ifdef ENABLE_JS_AOT
-  // Cached entry address for callers that would otherwise bypass
-  // JSScript::jitCodeRaw_ (e.g. loadJitCodeRawNoIon under trial
-  // inlining): equal to method_->raw() by default, but replaced with
-  // the AOT preamble's raw address once EnsureAOTPreambleFor runs.
-  // Callers that read this field always enter through the preamble
-  // when one exists, so the AOTSelfHostedPassReg convention holds
-  // regardless of which code path resolved the target.
+  // NOTE(Refactor): This is a bad name for a seconday entry point for the
+  // preamble which baseline functions should take in order to setup the
+  // indirection mechanism.
   uint8_t* entryPointRaw_{nullptr};
 #endif
 
@@ -433,7 +429,6 @@ class alignas(uintptr_t) BaselineScript final
     auto s = debugTrapEntries();
     return {s.data(), s.size()};
   }
-
   // Serialize resume entries as native offsets from method_->raw() so
   // they can be relocated on load. Unreachable entries were stored as
   // nullptr; encoded here as UINT32_MAX.

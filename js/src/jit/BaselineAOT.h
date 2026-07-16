@@ -30,7 +30,7 @@ static constexpr const char* kAOTContainerBinDefault =
 [[nodiscard]] bool LoadAOTInterpFromContainer(
     JSContext* cx, BaselineInterpreter& interpreter);
 
-// Look up an AOT BaselineFunction blob whose canonical bytes match
+// Look up an AOT BaselineFunction blob whose identity hash matches
 // `script`. Handles both self-hosted delazified scripts and guest
 // scripts uniformly. On hit, installs the blob's baseline code on the
 // script.
@@ -39,8 +39,8 @@ static constexpr const char* kAOTContainerBinDefault =
 
 // O(1) probe key: the container's BaselineFunction blob nameHash. Two
 // scripts sharing a SharedImmutableScriptData collide here, which is
-// fine -- the canonical memcmp inside LoadAOTBaselineFunction is the
-// ground-truth verify.
+// fine -- the SHA-1 identity memcmp inside LoadAOTBaselineFunction is
+// the ground-truth verify.
 uint32_t ComputeBaselineProbeHash(JSScript* script);
 
 [[nodiscard]] bool RecordAOTBaselineFunction(JSContext* cx,

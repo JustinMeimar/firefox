@@ -91,7 +91,8 @@ blobs:
     kind_id: 2
     doc: |
       Per-script AOT baseline code. Covers both self-hosted builtins and
-      guest scripts; identity is by canonical byte content, not by the
+      guest scripts; identity is by SHA-1 of the JSScript fields the
+      baseline compiler reads (see HashBaselineIdentity), not by the
       script's origin.
     fields:
       - {name: warmUpCheckPrologueOffset, type: u32}
@@ -106,9 +107,10 @@ blobs:
       - {name: nargs,                     type: u16}
       - {name: nfixed,                    type: u16}
       - {name: scopeKind,                 type: u8}
-      # SHA-1 of ComputeBaselineCanonical(script). Ground-truth identity
-      # check on load; supersedes storing the full canonical byte stream.
-      - {name: canonicalHash,             type: raw,
+      # SHA-1 of HashBaselineIdentity(script). Ground-truth identity
+      # check on load: script identity is the subset of JSScript state
+      # the baseline compiler reads, streamed through SHA-1.
+      - {name: identityHash,              type: raw,
                                           cpp_type: "mozilla::SHA1Sum::Hash",
                                           size: 20}
     arrays:

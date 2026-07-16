@@ -65,7 +65,7 @@ static constexpr uint32_t kAOTMaxVMWrappers = 512;
 static constexpr uint32_t kAOTMaxABIFunctions = 256;
 static constexpr uint32_t kAOTAlignment = 16;
 static constexpr uint32_t kAOTSectionAlignment = 4096;
-static constexpr uint32_t AOT_CONTAINER_VERSION = 14;
+static constexpr uint32_t AOT_CONTAINER_VERSION = 15;
 static constexpr uint32_t AOT_CONTAINER_MAGIC = 0x414F5443;  // "AOTC"
 
 enum class AOTSlot : uint32_t {
@@ -109,14 +109,11 @@ inline const char* AOTSlotName(AOTSlot slot) {
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
   InlineCacheStub = 1,
-  // Per-script AOT baseline code. Applies to both self-hosted builtins
-  // and guest scripts; identity is canonical byte content (see
-  // ComputeBaselineCanonical), so origin is irrelevant.
   BaselineFunction = 2,
 };
 
 // 20-byte SHA-1 digest wrapper usable as a HashSet key. Backs
-// AOTDumpAccumulator dedup sets for baseline canonicals and IC stubs.
+// AOTDumpAccumulator dedup sets for baseline identities and IC stubs.
 struct AOTHashKey {
   static constexpr size_t kSize = 20;
   uint8_t bytes[kSize];
@@ -435,9 +432,9 @@ class AOTContainerReader {
   const uint8_t* textBase_;
   uint32_t blobCount_;
   // Populated once at fromEmbedded() time from every BaselineFunction
-  // blob's nameHash (v11: SharedImmutableScriptData::hash()). Used as
-  // the O(1) miss check in LoadAOTBaselineFunction so scripts absent
-  // from the corpus never pay ComputeBaselineCanonical.
+  // blob's nameHash (SharedImmutableScriptData::hash()). Used as the
+  // O(1) miss check in LoadAOTBaselineFunction so scripts absent from
+  // the corpus never pay HashBaselineIdentity.
   const ProbeSet* baselineProbes_;
 
   AOTContainerReader(const AOTBlobDirectoryEntry* dir,

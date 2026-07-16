@@ -46,98 +46,74 @@ namespace js::jit {
 #ifdef ENABLE_JS_AOT
 
 // ============================================================
-// Names & Hashing
+// Script Identity
 // ============================================================
 
-// Magic prefix on the per-blob canonical byte string. Distinct from
-// AOT_CONTAINER_MAGIC so a truncated read of canonical bytes cannot be
-// confused with a container header.
-static constexpr uint32_t kBaselineCanonicalMagic = 0x424C4E63;  // 'BLNc'
-
-// Canonical bytes identify a script for AOT baseline matching: two
-// scripts hash equal iff their baseline codegen output would be
-// byte-identical. HasDebugScript is masked in because it toggles trap
-// emission; other mutable flags don't affect codegen. Debuggee scripts
-// are filtered upstream (see BaselineJIT.cpp:aotEligible and
-// LoadAOTBaselineFunction below) so debuggee-ness is not encoded here.
-// Only gcthing kinds are hashed, not pointers - pointers vary by realm
-// and are routed through the indirection table at load time.
-//
-// Wire format is the append order below. Adding, reordering, or
-// resizing any field silently invalidates every existing corpus; bump
-// AOT_CONTAINER_VERSION alongside such changes.
+// Fast O(1) probe key used to bucket blobs in the container directory.
+// SharedImmutableScriptData is deduplicated across scripts, so two
+// scripts with identical bytecode collide here; HashBaselineIdentity
+// below is the collision-safe verify.
 uint32_t ComputeBaselineProbeHash(JSScript* script) {
   return uint32_t(script->sharedData()->hash());
 }
 
-// ============================================================
-// Canonical Serialization
-// ============================================================
-
-static bool ComputeBaselineCanonical(
-    JSScript* script,
-    Vector<uint8_t, 0, SystemAllocPolicy>& out) {
-  auto append = [&](const void* p, size_t n) {
-    return out.append(reinterpret_cast<const uint8_t*>(p), n);
+// SHA-1 of the subset of JSScript state the baseline compiler reads.
+// Two scripts hash equal iff a baseline blob compiled for one is
+// byte-compatible with the other. Only gcthing *kinds* are hashed, not
+// pointers: pointers vary by realm and go through the indirection table
+// at load time. Debuggees are filtered upstream so no mutable flag
+// survives here.
+//
+// Wire format is the update() order below. Any change to which fields
+// are hashed, their order, or their widths silently invalidates every
+// existing corpus; bump AOT_CONTAINER_VERSION alongside such changes.
+static void HashBaselineIdentity(JSScript* script,
+                                 mozilla::SHA1Sum::Hash& out) {
+  mozilla::SHA1Sum sha;
+  auto u = [&](const void* p, size_t n) {
+    sha.update(p, uint32_t(n));
   };
 
-  auto immData = script->immutableScriptData()->immutableData();
-  auto gcThings = script->gcthings();
-
-  uint32_t magic = kBaselineCanonicalMagic;
   uint32_t immFlags = script->immutableFlags().toRaw();
-  uint32_t mutFlagsMask =
-      script->hasDebugScript()
-          ? uint32_t(MutableScriptFlagsEnum::HasDebugScript)
-          : 0u;
-  uint32_t funFlags =
-      script->function()
-          ? uint32_t(script->function()->flags().toRaw())
-          : 0u;
-  uint16_t nargs =
-      script->function() ? uint16_t(script->function()->nargs())
-                         : uint16_t(0);
+  uint32_t funFlags = script->function()
+                          ? uint32_t(script->function()->flags().toRaw())
+                          : 0u;
+  uint16_t nargs = script->function()
+                       ? uint16_t(script->function()->nargs())
+                       : uint16_t(0);
   uint16_t nfixed = uint16_t(script->nfixed());
   uint32_t nslots = uint32_t(script->nslots());
   uint32_t numICEntries = uint32_t(script->numICEntries());
-  uint32_t immDataSize = uint32_t(immData.size());
-  uint32_t gcThingKindsSize = uint32_t(gcThings.size());
   uint8_t scopeKind = uint8_t(script->outermostScope()->kind());
   uint8_t hasNonSyntactic = script->hasNonSyntacticScope() ? 1 : 0;
   uint8_t isFunction = script->function() ? 1 : 0;
-  uint8_t reserved = 0;
 
-  if (!append(&magic, sizeof(magic))) return false;
-  if (!append(&immFlags, sizeof(immFlags))) return false;
-  if (!append(&mutFlagsMask, sizeof(mutFlagsMask))) return false;
-  if (!append(&funFlags, sizeof(funFlags))) return false;
-  if (!append(&nargs, sizeof(nargs))) return false;
-  if (!append(&nfixed, sizeof(nfixed))) return false;
-  if (!append(&nslots, sizeof(nslots))) return false;
-  if (!append(&numICEntries, sizeof(numICEntries))) return false;
-  if (!append(&immDataSize, sizeof(immDataSize))) return false;
-  if (!append(&gcThingKindsSize, sizeof(gcThingKindsSize))) return false;
-  if (!append(&scopeKind, sizeof(scopeKind))) return false;
-  if (!append(&hasNonSyntactic, sizeof(hasNonSyntactic))) return false;
-  if (!append(&isFunction, sizeof(isFunction))) return false;
-  if (!append(&reserved, sizeof(reserved))) return false;
+  u(&immFlags, sizeof(immFlags));
+  u(&funFlags, sizeof(funFlags));
+  u(&nargs, sizeof(nargs));
+  u(&nfixed, sizeof(nfixed));
+  u(&nslots, sizeof(nslots));
+  u(&numICEntries, sizeof(numICEntries));
+  u(&scopeKind, sizeof(scopeKind));
+  u(&hasNonSyntactic, sizeof(hasNonSyntactic));
+  u(&isFunction, sizeof(isFunction));
 
-  if (immDataSize && !append(immData.data(), immDataSize)) {
-    return false;
-  }
-
+  // gcThings first, length-prefixed so its boundary with the trailing
+  // immData bytes is unambiguous. immData is variable-length but last,
+  // so its length is implicit in the total SHA-1 input length.
+  auto gcThings = script->gcthings();
+  uint32_t gcThingCount = uint32_t(gcThings.size());
+  u(&gcThingCount, sizeof(gcThingCount));
   for (const auto& gct : gcThings) {
     uint8_t k = uint8_t(gct.kind());
-    if (!append(&k, sizeof(k))) return false;
+    u(&k, 1);
   }
 
-  return true;
-}
+  auto immData = script->immutableScriptData()->immutableData();
+  if (!immData.empty()) {
+    u(immData.data(), immData.size());
+  }
 
-static void HashBaselineCanonical(mozilla::Span<const uint8_t> canonical,
-                                  mozilla::SHA1Sum::Hash& out) {
-  mozilla::SHA1Sum sha;
-  sha.update(canonical.data(), uint32_t(canonical.size()));
   sha.finish(out);
 }
 
@@ -145,9 +121,15 @@ static void HashBaselineCanonical(mozilla::Span<const uint8_t> canonical,
 // Blob Encode / Decode
 // ============================================================
 
+
+// NOTE_REFACTOR: AFAICT this is used only when recording a baseline function.
+// What is the off process / on file represetnation o f a baseline function we
+// will use for this AOT system? Will it be .js, will it be textual bytecode?
+// It most definitely can not be the .bin we have now,
 [[nodiscard]] static bool EncodeBaselineFunctionBlob(
-    HandleScript script, const mozilla::SHA1Sum::Hash& canonicalHash,
+    HandleScript script, const mozilla::SHA1Sum::Hash& identityHash,
     BaselineScript* bs, AOTBlobWriter& blob) {
+
   Vector<uint32_t, 0, SystemAllocPolicy> resumeBuf;
   if (!bs->aotResumeOffsets(resumeBuf)) return false;
 
@@ -176,7 +158,7 @@ static void HashBaselineCanonical(mozilla::Span<const uint8_t> canonical,
       .resumeOffsets = mozilla::Span<const uint32_t>(resumeBuf.begin(),
                                                      resumeBuf.length()),
   };
-  memcpy(payload.fields.canonicalHash, canonicalHash,
+  memcpy(payload.fields.identityHash, identityHash,
          mozilla::SHA1Sum::kHashSize);
 
   return EncodeAOTBlob_BaselineFunction(blob, payload);
@@ -365,14 +347,10 @@ void EmitBaselineCompileEvent(JSContext* cx, JSScript* script) {
 
   BaselineScript* bs = script->baselineScript();
 
-  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
-  if (!ComputeBaselineCanonical(script, canonical)) return;
-  mozilla::SHA1Sum::Hash canonicalHash;
-  HashBaselineCanonical(
-      mozilla::Span<const uint8_t>(canonical.begin(), canonical.length()),
-      canonicalHash);
+  mozilla::SHA1Sum::Hash identityHash;
+  HashBaselineIdentity(script, identityHash);
   uint32_t hashPrefix;
-  memcpy(&hashPrefix, canonicalHash, sizeof(hashPrefix));
+  memcpy(&hashPrefix, identityHash, sizeof(hashPrefix));
   uint32_t probeHash = ComputeBaselineProbeHash(script);
 
   std::string name;
@@ -385,11 +363,10 @@ void EmitBaselineCompileEvent(JSContext* cx, JSScript* script) {
   if (name.empty()) name = "top_level";
 
   AOT_INSTR(AOTInstr_Baseline,
-            "baseline-compile sha1=%08x probe=%u code=%u canonical=%zu "
+            "baseline-compile sha1=%08x probe=%u code=%u "
             "nargs=%u scope=%u name=%s\n",
             hashPrefix, unsigned(probeHash),
             unsigned(bs->method()->instructionsSize()),
-            canonical.length(),
             script->function() ? unsigned(script->function()->nargs()) : 0u,
             unsigned(script->outermostScope()->kind()),
             name.c_str());
@@ -402,25 +379,19 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
 
   BaselineScript* bs = script->baselineScript();
 
-  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
-  if (!ComputeBaselineCanonical(script, canonical)) {
-    return false;
-  }
-  mozilla::Span<const uint8_t> canonicalSpan(canonical.begin(),
-                                             canonical.length());
-  mozilla::SHA1Sum::Hash canonicalHash;
-  HashBaselineCanonical(canonicalSpan, canonicalHash);
+  mozilla::SHA1Sum::Hash identityHash;
+  HashBaselineIdentity(script, identityHash);
   AOTHashKey key;
-  memcpy(key.bytes, canonicalHash, sizeof(canonicalHash));
+  memcpy(key.bytes, identityHash, sizeof(identityHash));
 
   auto& accum = cx->runtime()->jitRuntime()->aotDump_;
   {
     LockGuard<Mutex> lock(accum.mutex);
-    auto ptr = accum.recordedBaselineCanonicals.lookupForAdd(key);
+    auto ptr = accum.recordedBaselineIdentities.lookupForAdd(key);
     if (ptr) {
       return true;
     }
-    if (!accum.recordedBaselineCanonicals.add(ptr, key)) return false;
+    if (!accum.recordedBaselineIdentities.add(ptr, key)) return false;
   }
 
   std::string name;
@@ -439,27 +410,25 @@ bool RecordAOTBaselineFunction(JSContext* cx, HandleScript script) {
   uint32_t probeHash = ComputeBaselineProbeHash(script);
   AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash, std::move(name));
 
-  if (!EncodeBaselineFunctionBlob(script, canonicalHash, bs, blob)) {
+  if (!EncodeBaselineFunctionBlob(script, identityHash, bs, blob)) {
     return false;
   }
 
   uint32_t hashPrefix;
-  memcpy(&hashPrefix, canonicalHash, sizeof(hashPrefix));
+  memcpy(&hashPrefix, identityHash, sizeof(hashPrefix));
 
   JitSpew(JitSpew_BaselineAOT,
           "AOT baseline function probe=%u sha1=%08x size=%zu "
-          "canonical=%zu nargs=%u scope=%u '%s'",
+          "nargs=%u scope=%u '%s'",
           probeHash, hashPrefix, bs->method()->instructionsSize(),
-          canonicalSpan.size(),
           script->function() ? unsigned(script->function()->nargs()) : 0u,
           unsigned(script->outermostScope()->kind()),
           blob.name().c_str());
 
   AOT_INSTR(AOTInstr_Baseline,
-            "baseline-record sha1=%08x size=%u canonical=%u name=%s\n",
-            hashPrefix,
-            unsigned(bs->method()->instructionsSize()),
-            unsigned(canonicalSpan.size()), blob.name().c_str());
+            "baseline-record sha1=%08x size=%u name=%s\n",
+            hashPrefix, unsigned(bs->method()->instructionsSize()),
+            blob.name().c_str());
 
   if (!accum.baselineFunctionBlobs.append(std::move(blob))) return false;
   return true;
@@ -720,12 +689,8 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
     return false;
   }
 
-  Vector<uint8_t, 0, SystemAllocPolicy> canonical;
-  if (!ComputeBaselineCanonical(script, canonical)) return false;
-  mozilla::Span<const uint8_t> canonicalSpan(canonical.begin(),
-                                             canonical.length());
   mozilla::SHA1Sum::Hash liveHash;
-  HashBaselineCanonical(canonicalSpan, liveHash);
+  HashBaselineIdentity(script, liveHash);
 
   enum class InstallResult { NoMatch, Installed, Failed };
   InstallResult result = InstallResult::NoMatch;
@@ -741,10 +706,10 @@ bool LoadAOTBaselineFunction(JSContext* cx, HandleScript script) {
           return false;
         }
 
-        if (memcmp(payload.fields.canonicalHash, liveHash,
+        if (memcmp(payload.fields.identityHash, liveHash,
                    mozilla::SHA1Sum::kHashSize) != 0) {
           JitSpew(JitSpew_BaselineAOT,
-                  "AOT baseline function canonical hash mismatch probe=%u",
+                  "AOT baseline function identity hash mismatch probe=%u",
                   probe);
           return false;
         }
