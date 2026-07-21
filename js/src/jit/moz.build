@@ -264,6 +264,12 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
         "wasm32/Trampoline-wasm32.cpp",
     ]
 
+if CONFIG["ENABLE_JS_AOT"]:
+    SOURCES += [
+        "AOT.cpp",
+        "AOTMacroAssembler.cpp",
+    ]
+
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(
     "ABIFunctionTypeGenerated.h",

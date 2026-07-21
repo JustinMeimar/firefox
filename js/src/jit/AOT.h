@@ -8,6 +8,7 @@
 #define jit_AOT_h
 
 #include "mozilla/Assertions.h"
+#include "mozilla/Maybe.h"
 
 #include <cstdint>
 
@@ -39,6 +40,8 @@ enum class AOTSlot : uint32_t {
   Count
 };
 
+const char* AOTSlotName(AOTSlot slot);
+
 class AOTIndirectionTable {
  public:
   AOTIndirectionTable() = default;
@@ -56,6 +59,10 @@ class AOTIndirectionTable {
   static constexpr uint32_t offsetOfSlot(AOTSlot slot) {
     return uint32_t(slot) * sizeof(uintptr_t);
   }
+
+  mozilla::Maybe<AOTSlot> findSlot(uintptr_t value) const;
+  AOTSlot findSlotOrCrash(uintptr_t value) const;
+  void dump() const;
 
   uintptr_t* baseAddress() { return slots_; }
   const uintptr_t* baseAddress() const { return slots_; }
