@@ -16,6 +16,7 @@
 #include "jstypes.h"
 
 #include "jit/ABIFunctions.h"
+#include "jit/AOT.h"
 #include "jit/BaselineICList.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CalleeToken.h"
@@ -231,6 +232,10 @@ class JitRuntime {
   MainThreadData<uint32_t> disallowArbitraryCode_{false};
 #endif
 
+#ifdef ENABLE_JS_AOT
+  AOTIndirectionTable aotIndirectionTable_;
+#endif
+
   bool generateTrampolines(JSContext* cx);
   bool generateBaselineICFallbackCode(JSContext* cx);
 
@@ -307,6 +312,14 @@ class JitRuntime {
   JitRuntime() = default;
   ~JitRuntime();
   [[nodiscard]] bool initialize(JSContext* cx);
+
+#ifdef ENABLE_JS_AOT
+  AOTIndirectionTable& aotIndirectionTable() { return aotIndirectionTable_; }
+  const AOTIndirectionTable& aotIndirectionTable() const {
+    return aotIndirectionTable_;
+  }
+  [[nodiscard]] bool populateAOTIndirectionTable(JSContext* cx);
+#endif
 
   static void TraceAtomZoneRoots(JSTracer* trc);
   static void TraceWeakJitcodeGlobalTable(JSRuntime* rt, JSTracer* trc);

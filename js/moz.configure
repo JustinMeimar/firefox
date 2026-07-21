@@ -229,6 +229,27 @@ set_config(
     depends_if("--enable-aot-ics-enforce")(lambda _: True),
 )
 
+# Enable ahead-of-time compiled JIT artifacts (baseline interpreter,
+# self-hosted, IC stubs). Currently x86_64-only.
+option(
+    "--enable-aot",
+    default=False,
+    help="{Enable|Disable} ahead-of-time compiled JIT artifacts (x86_64 only)",
+)
+
+
+@depends("--enable-aot", target)
+def js_aot(value, target):
+    if not value:
+        return None
+    if target.cpu != "x86_64":
+        die("--enable-aot is only supported on x86_64 (got %s)", target.cpu)
+    return True
+
+
+set_define("ENABLE_JS_AOT", js_aot)
+set_config("ENABLE_JS_AOT", js_aot)
+
 
 # JIT support
 # =======================================================

@@ -69,6 +69,30 @@
 #  include "vtune/VTuneWrapper.h"
 #endif
 
+#ifdef ENABLE_JS_AOT
+#  include "builtin/DataViewObject.h"
+#  include "builtin/MapObject.h"
+#  include "builtin/WeakMapObject.h"
+#  include "builtin/WeakSetObject.h"
+#  include "js/Wrapper.h"
+#  include "proxy/DeadObjectProxy.h"
+#  include "proxy/DOMProxy.h"
+#  include "vm/ArgumentsObject.h"
+#  include "vm/ArrayBufferObject.h"
+#  include "vm/ArrayObject.h"
+#  include "vm/BoundFunctionObject.h"
+#  include "vm/DateObject.h"
+#  include "vm/DateTime.h"
+#  include "vm/EnvironmentObject.h"
+#  include "vm/GeneratorObject.h"
+#  include "vm/Iteration.h"
+#  include "vm/JSFunction.h"
+#  include "vm/NativeObject.h"
+#  include "vm/PlainObject.h"
+#  include "vm/SharedArrayObject.h"
+#  include "vm/TypedArrayObject.h"
+#endif
+
 #include "gc/GC-inl.h"
 #include "gc/StableCellHasher-inl.h"
 #include "jit/InlineScriptTree-inl.h"
@@ -113,6 +137,33 @@ uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
   return masm.currentOffset();
 }
 
+#ifdef ENABLE_JS_AOT
+// TODO: Move out of Ion.cpp? Causes messy includes in patch 1/n
+bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
+
+  MOZ_ASSERT(debugTrapHandlers_[DebugTrapHandlerKind::Interpreter]);
+  MOZ_ASSERT(debugTrapHandlers_[DebugTrapHandlerKind::Compiler]);
+
+  JSRuntime* rt = cx->runtime();
+
+  // TODO: call populateAOTNamedSlots
+#define AOT_SLOT(name, expr) \
+  aotIndirectionTable_.set(AOTSlot::name, uintptr_t(expr));
+#include "jit/AOTSlots.tbl"
+#undef AOT_SLOT
+
+  // REFACTOR_NOTE: replace with call populateAOTABISlots method on the
+  // aotIndirectionTable, make the set method private since it pokes directly
+  // into the table. There will be a handful of public compound setting
+  // routines which can be called from populateAOTIndirectionTable, which
+  // arguably should also be a method on the indirectionTable, not the
+  // JitRuntime?
+
+
+  return true;
+}
+#endif
+
 bool JitRuntime::initialize(JSContext* cx) {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
 
@@ -122,6 +173,12 @@ bool JitRuntime::initialize(JSContext* cx) {
   if (!generateTrampolines(cx)) {
     return false;
   }
+
+#ifdef ENABLE_JS_AOT
+  if (!populateAOTIndirectionTable(cx)) {
+    return false;
+  }
+#endif
 
   if (!generateBaselineICFallbackCode(cx)) {
     return false;
@@ -147,6 +204,16 @@ bool JitRuntime::initialize(JSContext* cx) {
   // to point to the interpreter trampoline.
   cx->runtime()->selfHostedLazyScript.ref().jitCodeRaw_ =
       interpreterStub().value;
+
+#ifdef ENABLE_JS_AOT
+  // InterpretOp's address only becomes valid after GenerateBaselineInterpreter
+  // runs above; the .tbl carries a nullptr placeholder patched here.
+  if (IsBaselineInterpreterEnabled()) {
+    aotIndirectionTable_.set(
+        AOTSlot::InterpretOp,
+        uintptr_t(baselineInterpreter_.interpretOpAddr().value));
+  }
+#endif
 
   return true;
 }
