@@ -14,6 +14,8 @@
 
 namespace js::jit {
 
+extern const double MathRandomScaleInv;
+
 // [SMDOC] AOT JIT Code
 //
 // When built with `ENABLE_JS_AOT`, SpiderMonkey emits relocatable JIT

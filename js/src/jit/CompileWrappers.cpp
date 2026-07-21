@@ -98,6 +98,14 @@ const void* CompileRuntime::addressOfLastBufferedWholeCell() {
   return runtime()->gc.addressOfLastBufferedWholeCell();
 }
 
+void* CompileRuntime::addressOfNurseryPosition() {
+  return runtime()->gc.addressOfNurseryPosition();
+}
+
+void* CompileRuntime::addressOfNurseryAllocatedSites() {
+  return runtime()->gc.addressOfNurseryAllocatedSites();
+}
+
 const void* CompileRuntime::addressOfRuntimeFuse(
     RuntimeFuses::FuseIndex index) {
   // We're merely accessing the address of the fuse here, and so we don't need

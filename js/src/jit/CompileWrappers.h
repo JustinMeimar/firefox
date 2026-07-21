@@ -85,6 +85,8 @@ class CompileRuntime {
   const void* addressOfMegamorphicSetPropCache();
   const void* addressOfStringToAtomCache();
   const void* addressOfLastBufferedWholeCell();
+  void* addressOfNurseryPosition();
+  void* addressOfNurseryAllocatedSites();
 
   bool runtimeFuseIntact(RuntimeFuses::FuseIndex index);
   const void* addressOfRuntimeFuse(RuntimeFuses::FuseIndex index);
