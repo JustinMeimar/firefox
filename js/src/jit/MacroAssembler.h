@@ -32,6 +32,7 @@
 #endif
 #include "jit/ABIArgGenerator.h"
 #include "jit/ABIFunctions.h"
+#include "jit/AOT.h"
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
@@ -356,6 +357,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // self_hosted_cache is enabled) self-hosted baseline code.
   CompileRealm* maybeRealm_ = nullptr;
 
+#ifdef ENABLE_JS_AOT
+  AOTIndirectionTable* aotTable_ = nullptr;
+  bool inAOTStubFrame_ = false;
+#endif
+
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
 
@@ -366,6 +372,46 @@ class MacroAssembler : public MacroAssemblerSpecific {
                           CompileRealm* maybeRealm = nullptr);
 
  public:
+  bool isAOT() const {
+#ifdef ENABLE_JS_AOT
+    return aotTable_ != nullptr;
+#else
+    return false;
+#endif
+  }
+
+#ifdef ENABLE_JS_AOT
+  AOTIndirectionTable& aotTable() const {
+    MOZ_ASSERT(aotTable_);
+    return *aotTable_;
+  }
+
+  void setAOTTable(AOTIndirectionTable* table) {
+    MOZ_ASSERT((aotTable_ == nullptr) != (table == nullptr),
+               "AOT table must be installed and uninstalled in balanced pairs");
+    if (table) {
+      MOZ_ASSERT(currentOffset() == 0,
+                 "AOT scope must be installed before any code is emitted");
+      maybeRealm_ = nullptr;
+    }
+    aotTable_ = table;
+  }
+
+  class MOZ_RAII AutoInAOTStubFrame {
+    MacroAssembler& masm_;
+    bool prev_;
+
+   public:
+    explicit AutoInAOTStubFrame(MacroAssembler& masm)
+        : masm_(masm), prev_(masm.inAOTStubFrame_) {
+      masm.inAOTStubFrame_ = true;
+    }
+    ~AutoInAOTStubFrame() { masm_.inAOTStubFrame_ = prev_; }
+    AutoInAOTStubFrame(const AutoInAOTStubFrame&) = delete;
+    void operator=(const AutoInAOTStubFrame&) = delete;
+  };
+#endif
+
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
     // shared between visitors in the CodeGenerator. This assertion
