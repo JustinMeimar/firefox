@@ -86,9 +86,32 @@ AOT_SLOT(Ptr_StaticStrings_Unit,            &cx->staticStrings().unitStaticTable
 AOT_SLOT(Ptr_StaticStrings_Length2,         &cx->staticStrings().length2StaticTable)
 AOT_SLOT(Ptr_StaticStrings_Int,             &cx->staticStrings().intStaticTable)
 AOT_SLOT(Ptr_StaticStrings_SmallChar,       &StaticStrings::toSmallCharTable.storage)
-AOT_SLOT(Ptr_TypedArrayClasses_FixedLength, std::begin(TypedArrayObject::fixedLengthClasses))
-AOT_SLOT(Ptr_TypedArrayClasses_ImmutableEnd, std::prev(std::end(TypedArrayObject::immutableClasses)))
-AOT_SLOT(Ptr_TypedArrayClasses_Resizable,   std::begin(TypedArrayObject::resizableClasses))
-AOT_SLOT(Ptr_TypedArrayClasses_ResizableEnd, std::prev(std::end(TypedArrayObject::resizableClasses)))
 AOT_SLOT(Ptr_DateTimeInfo_UTCOffset,        DateTimeInfo::addressOfUTCToLocalOffsetSeconds())
 AOT_SLOT(Ptr_DOMProxyHandlerFamily,         GetDOMProxyHandlerFamily())
+AOT_SLOT(Ptr_MathRandomScaleInv,            &js::jit::MathRandomScaleInv)
+
+// TypedArray class-array anchors. The three arrays (fixedLength,
+// immutable, resizable) live contiguously; range checks and per-type
+// dispatch in MacroAssembler::{typedArrayElementSize,
+// resizableTypedArrayElementShiftBy, branchIfClassIsNot*TypedArray}
+// emit an ImmPtr for each distinct address they visit. Every address
+// they can visit gets a slot below.
+AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Begin,       std::begin(TypedArrayObject::fixedLengthClasses))
+AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_End,         std::end(TypedArrayObject::fixedLengthClasses))
+AOT_SLOT(Ptr_TypedArrayClasses_Immutable_LastElem,      std::prev(std::end(TypedArrayObject::immutableClasses)))
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Begin,         std::begin(TypedArrayObject::resizableClasses))
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable_End,           std::end(TypedArrayObject::resizableClasses))
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable_LastElem,      std::prev(std::end(TypedArrayObject::resizableClasses)))
+AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Int16,       &TypedArrayObject::fixedLengthClasses[Scalar::Int16])
+AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Int32,       &TypedArrayObject::fixedLengthClasses[Scalar::Int32])
+AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Float64,     &TypedArrayObject::fixedLengthClasses[Scalar::Float64])
+AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Uint8Clamped, &TypedArrayObject::fixedLengthClasses[Scalar::Uint8Clamped])
+AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_BigInt64,    &TypedArrayObject::fixedLengthClasses[Scalar::BigInt64])
+AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Float16,     &TypedArrayObject::fixedLengthClasses[Scalar::Float16])
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Int16,         &TypedArrayObject::resizableClasses[Scalar::Int16])
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Int32,         &TypedArrayObject::resizableClasses[Scalar::Int32])
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float64,       &TypedArrayObject::resizableClasses[Scalar::Float64])
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Uint8Clamped,  &TypedArrayObject::resizableClasses[Scalar::Uint8Clamped])
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable_BigInt64,      &TypedArrayObject::resizableClasses[Scalar::BigInt64])
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float16,       &TypedArrayObject::resizableClasses[Scalar::Float16])
+
