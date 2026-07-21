@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "debugger/DebugAPI.h"
+#include "jit/JitRuntime.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/JSContext.h"
 
@@ -100,6 +101,14 @@ bool BaselineFrame::uninlineIsProfilerSamplingEnabled(JSContext* cx) {
   return cx->isProfilerSamplingEnabled();
 }
 
+#ifdef ENABLE_JS_AOT
+void BaselineFrame::initAOTTableBase(JSContext* cx) {
+  if (JitRuntime* jrt = cx->runtime()->jitRuntime()) {
+    aotTableBase_ = jrt->aotIndirectionTable().baseAddress();
+  }
+}
+#endif
+
 bool BaselineFrame::initFunctionEnvironmentObjects(JSContext* cx) {
   return js::InitFunctionEnvironmentObjects(cx, this);
 }
@@ -151,6 +160,10 @@ void BaselineFrame::initForOsr(InterpreterFrame* fp, uint32_t numStackValues) {
 
   JSContext* cx =
       fp->script()->runtimeFromMainThread()->mainContextFromOwnThread();
+
+#ifdef ENABLE_JS_AOT
+  initAOTTableBase(cx);
+#endif
 
   Activation* interpActivation = cx->activation()->prev();
   jsbytecode* pc = interpActivation->asInterpreter()->regs().pc;

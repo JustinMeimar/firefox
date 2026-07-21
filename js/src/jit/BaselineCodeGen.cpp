@@ -1371,6 +1371,12 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
                   frame.addressOfICScript());
   }
   masm.bind(&done);
+
+#ifdef ENABLE_JS_AOT
+  masm.storePtr(
+      ImmPtr(masm.runtime()->jitRuntime()->aotIndirectionTable().baseAddress()),
+      frame.addressOfAOTTableBase());
+#endif
 }
 
 template <>
@@ -1444,6 +1450,12 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   } else {
     masm.storePtr(scratch1, frame.addressOfInterpreterPC());
   }
+
+#ifdef ENABLE_JS_AOT
+  masm.storePtr(
+      ImmPtr(masm.runtime()->jitRuntime()->aotIndirectionTable().baseAddress()),
+      frame.addressOfAOTTableBase());
+#endif
 }
 
 // Assert we don't need a post write barrier to write sourceObj to a slot of

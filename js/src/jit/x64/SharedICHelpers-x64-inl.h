@@ -39,7 +39,7 @@ inline void EmitBaselineCallVM(TrampolinePtr target, MacroAssembler& masm) {
   masm.call(target);
 }
 
-inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register) {
+inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register scratch) {
 #ifdef DEBUG
   // Compute frame size. Because the return address is still on the stack,
   // this is:
@@ -48,7 +48,6 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register) {
   //   - StackPointer
   //   - sizeof(return address)
 
-  ScratchRegisterScope scratch(masm);
   masm.movq(FramePointer, scratch);
   masm.subq(StackPointer, scratch);
   masm.subq(Imm32(sizeof(void*)), scratch);  // Return address.
@@ -65,11 +64,23 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register) {
   masm.storePtr(ImmWord(MakeFrameDescriptor(FrameType::BaselineJS)),
                 Address(StackPointer, sizeof(uintptr_t)));
 
+#ifdef ENABLE_JS_AOT
+  // The baseline prologue (emitInitFrameFields) writes the AOT table base
+  // into every baseline frame, so we can source it from there uniformly
+  // regardless of AOT mode. See BaselineStubFrameLayout::AOTTableOffsetFromFP.
+  masm.loadPtr(
+      Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()),
+      scratch);
+#endif
+
   // Save old frame pointer, stack pointer and stub reg.
   masm.Push(FramePointer);
   masm.mov(StackPointer, FramePointer);
 
   masm.Push(ICStubReg);
+#ifdef ENABLE_JS_AOT
+  masm.Push(scratch);
+#endif
 }
 
 }  // namespace jit

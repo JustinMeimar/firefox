@@ -121,6 +121,9 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
 
   MOZ_ASSERT(!compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = true;
+#ifdef ENABLE_JS_AOT
+  aotScope_.emplace(masm);
+#endif
 
   // All current uses of this are to call VM functions that can GC.
   compiler.makesGCCalls_ = true;
@@ -128,6 +131,9 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
 void AutoStubFrame::leave(MacroAssembler& masm) {
   MOZ_ASSERT(compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = false;
+#ifdef ENABLE_JS_AOT
+  aotScope_.reset();
+#endif
 
 #ifdef DEBUG
   masm.setFramePushed(framePushedAtEnterStubFrame_);

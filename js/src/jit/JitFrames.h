@@ -903,11 +903,16 @@ class BaselineStubFrameLayout : public CommonFrameLayout {
   // | - CallerFramePtr                          | <= Frame pointer points here
   // +-------------------------------------------+
   // | - StubPtr                                 | <= Technically these fields
-  // | - InlinedICScript or LocallyTracedValue   |    precede the FrameLayout in
-  // |                      LocallyTracedValue...|    memory.
+  // | - AOTTableBase (AOT builds only)          |    precede the FrameLayout in
+  // | - InlinedICScript or LocallyTracedValue   |    memory.
+  // |                      LocallyTracedValue...|
   // +-------------------------------------------+
   //
   // StubPtr is always present (but can be null; see generateDebugTrapHandler).
+  // AOTTableBase is only present in AOT builds; pushed by
+  // EmitBaselineEnterStubFrame so AOT-emitted stub code can reach the
+  // indirection table with one load instead of going through the baseline
+  // frame.
   // InlinedICScript is only present if the HasInlinedICScript flag is set in
   // the callee's frame descriptor (not shown in this diagram). Alternatively,
   // we support up to 255 locally traced values (with the count stored in
@@ -915,8 +920,14 @@ class BaselineStubFrameLayout : public CommonFrameLayout {
  public:
   static constexpr size_t ICStubOffset = sizeof(void*);
   static constexpr int ICStubOffsetFromFP = -int(ICStubOffset);
+#ifdef ENABLE_JS_AOT
+  static constexpr int AOTTableOffsetFromFP = 2 * -int(sizeof(void*));
+  static constexpr int InlinedICScriptOffsetFromFP = 3 * -int(sizeof(void*));
+  static constexpr size_t LocallyTracedValueOffset = 3 * sizeof(void*);
+#else
   static constexpr int InlinedICScriptOffsetFromFP = 2 * -int(sizeof(void*));
   static constexpr size_t LocallyTracedValueOffset = 2 * sizeof(void*);
+#endif
 
   static inline size_t Size() { return sizeof(BaselineStubFrameLayout); }
 
