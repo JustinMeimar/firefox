@@ -1054,6 +1054,10 @@ void MacroAssembler::moveValue(const Value& src, const ValueOperand& dest) {
     return;
   }
 
+#ifdef ENABLE_JS_AOT
+  MOZ_ASSERT(!isAOT(),
+             "moveValue with GC thing not intercepted in AOT mode");
+#endif
   movWithPatch(ImmWord(src.asRawBits()), dest.valueReg());
   writeDataRelocation(src);
 }

@@ -47,6 +47,8 @@
 
 #include "wasm/WasmBuiltins.h"
 
+#include "jit/AOTMacroAssembler-inl.h"
+
 namespace js {
 namespace jit {
 
@@ -795,7 +797,17 @@ void MacroAssembler::branchTestNeedsMarkingBarrierAnyZone(Condition cond,
   } else {
     // We are compiling the interpreter or another runtime-wide trampoline, so
     // we have to load cx->zone.
-    loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+#ifdef ENABLE_JS_AOT
+    if (isAOT()) {
+      // The runtime zone pointer has no indirection slot; reach the zone via
+      // JSContext instead.
+      loadJSContext(scratch);
+      loadPtr(Address(scratch, JSContext::offsetOfZone()), scratch);
+    } else
+#endif
+    {
+      loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+    }
     Address needsBarrierAddr(scratch, Zone::offsetOfNeedsMarkingBarrier());
     branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
   }

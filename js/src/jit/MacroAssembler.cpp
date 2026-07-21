@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "builtin/Math.h"
+#include "jit/AOT.h"
 #include "jit/AtomicOp.h"
 #include "jit/AtomicOperations.h"
 #include "jit/Bailouts.h"
@@ -70,6 +71,9 @@ using JS::GenericNaN;
 using mozilla::CheckedInt;
 
 TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
+#ifdef ENABLE_JS_AOT
+  MOZ_ASSERT(!isAOT());
+#endif
   const JitRuntime* rt = runtime()->jitRuntime();
   return rt->preBarrier(type);
 }

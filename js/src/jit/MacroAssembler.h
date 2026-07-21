@@ -410,6 +410,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
     AutoInAOTStubFrame(const AutoInAOTStubFrame&) = delete;
     void operator=(const AutoInAOTStubFrame&) = delete;
   };
+
+  void emitAOTSlotLoad(AOTSlot slot, Register dest);
+  void loadZoneForAOT(Register dest);
+  void callPreBarrierAOT(MIRType type, Register scratch);
+  void emitAOTDispatch(Register opcodeReg, Register tableReg);
+  size_t aotDispatchTableEntrySize() const;
 #endif
 
   MoveResolver& moveResolver() {
@@ -1073,6 +1079,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Load instructions
 
   inline void load32SignExtendToPtr(const Address& src, Register dest) PER_ARCH;
+#ifdef ENABLE_JS_AOT
+  inline void load32SignExtendToPtr(const BaseIndex& src, Register dest)
+      DEFINED_ON(x64);
+#endif
 
   inline void loadAbiReturnAddress(Register dest) PER_SHARED_ARCH;
 
@@ -5296,9 +5306,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Push(PreBarrierReg);
     computeEffectiveAddress(address, PreBarrierReg);
 
-    TrampolinePtr preBarrier = preBarrierTrampoline(type);
-
-    call(preBarrier);
+#ifdef ENABLE_JS_AOT
+    if (isAOT()) {
+      callPreBarrierAOT(type, ScratchReg);
+    } else
+#endif
+    {
+      TrampolinePtr preBarrier = preBarrierTrampoline(type);
+      call(preBarrier);
+    }
     Pop(PreBarrierReg);
     // On arm64, SP may be < PSP now (that's OK).
     // eg testcase: tests/auto-regress/bug702915.js
@@ -5309,7 +5325,16 @@ class MacroAssembler : public MacroAssemblerSpecific {
   template <typename T>
   void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
-    branchTestNeedsMarkingBarrier(Assembler::Zero, &done);
+#ifdef ENABLE_JS_AOT
+    if (isAOT()) {
+      // AOT code has no baked-in realm, so the compile-time zone address
+      // isn't available. Load the zone from JSContext instead.
+      branchTestNeedsMarkingBarrierAnyZone(Assembler::Zero, &done, ScratchReg);
+    } else
+#endif
+    {
+      branchTestNeedsMarkingBarrier(Assembler::Zero, &done);
+    }
     unguardedCallPreBarrier(address, type);
     bind(&done);
   }
@@ -6084,10 +6109,25 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   using MacroAssemblerSpecific::movePtr;
+  inline void movePtr(ImmPtr imm, Register dest);
+  inline void movePtr(ImmGCPtr imm, Register dest);
 
-  void movePtr(TrampolinePtr ptr, Register dest) {
-    movePtr(ImmPtr(ptr.value), dest);
-  }
+  using MacroAssemblerSpecific::storePtr;
+  inline void storePtr(ImmPtr imm, const Address& address);
+#ifndef JS_CODEGEN_RISCV64
+  inline void storePtr(Register src, AbsoluteAddress address);
+#endif
+
+  using MacroAssemblerSpecific::loadPtr;
+#ifndef JS_CODEGEN_RISCV64
+  inline void loadPtr(AbsoluteAddress addr, Register dest);
+#endif
+
+  using MacroAssemblerSpecific::jump;
+  inline void jump(TrampolinePtr code);
+
+  inline void loadRuntime(Register reg);
+  inline void loadZoneBase(Register dest);
 
  private:
   void handleFailure();
