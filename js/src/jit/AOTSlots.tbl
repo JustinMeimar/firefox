@@ -1,0 +1,94 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: set ts=8 sts=2 et sw=2 tw=80:
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// --- Runtime ---
+
+AOT_SLOT(JSRuntimePtr,           rt)
+AOT_SLOT(JSContextPtr,           cx)
+AOT_SLOT(InterruptBits,          cx->addressOfInterruptBits())
+AOT_SLOT(JitActivation,          cx->addressOfJitActivation())
+AOT_SLOT(ContextRealm,           reinterpret_cast<uint8_t*>(cx) + JSContext::offsetOfRealm())
+AOT_SLOT(WellKnownSymbols,       rt->wellKnownSymbols.ref())
+AOT_SLOT(LastBufferedCell,       rt->gc.addressOfLastBufferedWholeCell())
+AOT_SLOT(ProfilerEnabled,        rt->geckoProfiler().addressOfEnabled())
+AOT_SLOT(ProfilerExitFrameTail,  getProfilerExitFrameTail().value)
+AOT_SLOT(DoubleToInt32Stub,      getDoubleToInt32ValueStub().value)
+AOT_SLOT(MegamorphicCache,       &rt->caches().megamorphicCache)
+AOT_SLOT(MegamorphicSetPropCache, rt->caches().megamorphicSetPropCache.get())
+AOT_SLOT(StringToAtomCache,      &rt->caches().stringToAtomCache)
+AOT_SLOT(ExceptionTail,          getExceptionTail().value)
+AOT_SLOT(DebugTrapInterpreter,   debugTrapHandler(DebugTrapHandlerKind::Interpreter)->raw())
+AOT_SLOT(DebugTrapCompiler,      debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw())
+// InterpretOp is set after GenerateBaselineInterpreter (see JitRuntime::initialize).
+AOT_SLOT(InterpretOp,            nullptr)
+AOT_SLOT(NurseryPosition,        rt->gc.addressOfNurseryPosition())
+AOT_SLOT(NurseryAllocatedSites,  rt->gc.addressOfNurseryAllocatedSites())
+AOT_SLOT(JitStackLimit,          cx->addressOfJitStackLimit())
+#ifdef JS_GC_ZEAL
+AOT_SLOT(GCZealModeBits,         rt->gc.addressOfZealModeBits())
+#endif
+
+// --- Pre-barriers ---
+
+AOT_SLOT(PreBarrier_Value,       preBarrier(MIRType::Value).value)
+AOT_SLOT(PreBarrier_String,      preBarrier(MIRType::String).value)
+AOT_SLOT(PreBarrier_Object,      preBarrier(MIRType::Object).value)
+AOT_SLOT(PreBarrier_Shape,       preBarrier(MIRType::Shape).value)
+AOT_SLOT(PreBarrier_WasmAnyRef,  preBarrier(MIRType::WasmAnyRef).value)
+
+// --- Atoms ---
+
+AOT_SLOT(AtomEmpty,              static_cast<JSString*>(cx->names().empty_))
+AOT_SLOT(AtomTrue,               static_cast<JSString*>(cx->names().true_))
+AOT_SLOT(AtomFalse,              static_cast<JSString*>(cx->names().false_))
+AOT_SLOT(AtomFunction,           static_cast<JSString*>(cx->names().function))
+AOT_SLOT(AtomUndefined,          static_cast<JSString*>(cx->names().undefined))
+AOT_SLOT(AtomNull,               static_cast<JSString*>(cx->names().null))
+AOT_SLOT(AtomObject,             static_cast<JSString*>(cx->names().object))
+
+// --- JSClass pointers ---
+
+AOT_SLOT(Class_WithEnvironment,              &WithEnvironmentObject::class_)
+AOT_SLOT(Class_Function,                     &FunctionClass)
+AOT_SLOT(Class_ExtendedFunction,             &ExtendedFunctionClass)
+AOT_SLOT(Class_Array,                        &ArrayObject::class_)
+AOT_SLOT(Class_PlainObject,                  &PlainObject::class_)
+AOT_SLOT(Class_FixedLengthArrayBuffer,       &FixedLengthArrayBufferObject::class_)
+AOT_SLOT(Class_ImmutableArrayBuffer,         &ImmutableArrayBufferObject::class_)
+AOT_SLOT(Class_ResizableArrayBuffer,         &ResizableArrayBufferObject::class_)
+AOT_SLOT(Class_FixedLengthSharedArrayBuffer, &FixedLengthSharedArrayBufferObject::class_)
+AOT_SLOT(Class_GrowableSharedArrayBuffer,    &GrowableSharedArrayBufferObject::class_)
+AOT_SLOT(Class_FixedLengthDataView,          &FixedLengthDataViewObject::class_)
+AOT_SLOT(Class_ImmutableDataView,            &ImmutableDataViewObject::class_)
+AOT_SLOT(Class_ResizableDataView,            &ResizableDataViewObject::class_)
+AOT_SLOT(Class_MappedArguments,              &MappedArgumentsObject::class_)
+AOT_SLOT(Class_UnmappedArguments,            &UnmappedArgumentsObject::class_)
+AOT_SLOT(Class_BoundFunction,                &BoundFunctionObject::class_)
+AOT_SLOT(Class_PropertyIterator,             &PropertyIteratorObject::class_)
+AOT_SLOT(Class_Set,                          &SetObject::class_)
+AOT_SLOT(Class_Map,                          &MapObject::class_)
+AOT_SLOT(Class_Date,                         &DateObject::class_)
+AOT_SLOT(Class_WeakMap,                      &WeakMapObject::class_)
+AOT_SLOT(Class_WeakSet,                      &WeakSetObject::class_)
+AOT_SLOT(Class_Generator,                    &GeneratorObject::class_)
+AOT_SLOT(Class_WindowProxy,                  rt->maybeWindowProxyClass())
+
+// --- Misc pointers ---
+
+AOT_SLOT(Ptr_DeadObjectProxy,               &DeadObjectProxy::singleton)
+AOT_SLOT(Ptr_WrapperFamily,                 &js::Wrapper::family)
+AOT_SLOT(Ptr_EmptyObjectSlots,              emptyObjectSlots)
+AOT_SLOT(Ptr_EmptyObjectElements,           emptyObjectElements)
+AOT_SLOT(Ptr_StaticStrings_Unit,            &cx->staticStrings().unitStaticTable)
+AOT_SLOT(Ptr_StaticStrings_Length2,         &cx->staticStrings().length2StaticTable)
+AOT_SLOT(Ptr_StaticStrings_Int,             &cx->staticStrings().intStaticTable)
+AOT_SLOT(Ptr_StaticStrings_SmallChar,       &StaticStrings::toSmallCharTable.storage)
+AOT_SLOT(Ptr_TypedArrayClasses_FixedLength, std::begin(TypedArrayObject::fixedLengthClasses))
+AOT_SLOT(Ptr_TypedArrayClasses_ImmutableEnd, std::prev(std::end(TypedArrayObject::immutableClasses)))
+AOT_SLOT(Ptr_TypedArrayClasses_Resizable,   std::begin(TypedArrayObject::resizableClasses))
+AOT_SLOT(Ptr_TypedArrayClasses_ResizableEnd, std::prev(std::end(TypedArrayObject::resizableClasses)))
+AOT_SLOT(Ptr_DateTimeInfo_UTCOffset,        DateTimeInfo::addressOfUTCToLocalOffsetSeconds())
+AOT_SLOT(Ptr_DOMProxyHandlerFamily,         GetDOMProxyHandlerFamily())
