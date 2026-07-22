@@ -492,7 +492,7 @@ class BaselineInterpreterHandler {
   NonAssertingLabel interpretOpWithPCReg_;
 
   // Offsets of toggled jumps for debugger instrumentation.
-  using CodeOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
+  using CodeOffsetVector = BaselineInterpreterMetadata::CodeOffsetVector;
   CodeOffsetVector debugInstrumentationOffsets_;
 
   // Offsets of toggled jumps for code coverage instrumentation.
@@ -501,10 +501,10 @@ class BaselineInterpreterHandler {
   NonAssertingLabel codeCoverageAtPCLabel_;
 
   // Offsets of IC calls for IsIonInlinableOp ops, for Ion bailouts.
-  BaselineInterpreter::ICReturnOffsetVector icReturnOffsets_;
+  BaselineInterpreterMetadata::ICReturnOffsetVector icReturnOffsets_;
 
   // Offsets of some callVMs for BaselineDebugModeOSR.
-  BaselineInterpreter::CallVMOffsets callVMOffsets_;
+  BaselineInterpreterMetadata::CallVMOffsets callVMOffsets_;
 
   // The current JSOp we are emitting interpreter code for.
   mozilla::Maybe<JSOp> currentOp_;
@@ -527,7 +527,7 @@ class BaselineInterpreterHandler {
   }
   CodeOffsetVector& codeCoverageOffsets() { return codeCoverageOffsets_; }
 
-  BaselineInterpreter::ICReturnOffsetVector& icReturnOffsets() {
+  BaselineInterpreterMetadata::ICReturnOffsetVector& icReturnOffsets() {
     return icReturnOffsets_;
   }
 
@@ -549,7 +549,7 @@ class BaselineInterpreterHandler {
 
   [[nodiscard]] bool addDebugInstrumentationOffset(CodeOffset offset);
 
-  const BaselineInterpreter::CallVMOffsets& callVMOffsets() const {
+  const BaselineInterpreterMetadata::CallVMOffsets& callVMOffsets() const {
     return callVMOffsets_;
   }
 

@@ -471,9 +471,10 @@ bool DispatchOffThreadBaselineBatch(JSContext* cx);
 MethodStatus BaselineCompile(JSContext* cx, JSScript* script,
                              BaselineOptions options);
 
-// Class storing the generated Baseline Interpreter code for the runtime.
-class BaselineInterpreter {
- public:
+// Offsets into the generated Baseline Interpreter code, produced alongside
+// it. This is all the runtime needs, besides the code itself, to install
+// and instrument the interpreter.
+struct BaselineInterpreterMetadata {
   struct CallVMOffsets {
     uint32_t debugPrologueOffset = 0;
     uint32_t debugEpilogueOffset = 0;
@@ -485,45 +486,49 @@ class BaselineInterpreter {
     ICReturnOffset(uint32_t offset, JSOp op) : offset(offset), op(op) {}
   };
   using ICReturnOffsetVector = Vector<ICReturnOffset, 0, SystemAllocPolicy>;
-
- private:
-  // The interpreter code.
-  JitCode* code_ = nullptr;
+  using CodeOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
 
   // Offset of the code to start interpreting a bytecode op.
-  uint32_t interpretOpOffset_ = 0;
+  uint32_t interpretOpOffset = 0;
 
-  // Like interpretOpOffset_ but skips the debug trap for the current op.
-  uint32_t interpretOpNoDebugTrapOffset_ = 0;
+  // Like interpretOpOffset but skips the debug trap for the current op.
+  uint32_t interpretOpNoDebugTrapOffset = 0;
 
   // Early Ion bailouts will enter at this address. This is after frame
   // construction and environment initialization.
-  uint32_t bailoutPrologueOffset_ = 0;
+  uint32_t bailoutPrologueOffset = 0;
 
   // The offsets for the toggledJump instructions for profiler instrumentation.
-  uint32_t profilerEnterToggleOffset_ = 0;
-  uint32_t profilerExitToggleOffset_ = 0;
+  uint32_t profilerEnterToggleOffset = 0;
+  uint32_t profilerExitToggleOffset = 0;
 
   // Offset of the jump (tail call) to the debug trap handler trampoline code.
   // When the debugger is enabled, NOPs are patched to calls to this location.
-  uint32_t debugTrapHandlerOffset_ = 0;
+  uint32_t debugTrapHandlerOffset = 0;
 
   // The offsets of toggled jumps for debugger instrumentation.
-  using CodeOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
-  CodeOffsetVector debugInstrumentationOffsets_;
+  CodeOffsetVector debugInstrumentationOffsets;
 
   // Offsets of toggled calls to the DebugTrapHandler trampoline (for
   // breakpoints and stepping).
-  CodeOffsetVector debugTrapOffsets_;
+  CodeOffsetVector debugTrapOffsets;
 
   // Offsets of toggled jumps for code coverage.
-  CodeOffsetVector codeCoverageOffsets_;
+  CodeOffsetVector codeCoverageOffsets;
 
   // Offsets of IC calls for IsIonInlinableOp ops, for Ion bailouts.
-  ICReturnOffsetVector icReturnOffsets_;
+  ICReturnOffsetVector icReturnOffsets;
 
   // Offsets of some callVMs for BaselineDebugModeOSR.
-  CallVMOffsets callVMOffsets_;
+  CallVMOffsets callVMOffsets;
+};
+
+// Class storing the generated Baseline Interpreter code for the runtime.
+class BaselineInterpreter {
+  // The interpreter code.
+  JitCode* code_ = nullptr;
+
+  BaselineInterpreterMetadata metadata_;
 
   uint8_t* codeAtOffset(uint32_t offset) const {
     MOZ_ASSERT(offset > 0);
@@ -537,38 +542,30 @@ class BaselineInterpreter {
   BaselineInterpreter(const BaselineInterpreter&) = delete;
   void operator=(const BaselineInterpreter&) = delete;
 
-  void init(JitCode* code, uint32_t interpretOpOffset,
-            uint32_t interpretOpNoDebugTrapOffset,
-            uint32_t bailoutPrologueOffset, uint32_t profilerEnterToggleOffset,
-            uint32_t profilerExitToggleOffset, uint32_t debugTrapHandlerOffset,
-            CodeOffsetVector&& debugInstrumentationOffsets,
-            CodeOffsetVector&& debugTrapOffsets,
-            CodeOffsetVector&& codeCoverageOffsets,
-            ICReturnOffsetVector&& icReturnOffsets,
-            const CallVMOffsets& callVMOffsets);
+  void init(JitCode* code, BaselineInterpreterMetadata&& metadata);
 
   uint8_t* codeRaw() const { return code_->raw(); }
 
   uint8_t* retAddrForDebugPrologueCallVM() const {
-    return codeAtOffset(callVMOffsets_.debugPrologueOffset);
+    return codeAtOffset(metadata_.callVMOffsets.debugPrologueOffset);
   }
   uint8_t* retAddrForDebugEpilogueCallVM() const {
-    return codeAtOffset(callVMOffsets_.debugEpilogueOffset);
+    return codeAtOffset(metadata_.callVMOffsets.debugEpilogueOffset);
   }
   uint8_t* retAddrForDebugAfterYieldCallVM() const {
-    return codeAtOffset(callVMOffsets_.debugAfterYieldOffset);
+    return codeAtOffset(metadata_.callVMOffsets.debugAfterYieldOffset);
   }
   uint8_t* bailoutPrologueEntryAddr() const {
-    return codeAtOffset(bailoutPrologueOffset_);
+    return codeAtOffset(metadata_.bailoutPrologueOffset);
   }
 
   uint8_t* retAddrForIC(JSOp op) const;
 
   TrampolinePtr interpretOpAddr() const {
-    return TrampolinePtr(codeAtOffset(interpretOpOffset_));
+    return TrampolinePtr(codeAtOffset(metadata_.interpretOpOffset));
   }
   TrampolinePtr interpretOpNoDebugTrapAddr() const {
-    return TrampolinePtr(codeAtOffset(interpretOpNoDebugTrapOffset_));
+    return TrampolinePtr(codeAtOffset(metadata_.interpretOpNoDebugTrapOffset));
   }
 
   void toggleProfilerInstrumentation(bool enable);

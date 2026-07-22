@@ -7475,13 +7475,22 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 #endif
 
     interpreter.init(
-        code, interpretOpOffset_, interpretOpNoDebugTrapOffset_,
-        bailoutPrologueOffset_.offset(),
-        profilerEnterFrameToggleOffset_.offset(),
-        profilerExitFrameToggleOffset_.offset(), debugTrapHandlerOffset_,
-        std::move(handler.debugInstrumentationOffsets()),
-        std::move(debugTrapOffsets_), std::move(handler.codeCoverageOffsets()),
-        std::move(handler.icReturnOffsets()), handler.callVMOffsets());
+        code,
+        BaselineInterpreterMetadata{
+            .interpretOpOffset = interpretOpOffset_,
+            .interpretOpNoDebugTrapOffset = interpretOpNoDebugTrapOffset_,
+            .bailoutPrologueOffset = uint32_t(bailoutPrologueOffset_.offset()),
+            .profilerEnterToggleOffset =
+                uint32_t(profilerEnterFrameToggleOffset_.offset()),
+            .profilerExitToggleOffset =
+                uint32_t(profilerExitFrameToggleOffset_.offset()),
+            .debugTrapHandlerOffset = debugTrapHandlerOffset_,
+            .debugInstrumentationOffsets =
+                std::move(handler.debugInstrumentationOffsets()),
+            .debugTrapOffsets = std::move(debugTrapOffsets_),
+            .codeCoverageOffsets = std::move(handler.codeCoverageOffsets()),
+            .icReturnOffsets = std::move(handler.icReturnOffsets()),
+            .callVMOffsets = handler.callVMOffsets()});
   }
 
   if (cx->runtime()->geckoProfiler().enabled()) {
