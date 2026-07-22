@@ -267,8 +267,15 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
 if CONFIG["ENABLE_JS_AOT"]:
     SOURCES += [
         "AOT.cpp",
+        "AOTImage.cpp",
         "AOTMacroAssembler.cpp",
     ]
+
+    GeneratedFile(
+        "AOTImageGenerated.h",
+        script="GenerateAOTImage.py",
+        inputs=["AOTImageSchema.yaml"],
+    )
 
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(
