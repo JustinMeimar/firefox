@@ -209,6 +209,7 @@ DefaultJitOptions::DefaultJitOptions() {
 #ifdef ENABLE_JS_AOT
   SET_DEFAULT(dumpAOTBlinterp, false);
   SET_DEFAULT(dumpAOTBaseline, false);
+  SET_DEFAULT(useAOTImage, false);
   aotRecordDir = nullptr;
 #endif
 

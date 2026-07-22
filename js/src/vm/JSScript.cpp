@@ -3431,7 +3431,7 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
       }
     }
     if (!usingEntryTrampoline) {
-      setJitCodeRaw(rt->jitRuntime()->baselineInterpreter().codeRaw());
+      setJitCodeRaw(rt->jitRuntime()->baselineInterpreterEntryAddr());
     }
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   } else if (hasJitScript() &&

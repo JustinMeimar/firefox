@@ -10,9 +10,40 @@
 
 #  include <cstring>
 
+#  include "jit/JitCode.h"
+#  include "jit/JitSpewer.h"
+
+// Symbols exported by js/src/jit/aot/AOTImageIncbin.S. The .S file
+// .incbins the AOTImage.bin (real or empty placeholder) generated
+// into the objdir by GenerateEmptyAOTImage.py.
+extern "C" {
+extern const uint8_t aot_image_start[];
+extern const uint8_t aot_image_end[];
+}
+
 namespace js::jit {
 
-const AOTImage* AOTImage::embedded() { return nullptr; }
+const AOTImage* AOTImage::embedded() {
+  static const AOTImage* cached = nullptr;
+  static bool initialized = false;
+  if (initialized) {
+    return cached;
+  }
+  initialized = true;
+
+  size_t size = size_t(aot_image_end - aot_image_start);
+  auto img = fromBytes({aot_image_start, size});
+  if (img.isNothing()) {
+    JitSpew(JitSpew_BaselineAOT,
+            "AOT image absent or invalid (size=%zu); using runtime codegen",
+            size);
+    return nullptr;
+  }
+
+  static AOTImage sImage = img.value();
+  cached = &sImage;
+  return cached;
+}
 
 mozilla::Maybe<AOTImage> AOTImage::fromBytes(
     mozilla::Span<const uint8_t> bytes) {
@@ -172,6 +203,11 @@ bool AOTImageBuilder::finalize(std::ostream& out,
   out.write(reinterpret_cast<const char*>(buffer.begin()),
             std::streamsize(buffer.length()));
   return bool(out);
+}
+
+JitCode* AllocateAOTCode(JSContext* cx, uint8_t* codeStart, uint32_t codeSize,
+                         CodeKind kind) {
+  return JitCode::NewStatic(cx, codeStart, codeSize, kind);
 }
 
 }  // namespace js::jit

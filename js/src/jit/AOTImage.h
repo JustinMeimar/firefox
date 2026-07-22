@@ -18,8 +18,12 @@
 #  include <ostream>
 #  include <type_traits>
 
+#  include "jstypes.h"
+
 #  include "js/AllocPolicy.h"
 #  include "js/Vector.h"
+
+struct JS_PUBLIC_API JSContext;
 
 namespace js::jit {
 
@@ -64,6 +68,8 @@ class AOTImage;
 class AOTBlobReader;
 class AOTBlobWriter;
 class AOTImageBuilder;
+class JitCode;
+enum class CodeKind : uint8_t;
 
 // Blob kinds enumerated by AOTImageSchema.yaml.
 // Adding a kind: extend this enum, add its yaml entry, bump image::Version.
@@ -335,6 +341,14 @@ class AOTImageBuilder {
  private:
   Vector<AOTBlobWriter, 0, SystemAllocPolicy> blobs_;
 };
+
+// Allocates a JitCode over a static text range from the embedded AOT
+// image. The returned JitCode has isStaticCode() == true: no
+// ExecutablePool, no JitCodeHeader, no relocations. The caller must
+// keep the containing AOTImage alive; embedded() images live for the
+// life of the process.
+[[nodiscard]] JitCode* AllocateAOTCode(JSContext* cx, uint8_t* codeStart,
+                                       uint32_t codeSize, CodeKind kind);
 
 }  // namespace js::jit
 

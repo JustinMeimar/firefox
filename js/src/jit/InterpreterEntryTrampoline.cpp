@@ -107,8 +107,10 @@ void JitRuntime::generateBaselineInterpreterEntryTrampoline(
   masm.pushFrameDescriptorForJitCall(FrameType::BaselineInterpreterEntry,
                                      scratch, scratch);
 
-  // Call into baseline interpreter
-  uint8_t* blinterpAddr = baselineInterpreter().codeRaw();
+  // Call into baseline interpreter. Under AOT this must be the
+  // preamble-trampoline entry so AOTFuncPassReg is seeded before the
+  // interpreter dispatches.
+  uint8_t* blinterpAddr = baselineInterpreterEntryAddr();
   masm.assertStackAlignment(JitStackAlignment, 2 * sizeof(uintptr_t));
   masm.call(ImmPtr(blinterpAddr));
 
