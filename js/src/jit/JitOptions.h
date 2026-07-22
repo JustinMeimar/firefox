@@ -141,6 +141,12 @@ struct DefaultJitOptions {
   // maps to an AOTSlot; the captured bytes are discarded and the second
   // pass emits the code actually installed. No disk output.
   bool dumpAOTBaseline;
+
+  // If non-null, the AOT capture pass hands its bytes plus metadata to
+  // AOTArtifactRecorder, which writes one .aotb file per artifact
+  // under this directory. Setting this flag also implies
+  // dumpAOTBlinterp and dumpAOTBaseline.
+  const char* aotRecordDir;
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

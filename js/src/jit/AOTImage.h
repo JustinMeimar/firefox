@@ -288,6 +288,30 @@ class AOTImage {
   size_t size_;
 };
 
+// One-blob wire format used for intermediate `.aotb` files. Every
+// recorder-produced file starts with an AOTBlobFileHeader; the payload
+// order matches image::DirectoryEntry (fields, arrays, code). Both the
+// C++ recorder (AOTRecorder.cpp) and PackAOTImage.py parse this same
+// header.
+struct AOTBlobFileHeader {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t reserved;
+  uint32_t kind;
+  uint32_t probeHash;
+  uint8_t identityHash[20];
+  uint32_t fieldsSize;
+  uint32_t arraysSize;
+  uint32_t codeSize;
+};
+
+static_assert(sizeof(AOTBlobFileHeader) == 48,
+              "AOTBlobFileHeader wire size; edit BlobFileVersion on change");
+
+// "AOTB" in little-endian.
+inline constexpr uint32_t BlobFileMagic = 0x42544F41;
+inline constexpr uint16_t BlobFileVersion = 1;
+
 // Builds an in-memory image from a sequence of AOTBlobWriters. The
 // fingerprint is caller-provided so record-time versus load-time inputs
 // stay symmetric.

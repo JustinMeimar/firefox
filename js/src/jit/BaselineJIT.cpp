@@ -28,6 +28,7 @@
 #include "jit/JitCommon.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
+#include "jit/Linker.h"
 #include "jit/MacroAssembler.h"
 #include "js/friend/StackLimits.h"  // js::AutoCheckRecursionLimit
 #include "vm/Interpreter.h"
@@ -459,11 +460,13 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   StackMacroAssembler masm(cx, temp);
 
 #ifdef ENABLE_JS_AOT
-  // Two-pass under --aot-dump-baseline: run BaselineCompiler once on a
-  // throwaway masm wrapped in AutoAOTCodegen. The capture pass crashes
-  // at emit time on any ImmPtr not covered by an AOTSlot. Its bytes
-  // are discarded; the second pass emits the code actually installed.
-  if (JitOptions.dumpAOTBaseline) {
+  // Two-pass under --aot-dump-baseline (or --aot-record): run
+  // BaselineCompiler once on a throwaway masm wrapped in
+  // AutoAOTCodegen. The capture pass crashes at emit time on any
+  // ImmPtr not covered by an AOTSlot. Under --aot-record the AOT
+  // bytes are handed to the recorder; the second pass emits the code
+  // actually installed for this runtime.
+  if (JitOptions.dumpAOTBaseline || JitOptions.aotRecordDir) {
     TempAllocator dumpTemp(&cx->tempLifoAlloc());
     StackMacroAssembler dumpMasm(cx, dumpTemp);
     if (cx->runtime()->geckoProfiler().enabled()) {
@@ -485,6 +488,24 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
             script->filename() ? script->filename() : "<null>",
             unsigned(script->lineno()),
             size_t(dumpMasm.instructionsSize()));
+    if (AOTArtifactRecorder* rec =
+            cx->runtime()->jitRuntime()->aotRecorder()) {
+      Linker linker(dumpMasm);
+      JitCode* dumpCode = linker.newCode(cx, CodeKind::Baseline);
+      if (!dumpCode) {
+        return Method_Error;
+      }
+      // Identity hashing is a follow-up; for now, hash the script
+      // pointer so filenames stay unique within a single record run.
+      uint8_t identity[20] = {};
+      uintptr_t sp = reinterpret_cast<uintptr_t>(script);
+      memcpy(identity, &sp, sizeof(sp));
+      BaselineScriptMetadata dumpMd;
+      if (!rec->recordBaselineFunction(cx, dumpCode, identity,
+                                       uint32_t(sp), dumpMd)) {
+        return Method_Error;
+      }
+    }
   }
 #endif
 
@@ -1392,7 +1413,7 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     //
     // Flag is cleared with a scope guard so a reentrant capture is
     // impossible.
-    if (JitOptions.dumpAOTBlinterp) {
+    if (JitOptions.dumpAOTBlinterp || JitOptions.aotRecordDir) {
       auto clearDumpFlag = mozilla::MakeScopeExit(
           [] { JitOptions.dumpAOTBlinterp = false; });
       TempAllocator dumpTemp(&cx->tempLifoAlloc());
@@ -1405,6 +1426,13 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
       }
       JitSpew(JitSpew_BaselineAOT, "blinterp AOT capture ok: bytes=%zu",
               size_t(dumpMasm.instructionsSize()));
+      if (AOTArtifactRecorder* rec =
+              cx->runtime()->jitRuntime()->aotRecorder()) {
+        if (!rec->recordInterpreter(cx, dumpInterp.code(),
+                                    dumpInterp.metadata())) {
+          return false;
+        }
+      }
     }
 #endif
 

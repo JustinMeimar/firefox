@@ -269,6 +269,7 @@ if CONFIG["ENABLE_JS_AOT"]:
         "AOT.cpp",
         "AOTImage.cpp",
         "AOTMacroAssembler.cpp",
+        "AOTRecorder.cpp",
     ]
 
     GeneratedFile(
