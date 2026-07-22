@@ -496,14 +496,15 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       if (!dumpCode) {
         return Method_Error;
       }
-      // Identity hashing is a follow-up; for now, hash the script
-      // pointer so filenames stay unique within a single record run.
-      uint8_t identity[20] = {};
-      uintptr_t sp = reinterpret_cast<uintptr_t>(script);
-      memcpy(identity, &sp, sizeof(sp));
       BaselineScriptMetadata dumpMd;
+      if (!dumpCompiler.extractAOTMetadata(dumpMd)) {
+        return Method_Error;
+      }
+      mozilla::SHA1Sum::Hash identity;
+      ComputeBaselineIdentityHash(script, identity);
       if (!rec->recordBaselineFunction(cx, dumpCode, identity,
-                                       uint32_t(sp), dumpMd)) {
+                                       ComputeBaselineProbeHash(script),
+                                       dumpMd)) {
         return Method_Error;
       }
     }
@@ -603,6 +604,20 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   if (osrSourceFrame && osrSourceFrame.isDebuggee()) {
     options.setFlag(BaselineOption::ForceDebugInstrumentation);
   }
+
+#ifdef ENABLE_JS_AOT
+  // Debuggees have trap edits baked into runtime-generated code; the
+  // AOT copy would go stale on the first breakpoint.
+  if (JitOptions.useAOTImage && !script->isDebuggee()) {
+    if (TryInstallAOTBaselineScript(cx, script)) {
+      return Method_Compiled;
+    }
+    if (JitOptions.aotEnforce) {
+      MOZ_CRASH("AOT baseline function miss under --aot-enforce");
+    }
+  }
+#endif
+
   return BaselineCompile(cx, script, options);
 }
 

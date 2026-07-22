@@ -11,9 +11,13 @@
 #include "gc/FinalizationObservers.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTInstaller.h"
+#endif
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Invalidation.h"
+#include "jit/JitOptions.h"
 #include "jit/JitScript.h"
 #include "jit/JitZone.h"
 #include "vm/Runtime.h"
@@ -512,6 +516,15 @@ js::jit::JitZone* Zone::createJitZone(JSContext* cx) {
   }
 
   jitZone_ = jitZone.release();
+
+#ifdef ENABLE_JS_AOT
+  // Static IC stubs live in the atoms JitZone; this is the earliest
+  // point where that JitZone exists.
+  if (isAtomsZone() && jit::JitOptions.useAOTImage) {
+    (void)jit::TryLoadAOTICStubs(cx, jitZone_);
+  }
+#endif
+
   return jitZone_;
 }
 

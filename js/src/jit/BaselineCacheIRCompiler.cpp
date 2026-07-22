@@ -8,6 +8,8 @@
 
 #include "gc/GC.h"
 #ifdef ENABLE_JS_AOT
+#  include "jit/AOTImage.h"
+#  include "jit/AOTRecorder.h"
 #  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/CacheIR.h"
@@ -2121,8 +2123,21 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
               size_t(dumpCode->instructionsSize()));
       if (AOTArtifactRecorder* rec =
               cx->runtime()->jitRuntime()->aotRecorder()) {
-        CacheIRStubKey aotKey(nullptr);  // patch 12 supplies stubInfo
-        if (!rec->recordICStub(cx, dumpCode, aotKey)) {
+        AOTICStubMetadata md;
+        md.cacheKind = uint8_t(kind);
+        md.makesGCCalls = dumpComp.makesGCCalls() ? 1 : 0;
+        md.stubDataOffset = uint8_t(StubDataOffset);
+        md.localTracingSlots = dumpCode->localTracingSlots();
+        if (!md.cacheIRCode.append(writer.codeStart(), writer.codeLength())) {
+          return false;
+        }
+        if (!md.fieldTypes.reserve(writer.numStubFields())) {
+          return false;
+        }
+        for (uint32_t i = 0; i < writer.numStubFields(); i++) {
+          md.fieldTypes.infallibleAppend(uint8_t(writer.stubFieldType(i)));
+        }
+        if (!rec->recordICStub(cx, dumpCode, md)) {
           return false;
         }
       }

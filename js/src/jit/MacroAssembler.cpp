@@ -4253,8 +4253,13 @@ void MacroAssembler::loadJitCodeRawNoIon(Register func, Register dest,
   bind(&hasBaselineScript);
 #endif
 
+#ifdef ENABLE_JS_AOT
+  loadPtr(Address(scratch, BaselineScript::offsetOfAOTPreambleTrampoline()),
+          dest);
+#else
   loadPtr(Address(scratch, BaselineScript::offsetOfMethod()), scratch);
   loadPtr(Address(scratch, JitCode::offsetOfCode()), dest);
+#endif
   jump(&done);
 
   // If there's no IonScript, we can just use jitCodeRaw_.

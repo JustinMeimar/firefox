@@ -190,6 +190,14 @@ class alignas(uintptr_t) BaselineScript final
   // Code pointer containing the actual method.
   HeapPtr<JitCode*> method_{nullptr};
 
+#ifdef ENABLE_JS_AOT
+  // Cached entry pointer for callers that must seed the AOT courier
+  // register before running the (possibly shared) baseline code. For
+  // AOT-installed scripts this is the preamble trampoline; for freshly
+  // compiled scripts it defaults to method_->raw().
+  uint8_t* aotPreambleTrampoline_{nullptr};
+#endif
+
   // An ion compilation that is ready, but isn't linked yet.
   MainThreadData<IonCompileTask*> pendingIonCompileTask_{nullptr};
 
@@ -296,6 +304,17 @@ class alignas(uintptr_t) BaselineScript final
     return offsetof(BaselineScript, method_);
   }
 
+#ifdef ENABLE_JS_AOT
+  static inline size_t offsetOfAOTPreambleTrampoline() {
+    return offsetof(BaselineScript, aotPreambleTrampoline_);
+  }
+  uint8_t* aotPreambleTrampoline() const { return aotPreambleTrampoline_; }
+  void setAOTPreambleTrampoline(uint8_t* trampoline) {
+    MOZ_ASSERT(trampoline);
+    aotPreambleTrampoline_ = trampoline;
+  }
+#endif
+
   void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                               size_t* data) const {
     *data += mallocSizeOf(this);
@@ -314,6 +333,9 @@ class alignas(uintptr_t) BaselineScript final
   void setMethod(JitCode* code) {
     MOZ_ASSERT(!method_);
     method_ = code;
+#ifdef ENABLE_JS_AOT
+    aotPreambleTrampoline_ = code->raw();
+#endif
   }
 
   bool containsCodeAddress(uint8_t* addr) const {

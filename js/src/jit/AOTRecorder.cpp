@@ -9,6 +9,7 @@
 #  include "jit/AOTRecorder.h"
 
 #  include "mozilla/ScopeExit.h"
+#  include "mozilla/SHA1.h"
 
 #  include <fcntl.h>
 #  include <sys/stat.h>
@@ -146,23 +147,33 @@ bool AOTArtifactRecorder::recordBaselineFunction(
 }
 
 bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
-                                       const CacheIRStubKey& key) {
-  // Placeholder identity: SHA-1 over the stub's writer bytes is
-  // computed by CacheIRWriter callers upstream. For now, use the raw
-  // stub-info pointer as a stand-in so file names stay unique in a
-  // single run. Patch 12 will replace this with the real SHA-1.
-  uint8_t identity[20] = {};
-  uintptr_t infoPtr = reinterpret_cast<uintptr_t>(key.stubInfo.get());
-  memcpy(identity, &infoPtr, sizeof(infoPtr));
+                                       const AOTICStubMetadata& md) {
+  // Identity: SHA-1 over the stub inputs that make its emitted code
+  // reproducible. Two stubs with the same identity have byte-identical
+  // .text (assuming identical AOT-mode masm state), so filename dedupe
+  // on identity is safe.
+  mozilla::SHA1Sum sha;
+  sha.update(&md.cacheKind, sizeof(md.cacheKind));
+  if (!md.cacheIRCode.empty()) {
+    sha.update(md.cacheIRCode.begin(), md.cacheIRCode.length());
+  }
+  if (!md.fieldTypes.empty()) {
+    sha.update(md.fieldTypes.begin(), md.fieldTypes.length());
+  }
+  mozilla::SHA1Sum::Hash hash;
+  sha.finish(hash);
 
-  if (wasSeen(identity)) return true;
+  static_assert(sizeof(hash) == 20,
+                "SHA1 hash width mirrors AOTBlobFileHeader::identityHash");
 
-  AOTBlobWriter blob(AOTBlobKind::InlineCacheStub, /* probeHash = */ 0,
-                     identity);
+  if (wasSeen(hash)) return true;
+
+  AOTBlobWriter blob(AOTBlobKind::InlineCacheStub, /* probeHash = */ 0, hash);
+  if (!EncodeBlob_InlineCacheStub(blob, md)) return false;
   if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
 
   char idHex[41];
-  HexEncode(identity, 8, idHex);
+  HexEncode(hash, 8, idHex);
   std::string path = directory_ + "/ic-" + idHex + ".aotb";
   return writeBlobFile(cx, path, blob);
 }

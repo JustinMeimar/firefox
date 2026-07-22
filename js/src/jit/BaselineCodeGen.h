@@ -471,6 +471,13 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
     return handler.compileDebugInstrumentation();
   }
 
+#ifdef ENABLE_JS_AOT
+  // Populates `md` from this compiler's post-emit state. Only used by
+  // the AOT capture pass, whose compiler is discarded immediately
+  // afterward. Returns false on allocation failure.
+  [[nodiscard]] bool extractAOTMetadata(BaselineScriptMetadata& md);
+#endif
+
  private:
   bool compileImpl();
 
