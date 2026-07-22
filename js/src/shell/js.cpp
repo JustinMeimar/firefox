@@ -13063,6 +13063,12 @@ bool InitOptionParser(OptionParser& op) {
           '\0', "enforce-aot-ics",
           "Enable enforcing only use of ahead-of-time-known ICs") ||
 #endif
+#ifdef ENABLE_JS_AOT
+      !op.addBoolOption('\0', "aot-dump-blinterp",
+                        "Compile the baseline interpreter in AOT capture "
+                        "mode and log a summary line. Emitted code still "
+                        "runs in-process; no files are written.") ||
+#endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
           "Wait for COUNT calls or iterations before baseline-compiling "
@@ -14160,6 +14166,12 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("enforce-aot-ics")) {
     jit::JitOptions.enableAOTICEnforce = true;
+  }
+#endif
+
+#ifdef ENABLE_JS_AOT
+  if (op.getBoolOption("aot-dump-blinterp")) {
+    jit::JitOptions.dumpAOTBlinterp = true;
   }
 #endif
 

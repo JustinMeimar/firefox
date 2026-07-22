@@ -130,6 +130,12 @@ struct DefaultJitOptions {
   bool enableAOTICs;
   bool enableAOTICEnforce;
 #endif
+#ifdef ENABLE_JS_AOT
+  // Compile the baseline interpreter in AOT capture mode and log a
+  // summary line. Emitted code still runs in-process; nothing is saved
+  // to disk.
+  bool dumpAOTBlinterp;
+#endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to
   // measure the effectiveness of each mitigation with various proof of

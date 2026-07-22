@@ -14,6 +14,9 @@
 #include "debugger/DebugAPI.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AutoAOTCodegen.h"
+#endif
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineCodeGen.h"
 #include "jit/BaselineCompileTask.h"
@@ -1356,6 +1359,37 @@ uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
 bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
+#ifdef ENABLE_JS_AOT
+    // Two-pass generation under --aot-dump-blinterp: an AOT-capture
+    // pass runs first on a throwaway masm, then the normal pass emits
+    // the interpreter actually installed for this runtime. The capture
+    // pass validates that every ImmPtr the interpreter emits is
+    // covered by an AOTSlot; a miss crashes at emit time. The
+    // captured bytes have no consumer yet.
+    //
+    // The runtime interpreter must be the non-AOT one because it
+    // encodes runtime pointers directly, and the AOT-mode indirection
+    // requires per-frame table-base plumbing that the non-EnterJIT
+    // entry paths (bailouts, exception unwind) do not provide.
+    //
+    // Flag is cleared with a scope guard so a reentrant capture is
+    // impossible.
+    if (JitOptions.dumpAOTBlinterp) {
+      auto clearDumpFlag = mozilla::MakeScopeExit(
+          [] { JitOptions.dumpAOTBlinterp = false; });
+      TempAllocator dumpTemp(&cx->tempLifoAlloc());
+      StackMacroAssembler dumpMasm(cx, dumpTemp);
+      AutoAOTCodegen aot(dumpMasm, cx);
+      BaselineInterpreterGenerator dumpGen(cx, dumpTemp, dumpMasm);
+      BaselineInterpreter dumpInterp;
+      if (!dumpGen.generate(cx, dumpInterp)) {
+        return false;
+      }
+      JitSpew(JitSpew_BaselineAOT, "blinterp AOT capture ok: bytes=%zu",
+              size_t(dumpMasm.instructionsSize()));
+    }
+#endif
+
     TempAllocator temp(&cx->tempLifoAlloc());
     StackMacroAssembler masm(cx, temp);
     BaselineInterpreterGenerator generator(cx, temp, masm);

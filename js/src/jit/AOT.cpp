@@ -20,8 +20,17 @@ const char* AOTSlotName(AOTSlot slot) {
     return #name;
 #include "jit/AOTSlots.tbl"
 #undef AOT_SLOT
-    case AOTSlot::Count:
+    default:
       break;
+  }
+  uint32_t s = uint32_t(slot);
+  if (s >= uint32_t(AOTSlot::VMWrapper_Begin) &&
+      s < uint32_t(AOTSlot::VMWrapper_End)) {
+    return "VMWrapper";
+  }
+  if (s >= uint32_t(AOTSlot::ABIFn_Begin) &&
+      s < uint32_t(AOTSlot::ABIFn_End)) {
+    return "ABIFn";
   }
   return "Unknown";
 }

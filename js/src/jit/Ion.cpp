@@ -70,8 +70,11 @@
 #endif
 
 #ifdef ENABLE_JS_AOT
+#  include "builtin/Array.h"
+#  include "builtin/AtomicsObject.h"
 #  include "builtin/DataViewObject.h"
 #  include "builtin/MapObject.h"
+#  include "builtin/Math.h"
 #  include "builtin/WeakMapObject.h"
 #  include "builtin/WeakSetObject.h"
 #  include "js/Wrapper.h"
@@ -93,6 +96,9 @@
 #  include "vm/TypedArrayObject.h"
 #endif
 
+#ifdef ENABLE_JS_AOT
+#  include "jit/ABIFunctionList-inl.h"
+#endif
 #include "gc/GC-inl.h"
 #include "gc/StableCellHasher-inl.h"
 #include "jit/InlineScriptTree-inl.h"
@@ -159,6 +165,64 @@ bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
   // arguably should also be a method on the indirectionTable, not the
   // JitRuntime?
 
+
+  // ABI functions reachable via callWithABI<Fn, cppFn>. Order here fixes
+  // the slot index; adding entries in the middle shifts every subsequent
+  // slot, so append-only unless you also rebuild any container that
+  // baked in these indices.
+  uint32_t abiIdx = 0;
+  auto setABI = [&](auto fp) {
+    aotIndirectionTable_.set(
+        AOTSlotForABIFn(abiIdx++),
+        uintptr_t(JS_FUNC_TO_DATA_PTR(void*, fp)));
+  };
+
+#  define EMIT_ABI(fp) setABI(fp);
+  ABIFUNCTION_LIST(EMIT_ABI)
+#  undef EMIT_ABI
+#  define EMIT_ABI_TYPED(fp, ...) setABI(static_cast<__VA_ARGS__>(fp));
+  ABIFUNCTION_AND_TYPE_LIST(EMIT_ABI_TYPED)
+#  undef EMIT_ABI_TYPED
+
+  // Computed function pointers: not in ABIFUNCTION_LIST because they are
+  // selected at codegen time by scalar type or math kind.
+  for (uint8_t i = uint8_t(UnaryMathFunction::SinNative);
+       i <= uint8_t(UnaryMathFunction::Round); i++) {
+    setABI(GetUnaryMathFunctionPtr(UnaryMathFunction(i)));
+  }
+
+  static constexpr Scalar::Type AtomicsTypes[] = {
+      Scalar::Int8,   Scalar::Uint8, Scalar::Int16,
+      Scalar::Uint16, Scalar::Int32, Scalar::Uint32
+  };
+  auto emitAtomicsGroup = [&](auto fn) {
+    for (Scalar::Type ty : AtomicsTypes) setABI(fn(ty));
+  };
+  emitAtomicsGroup(AtomicsCompareExchange);
+  emitAtomicsGroup(AtomicsExchange);
+  emitAtomicsGroup(AtomicsAdd);
+  emitAtomicsGroup(AtomicsSub);
+  emitAtomicsGroup(AtomicsAnd);
+  emitAtomicsGroup(AtomicsOr);
+  emitAtomicsGroup(AtomicsXor);
+
+  setABI(ArrayConstructor);
+#  define EMIT_TA_CTOR(_, T, N) setABI(TypedArrayConstructorNative(Scalar::N));
+  JS_FOR_EACH_TYPED_ARRAY(EMIT_TA_CTOR)
+#  undef EMIT_TA_CTOR
+
+  MOZ_RELEASE_ASSERT(abiIdx <= AOTMaxABIFunctions,
+                     "raise AOTMaxABIFunctions");
+
+  // VM wrappers, indexed by VMFunctionId. The offsets have been recorded
+  // by generateTrampolines above.
+  size_t n = functionWrapperOffsets_.length();
+  MOZ_RELEASE_ASSERT(n <= AOTMaxVMWrappers, "raise AOTMaxVMWrappers");
+  for (size_t i = 0; i < n; i++) {
+    aotIndirectionTable_.set(
+        AOTSlotForVMWrapper(i),
+        uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
+  }
 
   return true;
 }

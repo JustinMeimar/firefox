@@ -206,6 +206,10 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(enableAOTICEnforce, true);
 #endif
 
+#ifdef ENABLE_JS_AOT
+  SET_DEFAULT(dumpAOTBlinterp, false);
+#endif
+
   // How many invocations or loop iterations are needed before functions
   // enter the Baseline Interpreter.
   SET_DEFAULT(baselineInterpreterWarmUpThreshold, 10);
