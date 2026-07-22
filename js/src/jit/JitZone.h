@@ -19,7 +19,6 @@
 #include "gc/Barrier.h"
 #include "gc/Marking.h"
 #include "gc/WeakMap.h"
-#include "jit/CacheIRAOT.h"
 #include "jit/ExecutableAllocator.h"
 #include "jit/ICStubSpace.h"
 #include "jit/Invalidation.h"
@@ -170,10 +169,6 @@ class JitZone {
   mozilla::Maybe<IonCompilationId> currentCompilationId_;
   bool keepJitScripts_ = false;
 
-  // Whether AOT IC loading failed due to OOM; if so, disable
-  // enforcing-AOT checks.
-  bool incompleteAOTICs_ = false;
-
   gc::Heap initialStringHeap = gc::Heap::Tenured;
 
   JitCode* generateStringConcatStub(JSContext* cx);
@@ -185,9 +180,6 @@ class JitZone {
  public:
   explicit JitZone(JSContext* cx, bool zoneHasNurseryStrings) {
     setStringsCanBeInNursery(zoneHasNurseryStrings);
-#ifdef ENABLE_JS_AOT_ICS
-    js::jit::FillAOTICs(cx, this);
-#endif
   }
   ~JitZone() {
     MOZ_ASSERT(jitScripts_.isEmpty());
@@ -312,9 +304,6 @@ class JitZone {
   mozilla::Maybe<IonCompilationId>& currentCompilationIdRef() {
     return currentCompilationId_;
   }
-
-  void setIncompleteAOTICs() { incompleteAOTICs_ = true; }
-  bool isIncompleteAOTICs() const { return incompleteAOTICs_; }
 
   void traceWeak(JSTracer* trc, JS::Realm* realm);
 

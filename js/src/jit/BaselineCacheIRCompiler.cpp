@@ -13,7 +13,6 @@
 #  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/CacheIR.h"
-#include "jit/CacheIRAOT.h"
 #include "jit/CacheIRSpewer.h"
 #include "jit/CacheIRWriter.h"
 #include "jit/JitFrames.h"
@@ -2035,39 +2034,6 @@ static void ResetEnteredCounts(const ICEntry* icEntry) {
   }
 }
 
-#ifdef ENABLE_JS_AOT_ICS
-void DumpNonAOTICStubAndQuit(CacheKind kind, const CacheIRWriter& writer) {
-  // Generate a random filename (unlikely to conflict with others).
-  char filename[64];
-  snprintf(filename, sizeof(filename), "IC-%" PRIu64,
-           mozilla::RandomUint64OrDie());
-  FILE* f = fopen(filename, "w");
-  MOZ_RELEASE_ASSERT(f);
-
-  // Generate the CacheIR text to dump to a file.
-  {
-    Fprinter printer(f);
-    SpewCacheIROpsAsAOT(printer, kind, writer);
-  }
-  fflush(f);
-  fclose(f);
-  fprintf(stderr, "UNEXPECTED NEW IC BODY\n");
-
-  fprintf(stderr,
-          "Please add the file '%s' to the ahead-of-time known IC bodies in "
-          "js/src/ics/.\n"
-          "\n"
-          "To keep running and dump all new ICs (useful for updating with "
-          "test-suites),\n"
-          "set the environment variable AOT_ICS_KEEP_GOING=1 and rerun.\n",
-          filename);
-
-  if (!getenv("AOT_ICS_KEEP_GOING")) {
-    abort();
-  }
-}
-#endif
-
 static constexpr uint32_t StubDataOffset = sizeof(ICCacheIRStub);
 static_assert(StubDataOffset % sizeof(uint64_t) == 0,
               "Stub fields must be aligned");
@@ -2075,19 +2041,11 @@ static_assert(StubDataOffset % sizeof(uint64_t) == 0,
 static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
                                 const CacheIRWriter& writer,
                                 CacheIRStubInfo*& stubInfo, JitCode*& code,
-                                const char* name, bool isAOTFill,
-                                JitZone* jitZone) {
+                                const char* name, JitZone* jitZone) {
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
 
   code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
-
-#ifdef ENABLE_JS_AOT_ICS
-  if (JitOptions.enableAOTICEnforce && !stubInfo && !isAOTFill &&
-      !jitZone->isIncompleteAOTICs()) {
-    DumpNonAOTICStubAndQuit(kind, writer);
-  }
-#endif
 
   if (!code && !IsPortableBaselineInterpreterEnabled()) {
     // We have to generate stub code.
@@ -2210,7 +2168,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   // that some platforms may not generate all possible ICs for another
   // platform (e.g. due to limited registers on x86-32) but it is always
   // fine not to have an IC preloaded in the corpus.
-  MOZ_ASSERT_IF(!isAOTFill, stubInfo->stubDataSize() == writer.stubDataSize());
+  MOZ_ASSERT(stubInfo->stubDataSize() == writer.stubDataSize());
 
   return true;
 }
@@ -2254,7 +2212,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   JitCode* code;
 
   if (!LookupOrCompileStub(cx, kind, writer, stubInfo, code, name,
-                           /* isAOTFill = */ false, cx->zone()->jitZone())) {
+                           cx->zone()->jitZone())) {
     return ICAttachResult::OOM;
   }
 
@@ -2383,35 +2341,6 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   owningScript->updateLastICStubCounter();
   return ICAttachResult::Attached;
 }
-
-#ifdef ENABLE_JS_AOT_ICS
-
-#  ifndef ENABLE_PORTABLE_BASELINE_INTERP
-// The AOT loading of ICs doesn't work (yet) in modes with a native
-// JIT enabled because compilation tries to access state that doesn't
-// exist yet (trampolines?) when we create the JitZone.
-#    error AOT ICs are only supported (for now) in PBL builds.
-#  endif
-
-void js::jit::FillAOTICs(JSContext* cx, JitZone* zone) {
-  if (JitOptions.enableAOTICs) {
-    for (auto& stub : GetAOTStubs()) {
-      CacheIRWriter writer(cx, stub);
-      if (writer.failed()) {
-        zone->setIncompleteAOTICs();
-        break;
-      }
-      CacheIRStubInfo* stubInfo;
-      JitCode* code;
-      (void)LookupOrCompileStub(cx, stub.kind, writer, stubInfo, code,
-                                "aot stub",
-                                /* isAOTFill = */ true, zone);
-      (void)stubInfo;
-      (void)code;
-    }
-  }
-}
-#endif
 
 uint8_t* ICCacheIRStub::stubDataStart() {
   return reinterpret_cast<uint8_t*>(this) + stubInfo_->stubDataOffset();

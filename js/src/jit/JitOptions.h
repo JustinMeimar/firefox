@@ -126,10 +126,6 @@ struct DefaultJitOptions {
   uint32_t ionMaxLocalsAndArgsMainThread;
   uint32_t wasmBatchBaselineThreshold;
   uint32_t wasmBatchIonThreshold;
-#ifdef ENABLE_JS_AOT_ICS
-  bool enableAOTICs;
-  bool enableAOTICEnforce;
-#endif
 #ifdef ENABLE_JS_AOT
   // Compile the baseline interpreter in AOT capture mode and log a
   // summary line. Emitted code still runs in-process; nothing is saved
