@@ -109,6 +109,7 @@
   _("bl-ic-fb", BaselineICFallback)           \
   _("bl-osr", BaselineOSR)                    \
   _("bl-bails", BaselineBailouts)             \
-  _("bl-dbg-osr", BaselineDebugModeOSR)
+  _("bl-dbg-osr", BaselineDebugModeOSR)       \
+  _("bl-aot", BaselineAOT)
 
 #endif /* jit_JitSpewChannelList_h */

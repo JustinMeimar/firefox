@@ -35,12 +35,34 @@ extern const double MathRandomScaleInv;
 // Both are two loads. Pinning the table base into a register (one load)
 // is future work.
 
+// Extended-slot capacities. Each region is a fixed range in the AOTSlot
+// enum, populated at runtime from JitRuntime state; codegen looks them
+// up by index via the helpers below. Sizes are conservative caps and
+// verified by MOZ_ASSERT in populateAOTIndirectionTable.
+static constexpr uint32_t AOTMaxVMWrappers = 512;
+static constexpr uint32_t AOTMaxABIFunctions = 256;
+
 enum class AOTSlot : uint32_t {
 #define AOT_SLOT(name, ...) name,
 #include "jit/AOTSlots.tbl"
 #undef AOT_SLOT
-  Count
+  NamedSlot_End,
+  VMWrapper_Begin = NamedSlot_End,
+  VMWrapper_End = VMWrapper_Begin + AOTMaxVMWrappers,
+  ABIFn_Begin = VMWrapper_End,
+  ABIFn_End = ABIFn_Begin + AOTMaxABIFunctions,
+  Count = ABIFn_End
 };
+
+inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
+  MOZ_ASSERT(id < AOTMaxVMWrappers);
+  return AOTSlot(uint32_t(AOTSlot::VMWrapper_Begin) + id);
+}
+
+inline AOTSlot AOTSlotForABIFn(uint32_t idx) {
+  MOZ_ASSERT(idx < AOTMaxABIFunctions);
+  return AOTSlot(uint32_t(AOTSlot::ABIFn_Begin) + idx);
+}
 
 const char* AOTSlotName(AOTSlot slot);
 
