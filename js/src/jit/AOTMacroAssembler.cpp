@@ -81,4 +81,36 @@ size_t MacroAssembler::aotDispatchTableEntrySize() const {
   return isAOT() ? sizeof(int32_t) : sizeof(uintptr_t);
 }
 
+void MacroAssembler::emitAOTStoreFrameTableBase(Register passReg,
+                                                Register scratch,
+                                                const Address& dst) {
+  if (isAOT()) {
+    // AOT capture: table base was placed in the courier register by the
+    // AOT preamble trampoline.
+    storePtr(passReg, dst);
+    return;
+  }
+  // Non-AOT baseline frames still carry the table base as a hedge: any
+  // AOT-loaded stub called from this frame reads the slot to find the
+  // table. Guarding this on a JitOption is future work.
+  movePtr(
+      ImmPtr(runtime()->jitRuntime()->aotIndirectionTable().baseAddress()),
+      scratch);
+  storePtr(scratch, dst);
+}
+
+void MacroAssembler::emitAOTCopyFrameTableBaseFromCaller(Register scratch) {
+  if (!isAOT()) {
+    return;
+  }
+  // Generator resume rebuilds a BaselineFrame from a saved snapshot; the
+  // caller's FP sits at [FramePointer + 0]. Follow it to read the caller's
+  // AOT table slot and mirror it into ours.
+  loadPtr(Address(FramePointer, 0), scratch);
+  loadPtr(Address(scratch, BaselineFrame::reverseOffsetOfAOTTableBase()),
+          scratch);
+  storePtr(scratch,
+           Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
+}
+
 #endif  // ENABLE_JS_AOT
