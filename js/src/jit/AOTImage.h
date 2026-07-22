@@ -85,7 +85,7 @@ namespace image {
 inline constexpr uint32_t Magic = 0x49544F41;
 
 // Bump on any layout / schema / fingerprint-input change.
-inline constexpr uint16_t kVersion = 1;
+inline constexpr uint16_t Version = 2;
 
 // SHA-1 of engine-relevant inputs (AOTSlots order, VMFunctionId order,
 // ABIFUNCTION_LIST order, JSOp numbering, ISA baseline, engine version).
@@ -349,6 +349,21 @@ class AOTImageBuilder {
 // life of the process.
 [[nodiscard]] JitCode* AllocateAOTCode(JSContext* cx, uint8_t* codeStart,
                                        uint32_t codeSize, CodeKind kind);
+
+// Wire-adjacent runtime shape of an InlineCacheStub blob. The encoder
+// copies from a CacheIRStubInfo; the decoder rebuilds a
+// CacheIRStubInfo (via CacheIRStubInfo::NewFromSerialized) plus its
+// CacheIRStubKey::Lookup. Kept hand-written so the schema generator
+// stays free of CacheIR types; only the Encode/Decode helpers are
+// generated.
+struct AOTICStubMetadata {
+  uint8_t cacheKind = 0;
+  uint8_t makesGCCalls = 0;
+  uint8_t stubDataOffset = 0;
+  uint8_t localTracingSlots = 0;
+  Vector<uint8_t, 0, SystemAllocPolicy> cacheIRCode;
+  Vector<uint8_t, 0, SystemAllocPolicy> fieldTypes;
+};
 
 }  // namespace js::jit
 

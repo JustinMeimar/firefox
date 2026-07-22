@@ -153,6 +153,10 @@ struct DefaultJitOptions {
   // (missing image, wrong version, decoding error). Interpreter-only
   // in patch 11; extended to baseline functions and IC stubs in 12.
   bool useAOTImage;
+
+  // With useAOTImage on, crash on any AOT lookup miss instead of
+  // falling back. Keeps CI from silently drifting off the AOT path.
+  bool aotEnforce;
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

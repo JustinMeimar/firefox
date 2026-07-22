@@ -3415,7 +3415,14 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
     jit::IonScript* ion = ionScript();
     setJitCodeRaw(ion->method()->raw());
   } else if (hasBaselineScript()) {
-    setJitCodeRaw(baselineScript()->method()->raw());
+    uint8_t* raw = baselineScript()->method()->raw();
+#ifdef ENABLE_JS_AOT
+    if (uint8_t* trampoline =
+            rt->jitRuntime()->lookupAOTPreambleTrampoline(raw)) {
+      raw = trampoline;
+    }
+#endif
+    setJitCodeRaw(raw);
   } else if (hasJitScript() && js::jit::IsBaselineInterpreterEnabled()) {
     bool usingEntryTrampoline = false;
     if (jit::JitOptions.emitInterpreterEntryTrampoline) {

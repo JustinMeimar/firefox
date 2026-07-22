@@ -27,7 +27,7 @@ class JitCode;
 class BaselineInterpreter;
 struct BaselineInterpreterMetadata;
 struct BaselineScriptMetadata;
-struct CacheIRStubKey;
+struct AOTICStubMetadata;
 
 // [SMDOC] AOT Artifact Recorder
 // =============================
@@ -67,10 +67,10 @@ class AOTArtifactRecorder {
       JSContext* cx, JitCode* code, const uint8_t identityHash[20],
       uint32_t probeHash, const BaselineScriptMetadata& md);
 
-  // IC stub is keyed by CacheIRStubKey hash. Filename is
-  // <dir>/ic-<identity16>.aotb.
+  // IC stub identity is SHA-1 over (cacheKind, cacheIRCode, fieldTypes).
+  // Filename is <dir>/ic-<identity16>.aotb.
   [[nodiscard]] bool recordICStub(JSContext* cx, JitCode* code,
-                                  const CacheIRStubKey& key);
+                                  const AOTICStubMetadata& md);
 
  private:
   using SeenSet =

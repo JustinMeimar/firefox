@@ -290,6 +290,27 @@ MethodStatus BaselineCompiler::compileOffThread() {
   return Method_Compiled;
 }
 
+#ifdef ENABLE_JS_AOT
+bool BaselineCompiler::extractAOTMetadata(BaselineScriptMetadata& md) {
+  md.warmUpCheckPrologueOffset = warmUpCheckPrologueOffset_.offset();
+  md.profilerEnterToggleOffset = profilerEnterFrameToggleOffset_.offset();
+  md.profilerExitToggleOffset = profilerExitFrameToggleOffset_.offset();
+  md.flags = compileDebugInstrumentation()
+                 ? uint8_t(BaselineScript::HAS_DEBUG_INSTRUMENTATION)
+                 : uint8_t(0);
+  // The compiler's RetAddrEntryVector and OSREntryVector carry an
+  // inline capacity that the metadata's Vector<T, 0> does not; copy
+  // rather than move to bridge the type mismatch.
+  auto copyInto = [](auto& dst, const auto& src) {
+    return dst.append(src.begin(), src.end());
+  };
+  return copyInto(md.retAddrEntries, handler.retAddrEntries()) &&
+         copyInto(md.osrEntries, handler.osrEntries()) &&
+         copyInto(md.debugTrapEntries, debugTrapEntries_) &&
+         copyInto(md.resumeOffsetEntries, resumeOffsetEntries_);
+}
+#endif
+
 bool BaselineCompiler::compileImpl() {
   MOZ_RELEASE_ASSERT(handler.script()->length() <= BaselineMaxScriptLength);
   MOZ_RELEASE_ASSERT(handler.script()->nslots() <= BaselineMaxScriptSlots);

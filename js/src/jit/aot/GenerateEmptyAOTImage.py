@@ -14,7 +14,7 @@ import sys
 
 # Mirror js/src/jit/AOTImage.h::image constants.
 IMAGE_MAGIC = 0x49544F41  # "AOTI"
-IMAGE_VERSION = 1
+IMAGE_VERSION = 2
 FINGERPRINT_SIZE = 20
 ALIGNMENT = 16
 TEXT_ALIGNMENT = 4096

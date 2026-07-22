@@ -8,17 +8,89 @@
 
 #  include "jit/AOTInstaller.h"
 
+#  include "mozilla/SHA1.h"
+
+#  include <cstring>
+
 #  include "jit/AOT.h"
 #  include "jit/AOTImage.h"
 #  include "jit/AOTImageGenerated.h"
+#  include "jit/BaselineIC.h"
 #  include "jit/BaselineJIT.h"
+#  include "jit/CacheIRCompiler.h"
 #  include "jit/JitCode.h"
 #  include "jit/JitOptions.h"
 #  include "jit/JitRuntime.h"
+#  include "jit/JitScript.h"
 #  include "jit/JitSpewer.h"
+#  include "jit/JitZone.h"
 #  include "vm/JSContext.h"
+#  include "vm/JSScript.h"
+#  include "vm/Scope.h"
+#  include "vm/SharedStencil.h"
 
 namespace js::jit {
+
+// -----------------------------------------------------------------
+// Identity
+// -----------------------------------------------------------------
+
+uint32_t ComputeBaselineProbeHash(JSScript* script) {
+  return uint32_t(script->sharedData()->hash());
+}
+
+void ComputeBaselineIdentityHash(JSScript* script,
+                                 mozilla::SHA1Sum::Hash& out) {
+  mozilla::SHA1Sum sha;
+  auto u = [&](const void* p, size_t n) {
+    sha.update(p, uint32_t(n));
+  };
+
+  uint32_t immFlags = script->immutableFlags().toRaw();
+  uint32_t funFlags = script->function()
+                          ? uint32_t(script->function()->flags().toRaw())
+                          : 0u;
+  uint16_t nargs = script->function()
+                       ? uint16_t(script->function()->nargs())
+                       : uint16_t(0);
+  uint16_t nfixed = uint16_t(script->nfixed());
+  uint32_t nslots = uint32_t(script->nslots());
+  uint32_t numICEntries = uint32_t(script->numICEntries());
+  uint8_t scopeKind = uint8_t(script->outermostScope()->kind());
+  uint8_t hasNonSyntactic = script->hasNonSyntacticScope() ? 1 : 0;
+  uint8_t isFunction = script->function() ? 1 : 0;
+
+  u(&immFlags, sizeof(immFlags));
+  u(&funFlags, sizeof(funFlags));
+  u(&nargs, sizeof(nargs));
+  u(&nfixed, sizeof(nfixed));
+  u(&nslots, sizeof(nslots));
+  u(&numICEntries, sizeof(numICEntries));
+  u(&scopeKind, sizeof(scopeKind));
+  u(&hasNonSyntactic, sizeof(hasNonSyntactic));
+  u(&isFunction, sizeof(isFunction));
+
+  // Length-prefix the gcthing kinds so the tail of variable-length
+  // bytecode does not alias.
+  auto gcThings = script->gcthings();
+  uint32_t gcThingCount = uint32_t(gcThings.size());
+  u(&gcThingCount, sizeof(gcThingCount));
+  for (const auto& gct : gcThings) {
+    uint8_t k = uint8_t(gct.kind());
+    u(&k, 1);
+  }
+
+  auto immData = script->immutableScriptData()->immutableData();
+  if (!immData.empty()) {
+    u(immData.data(), immData.size());
+  }
+
+  sha.finish(out);
+}
+
+// -----------------------------------------------------------------
+// Baseline interpreter
+// -----------------------------------------------------------------
 
 bool TryInstallAOTBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interp) {
@@ -46,8 +118,6 @@ bool TryInstallAOTBaselineInterpreter(JSContext* cx,
     return false;
   }
 
-  // The image's text region is r-x pages; JitCode::NewStatic wraps them
-  // without an ExecutablePool or JitCodeHeader.
   auto code = reader.code();
   uint8_t* codeStart = const_cast<uint8_t*>(code.data());
   JitCode* jitCode =
@@ -56,16 +126,179 @@ bool TryInstallAOTBaselineInterpreter(JSContext* cx,
     return false;
   }
 
-  interp.init(jitCode, std::move(md));
-
-  if (!EnsureAOTPreambleTrampolineFor(cx, jitCode)) {
+  if (!EnsureAOTPreambleTrampolineFor(cx, jitCode, AOTInterpPassReg)) {
     return false;
   }
+
+  interp.init(jitCode, std::move(md));
 
   JitSpew(JitSpew_BaselineAOT,
           "installed baseline interpreter from AOT image: bytes=%zu",
           size_t(code.size()));
   return true;
+}
+
+// -----------------------------------------------------------------
+// Baseline JIT function
+// -----------------------------------------------------------------
+
+// Finds the matching BaselineFunction blob for `script` and installs a
+// BaselineScript over its static text range. Success attaches the
+// BaselineScript to the JSScript; failure leaves the script untouched.
+bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
+  if (!JitOptions.useAOTImage) {
+    return false;
+  }
+
+  const AOTImage* image = AOTImage::embedded();
+  if (!image) {
+    return false;
+  }
+
+  uint32_t probe = ComputeBaselineProbeHash(script);
+  mozilla::SHA1Sum::Hash liveHash;
+  ComputeBaselineIdentityHash(script, liveHash);
+
+  auto readerOpt = image->findByIdentity(AOTBlobKind::BaselineFunction, probe,
+                                         liveHash);
+  if (readerOpt.isNothing()) {
+    return false;
+  }
+
+  AOTBlobReader reader = readerOpt.ref();
+  BaselineScriptMetadata md;
+  if (!DecodeBlob_BaselineFunction(reader, &md)) {
+    JitSpew(JitSpew_BaselineAOT,
+            "AOT baseline function decode failed for %s:%u",
+            script->filename() ? script->filename() : "<null>",
+            unsigned(script->lineno()));
+    return false;
+  }
+
+  auto code = reader.code();
+  uint8_t* codeStart = const_cast<uint8_t*>(code.data());
+  JitCode* jitCode = AllocateAOTCode(cx, codeStart, uint32_t(code.size()),
+                                     CodeKind::Baseline);
+  if (!jitCode) {
+    return false;
+  }
+
+  if (!EnsureAOTPreambleTrampolineFor(cx, jitCode, AOTFuncPassReg)) {
+    return false;
+  }
+  uint8_t* trampoline =
+      cx->runtime()->jitRuntime()->lookupAOTPreambleTrampoline(jitCode->raw());
+  MOZ_ASSERT(trampoline);
+
+  BaselineScript* bs = BaselineScript::New(
+      cx, md.warmUpCheckPrologueOffset, md.profilerEnterToggleOffset,
+      md.profilerExitToggleOffset, md.retAddrEntries.length(),
+      md.osrEntries.length(), md.debugTrapEntries.length(),
+      script->resumeOffsets().size());
+  if (!bs) {
+    return false;
+  }
+
+  bs->setMethod(jitCode);
+  bs->setAOTPreambleTrampoline(trampoline);
+  if (!md.retAddrEntries.empty()) {
+    bs->copyRetAddrEntries(md.retAddrEntries.begin());
+  }
+  if (!md.osrEntries.empty()) {
+    bs->copyOSREntries(md.osrEntries.begin());
+  }
+  if (!md.debugTrapEntries.empty()) {
+    bs->copyDebugTrapEntries(md.debugTrapEntries.begin());
+  }
+  bs->computeResumeNativeOffsets(script, md.resumeOffsetEntries);
+
+  if (md.flags & BaselineScript::HAS_DEBUG_INSTRUMENTATION) {
+    bs->setHasDebugInstrumentation();
+  }
+
+  script->jitScript()->setBaselineScript(script, bs);
+
+  JitSpew(JitSpew_BaselineAOT,
+          "installed baseline function from AOT image: %s:%u bytes=%zu",
+          script->filename() ? script->filename() : "<null>",
+          unsigned(script->lineno()), size_t(code.size()));
+  return true;
+}
+
+// -----------------------------------------------------------------
+// IC stubs
+// -----------------------------------------------------------------
+
+bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
+  if (!JitOptions.useAOTImage) {
+    return false;
+  }
+
+  const AOTImage* image = AOTImage::embedded();
+  if (!image) {
+    return false;
+  }
+
+  uint32_t loaded = 0;
+  uint32_t attempted = 0;
+  for (uint32_t i = 0; i < image->blobCount(); i++) {
+    AOTBlobReader reader = image->blobAt(i);
+    if (reader.kind() != AOTBlobKind::InlineCacheStub) {
+      continue;
+    }
+    attempted++;
+
+    AOTICStubMetadata md;
+    if (!DecodeBlob_InlineCacheStub(reader, &md)) {
+      JitSpew(JitSpew_BaselineAOT, "AOT IC stub decode failed at index %u", i);
+      continue;
+    }
+
+    CacheIRStubInfo* stubInfo = CacheIRStubInfo::NewFromSerialized(
+        CacheKind(md.cacheKind), ICStubEngine::Baseline,
+        md.makesGCCalls != 0, md.stubDataOffset,
+        md.cacheIRCode.begin(), md.cacheIRCode.length(),
+        md.fieldTypes.begin(), md.fieldTypes.length());
+    if (!stubInfo) {
+      continue;
+    }
+
+    CacheIRStubKey::Lookup lookup(CacheKind(md.cacheKind),
+                                  ICStubEngine::Baseline, stubInfo->code(),
+                                  stubInfo->codeLength());
+
+    CacheIRStubInfo* existing = nullptr;
+    if (jitZone->getBaselineCacheIRStubCode(lookup, &existing)) {
+      // Runtime already has this stub; the AOT copy is redundant.
+      js_free(stubInfo);
+      continue;
+    }
+
+    auto codeSpan = reader.code();
+    JitCode* jitCode = AllocateAOTCode(cx,
+                                       const_cast<uint8_t*>(codeSpan.data()),
+                                       uint32_t(codeSpan.size()),
+                                       CodeKind::Baseline);
+    if (!jitCode) {
+      js_free(stubInfo);
+      continue;
+    }
+    jitCode->setLocalTracingSlots(md.localTracingSlots);
+
+    CacheIRStubKey key(stubInfo);
+    if (!jitZone->putBaselineCacheIRStubCode(lookup, key, jitCode)) {
+      // putBaselineCacheIRStubCode takes ownership on success only;
+      // on failure the key's UniquePtr will drop stubInfo.
+      continue;
+    }
+    loaded++;
+  }
+
+  if (attempted > 0) {
+    JitSpew(JitSpew_BaselineAOT,
+            "AOT IC stubs loaded=%u attempted=%u", loaded, attempted);
+  }
+  return loaded > 0;
 }
 
 }  // namespace js::jit

@@ -13082,6 +13082,9 @@ bool InitOptionParser(OptionParser& op) {
                         "Load AOT artifacts from the embedded image "
                         "at startup. Falls back to runtime codegen on "
                         "any load failure.") ||
+      !op.addBoolOption('\0', "aot-enforce",
+                        "With --aot: crash on any AOT lookup miss "
+                        "instead of falling back to codegen.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14195,6 +14198,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("aot")) {
     jit::JitOptions.useAOTImage = true;
+  }
+  if (op.getBoolOption("aot-enforce")) {
+    jit::JitOptions.aotEnforce = true;
   }
 #endif
 

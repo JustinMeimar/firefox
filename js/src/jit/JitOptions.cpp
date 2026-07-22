@@ -210,6 +210,7 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(dumpAOTBlinterp, false);
   SET_DEFAULT(dumpAOTBaseline, false);
   SET_DEFAULT(useAOTImage, false);
+  SET_DEFAULT(aotEnforce, false);
   aotRecordDir = nullptr;
 #endif
 

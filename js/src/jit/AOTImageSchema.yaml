@@ -115,14 +115,20 @@ blobs:
   InlineCacheStub:
     kind_id: 2
     doc: |
-      One AOT-compiled CacheIR stub keyed by CacheIRStubKey. The
-      installer (patch 12+) reads `kind` plus the stub-info hash to
-      pair a static text range with the runtime stub info.
+      One AOT-compiled CacheIR stub. On load the CacheIR bytes plus
+      the trailing field-type table are used to reconstruct a
+      CacheIRStubInfo; the resulting CacheIRStubKey names the static
+      text range in the per-zone stub map.
+    metadata_type: "js::jit::AOTICStubMetadata"
     fields:
-      - {name: cacheKind,          type: u8}
-      - {name: makesGCCalls,       type: u8}
-      - {name: stubDataOffset,     type: u8}
-      - {name: localTracingSlots,  type: u8}
-      - {name: stubInfoHashLength, type: u32}
+      - {name: cacheKind,          type: u8,  cpp_member: cacheKind}
+      - {name: makesGCCalls,       type: u8,  cpp_member: makesGCCalls}
+      - {name: stubDataOffset,     type: u8,  cpp_member: stubDataOffset}
+      - {name: localTracingSlots,  type: u8,  cpp_member: localTracingSlots}
+      - {name: cacheIRCodeLength,  type: u32, cpp_member: "cacheIRCode.length"}
+      - {name: fieldTypesLength,   type: u32, cpp_member: "fieldTypes.length"}
     arrays:
-      - {name: stubInfoHash, element: "uint8_t", count_from: stubInfoHashLength}
+      - {name: cacheIRCode, element: "uint8_t",
+         count_from: cacheIRCodeLength, cpp_member: cacheIRCode}
+      - {name: fieldTypes,  element: "uint8_t",
+         count_from: fieldTypesLength,  cpp_member: fieldTypes}
