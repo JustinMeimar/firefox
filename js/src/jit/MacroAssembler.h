@@ -416,7 +416,21 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void callPreBarrierAOT(MIRType type, Register scratch);
   void emitAOTDispatch(Register opcodeReg, Register tableReg);
   size_t aotDispatchTableEntrySize() const;
+
+  // Seed the current BaselineFrame's AOT table slot from the courier
+  // register set up by generateAOTPreambleTrampoline. Called once at
+  // frame init; no-op unless isAOT().
+  void emitAOTStoreFrameTableBase(Register passReg, Register scratch,
+                                  const Address& dst);
+
+  // Generator resume path: copy the AOT table base from the caller's
+  // BaselineFrame slot into ours. No-op unless isAOT().
+  void emitAOTCopyFrameTableBaseFromCaller(Register scratch);
 #endif
+
+  void loadVMWrapper(VMFunctionId id, Register dest);
+  void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
+                               const Label& handler);
 
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure

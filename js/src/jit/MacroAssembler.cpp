@@ -2748,6 +2748,29 @@ void MacroAssembler::loadCurrentRealm(Register dest) {
   loadPtr(Address(dest, 0), dest);
 }
 
+void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
+  TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
+  movePtr(ImmPtr(ptr.value), dest);
+}
+
+void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset, size_t index,
+                                             const Label& handler) {
+  MOZ_ASSERT(handler.bound());
+#ifdef ENABLE_JS_AOT
+  if (isAOT()) {
+    // AOT dispatch tables store int32 offsets relative to the table
+    // base; emitAOTDispatch adds the base back at run time.
+    int32_t relOffset = int32_t(handler.offset()) - int32_t(tableOffset);
+    writeInt32Data(relOffset);
+    return;
+  }
+#endif
+  CodeLabel cl;
+  writeCodePointer(&cl);
+  cl.target()->bind(handler.offset());
+  addCodeLabel(cl);
+}
+
 void MacroAssembler::loadGlobalObjectData(Register dest) {
   loadCurrentRealm(dest);
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);

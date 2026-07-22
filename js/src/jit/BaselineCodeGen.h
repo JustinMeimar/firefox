@@ -290,7 +290,6 @@ class BaselineCodeGen {
 };
 
 using RetAddrEntryVector = js::Vector<RetAddrEntry, 16, SystemAllocPolicy>;
-using AllocSiteIndexVector = js::Vector<uint32_t, 16, SystemAllocPolicy>;
 
 // Interface used by BaselineCodeGen for BaselineCompiler.
 class BaselineCompilerHandler {
@@ -302,7 +301,6 @@ class BaselineCompilerHandler {
 #endif
   FixedList<Label> labels_;
   RetAddrEntryVector retAddrEntries_;
-  AllocSiteIndexVector allocSiteIndices_;
 
   // Native code offsets for OSR at JSOp::LoopHead ops.
   using OSREntryVector =
@@ -333,7 +331,7 @@ class BaselineCompilerHandler {
 
   bool compilingOffThread_ = false;
 
-  bool needsEnvAllocSite_ = false;
+  bool isAOT_ = false;
 
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
 
@@ -419,22 +417,22 @@ class BaselineCompilerHandler {
 
   void maybeDisableIon();
 
-  [[nodiscard]] bool addAllocSiteIndex(uint32_t entryIndex) {
-    return allocSiteIndices_.append(entryIndex);
-  }
-  void createAllocSites();
-
   bool compilingOffThread() const { return compilingOffThread_; }
   void setCompilingOffThread() { compilingOffThread_ = true; }
 
-  bool addEnvAllocSite() {
-    needsEnvAllocSite_ = true;
-    return true;
-  }
+  // Env alloc-site setup used to be conditional on a codegen-time flag.
+  // For AOT replayability the compiler must always emit the load, so this
+  // is now unconditional. The install-time walk in
+  // FinalizeInstalledBaselineScript decides whether to actually populate
+  // the site based on script->needsFunctionEnvironmentObjects().
+  bool usesEnvAllocSite() const { return true; }
 
   bool realmIndependentJitcode() const {
-    return JS::Prefs::experimental_self_hosted_cache() &&
-           script()->selfHosted();
+    // AOT-context codegen must be replayable on any matching JSScript in
+    // any realm. The experimental self-hosted cache is a separate flavor
+    // of the same requirement, restricted to self-hosted scripts.
+    return isAOT_ || (JS::Prefs::experimental_self_hosted_cache() &&
+                      script()->selfHosted());
   }
 
   bool needsProfilerCallSiteInstrumentation() const { return true; }
@@ -567,7 +565,7 @@ class BaselineInterpreterHandler {
   bool canHaveFixedSlots() const { return true; }
   JSObject* maybeGlobalLexicalEnvironment() const { return nullptr; }
 
-  bool addEnvAllocSite() { return false; }  // Not supported.
+  bool usesEnvAllocSite() const { return false; }  // Not supported.
 
   bool realmIndependentJitcode() const { return true; }
 
@@ -610,6 +608,12 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
 
   void emitOutOfLineCodeCoverageInstrumentation();
 };
+
+// Post-compile / install-time step for a baseline-compiled script. Walks
+// the JitScript's ICEntries and creates per-op alloc sites, and populates
+// the env alloc site if the script has function environment objects.
+// Runs on the main thread; silent on OOM.
+void FinalizeInstalledBaselineScript(JSScript* script);
 
 }  // namespace jit
 }  // namespace js
