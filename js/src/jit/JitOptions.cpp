@@ -209,6 +209,7 @@ DefaultJitOptions::DefaultJitOptions() {
 #ifdef ENABLE_JS_AOT
   SET_DEFAULT(dumpAOTBlinterp, false);
   SET_DEFAULT(dumpAOTBaseline, false);
+  aotRecordDir = nullptr;
 #endif
 
   // How many invocations or loop iterations are needed before functions

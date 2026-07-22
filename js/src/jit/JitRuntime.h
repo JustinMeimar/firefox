@@ -17,6 +17,9 @@
 
 #include "jit/ABIFunctions.h"
 #include "jit/AOT.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTRecorder.h"
+#endif
 #include "jit/BaselineICList.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CalleeToken.h"
@@ -258,7 +261,12 @@ class JitRuntime {
   void traceAOTPreambleTrampolines(JSTracer* trc);
   void clearAOTPreambleTrampolines() { aotPreambleTrampolines_.clear(); }
 
+  AOTArtifactRecorder* aotRecorder() const { return aotRecorder_.get(); }
+  [[nodiscard]] bool ensureAOTRecorder(JSContext* cx);
+
  private:
+  js::UniquePtr<AOTArtifactRecorder> aotRecorder_;
+
 #endif
 
   bool generateTrampolines(JSContext* cx);

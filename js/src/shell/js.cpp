@@ -13072,6 +13072,12 @@ bool InitOptionParser(OptionParser& op) {
                         "Compile every baseline JIT function and IC stub "
                         "in AOT capture mode before the real emit. "
                         "Discards captured bytes; no files are written.") ||
+      !op.addStringOption(
+          '\0', "aot-record", "DIR",
+          "Record every AOT-captured artifact (baseline interpreter, "
+          "baseline JIT functions, IC stubs) into DIR as one .aotb "
+          "file per artifact. Implies --aot-dump-blinterp and "
+          "--aot-dump-baseline.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14179,6 +14185,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("aot-dump-baseline")) {
     jit::JitOptions.dumpAOTBaseline = true;
+  }
+  if (const char* dir = op.getStringOption("aot-record")) {
+    jit::JitOptions.aotRecordDir = dir;
   }
 #endif
 

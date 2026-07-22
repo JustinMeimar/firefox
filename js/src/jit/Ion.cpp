@@ -249,6 +249,21 @@ void JitRuntime::traceAOTPreambleTrampolines(JSTracer* trc) {
     TraceRoot(trc, &e.trampoline, "aot-preamble-trampoline");
   }
 }
+
+bool JitRuntime::ensureAOTRecorder(JSContext* cx) {
+  if (aotRecorder_) {
+    return true;
+  }
+  auto rec = cx->make_unique<AOTArtifactRecorder>();
+  if (!rec) {
+    return false;
+  }
+  if (!rec->init(cx, JitOptions.aotRecordDir)) {
+    return false;
+  }
+  aotRecorder_ = std::move(rec);
+  return true;
+}
 #endif
 
 bool JitRuntime::initialize(JSContext* cx) {
@@ -263,6 +278,9 @@ bool JitRuntime::initialize(JSContext* cx) {
 
 #ifdef ENABLE_JS_AOT
   if (!populateAOTIndirectionTable(cx)) {
+    return false;
+  }
+  if (JitOptions.aotRecordDir && !ensureAOTRecorder(cx)) {
     return false;
   }
 #endif

@@ -75,3 +75,54 @@ blobs:
          element: "js::jit::BaselineInterpreterMetadata::ICReturnOffset",
          count_from: icReturnCount,
          cpp_member: icReturnOffsets}
+
+  BaselineFunction:
+    kind_id: 1
+    doc: |
+      Per-JSScript baseline JIT code plus the metadata needed to
+      reconstruct a BaselineScript on load. Identity is by SHA-1 over
+      the JSScript state the compiler reads (see AOTRecorder.cpp).
+    metadata_type: "js::jit::BaselineScriptMetadata"
+    fields:
+      - {name: warmUpCheckPrologueOffset, type: u32,
+         cpp_member: warmUpCheckPrologueOffset}
+      - {name: profilerEnterToggleOffset, type: u32,
+         cpp_member: profilerEnterToggleOffset}
+      - {name: profilerExitToggleOffset,  type: u32,
+         cpp_member: profilerExitToggleOffset}
+      - {name: flags,                     type: u8,  cpp_member: flags}
+      - {name: reserved,                  type: u8}
+      - {name: reserved2,                 type: u16}
+      - {name: retAddrCount,              type: u32,
+         cpp_member: "retAddrEntries.length"}
+      - {name: osrCount,                  type: u32,
+         cpp_member: "osrEntries.length"}
+      - {name: debugTrapCount,            type: u32,
+         cpp_member: "debugTrapEntries.length"}
+      - {name: resumeCount,               type: u32,
+         cpp_member: "resumeOffsetEntries.length"}
+    arrays:
+      - {name: retAddrEntries, element: "js::jit::RetAddrEntry",
+         count_from: retAddrCount, cpp_member: retAddrEntries}
+      - {name: osrEntries, element: "js::jit::BaselineScript::OSREntry",
+         count_from: osrCount, cpp_member: osrEntries}
+      - {name: debugTrapEntries,
+         element: "js::jit::BaselineScript::DebugTrapEntry",
+         count_from: debugTrapCount, cpp_member: debugTrapEntries}
+      - {name: resumeOffsetEntries, element: "js::jit::ResumeOffsetEntry",
+         count_from: resumeCount, cpp_member: resumeOffsetEntries}
+
+  InlineCacheStub:
+    kind_id: 2
+    doc: |
+      One AOT-compiled CacheIR stub keyed by CacheIRStubKey. The
+      installer (patch 12+) reads `kind` plus the stub-info hash to
+      pair a static text range with the runtime stub info.
+    fields:
+      - {name: cacheKind,          type: u8}
+      - {name: makesGCCalls,       type: u8}
+      - {name: stubDataOffset,     type: u8}
+      - {name: localTracingSlots,  type: u8}
+      - {name: stubInfoHashLength, type: u32}
+    arrays:
+      - {name: stubInfoHash, element: "uint8_t", count_from: stubInfoHashLength}

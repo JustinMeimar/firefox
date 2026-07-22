@@ -523,6 +523,27 @@ struct BaselineInterpreterMetadata {
   CallVMOffsets callVMOffsets;
 };
 
+// Offsets and entry arrays for one baseline-compiled function. Fields
+// are populated by BaselineCompiler at emit time; the encoder side
+// (jit/AOTRecorder.cpp) serializes them into an AOT image blob and the
+// installer (patch 11+) reconstructs a BaselineScript from them.
+struct BaselineScriptMetadata {
+  // Direct mirror of BaselineScript's own header fields.
+  uint32_t warmUpCheckPrologueOffset = 0;
+  uint32_t profilerEnterToggleOffset = 0;
+  uint32_t profilerExitToggleOffset = 0;
+  uint8_t flags = 0;
+
+  // Trailing arrays copied out of BaselineCompiler / BaselineScript. The
+  // resume-offset list is stored as pc->native pairs; the installer
+  // reruns computeResumeNativeOffsets to rebuild the absolute pointer
+  // vector for the freshly loaded JitCode.
+  Vector<RetAddrEntry, 0, SystemAllocPolicy> retAddrEntries;
+  Vector<BaselineScript::OSREntry, 0, SystemAllocPolicy> osrEntries;
+  Vector<BaselineScript::DebugTrapEntry, 0, SystemAllocPolicy> debugTrapEntries;
+  ResumeOffsetEntryVector resumeOffsetEntries;
+};
+
 // Class storing the generated Baseline Interpreter code for the runtime.
 class BaselineInterpreter {
   // The interpreter code.
@@ -545,6 +566,8 @@ class BaselineInterpreter {
   void init(JitCode* code, BaselineInterpreterMetadata&& metadata);
 
   uint8_t* codeRaw() const { return code_->raw(); }
+  JitCode* code() const { return code_; }
+  const BaselineInterpreterMetadata& metadata() const { return metadata_; }
 
   uint8_t* retAddrForDebugPrologueCallVM() const {
     return codeAtOffset(metadata_.callVMOffsets.debugPrologueOffset);

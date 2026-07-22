@@ -2097,10 +2097,11 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     }
 
 #ifdef ENABLE_JS_AOT
-    // Two-pass under --aot-dump-baseline: throwaway compile inside
-    // AutoAOTCodegen validates that this IC's ImmPtrs all map to
-    // AOTSlots. Captured bytes are discarded.
-    if (JitOptions.dumpAOTBaseline) {
+    // Two-pass under --aot-dump-baseline (or --aot-record): throwaway
+    // compile inside AutoAOTCodegen validates every ImmPtr against an
+    // AOTSlot. Under --aot-record the AOT bytes are handed to the
+    // recorder; otherwise they are discarded.
+    if (JitOptions.dumpAOTBaseline || JitOptions.aotRecordDir) {
       TempAllocator dumpTemp(&cx->tempLifoAlloc());
       BaselineCacheIRCompiler dumpComp(cx, dumpTemp, writer, StubDataOffset);
       if (!dumpComp.init(kind)) {
@@ -2118,6 +2119,13 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
               "baseline IC AOT capture ok: kind=%s bytes=%zu",
               CacheKindNames[uint8_t(kind)],
               size_t(dumpCode->instructionsSize()));
+      if (AOTArtifactRecorder* rec =
+              cx->runtime()->jitRuntime()->aotRecorder()) {
+        CacheIRStubKey aotKey(nullptr);  // patch 12 supplies stubInfo
+        if (!rec->recordICStub(cx, dumpCode, aotKey)) {
+          return false;
+        }
+      }
     }
 #endif
 
