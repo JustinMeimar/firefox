@@ -13068,6 +13068,10 @@ bool InitOptionParser(OptionParser& op) {
                         "Compile the baseline interpreter in AOT capture "
                         "mode and log a summary line. Emitted code still "
                         "runs in-process; no files are written.") ||
+      !op.addBoolOption('\0', "aot-dump-baseline",
+                        "Compile every baseline JIT function and IC stub "
+                        "in AOT capture mode before the real emit. "
+                        "Discards captured bytes; no files are written.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14172,6 +14176,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
 #ifdef ENABLE_JS_AOT
   if (op.getBoolOption("aot-dump-blinterp")) {
     jit::JitOptions.dumpAOTBlinterp = true;
+  }
+  if (op.getBoolOption("aot-dump-baseline")) {
+    jit::JitOptions.dumpAOTBaseline = true;
   }
 #endif
 

@@ -226,6 +226,29 @@ bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
 
   return true;
 }
+
+JitCode* JitRuntime::generateAOTPreambleTrampoline(JSContext* cx, void* target,
+                                                   Register passReg) {
+  // Emit a two-instruction shim that hoists &aotIndirectionTable into
+  // passReg and jumps to target. Prepended to every AOT entry point so
+  // the runtime-specific table pointer reaches the blob without
+  // patching the shared static code.
+  TempAllocator temp(&cx->tempLifoAlloc());
+  StackMacroAssembler masm(cx, temp);
+  AutoCreatedBy acb(masm, "JitRuntime::generateAOTPreambleTrampoline");
+
+  masm.movePtr(ImmPtr(aotIndirectionTable_.baseAddress()), passReg);
+  masm.jump(ImmPtr(target));
+
+  Linker linker(masm);
+  return linker.newCode(cx, CodeKind::Other);
+}
+
+void JitRuntime::traceAOTPreambleTrampolines(JSTracer* trc) {
+  for (auto& e : aotPreambleTrampolines_) {
+    TraceRoot(trc, &e.trampoline, "aot-preamble-trampoline");
+  }
+}
 #endif
 
 bool JitRuntime::initialize(JSContext* cx) {
@@ -714,6 +737,22 @@ template JitCode* JitCode::New<NoGC>(JSContext* cx, uint8_t* code,
                                      uint32_t bufferSize, uint32_t headerSize,
                                      ExecutablePool* pool, CodeKind kind);
 
+#ifdef ENABLE_JS_AOT
+JitCode* JitCode::NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
+                            CodeKind kind) {
+  JitCode* codeObj = cx->newCell<JitCode, NoGC>(
+      code, /* bufferSize = */ 0, /* headerSize = */ 0, /* pool = */ nullptr,
+      kind);
+  if (!codeObj) {
+    ReportOutOfMemory(cx);
+    return nullptr;
+  }
+  codeObj->isStaticCode_ = true;
+  codeObj->insnSize_ = codeSize;
+  return codeObj;
+}
+#endif
+
 void JitCode::copyFrom(MacroAssembler& masm) {
   // Store the JitCode pointer in the JitCodeHeader so we can recover the
   // gcthing from relocation tables.
@@ -732,6 +771,14 @@ void JitCode::copyFrom(MacroAssembler& masm) {
 }
 
 void JitCode::traceChildren(JSTracer* trc) {
+#ifdef ENABLE_JS_AOT
+  // Static AOT code carries no relocation tables, so there are no
+  // children to trace.
+  if (isStaticCode_) {
+    return;
+  }
+#endif
+
   // Note that we cannot mark invalidated scripts, since we've basically
   // corrupted the code stream by injecting bailouts.
   if (invalidated()) {
@@ -765,6 +812,15 @@ void JitCode::finalize(JS::GCContext* gcx) {
 
 #ifdef MOZ_VTUNE
   vtune::UnmarkCode(this);
+#endif
+
+#ifdef ENABLE_JS_AOT
+  // Static AOT code has no ExecutablePool or header to release. Clear
+  // the header pointer and return.
+  if (isStaticCode_) {
+    setHeaderPtr(nullptr);
+    return;
+  }
 #endif
 
   MOZ_ASSERT(pool_);

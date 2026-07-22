@@ -209,6 +209,11 @@ class ICStub {
   void setEnteredCount(uint32_t count) { enteredCount_ = count; }
   void resetEnteredCount() { enteredCount_ = 0; }
 
+  // True if stubCode_ points into the AOT text segment (which has no
+  // JitCodeHeader in front, so JitCode::FromExecutable is invalid).
+  // Always false until the AOT loader is in place.
+  bool isStaticCode() const;
+
   static constexpr size_t offsetOfStubCode() {
     return offsetof(ICStub, stubCode_);
   }
@@ -273,6 +278,13 @@ class ICCacheIRStub final : public ICStub {
 
   const CacheIRStubInfo* stubInfo_;
 
+#ifdef ENABLE_JS_AOT
+  // Static AOT stubs have no JitCodeHeader before their code, so
+  // JitCode::FromExecutable cannot recover the owning JitCode. Cache
+  // it here.
+  JitCode* jitCode_;
+#endif
+
 #ifndef JS_64BIT
   // Ensure stub data is 8-byte aligned on 32-bit.
   uintptr_t padding_ = 0;
@@ -281,9 +293,18 @@ class ICCacheIRStub final : public ICStub {
  public:
   ICCacheIRStub(JitCode* stubCode, const CacheIRStubInfo* stubInfo)
       : ICStub(stubCode ? stubCode->raw() : nullptr, /* isFallback = */ false),
-        stubInfo_(stubInfo) {
+        stubInfo_(stubInfo)
+#ifdef ENABLE_JS_AOT
+        ,
+        jitCode_(stubCode)
+#endif
+  {
     MOZ_ASSERT_IF(!IsPortableBaselineInterpreterEnabled(), stubCode);
   }
+
+#ifdef ENABLE_JS_AOT
+  JitCode* jitCode() { return jitCode_; }
+#endif
 
   ICStub* next() const { return next_; }
   void setNext(ICStub* stub) { next_ = stub; }
@@ -316,10 +337,18 @@ class ICCacheIRStub final : public ICStub {
 // Assert stub size is what we expect to catch regressions.
 #ifdef JS_64BIT
 static_assert(sizeof(ICFallbackStub) == 3 * sizeof(uintptr_t));
+#  ifdef ENABLE_JS_AOT
+static_assert(sizeof(ICCacheIRStub) == 5 * sizeof(uintptr_t));
+#  else
 static_assert(sizeof(ICCacheIRStub) == 4 * sizeof(uintptr_t));
+#  endif
 #else
 static_assert(sizeof(ICFallbackStub) == 5 * sizeof(uintptr_t));
+#  ifdef ENABLE_JS_AOT
+static_assert(sizeof(ICCacheIRStub) == 7 * sizeof(uintptr_t));
+#  else
 static_assert(sizeof(ICCacheIRStub) == 6 * sizeof(uintptr_t));
+#  endif
 #endif
 
 inline ICStub* ICStub::maybeNext() const {

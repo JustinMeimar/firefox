@@ -9,7 +9,15 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Maybe.h"
 
+#include "jit/JitContext.h"
+#include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
+#include "vm/JSContext.h"
+#include "vm/Runtime.h"
+
+#if defined(JS_CODEGEN_X64)
+#  include "jit/x64/Assembler-x64.h"
+#endif
 
 namespace js::jit {
 
@@ -64,6 +72,30 @@ AOTSlot AOTIndirectionTable::findSlotOrCrash(uintptr_t value) const {
     MOZ_CRASH("No AOT slot for pointer");
   }
   return *slot;
+}
+
+bool EnsureAOTPreambleTrampolineFor(JSContext* cx, JitCode* code,
+                                    Register passReg) {
+  JitRuntime* jrt = cx->runtime()->jitRuntime();
+  if (jrt->lookupAOTPreambleTrampoline(code->raw())) {
+    return true;
+  }
+
+  mozilla::Maybe<JitContext> jctx;
+  if (!MaybeGetJitContext()) {
+    jctx.emplace(cx);
+  }
+  JitCode* trampoline =
+      jrt->generateAOTPreambleTrampoline(cx, code->raw(), passReg);
+  if (!trampoline) {
+    return false;
+  }
+  if (!jrt->aotPreambleTrampolines_.append(
+          JitRuntime::AOTPreambleTrampolineEntry{code->raw(), trampoline})) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  return true;
 }
 
 }  // namespace js::jit
