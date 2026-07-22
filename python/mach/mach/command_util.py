@@ -150,6 +150,7 @@ MACH_COMMANDS = {
     "install": MachCommandReference("python/mozbuild/mozbuild/mach_commands.py"),
     "intermittents": MachCommandReference("testing/intermittents_mach_commands.py"),
     "install-moz-phab": MachCommandReference("tools/phabricator/mach_commands.py"),
+    "jit-aot": MachCommandReference("js/src/jit/aot/mach_commands.py"),
     "jit-test": MachCommandReference("testing/mach_commands.py"),
     "jsapi-tests": MachCommandReference("testing/mach_commands.py"),
     "jsshell-bench": MachCommandReference("testing/mach_commands.py"),

@@ -11,22 +11,31 @@
 #  include "mozilla/ScopeExit.h"
 #  include "mozilla/SHA1.h"
 
+#  include <cerrno>
+#  include <cstdio>
+#  include <cstring>
 #  include <fcntl.h>
 #  include <sys/stat.h>
 #  include <sys/types.h>
 #  include <unistd.h>
 
-#  include <cerrno>
-#  include <cstdio>
-#  include <cstring>
-
+#  include "frontend/CompilationStencil.h"
+#  include "gc/Zone.h"
 #  include "jit/AOTImageGenerated.h"
 #  include "jit/BaselineJIT.h"
 #  include "jit/CacheIR.h"
 #  include "jit/JitCode.h"
+#  include "jit/JitScript.h"
 #  include "jit/JitSpewer.h"
 #  include "jit/JitZone.h"
+#  include "vm/JSAtomUtils.h"
 #  include "vm/JSContext.h"
+#  include "vm/JSFunction.h"
+#  include "vm/JSScript.h"
+#  include "vm/Runtime.h"
+
+#  include "jit/JitScript-inl.h"
+#  include "vm/JSObject-inl.h"
 
 namespace js::jit {
 
@@ -144,6 +153,90 @@ bool AOTArtifactRecorder::recordBaselineFunction(
   HexEncode(identityHash, 8, idHex);
   std::string path = directory_ + "/blfun-" + idHex + ".aotb";
   return writeBlobFile(cx, path, blob);
+}
+
+bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(
+    JSContext* cx, uint32_t* compiledOut, uint32_t* skippedOut) {
+  *compiledOut = 0;
+  *skippedOut = 0;
+
+  if (!cx->runtime()->hasSelfHostStencil()) {
+    JitSpew(JitSpew_BaselineAOT,
+            "AOT self-hosted corpus: no self-host stencil loaded");
+    return true;
+  }
+
+  JS::RootedVector<JSAtom*> names(cx);
+  {
+    auto& map = cx->runtime()->selfHostScriptMap.ref();
+    if (!names.reserve(map.count())) {
+      return false;
+    }
+    for (auto iter = map.iter(); !iter.done(); iter.next()) {
+      names.infallibleAppend(iter.get().key());
+    }
+  }
+
+  // Mirrors GlobalObject::resolveSelfHostedFunctionSlow: self-hosted
+  // instantiation must not run the allocation-metadata builder.
+  AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
+
+  for (JSAtom* rawAtom : names.get()) {
+    Rooted<JSAtom*> atom(cx, rawAtom);
+    Rooted<PropertyName*> name(cx, atom->asPropertyName());
+    auto indexRange = cx->runtime()->getSelfHostedScriptIndexRange(name);
+    if (!indexRange) {
+      (*skippedOut)++;
+      continue;
+    }
+
+    RootedFunction fun(
+        cx, cx->runtime()->selfHostStencil().instantiateSelfHostedLazyFunction(
+                cx, cx->runtime()->selfHostStencilInput().atomCache,
+                indexRange->start, name));
+    if (!fun) {
+      (*skippedOut)++;
+      cx->clearPendingException();
+      continue;
+    }
+    if (!cx->runtime()->delazifySelfHostedFunction(cx, name, fun)) {
+      (*skippedOut)++;
+      cx->clearPendingException();
+      continue;
+    }
+
+    // Force the AOT capture pass by triggering a baseline compile at
+    // this point. The recorder receives the artifact via the normal
+    // BaselineCompile path.
+    Rooted<JSScript*> script(cx, fun->nonLazyScript());
+    if (!script || !CanBaselineInterpretScript(script)) {
+      (*skippedOut)++;
+      continue;
+    }
+    if (!cx->zone()->ensureJitZoneExists(cx)) {
+      return false;
+    }
+    AutoKeepJitScripts keepJitScript(cx);
+    if (!script->ensureHasJitScript(cx, keepJitScript)) {
+      (*skippedOut)++;
+      cx->clearPendingException();
+      continue;
+    }
+
+    BaselineOptions options({BaselineOption::ForceMainThreadCompilation});
+    MethodStatus status = BaselineCompile(cx, script, options);
+    if (status != Method_Compiled) {
+      (*skippedOut)++;
+      cx->clearPendingException();
+      continue;
+    }
+    (*compiledOut)++;
+  }
+
+  JitSpew(JitSpew_BaselineAOT,
+          "AOT self-hosted corpus: recorded=%u skipped=%u",
+          *compiledOut, *skippedOut);
+  return true;
 }
 
 bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,

@@ -94,7 +94,11 @@
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
 #include "jit/JitcodeMap.h"
+#include "jit/JitRuntime.h"
 #include "jit/JitZone.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTRecorder.h"
+#endif
 #include "jit/shared/CodeGenerator-shared.h"
 #include "jit/Simulator.h"
 #ifdef JS_CODEGEN_ARM64
@@ -12011,6 +12015,22 @@ auto minVal(T a, Ts... args) {
     return false;
   }
 
+#ifdef ENABLE_JS_AOT
+  if (op->getBoolOption("aot-record-self-hosted")) {
+    if (jit::AOTArtifactRecorder* rec =
+            cx->runtime()->jitRuntime()->aotRecorder()) {
+      uint32_t compiled = 0, skipped = 0;
+      if (!rec->recordSelfHostedBaselineCorpus(cx, &compiled, &skipped)) {
+        return false;
+      }
+    } else {
+      fprintf(stderr,
+              "--aot-record-self-hosted requires --aot-record=<dir>\n");
+      return false;
+    }
+  }
+#endif
+
   MultiStringRange filePaths = op->getMultiStringOption('f');
   MultiStringRange utf16FilePaths = op->getMultiStringOption('u');
   MultiStringRange preludePaths = op->getMultiStringOption('p');
@@ -13085,6 +13105,11 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "aot-enforce",
                         "With --aot: crash on any AOT lookup miss "
                         "instead of falling back to codegen.") ||
+      !op.addBoolOption('\0', "aot-record-self-hosted",
+                        "With --aot-record=<dir>: iterate every "
+                        "self-hosted function, delazify it, and drive "
+                        "a baseline compile so the AOT capture path "
+                        "records it. Runs before -f / -e / script.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
