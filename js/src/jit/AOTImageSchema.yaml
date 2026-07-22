@@ -1,0 +1,77 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# [SMDOC] AOT Image Schema
+# ========================
+# Parsed by GenerateAOTImage.py at build time to produce
+# jit/AOTImageGenerated.h. Single source of truth for the on-disk
+# layout of every artifact stored inside an AOT image: the fixed-size
+# POD `fields`, variable-length element `arrays`, and the Encode/Decode
+# helpers that translate between a hand-written metadata class and the
+# wire representation.
+#
+# The Python packer (jit/aot/PackAOTImage.py, patch 10+) imports this
+# same file, so C++ and Python cannot disagree on the wire format.
+#
+# Field types
+# -----------
+#   u8, u16, u32   -> uint8_t, uint16_t, uint32_t
+#   raw            -> pass-through C++ type; requires `size:` bytes and
+#                     `cpp_type:` for the generated POD member.
+#
+# Array descriptor
+# ----------------
+#   name           name of the payload member on AOTView_<Kind>.
+#   element        C++ type of each element (trivially copyable).
+#   count_from     `fields` member that holds this array's length.
+#   cpp_member     optional. Used only when the blob declares
+#                  `metadata_type`; names the C++ member of that class
+#                  to walk when Encoding/Decoding.
+#
+# Fields with `cpp_member`
+# ------------------------
+# A `cpp_member` on a field maps the wire field to an accessor path on
+# the hand-written metadata class named by `metadata_type`. Dot-separated
+# for nested sub-structs. Suffix `.length` on an array-count field asks
+# the encoder to source the count from the C++ container's length()
+# rather than assuming it comes from a named scalar.
+#
+# Bump image::Version in AOTImage.h for any wire-format change: adding a
+# blob kind, adding / reordering / resizing a field, changing a field
+# type, adding an array, renaming its count_from. Skipping the bump
+# means a stale image fails the fieldsSize check at load time.
+
+blobs:
+  BaselineInterpreter:
+    kind_id: 0 # NOTE: name or get rid of kind_id
+    doc: "Singleton baseline interpreter blob."
+    metadata_type: "js::jit::BaselineInterpreterMetadata"
+    fields:
+      - {name: interpretOpOffset,            type: u32, cpp_member: interpretOpOffset}
+      - {name: interpretOpNoDebugTrapOffset, type: u32, cpp_member: interpretOpNoDebugTrapOffset}
+      - {name: bailoutPrologueOffset,        type: u32, cpp_member: bailoutPrologueOffset}
+      - {name: profilerEnterToggleOffset,    type: u32, cpp_member: profilerEnterToggleOffset}
+      - {name: profilerExitToggleOffset,     type: u32, cpp_member: profilerExitToggleOffset}
+      - {name: debugTrapHandlerOffset,       type: u32, cpp_member: debugTrapHandlerOffset}
+      - {name: debugPrologueOffset,          type: u32, cpp_member: "callVMOffsets.debugPrologueOffset"}
+      - {name: debugEpilogueOffset,          type: u32, cpp_member: "callVMOffsets.debugEpilogueOffset"}
+      - {name: debugAfterYieldOffset,        type: u32, cpp_member: "callVMOffsets.debugAfterYieldOffset"}
+      - {name: debugInstrumentationCount,    type: u32, cpp_member: "debugInstrumentationOffsets.length"}
+      - {name: debugTrapCount,               type: u32, cpp_member: "debugTrapOffsets.length"}
+      - {name: codeCoverageCount,            type: u32, cpp_member: "codeCoverageOffsets.length"}
+      - {name: icReturnCount,                type: u32, cpp_member: "icReturnOffsets.length"}
+    arrays:
+      - {name: debugInstrumentationOffsets, element: "uint32_t",
+         count_from: debugInstrumentationCount,
+         cpp_member: debugInstrumentationOffsets}
+      - {name: debugTrapOffsets,            element: "uint32_t",
+         count_from: debugTrapCount,
+         cpp_member: debugTrapOffsets}
+      - {name: codeCoverageOffsets,         element: "uint32_t",
+         count_from: codeCoverageCount,
+         cpp_member: codeCoverageOffsets}
+      - {name: icReturnOffsets,
+         element: "js::jit::BaselineInterpreterMetadata::ICReturnOffset",
+         count_from: icReturnCount,
+         cpp_member: icReturnOffsets}
