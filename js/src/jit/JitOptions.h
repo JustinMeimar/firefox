@@ -147,6 +147,12 @@ struct DefaultJitOptions {
   // under this directory. Setting this flag also implies
   // dumpAOTBlinterp and dumpAOTBaseline.
   const char* aotRecordDir;
+
+  // Attempt to load AOT artifacts from the embedded AOTImage.bin at
+  // startup. Falls back to runtime codegen on any load failure
+  // (missing image, wrong version, decoding error). Interpreter-only
+  // in patch 11; extended to baseline functions and IC stubs in 12.
+  bool useAOTImage;
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

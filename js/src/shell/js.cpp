@@ -13078,6 +13078,10 @@ bool InitOptionParser(OptionParser& op) {
           "baseline JIT functions, IC stubs) into DIR as one .aotb "
           "file per artifact. Implies --aot-dump-blinterp and "
           "--aot-dump-baseline.") ||
+      !op.addBoolOption('\0', "aot",
+                        "Load AOT artifacts from the embedded image "
+                        "at startup. Falls back to runtime codegen on "
+                        "any load failure.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14188,6 +14192,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (const char* dir = op.getStringOption("aot-record")) {
     jit::JitOptions.aotRecordDir = dir;
+  }
+  if (op.getBoolOption("aot")) {
+    jit::JitOptions.useAOTImage = true;
   }
 #endif
 

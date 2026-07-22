@@ -15,6 +15,7 @@
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #ifdef ENABLE_JS_AOT
+#  include "jit/AOTInstaller.h"
 #  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/AutoWritableJitCode.h"
@@ -1399,6 +1400,13 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
 #ifdef ENABLE_JS_AOT
+    // Fast path: install the baseline interpreter from the embedded
+    // AOT image if --aot is on and the image carries a matching blob.
+    // Any failure falls through to the two-pass path below.
+    if (TryInstallAOTBaselineInterpreter(cx, interpreter)) {
+      return true;
+    }
+
     // Two-pass generation under --aot-dump-blinterp: an AOT-capture
     // pass runs first on a throwaway masm, then the normal pass emits
     // the interpreter actually installed for this runtime. The capture

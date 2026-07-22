@@ -265,9 +265,12 @@ elif CONFIG["JS_CODEGEN_WASM32"]:
     ]
 
 if CONFIG["ENABLE_JS_AOT"]:
+    DIRS += ["aot"]
+
     SOURCES += [
         "AOT.cpp",
         "AOTImage.cpp",
+        "AOTInstaller.cpp",
         "AOTMacroAssembler.cpp",
         "AOTRecorder.cpp",
     ]

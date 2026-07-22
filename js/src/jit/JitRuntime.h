@@ -360,6 +360,19 @@ class JitRuntime {
                                          Register passReg);
 #endif
 
+  // Entry address for the baseline interpreter. Under AOT this is the
+  // preamble trampoline that seeds AOTFuncPassReg with the indirection
+  // table base; otherwise it is the raw interpreter code.
+  uint8_t* baselineInterpreterEntryAddr() const {
+    uint8_t* raw = baselineInterpreter_.codeRaw();
+#ifdef ENABLE_JS_AOT
+    if (uint8_t* trampoline = lookupAOTPreambleTrampoline(raw)) {
+      return trampoline;
+    }
+#endif
+    return raw;
+  }
+
   static void TraceAtomZoneRoots(JSTracer* trc);
   static void TraceWeakJitcodeGlobalTable(JSRuntime* rt, JSTracer* trc);
 
