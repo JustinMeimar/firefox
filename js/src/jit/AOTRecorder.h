@@ -72,6 +72,15 @@ class AOTArtifactRecorder {
   [[nodiscard]] bool recordICStub(JSContext* cx, JitCode* code,
                                   const AOTICStubMetadata& md);
 
+  // Iterates the runtime's self-hosted script map, delazifying each
+  // function and driving a baseline compile through the AOT capture
+  // path. Called from the shell after `--aot-record=<dir>` is armed
+  // (see js.cpp). Returns the number of blobs recorded; a zero count
+  // is not treated as failure.
+  [[nodiscard]] bool recordSelfHostedBaselineCorpus(JSContext* cx,
+                                                    uint32_t* compiledOut,
+                                                    uint32_t* skippedOut);
+
  private:
   using SeenSet =
       mozilla::HashSet<uint64_t, mozilla::DefaultHasher<uint64_t>,
