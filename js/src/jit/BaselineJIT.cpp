@@ -1214,8 +1214,8 @@ void BaselineInterpreter::toggleProfilerInstrumentation(bool enable) {
   }
 
   AutoWritableJitCode awjc(code_);
-  ToggleProfilerInstrumentation(code_, profilerEnterToggleOffset_,
-                                profilerExitToggleOffset_, enable);
+  ToggleProfilerInstrumentation(code_, metadata_.profilerEnterToggleOffset,
+                                metadata_.profilerExitToggleOffset, enable);
 }
 
 void BaselineInterpreter::toggleDebuggerInstrumentation(bool enable) {
@@ -1226,7 +1226,7 @@ void BaselineInterpreter::toggleDebuggerInstrumentation(bool enable) {
   AutoWritableJitCode awjc(code_);
 
   // Toggle jumps for debugger instrumentation.
-  for (uint32_t offset : debugInstrumentationOffsets_) {
+  for (uint32_t offset : metadata_.debugInstrumentationOffsets) {
     CodeLocationLabel label(code_, CodeOffset(offset));
     if (enable) {
       Assembler::ToggleToCmp(label);
@@ -1237,9 +1237,9 @@ void BaselineInterpreter::toggleDebuggerInstrumentation(bool enable) {
 
   // Toggle DebugTrapHandler calls.
 
-  uint8_t* debugTrapHandler = codeAtOffset(debugTrapHandlerOffset_);
+  uint8_t* debugTrapHandler = codeAtOffset(metadata_.debugTrapHandlerOffset);
 
-  for (uint32_t offset : debugTrapOffsets_) {
+  for (uint32_t offset : metadata_.debugTrapOffsets) {
     uint8_t* trap = codeAtOffset(offset);
     if (enable) {
       MacroAssembler::patchNopToCall(trap, debugTrapHandler);
@@ -1257,7 +1257,7 @@ void BaselineInterpreter::toggleCodeCoverageInstrumentationUnchecked(
 
   AutoWritableJitCode awjc(code_);
 
-  for (uint32_t offset : codeCoverageOffsets_) {
+  for (uint32_t offset : metadata_.codeCoverageOffsets) {
     CodeLocationLabel label(code_, CodeOffset(offset));
     if (enable) {
       Assembler::ToggleToCmp(label);
@@ -1322,33 +1322,14 @@ void jit::ToggleBaselineProfiling(JSContext* cx, bool enable) {
   }
 }
 
-void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
-                               uint32_t interpretOpNoDebugTrapOffset,
-                               uint32_t bailoutPrologueOffset,
-                               uint32_t profilerEnterToggleOffset,
-                               uint32_t profilerExitToggleOffset,
-                               uint32_t debugTrapHandlerOffset,
-                               CodeOffsetVector&& debugInstrumentationOffsets,
-                               CodeOffsetVector&& debugTrapOffsets,
-                               CodeOffsetVector&& codeCoverageOffsets,
-                               ICReturnOffsetVector&& icReturnOffsets,
-                               const CallVMOffsets& callVMOffsets) {
+void BaselineInterpreter::init(JitCode* code,
+                               BaselineInterpreterMetadata&& metadata) {
   code_ = code;
-  interpretOpOffset_ = interpretOpOffset;
-  interpretOpNoDebugTrapOffset_ = interpretOpNoDebugTrapOffset;
-  bailoutPrologueOffset_ = bailoutPrologueOffset;
-  profilerEnterToggleOffset_ = profilerEnterToggleOffset;
-  profilerExitToggleOffset_ = profilerExitToggleOffset;
-  debugTrapHandlerOffset_ = debugTrapHandlerOffset;
-  debugInstrumentationOffsets_ = std::move(debugInstrumentationOffsets);
-  debugTrapOffsets_ = std::move(debugTrapOffsets);
-  codeCoverageOffsets_ = std::move(codeCoverageOffsets);
-  icReturnOffsets_ = std::move(icReturnOffsets);
-  callVMOffsets_ = callVMOffsets;
+  metadata_ = std::move(metadata);
 }
 
 uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
-  for (const ICReturnOffset& entry : icReturnOffsets_) {
+  for (const auto& entry : metadata_.icReturnOffsets) {
     if (entry.op == op) {
       return codeAtOffset(entry.offset);
     }
