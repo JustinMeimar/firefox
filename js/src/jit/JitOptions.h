@@ -135,6 +135,12 @@ struct DefaultJitOptions {
   // summary line. Emitted code still runs in-process; nothing is saved
   // to disk.
   bool dumpAOTBlinterp;
+
+  // Compile every baseline JIT function and IC stub in AOT capture mode
+  // before the real emit. The capture pass validates that every ImmPtr
+  // maps to an AOTSlot; the captured bytes are discarded and the second
+  // pass emits the code actually installed. No disk output.
+  bool dumpAOTBaseline;
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

@@ -52,6 +52,12 @@ using mozilla::DebugOnly;
 namespace js {
 namespace jit {
 
+bool ICStub::isStaticCode() const {
+  // Placeholder. Becomes a real AOT text-range check once the AOT
+  // loader introduces an embedded text segment.
+  return false;
+}
+
 // Class used to emit all Baseline IC fallback code when initializing the
 // JitRuntime.
 class MOZ_RAII FallbackICCodeCompiler final {
@@ -122,6 +128,15 @@ AllocatableGeneralRegisterSet BaselineICAvailableGeneralRegs(size_t numInputs) {
   MOZ_ASSERT(!regs.has(ICTailCallReg));
 #endif
   regs.take(ICStubReg);
+
+#ifdef ENABLE_JS_AOT
+  // AOTFuncPassReg is the courier register used by baseline JIT'd
+  // frames to seed their AOT indirection table slot. Reserving it in
+  // AOT builds keeps IC codegen from clobbering it before the frame
+  // init that reads it. On x64 it aliases ScratchReg and is already
+  // non-allocatable, so use takeUnchecked to cover both cases.
+  regs.takeUnchecked(AOTFuncPassReg);
+#endif
 
   switch (numInputs) {
     case 0:
@@ -457,10 +472,16 @@ static void MaybeNotifyWarp(JSScript* script, ICFallbackStub* stub) {
 }
 
 void ICCacheIRStub::trace(JSTracer* trc) {
+#ifdef ENABLE_JS_AOT
+  if (jitCode_) {
+    TraceManuallyBarrieredEdge(trc, &jitCode_, "baseline-ic-stub-code");
+  }
+#else
   if (hasJitCode()) {
     JitCode* stubJitCode = jitCode();
     TraceManuallyBarrieredEdge(trc, &stubJitCode, "baseline-ic-stub-code");
   }
+#endif
 
   TraceCacheIRStub(trc, this, stubInfo());
 }

@@ -12,7 +12,15 @@
 
 #include <cstdint>
 
+#include "jstypes.h"
+
+#include "jit/Registers.h"
+
+struct JS_PUBLIC_API JSContext;
+
 namespace js::jit {
+
+class JitCode;
 
 extern const double MathRandomScaleInv;
 
@@ -94,6 +102,14 @@ class AOTIndirectionTable {
  private:
   uintptr_t slots_[uint32_t(AOTSlot::Count)] = {};
 };
+
+// Ensure a preamble trampoline exists for |code|. The trampoline seeds
+// |passReg| with the runtime's AOT indirection table base and jumps to
+// code->raw(). Callers must pass the register the emitted code reads
+// from: AOTFuncPassReg for baseline JIT functions, AOTInterpPassReg for
+// the baseline interpreter. Idempotent.
+[[nodiscard]] bool EnsureAOTPreambleTrampolineFor(JSContext* cx, JitCode* code,
+                                                  Register passReg);
 
 }  // namespace js::jit
 

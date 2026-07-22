@@ -7,6 +7,9 @@
 #include "mozilla/RandomNum.h"
 
 #include "gc/GC.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AutoAOTCodegen.h"
+#endif
 #include "jit/CacheIR.h"
 #include "jit/CacheIRAOT.h"
 #include "jit/CacheIRSpewer.h"
@@ -2093,6 +2096,31 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
       return false;
     }
 
+#ifdef ENABLE_JS_AOT
+    // Two-pass under --aot-dump-baseline: throwaway compile inside
+    // AutoAOTCodegen validates that this IC's ImmPtrs all map to
+    // AOTSlots. Captured bytes are discarded.
+    if (JitOptions.dumpAOTBaseline) {
+      TempAllocator dumpTemp(&cx->tempLifoAlloc());
+      BaselineCacheIRCompiler dumpComp(cx, dumpTemp, writer, StubDataOffset);
+      if (!dumpComp.init(kind)) {
+        return false;
+      }
+      JitCode* dumpCode = nullptr;
+      {
+        AutoAOTCodegen aotScope(dumpComp.masmForAOT(), cx);
+        dumpCode = dumpComp.compile();
+      }
+      if (!dumpCode) {
+        return false;
+      }
+      JitSpew(JitSpew_BaselineAOT,
+              "baseline IC AOT capture ok: kind=%s bytes=%zu",
+              CacheKindNames[uint8_t(kind)],
+              size_t(dumpCode->instructionsSize()));
+    }
+#endif
+
     code = comp.compile();
     if (!code) {
       return false;
@@ -3833,7 +3861,9 @@ static void CallRegExpStub(MacroAssembler& masm, size_t jitZoneStubOffset,
   // pretenuring heuristics that affect behavior of the stub). This is uncommon
   // but can happen if we discarded all JIT code but had some active (Baseline)
   // scripts on the stack.
-  masm.movePtr(ImmPtr(masm.realm()->zone()->jitZone()), temp);
+  masm.loadJSContext(temp);
+  masm.loadPtr(Address(temp, JSContext::offsetOfZone()), temp);
+  masm.loadPtr(Address(temp, Zone::offsetOfJitZone()), temp);
   masm.loadPtr(Address(temp, jitZoneStubOffset), temp);
   masm.branchTestPtr(Assembler::Zero, temp, temp, vmCall);
   masm.call(Address(temp, JitCode::offsetOfCode()));

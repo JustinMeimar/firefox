@@ -234,6 +234,31 @@ class JitRuntime {
 
 #ifdef ENABLE_JS_AOT
   AOTIndirectionTable aotIndirectionTable_;
+
+ public:
+  // A per-target shim that seeds the courier register with
+  // &aotIndirectionTable before jumping to the AOT target. Kept
+  // alive by the GC via traceAOTPreambleTrampolines.
+  struct AOTPreambleTrampolineEntry {
+    uint8_t* aotCode;
+    JitCode* trampoline;
+  };
+  Vector<AOTPreambleTrampolineEntry, 0, SystemAllocPolicy>
+      aotPreambleTrampolines_;
+
+  uint8_t* lookupAOTPreambleTrampoline(uint8_t* codeRaw) const {
+    for (const auto& e : aotPreambleTrampolines_) {
+      if (e.aotCode == codeRaw) {
+        return e.trampoline->raw();
+      }
+    }
+    return nullptr;
+  }
+
+  void traceAOTPreambleTrampolines(JSTracer* trc);
+  void clearAOTPreambleTrampolines() { aotPreambleTrampolines_.clear(); }
+
+ private:
 #endif
 
   bool generateTrampolines(JSContext* cx);
@@ -319,6 +344,12 @@ class JitRuntime {
     return aotIndirectionTable_;
   }
   [[nodiscard]] bool populateAOTIndirectionTable(JSContext* cx);
+
+  // Emit a two-instruction shim that seeds passReg with
+  // &aotIndirectionTable_ and jumps to target. The returned JitCode is
+  // typically kept in aotPreambleTrampolines_ so the GC keeps it alive.
+  JitCode* generateAOTPreambleTrampoline(JSContext* cx, void* target,
+                                         Register passReg);
 #endif
 
   static void TraceAtomZoneRoots(JSTracer* trc);

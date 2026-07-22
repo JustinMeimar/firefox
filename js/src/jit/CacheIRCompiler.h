@@ -745,6 +745,12 @@ class MOZ_RAII CacheIRCompiler {
   const CacheIRWriter& writer_;
   StackMacroAssembler masm;
 
+ public:
+#ifdef ENABLE_JS_AOT
+  MacroAssembler& masmForAOT() { return masm; }
+#endif
+
+ protected:
   CacheRegisterAllocator allocator;
   Vector<FailurePath, 4, SystemAllocPolicy> failurePaths;
 

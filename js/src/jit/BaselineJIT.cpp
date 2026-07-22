@@ -410,6 +410,13 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   bool forceMainThread =
       compileDebugInstrumentation ||
       options.hasFlag(BaselineOption::ForceMainThreadCompilation);
+#ifdef ENABLE_JS_AOT
+  // Off-thread baseline compilation skips the two-pass capture wired
+  // into BaselineCompile, so pin capture runs to the main thread.
+  if (JitOptions.dumpAOTBaseline) {
+    forceMainThread = true;
+  }
+#endif
 
   JitContext jctx(cx);
 
@@ -450,6 +457,36 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
     ar.emplace(cx, nullptr);
   }
   StackMacroAssembler masm(cx, temp);
+
+#ifdef ENABLE_JS_AOT
+  // Two-pass under --aot-dump-baseline: run BaselineCompiler once on a
+  // throwaway masm wrapped in AutoAOTCodegen. The capture pass crashes
+  // at emit time on any ImmPtr not covered by an AOTSlot. Its bytes
+  // are discarded; the second pass emits the code actually installed.
+  if (JitOptions.dumpAOTBaseline) {
+    TempAllocator dumpTemp(&cx->tempLifoAlloc());
+    StackMacroAssembler dumpMasm(cx, dumpTemp);
+    if (cx->runtime()->geckoProfiler().enabled()) {
+      dumpMasm.enableProfilingInstrumentation();
+    }
+    AutoAOTCodegen aotScope(dumpMasm, cx);
+    BaselineCompiler dumpCompiler(dumpTemp, CompileRuntime::get(cx->runtime()),
+                                  dumpMasm, &snapshot);
+    if (!dumpCompiler.init()) {
+      ReportOutOfMemory(cx);
+      return Method_Error;
+    }
+    if (dumpCompiler.compileOffThread() != Method_Compiled) {
+      ReportOutOfMemory(cx);
+      return Method_Error;
+    }
+    JitSpew(JitSpew_BaselineAOT,
+            "baseline func AOT capture ok: %s:%u bytes=%zu",
+            script->filename() ? script->filename() : "<null>",
+            unsigned(script->lineno()),
+            size_t(dumpMasm.instructionsSize()));
+  }
+#endif
 
   BaselineCompiler compiler(temp, CompileRuntime::get(cx->runtime()), masm,
                             &snapshot);
