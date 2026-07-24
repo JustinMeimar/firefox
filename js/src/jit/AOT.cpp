@@ -26,7 +26,9 @@ const char* AOTSlotName(AOTSlot slot) {
 #define AOT_SLOT(name, ...) \
   case AOTSlot::name:       \
     return #name;
+#define AOT_ATOM_SLOT AOT_SLOT
 #include "jit/AOTSlots.tbl"
+#undef AOT_ATOM_SLOT
 #undef AOT_SLOT
     default:
       break;
@@ -52,6 +54,22 @@ mozilla::Maybe<AOTSlot> AOTIndirectionTable::findSlot(uintptr_t value) const {
       return mozilla::Some(AOTSlot(i));
     }
   }
+  return mozilla::Nothing();
+}
+
+mozilla::Maybe<AOTSlot> AOTIndirectionTable::findAtomSlot(
+    uintptr_t value) const {
+  if (value == 0) {
+    return mozilla::Nothing();
+  }
+#define AOT_SLOT(name, ...)
+#define AOT_ATOM_SLOT(name, ...)                  \
+  if (slots_[uint32_t(AOTSlot::name)] == value) { \
+    return mozilla::Some(AOTSlot::name);          \
+  }
+#include "jit/AOTSlots.tbl"
+#undef AOT_ATOM_SLOT
+#undef AOT_SLOT
   return mozilla::Nothing();
 }
 

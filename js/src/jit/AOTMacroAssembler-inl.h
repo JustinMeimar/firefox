@@ -61,12 +61,11 @@ inline void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 inline void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
 #ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
-    if (auto slot = aotTable().findSlot(uintptr_t(imm.value))) {
+    if (auto slot = aotTable().findAtomSlot(uintptr_t(imm.value))) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
-    // GC pointers with no matching slot (for example script-specific
-    // atoms) fall through to a normal relocatable move.
+    // Other GC pointers retain their normal relocation behavior.
   }
 #endif
   MacroAssemblerSpecific::movePtr(imm, dest);

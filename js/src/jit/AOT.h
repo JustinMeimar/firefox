@@ -52,7 +52,9 @@ static constexpr uint32_t AOTMaxABIFunctions = 256;
 
 enum class AOTSlot : uint32_t {
 #define AOT_SLOT(name, ...) name,
+#define AOT_ATOM_SLOT AOT_SLOT
 #include "jit/AOTSlots.tbl"
+#undef AOT_ATOM_SLOT
 #undef AOT_SLOT
   NamedSlot_End,
   VMWrapper_Begin = NamedSlot_End,
@@ -93,6 +95,7 @@ class AOTIndirectionTable {
   }
 
   mozilla::Maybe<AOTSlot> findSlot(uintptr_t value) const;
+  mozilla::Maybe<AOTSlot> findAtomSlot(uintptr_t value) const;
   AOTSlot findSlotOrCrash(uintptr_t value) const;
   void dump() const;
 

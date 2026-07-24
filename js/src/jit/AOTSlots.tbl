@@ -38,15 +38,15 @@ AOT_SLOT(PreBarrier_Object,      preBarrier(MIRType::Object).value)
 AOT_SLOT(PreBarrier_Shape,       preBarrier(MIRType::Shape).value)
 AOT_SLOT(PreBarrier_WasmAnyRef,  preBarrier(MIRType::WasmAnyRef).value)
 
-// --- Atoms ---
+// --- AtomsZone pointers used by ImmGCPtr codegen ---
 
-AOT_SLOT(AtomEmpty,              static_cast<JSString*>(cx->names().empty_))
-AOT_SLOT(AtomTrue,               static_cast<JSString*>(cx->names().true_))
-AOT_SLOT(AtomFalse,              static_cast<JSString*>(cx->names().false_))
-AOT_SLOT(AtomFunction,           static_cast<JSString*>(cx->names().function))
-AOT_SLOT(AtomUndefined,          static_cast<JSString*>(cx->names().undefined))
-AOT_SLOT(AtomNull,               static_cast<JSString*>(cx->names().null))
-AOT_SLOT(AtomObject,             static_cast<JSString*>(cx->names().object))
+AOT_ATOM_SLOT(AtomEmpty,              static_cast<JSString*>(cx->names().empty_))
+AOT_ATOM_SLOT(AtomTrue,               static_cast<JSString*>(cx->names().true_))
+AOT_ATOM_SLOT(AtomFalse,              static_cast<JSString*>(cx->names().false_))
+AOT_ATOM_SLOT(AtomFunction,           static_cast<JSString*>(cx->names().function))
+AOT_ATOM_SLOT(AtomUndefined,          static_cast<JSString*>(cx->names().undefined))
+AOT_ATOM_SLOT(AtomNull,               static_cast<JSString*>(cx->names().null))
+AOT_ATOM_SLOT(AtomObject,             static_cast<JSString*>(cx->names().object))
 
 // --- JSClass pointers ---
 
