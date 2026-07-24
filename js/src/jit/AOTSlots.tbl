@@ -22,8 +22,7 @@ AOT_SLOT(StringToAtomCache,      &rt->caches().stringToAtomCache)
 AOT_SLOT(ExceptionTail,          getExceptionTail().value)
 AOT_SLOT(DebugTrapInterpreter,   debugTrapHandler(DebugTrapHandlerKind::Interpreter)->raw())
 AOT_SLOT(DebugTrapCompiler,      debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw())
-// InterpretOp is set after GenerateBaselineInterpreter (see JitRuntime::initialize).
-AOT_SLOT(InterpretOp,            nullptr)
+AOT_SLOT(InterpretOp,            baselineInterpreter_.interpretOpAddr().value)
 AOT_SLOT(NurseryPosition,        rt->gc.addressOfNurseryPosition())
 AOT_SLOT(NurseryAllocatedSites,  rt->gc.addressOfNurseryAllocatedSites())
 AOT_SLOT(JitStackLimit,          cx->addressOfJitStackLimit())
@@ -114,4 +113,3 @@ AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float64,       &TypedArrayObject::resiz
 AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Uint8Clamped,  &TypedArrayObject::resizableClasses[Scalar::Uint8Clamped])
 AOT_SLOT(Ptr_TypedArrayClasses_Resizable_BigInt64,      &TypedArrayObject::resizableClasses[Scalar::BigInt64])
 AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float16,       &TypedArrayObject::resizableClasses[Scalar::Float16])
-

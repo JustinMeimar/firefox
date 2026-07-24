@@ -273,15 +273,6 @@ bool JitRuntime::initialize(JSContext* cx) {
     return false;
   }
 
-#ifdef ENABLE_JS_AOT
-  if (!populateAOTIndirectionTable(cx)) {
-    return false;
-  }
-  if (JitOptions.aotRecordDir && !ensureAOTRecorder(cx)) {
-    return false;
-  }
-#endif
-
   if (!generateBaselineICFallbackCode(cx)) {
     return false;
   }
@@ -308,12 +299,19 @@ bool JitRuntime::initialize(JSContext* cx) {
       interpreterStub().value;
 
 #ifdef ENABLE_JS_AOT
-  // InterpretOp's address only becomes valid after GenerateBaselineInterpreter
-  // runs above; the .tbl carries a nullptr placeholder patched here.
-  if (IsBaselineInterpreterEnabled()) {
-    aotIndirectionTable_.set(
-        AOTSlot::InterpretOp,
-        uintptr_t(baselineInterpreter_.interpretOpAddr().value));
+  const bool aotActive = JitOptions.useAOTImage || JitOptions.aotRecordDir ||
+                         JitOptions.dumpAOTBlinterp ||
+                         JitOptions.dumpAOTBaseline;
+  if (aotActive && IsBaselineInterpreterEnabled()) {
+    if (JitOptions.aotRecordDir && !ensureAOTRecorder(cx)) {
+      return false;
+    }
+    if (!populateAOTIndirectionTable(cx)) {
+      return false;
+    }
+    if (!CaptureAOTBaselineInterpreter(cx, baselineInterpreter_)) {
+      return false;
+    }
   }
 #endif
 
