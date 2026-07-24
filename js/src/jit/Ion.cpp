@@ -299,10 +299,8 @@ bool JitRuntime::initialize(JSContext* cx) {
       interpreterStub().value;
 
 #ifdef ENABLE_JS_AOT
-  const bool aotActive = JitOptions.useAOTImage || JitOptions.aotRecordDir ||
-                         JitOptions.dumpAOTBlinterp ||
-                         JitOptions.dumpAOTBaseline;
-  if (aotActive && IsBaselineInterpreterEnabled()) {
+  if (JitOptions.isAOTLoadOrCaptureEnabled() &&
+      IsBaselineInterpreterEnabled()) {
     if (JitOptions.aotRecordDir && !ensureAOTRecorder(cx)) {
       return false;
     }

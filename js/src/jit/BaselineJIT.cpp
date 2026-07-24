@@ -415,7 +415,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
 #ifdef ENABLE_JS_AOT
   // Off-thread baseline compilation skips the two-pass capture wired
   // into BaselineCompile, so pin capture runs to the main thread.
-  if (JitOptions.dumpAOTBaseline) {
+  if (JitOptions.shouldCaptureAOTBaseline()) {
     forceMainThread = true;
   }
 #endif
@@ -467,7 +467,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   // ImmPtr not covered by an AOTSlot. Under --aot-record the AOT
   // bytes are handed to the recorder; the second pass emits the code
   // actually installed for this runtime.
-  if (JitOptions.dumpAOTBaseline || JitOptions.aotRecordDir) {
+  if (JitOptions.shouldCaptureAOTBaseline()) {
     TempAllocator dumpTemp(&cx->tempLifoAlloc());
     StackMacroAssembler dumpMasm(cx, dumpTemp);
     if (cx->runtime()->geckoProfiler().enabled()) {
@@ -1465,7 +1465,7 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
 bool jit::CaptureAOTBaselineInterpreter(
     JSContext* cx, const BaselineInterpreter& interpreter) {
   if (!IsBaselineInterpreterEnabled() || interpreter.code()->isStaticCode() ||
-      (!JitOptions.dumpAOTBlinterp && !JitOptions.aotRecordDir)) {
+      !JitOptions.shouldCaptureAOTInterpreter()) {
     return true;
   }
 

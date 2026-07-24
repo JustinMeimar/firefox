@@ -2061,7 +2061,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     // compile inside AutoAOTCodegen validates every ImmPtr against an
     // AOTSlot. Under --aot-record the AOT bytes are handed to the
     // recorder; otherwise they are discarded.
-    if (JitOptions.dumpAOTBaseline || JitOptions.aotRecordDir) {
+    if (JitOptions.shouldCaptureAOTBaseline()) {
       TempAllocator dumpTemp(&cx->tempLifoAlloc());
       BaselineCacheIRCompiler dumpComp(cx, dumpTemp, writer, StubDataOffset);
       if (!dumpComp.init(kind)) {

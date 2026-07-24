@@ -140,8 +140,8 @@ struct DefaultJitOptions {
 
   // If non-null, the AOT capture pass hands its bytes plus metadata to
   // AOTArtifactRecorder, which writes one .aotb file per artifact
-  // under this directory. Setting this flag also implies
-  // dumpAOTBlinterp and dumpAOTBaseline.
+  // under this directory. This also enables baseline interpreter,
+  // baseline function, and IC stub capture.
   const char* aotRecordDir;
 
   // Attempt to load AOT artifacts from the embedded AOTImage.bin at
@@ -153,6 +153,17 @@ struct DefaultJitOptions {
   // With useAOTImage on, crash on any AOT lookup miss instead of
   // falling back. Keeps CI from silently drifting off the AOT path.
   bool aotEnforce;
+
+  bool shouldCaptureAOTInterpreter() const {
+    return dumpAOTBlinterp || aotRecordDir;
+  }
+  bool shouldCaptureAOTBaseline() const {
+    return dumpAOTBaseline || aotRecordDir;
+  }
+  bool isAOTLoadOrCaptureEnabled() const {
+    return useAOTImage || shouldCaptureAOTInterpreter() ||
+           shouldCaptureAOTBaseline();
+  }
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to
