@@ -17,7 +17,7 @@ import sys
 
 # Wire constants (mirror image::* in js/src/jit/AOTImage.h).
 IMAGE_MAGIC = 0x49544F41  # "AOTI"
-IMAGE_VERSION = 2
+IMAGE_VERSION = 3
 FINGERPRINT_SIZE = 20
 ALIGNMENT = 16
 TEXT_ALIGNMENT = 4096
@@ -96,12 +96,8 @@ def pack(record_dir, schema_path, out_path):
     blobs = [Blob(p) for p in paths]
 
     fingerprint_offset = HEADER_SIZE
-    directory_offset = align_up(
-        fingerprint_offset + FINGERPRINT_SIZE, ALIGNMENT
-    )
-    data_start = align_up(
-        directory_offset + DIR_ENTRY_SIZE * len(blobs), ALIGNMENT
-    )
+    directory_offset = align_up(fingerprint_offset + FINGERPRINT_SIZE, ALIGNMENT)
+    data_start = align_up(directory_offset + DIR_ENTRY_SIZE * len(blobs), ALIGNMENT)
 
     entries = []
     cursor = data_start
@@ -165,9 +161,7 @@ def pack(record_dir, schema_path, out_path):
         b = blobs[i]
         p = e["dataOffset"]
         buf[p : p + e["fieldsSize"]] = b.fields
-        buf[p + e["fieldsSize"] : p + e["fieldsSize"] + e["arraysSize"]] = (
-            b.arrays
-        )
+        buf[p + e["fieldsSize"] : p + e["fieldsSize"] + e["arraysSize"]] = b.arrays
         t = text_offset + e["textOffset"]
         buf[t : t + e["textSize"]] = b.code
 

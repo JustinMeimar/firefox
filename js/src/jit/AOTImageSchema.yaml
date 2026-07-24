@@ -132,3 +132,21 @@ blobs:
          count_from: cacheIRCodeLength, cpp_member: cacheIRCode}
       - {name: fieldTypes,  element: "uint8_t",
          count_from: fieldTypesLength,  cpp_member: fieldTypes}
+
+  Configuration:
+    kind_id: 3
+    doc: "Code-generation options shared by all blobs in the image."
+    metadata_type: "js::jit::AOTConfigurationMetadata"
+    fields:
+      - {name: disableInlining, type: u8, cpp_member: disableInlining}
+      - {name: spectreObjectMitigations, type: u8,
+         cpp_member: spectreObjectMitigations}
+      - {name: spectreStringMitigations, type: u8,
+         cpp_member: spectreStringMitigations}
+      - {name: baselineBatching, type: u8, cpp_member: baselineBatching}
+      - {name: baselineJitWarmUpThreshold, type: u32,
+         cpp_member: baselineJitWarmUpThreshold}
+      - {name: baselineQueueCapacity, type: u32,
+         cpp_member: baselineQueueCapacity}
+      - {name: trialInliningWarmUpThreshold, type: u32,
+         cpp_member: trialInliningWarmUpThreshold}

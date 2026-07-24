@@ -69,7 +69,12 @@ bool AOTArtifactRecorder::init(JSContext* cx, const char* dir) {
             directory_.c_str(), strerror(errno));
     return false;
   }
-  return true;
+  AOTBlobWriter blob(AOTBlobKind::Configuration, /* probeHash = */ 0,
+                     /* identityHash = */ nullptr);
+  if (!EncodeBlob_Configuration(blob, CurrentAOTConfiguration())) {
+    return false;
+  }
+  return writeBlobFile(cx, directory_ + "/configuration.aotb", blob);
 }
 
 bool AOTArtifactRecorder::wasSeen(const uint8_t identityHash[20]) {
@@ -91,8 +96,8 @@ bool AOTArtifactRecorder::writeBlobFile(JSContext* cx, const std::string& path,
     if (errno == EEXIST) {
       return true;
     }
-    JitSpew(JitSpew_BaselineAOT, "AOT record open failed: %s: %s",
-            path.c_str(), strerror(errno));
+    JitSpew(JitSpew_BaselineAOT, "AOT record open failed: %s: %s", path.c_str(),
+            strerror(errno));
     return false;
   }
   auto closeGuard = mozilla::MakeScopeExit([&] { close(fd); });
@@ -155,8 +160,9 @@ bool AOTArtifactRecorder::recordBaselineFunction(
   return writeBlobFile(cx, path, blob);
 }
 
-bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(
-    JSContext* cx, uint32_t* compiledOut, uint32_t* skippedOut) {
+bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
+                                                         uint32_t* compiledOut,
+                                                         uint32_t* skippedOut) {
   *compiledOut = 0;
   *skippedOut = 0;
 
@@ -233,8 +239,7 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(
     (*compiledOut)++;
   }
 
-  JitSpew(JitSpew_BaselineAOT,
-          "AOT self-hosted corpus: recorded=%u skipped=%u",
+  JitSpew(JitSpew_BaselineAOT, "AOT self-hosted corpus: recorded=%u skipped=%u",
           *compiledOut, *skippedOut);
   return true;
 }

@@ -15,21 +15,50 @@
 #  include "jit/AOT.h"
 #  include "jit/AOTImage.h"
 #  include "jit/AOTImageGenerated.h"
+#  include "jit/AutoWritableJitCode.h"
+#  include "jit/BaselineCodeGen.h"
 #  include "jit/BaselineIC.h"
 #  include "jit/BaselineJIT.h"
 #  include "jit/CacheIRCompiler.h"
 #  include "jit/JitCode.h"
+#  include "jit/JitcodeMap.h"
 #  include "jit/JitOptions.h"
 #  include "jit/JitRuntime.h"
 #  include "jit/JitScript.h"
 #  include "jit/JitSpewer.h"
 #  include "jit/JitZone.h"
+#  include "vm/CodeCoverage.h"
+#  include "vm/GeckoProfiler.h"
 #  include "vm/JSContext.h"
 #  include "vm/JSScript.h"
 #  include "vm/Scope.h"
 #  include "vm/SharedStencil.h"
 
+#  include "jit/JitScript-inl.h"
+#  include "vm/JSScript-inl.h"
+
 namespace js::jit {
+
+static bool IsAOTImageCompatible(const AOTImage* image) {
+  auto readerOpt = image->findUnique(AOTBlobKind::Configuration);
+  if (readerOpt.isNothing()) {
+    JitSpew(JitSpew_BaselineAOT, "AOT image lacks configuration metadata");
+    return false;
+  }
+
+  AOTBlobReader reader = readerOpt.ref();
+  AOTConfigurationMetadata recorded;
+  if (!DecodeBlob_Configuration(reader, &recorded)) {
+    JitSpew(JitSpew_BaselineAOT, "AOT image configuration decode failed");
+    return false;
+  }
+  if (recorded != CurrentAOTConfiguration()) {
+    JitSpew(JitSpew_BaselineAOT,
+            "AOT image configuration mismatch; using runtime codegen");
+    return false;
+  }
+  return true;
+}
 
 // -----------------------------------------------------------------
 // Identity
@@ -42,17 +71,13 @@ uint32_t ComputeBaselineProbeHash(JSScript* script) {
 void ComputeBaselineIdentityHash(JSScript* script,
                                  mozilla::SHA1Sum::Hash& out) {
   mozilla::SHA1Sum sha;
-  auto u = [&](const void* p, size_t n) {
-    sha.update(p, uint32_t(n));
-  };
+  auto u = [&](const void* p, size_t n) { sha.update(p, uint32_t(n)); };
 
   uint32_t immFlags = script->immutableFlags().toRaw();
-  uint32_t funFlags = script->function()
-                          ? uint32_t(script->function()->flags().toRaw())
-                          : 0u;
-  uint16_t nargs = script->function()
-                       ? uint16_t(script->function()->nargs())
-                       : uint16_t(0);
+  uint32_t funFlags =
+      script->function() ? uint32_t(script->function()->flags().toRaw()) : 0u;
+  uint16_t nargs =
+      script->function() ? uint16_t(script->function()->nargs()) : uint16_t(0);
   uint16_t nfixed = uint16_t(script->nfixed());
   uint32_t nslots = uint32_t(script->nslots());
   uint32_t numICEntries = uint32_t(script->numICEntries());
@@ -99,22 +124,20 @@ bool TryInstallAOTBaselineInterpreter(JSContext* cx,
   }
 
   const AOTImage* image = AOTImage::embedded();
-  if (!image) {
+  if (!image || !IsAOTImageCompatible(image)) {
     return false;
   }
 
   auto readerOpt = image->findUnique(AOTBlobKind::BaselineInterpreter);
   if (readerOpt.isNothing()) {
-    JitSpew(JitSpew_BaselineAOT,
-            "AOT image lacks a baseline interpreter blob");
+    JitSpew(JitSpew_BaselineAOT, "AOT image lacks a baseline interpreter blob");
     return false;
   }
 
   AOTBlobReader reader = readerOpt.ref();
   BaselineInterpreterMetadata md;
   if (!DecodeBlob_BaselineInterpreter(reader, &md)) {
-    JitSpew(JitSpew_BaselineAOT,
-            "AOT baseline interpreter decode failed");
+    JitSpew(JitSpew_BaselineAOT, "AOT baseline interpreter decode failed");
     return false;
   }
 
@@ -131,6 +154,31 @@ bool TryInstallAOTBaselineInterpreter(JSContext* cx,
   }
 
   interp.init(jitCode, std::move(md));
+
+  // Register the AOT interpreter .text range with the profiler and
+  // enable instrumentation channels that are otherwise wired up during
+  // GenerateBaselineInterpreter after normal codegen.
+  {
+    auto profEntry = MakeJitcodeGlobalEntry<BaselineInterpreterEntry>(
+        cx, jitCode, jitCode->raw(), jitCode->rawEnd());
+    if (!profEntry) {
+      return false;
+    }
+    JitcodeGlobalTable* globalTable =
+        cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+    if (!globalTable->addEntry(std::move(profEntry))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+    jitCode->setHasBytecodeMap();
+  }
+
+  if (cx->runtime()->geckoProfiler().enabled()) {
+    interp.toggleProfilerInstrumentation(true);
+  }
+  if (coverage::IsLCovEnabled()) {
+    interp.toggleCodeCoverageInstrumentationUnchecked(true);
+  }
 
   JitSpew(JitSpew_BaselineAOT,
           "installed baseline interpreter from AOT image: bytes=%zu",
@@ -151,7 +199,7 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   }
 
   const AOTImage* image = AOTImage::embedded();
-  if (!image) {
+  if (!image || !IsAOTImageCompatible(image)) {
     return false;
   }
 
@@ -159,9 +207,20 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   mozilla::SHA1Sum::Hash liveHash;
   ComputeBaselineIdentityHash(script, liveHash);
 
-  auto readerOpt = image->findByIdentity(AOTBlobKind::BaselineFunction, probe,
-                                         liveHash);
+  auto readerOpt =
+      image->findByIdentity(AOTBlobKind::BaselineFunction, probe, liveHash);
   if (readerOpt.isNothing()) {
+    return false;
+  }
+
+  // CanEnterBaselineJIT reaches us before the normal BaselineCompile /
+  // PrepareToCompile path runs, so the JitScript and its cached baseline
+  // data may not exist yet. Set them up here before touching jitScript().
+  AutoKeepJitScripts keepJitScript(cx);
+  if (!script->ensureHasJitScript(cx, keepJitScript)) {
+    return false;
+  }
+  if (!script->jitScript()->ensureHasCachedBaselineJitData(cx, script)) {
     return false;
   }
 
@@ -177,8 +236,8 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
 
   auto code = reader.code();
   uint8_t* codeStart = const_cast<uint8_t*>(code.data());
-  JitCode* jitCode = AllocateAOTCode(cx, codeStart, uint32_t(code.size()),
-                                     CodeKind::Baseline);
+  JitCode* jitCode =
+      AllocateAOTCode(cx, codeStart, uint32_t(code.size()), CodeKind::Baseline);
   if (!jitCode) {
     return false;
   }
@@ -218,6 +277,37 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
 
   script->jitScript()->setBaselineScript(script, bs);
 
+  FinalizeInstalledBaselineScript(script);
+
+  // Register the AOT baseline .text range with the profiler so stack
+  // walks can map return addresses back to a script. Without this,
+  // profiler frame classification fails for anything running in
+  // AOT-installed baseline code.
+  JitcodeGlobalTable* globalTable =
+      cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
+  if (!globalTable->lookup(jitCode->raw())) {
+    UniqueChars str = GeckoProfilerRuntime::allocProfileString(cx, script);
+    if (!str) {
+      return false;
+    }
+    auto profEntry = MakeJitcodeGlobalEntry<RealmIndependentSharedEntry>(
+        cx, jitCode, jitCode->raw(), jitCode->rawEnd(), std::move(str));
+    if (!profEntry) {
+      return false;
+    }
+    if (!globalTable->addEntry(std::move(profEntry))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+    jitCode->setHasBytecodeMap();
+  }
+
+  if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(
+          cx->runtime())) {
+    AutoWritableJitCode awjc(bs->method());
+    bs->toggleProfilerInstrumentation(true);
+  }
+
   JitSpew(JitSpew_BaselineAOT,
           "installed baseline function from AOT image: %s:%u bytes=%zu",
           script->filename() ? script->filename() : "<null>",
@@ -235,7 +325,7 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
   }
 
   const AOTImage* image = AOTImage::embedded();
-  if (!image) {
+  if (!image || !IsAOTImageCompatible(image)) {
     return false;
   }
 
@@ -250,16 +340,21 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
 
     AOTICStubMetadata md;
     if (!DecodeBlob_InlineCacheStub(reader, &md)) {
+      if (cx->isExceptionPending()) {
+        return false;
+      }
       JitSpew(JitSpew_BaselineAOT, "AOT IC stub decode failed at index %u", i);
       continue;
     }
 
     CacheIRStubInfo* stubInfo = CacheIRStubInfo::NewFromSerialized(
-        CacheKind(md.cacheKind), ICStubEngine::Baseline,
-        md.makesGCCalls != 0, md.stubDataOffset,
-        md.cacheIRCode.begin(), md.cacheIRCode.length(),
+        CacheKind(md.cacheKind), ICStubEngine::Baseline, md.makesGCCalls != 0,
+        md.stubDataOffset, md.cacheIRCode.begin(), md.cacheIRCode.length(),
         md.fieldTypes.begin(), md.fieldTypes.length());
     if (!stubInfo) {
+      if (cx->isExceptionPending()) {
+        return false;
+      }
       continue;
     }
 
@@ -275,13 +370,12 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
     }
 
     auto codeSpan = reader.code();
-    JitCode* jitCode = AllocateAOTCode(cx,
-                                       const_cast<uint8_t*>(codeSpan.data()),
-                                       uint32_t(codeSpan.size()),
-                                       CodeKind::Baseline);
+    JitCode* jitCode =
+        AllocateAOTCode(cx, const_cast<uint8_t*>(codeSpan.data()),
+                        uint32_t(codeSpan.size()), CodeKind::Baseline);
     if (!jitCode) {
       js_free(stubInfo);
-      continue;
+      return false;
     }
     jitCode->setLocalTracingSlots(md.localTracingSlots);
 
@@ -289,14 +383,17 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, jitCode)) {
       // putBaselineCacheIRStubCode takes ownership on success only;
       // on failure the key's UniquePtr will drop stubInfo.
+      if (cx->isExceptionPending()) {
+        return false;
+      }
       continue;
     }
     loaded++;
   }
 
   if (attempted > 0) {
-    JitSpew(JitSpew_BaselineAOT,
-            "AOT IC stubs loaded=%u attempted=%u", loaded, attempted);
+    JitSpew(JitSpew_BaselineAOT, "AOT IC stubs loaded=%u attempted=%u", loaded,
+            attempted);
   }
   return loaded > 0;
 }

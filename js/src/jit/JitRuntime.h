@@ -30,6 +30,7 @@
 #include "jit/shared/Assembler-shared.h"
 #include "jit/TrampolineNatives.h"
 #include "js/AllocPolicy.h"
+#include "js/HashTable.h"
 #include "js/ProfilingFrameIterator.h"
 #include "js/TypeDecls.h"
 #include "js/UniquePtr.h"
@@ -260,6 +261,13 @@ class JitRuntime {
 
   void traceAOTPreambleTrampolines(JSTracer* trc);
   void clearAOTPreambleTrampolines() { aotPreambleTrampolines_.clear(); }
+
+  // Sibling BaselineScripts sharing the same static AOT .text region
+  // each have their own profilerInstrumented_ flag, but the underlying
+  // toggled bytes are shared. ToggleProfilerInstrumentation consults
+  // this set so a second install does not re-flip the shared bytes.
+  HashSet<uint8_t*, mozilla::DefaultHasher<uint8_t*>, SystemAllocPolicy>
+      staticCodeProfilerOn_;
 
   AOTArtifactRecorder* aotRecorder() const { return aotRecorder_.get(); }
   [[nodiscard]] bool ensureAOTRecorder(JSContext* cx);

@@ -77,6 +77,7 @@ enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
   BaselineFunction = 1,
   InlineCacheStub = 2,
+  Configuration = 3,
 };
 
 namespace image {
@@ -85,7 +86,7 @@ namespace image {
 inline constexpr uint32_t Magic = 0x49544F41;
 
 // Bump on any layout / schema / fingerprint-input change.
-inline constexpr uint16_t Version = 2;
+inline constexpr uint16_t Version = 3;
 
 // SHA-1 of engine-relevant inputs (AOTSlots order, VMFunctionId order,
 // ABIFUNCTION_LIST order, JSOp numbering, ISA baseline, engine version).
@@ -172,8 +173,7 @@ class AOTBlobReader {
       return {};
     }
     MOZ_ASSERT(arraysCursor_ + count * sizeof(T) <= arraysEnd_);
-    auto span =
-        mozilla::Span(reinterpret_cast<const T*>(arraysCursor_), count);
+    auto span = mozilla::Span(reinterpret_cast<const T*>(arraysCursor_), count);
     arraysCursor_ += count * sizeof(T);
     return span;
   }
@@ -282,9 +282,8 @@ class AOTImage {
 
   // Finds a blob by kind + identity hash. `probeHash` is a fast reject
   // check derived from identity; pass 0 to match all.
-  mozilla::Maybe<AOTBlobReader> findByIdentity(AOTBlobKind kind,
-                                               uint32_t probeHash,
-                                               const uint8_t* identityHash) const;
+  mozilla::Maybe<AOTBlobReader> findByIdentity(
+      AOTBlobKind kind, uint32_t probeHash, const uint8_t* identityHash) const;
 
  private:
   explicit AOTImage(mozilla::Span<const uint8_t> bytes)
@@ -331,8 +330,7 @@ class AOTImageBuilder {
 
   // Emits the finalized image to `out`. `fingerprint` must be
   // image::FingerprintSize bytes.
-  [[nodiscard]] bool finalize(std::ostream& out,
-                              const uint8_t* fingerprint);
+  [[nodiscard]] bool finalize(std::ostream& out, const uint8_t* fingerprint);
 
   // As above, but collects into a byte vector. Used by the jsapi-test.
   [[nodiscard]] bool finalize(Vector<uint8_t, 0, SystemAllocPolicy>& out,
@@ -364,6 +362,20 @@ struct AOTICStubMetadata {
   Vector<uint8_t, 0, SystemAllocPolicy> cacheIRCode;
   Vector<uint8_t, 0, SystemAllocPolicy> fieldTypes;
 };
+
+struct AOTConfigurationMetadata {
+  uint8_t disableInlining = 0;
+  uint8_t spectreObjectMitigations = 0;
+  uint8_t spectreStringMitigations = 0;
+  uint8_t baselineBatching = 0;
+  uint32_t baselineJitWarmUpThreshold = 0;
+  uint32_t baselineQueueCapacity = 0;
+  uint32_t trialInliningWarmUpThreshold = 0;
+
+  bool operator==(const AOTConfigurationMetadata& other) const = default;
+};
+
+AOTConfigurationMetadata CurrentAOTConfiguration();
 
 }  // namespace js::jit
 

@@ -487,10 +487,8 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
     JitSpew(JitSpew_BaselineAOT,
             "baseline func AOT capture ok: %s:%u bytes=%zu",
             script->filename() ? script->filename() : "<null>",
-            unsigned(script->lineno()),
-            size_t(dumpMasm.instructionsSize()));
-    if (AOTArtifactRecorder* rec =
-            cx->runtime()->jitRuntime()->aotRecorder()) {
+            unsigned(script->lineno()), size_t(dumpMasm.instructionsSize()));
+    if (AOTArtifactRecorder* rec = cx->runtime()->jitRuntime()->aotRecorder()) {
       Linker linker(dumpMasm);
       JitCode* dumpCode = linker.newCode(cx, CodeKind::Baseline);
       if (!dumpCode) {
@@ -611,6 +609,9 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   if (JitOptions.useAOTImage && !script->isDebuggee()) {
     if (TryInstallAOTBaselineScript(cx, script)) {
       return Method_Compiled;
+    }
+    if (cx->isExceptionPending()) {
+      return Method_Error;
     }
     if (JitOptions.aotEnforce) {
       MOZ_CRASH("AOT baseline function miss under --aot-enforce");
@@ -1265,6 +1266,31 @@ static void ToggleProfilerInstrumentation(JitCode* code,
                                        CodeOffset(profilerExitToggleOffset));
 
   code->setProfilerInstrumented(enable);
+
+#ifdef ENABLE_JS_AOT
+  // Multiple BaselineScripts can share the same static AOT text region;
+  // each has its own profilerInstrumented_ flag but the underlying
+  // toggled bytes are shared. Keep the process-wide state in a set on
+  // JitRuntime so a second sibling BaselineScript does not re-toggle
+  // bytes that were already flipped.
+  if (code->isStaticCode()) {
+    auto& set =
+        code->runtimeFromMainThread()->jitRuntime()->staticCodeProfilerOn_;
+    bool currentlyOn = set.has(code->raw());
+    if (currentlyOn == enable) {
+      return;
+    }
+    if (enable) {
+      AutoEnterOOMUnsafeRegion oomUnsafe;
+      if (!set.put(code->raw())) {
+        oomUnsafe.crash("staticCodeProfilerOn_ OOM");
+      }
+    } else {
+      set.remove(code->raw());
+    }
+  }
+#endif
+
   if (enable) {
     Assembler::ToggleToCmp(enterToggleLocation);
     Assembler::ToggleToCmp(exitToggleLocation);
@@ -1421,6 +1447,9 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     if (TryInstallAOTBaselineInterpreter(cx, interpreter)) {
       return true;
     }
+    if (cx->isExceptionPending()) {
+      return false;
+    }
 
     // Two-pass generation under --aot-dump-blinterp: an AOT-capture
     // pass runs first on a throwaway masm, then the normal pass emits
@@ -1437,8 +1466,8 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     // Flag is cleared with a scope guard so a reentrant capture is
     // impossible.
     if (JitOptions.dumpAOTBlinterp || JitOptions.aotRecordDir) {
-      auto clearDumpFlag = mozilla::MakeScopeExit(
-          [] { JitOptions.dumpAOTBlinterp = false; });
+      auto clearDumpFlag =
+          mozilla::MakeScopeExit([] { JitOptions.dumpAOTBlinterp = false; });
       TempAllocator dumpTemp(&cx->tempLifoAlloc());
       StackMacroAssembler dumpMasm(cx, dumpTemp);
       AutoAOTCodegen aot(dumpMasm, cx);

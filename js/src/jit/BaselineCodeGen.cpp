@@ -2098,7 +2098,10 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   // jump. Starts off initially disabled.
   Label noInstrument;
   CodeOffset toggleOffset = masm.toggledJump(&noInstrument);
-  masm.profilerExitFrame();
+  Register ptrReg = R1.scratchReg();
+  masm.movePtr(ImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value),
+               ptrReg);
+  masm.jump(ptrReg);
   masm.bind(&noInstrument);
 
   // Store the start offset in the appropriate location.
