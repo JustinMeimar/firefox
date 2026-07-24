@@ -684,10 +684,9 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   MOZ_ASSERT(totalSize < INT32_MAX, "Nursery allocation too large");
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
-  // We know statically whether nursery allocation is enabled for a particular
-  // kind because we discard JIT code when this changes. Under AOT fill zone
-  // is nullptr; skip the compile-time check and rely on the runtime
-  // nursery-end comparison below.
+  // Nursery allocation availability is normally fixed when code is generated.
+  // During AOT capture, rely on the runtime nursery boundary check because no
+  // active zone is available.
   if (zone && !IsNurseryAllocEnabled(zone, traceKind)) {
     jump(fail);
     return;
@@ -734,8 +733,8 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
       }
     } else {
 #ifdef ENABLE_JS_AOT
-      // AOT: compute the catch-all site + header word at runtime via the
-      // AOT zone indirection chain.
+      // Compute the default allocation site and header word from the runtime
+      // zone state.
       int32_t siteOffset = Zone::offsetOfUnknownAllocSite(traceKind);
       loadZoneForAOT(temp);
       computeEffectiveAddress(Address(temp, siteOffset), temp);
@@ -779,7 +778,8 @@ void MacroAssembler::updateAllocSite(Register temp, Register result,
   movePtr(ImmPtr(allocSitesAddr), temp);
   push(result);
   loadPtr(Address(temp, 0), result);
-  storePtr(result, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
+  storePtr(result,
+           Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
   storePtr(site, Address(temp, 0));
   pop(result);
 
@@ -2758,8 +2758,8 @@ void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset, size_t index,
   MOZ_ASSERT(handler.bound());
 #ifdef ENABLE_JS_AOT
   if (isAOT()) {
-    // AOT dispatch tables store int32 offsets relative to the table
-    // base; emitAOTDispatch adds the base back at run time.
+    // AOT dispatch tables store 32 bit offsets relative to the table base. Add
+    // the base at runtime to recover the target address.
     int32_t relOffset = int32_t(handler.offset()) - int32_t(tableOffset);
     writeInt32Data(relOffset);
     return;
@@ -4285,8 +4285,8 @@ void MacroAssembler::handleFailure() {
 void MacroAssembler::assertUnreachable(const char* output) {
 #ifdef JS_MASM_VERBOSE
 #  ifdef ENABLE_JS_AOT
-  // The debug print path calls into ABI code with an unslotted string
-  // pointer; skip it in AOT mode.
+  // Skip the debug print path during AOT capture because its string pointer has
+  // no indirection slot.
   if (!isAOT())
 #  endif
   {

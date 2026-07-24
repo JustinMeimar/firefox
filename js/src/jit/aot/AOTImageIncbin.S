@@ -3,11 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /*
- * Embeds the AOT image blob and exports its start/end symbols. The
- * bytes are either produced by `mach jit-aot build` in stage 2 or
- * fall back to the empty placeholder GenerateEmptyAOTImage.py drops
- * into the objdir. The runtime loader (js/src/jit/AOTImage.cpp) reads
- * this range via extern "C" declarations of the same symbols.
+ * Embeds the generated AOT image and exports symbols for its byte range. When
+ * no recorded image is available, the build embeds an empty valid image so
+ * runtime generation remains available.
  */
 
     .section .text.aot,"ax",@progbits

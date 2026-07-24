@@ -36,6 +36,13 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
              IsPortableBaselineInterpreterEnabled());
 #endif
 
+#ifdef ENABLE_JS_AOT
+  MOZ_ASSERT(!cx->runtime()->jitRuntime()->pointsIntoAOTInterpText(code),
+             "EnterJit target is inside the raw AOT interp .text; expected "
+             "the preamble trampoline. AOTInterpPassReg will be unseeded and "
+             "the frame's aotTableBase_ slot will hold garbage.");
+#endif
+
   AutoCheckRecursionLimit recursion(cx);
   if (!recursion.check(cx)) {
     return EnterJitStatus::Error;
@@ -150,6 +157,11 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
 // Call the per-script interpreter entry trampoline.
 bool js::jit::EnterInterpreterEntryTrampoline(uint8_t* code, JSContext* cx,
                                               RunState* state) {
+#ifdef ENABLE_JS_AOT
+  MOZ_ASSERT(
+      !cx->runtime()->jitRuntime()->pointsIntoAOTInterpText(code),
+      "Per-script interp entry trampoline resolved to raw AOT interp bytes");
+#endif
   using EnterTrampolineCodePtr = bool (*)(JSContext* cx, RunState*);
   auto funcPtr = JS_DATA_TO_FUNC_PTR(EnterTrampolineCodePtr, code);
   return CALL_GENERATED_2(funcPtr, cx, state);

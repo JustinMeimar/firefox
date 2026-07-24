@@ -4,43 +4,15 @@
 
 # [SMDOC] AOT Image Schema
 # ========================
-# Parsed by GenerateAOTImage.py at build time to produce
-# jit/AOTImageGenerated.h. Single source of truth for the on-disk
-# layout of every artifact stored inside an AOT image: the fixed-size
-# POD `fields`, variable-length element `arrays`, and the Encode/Decode
-# helpers that translate between a hand-written metadata class and the
-# wire representation.
+# This file defines the binary layout of each artifact in an AOT image. The
+# generator uses it to create matching metadata structures and serialization
+# helpers. Readers and writers share the same schema.
 #
-# The Python packer (jit/aot/PackAOTImage.py, patch 10+) imports this
-# same file, so C++ and Python cannot disagree on the wire format.
+# Fixed fields use unsigned integer or raw byte types. Arrays identify their
+# element type and the field containing their length. Metadata mappings describe
+# how serialized fields correspond to the hand written metadata representation.
 #
-# Field types
-# -----------
-#   u8, u16, u32   -> uint8_t, uint16_t, uint32_t
-#   raw            -> pass-through C++ type; requires `size:` bytes and
-#                     `cpp_type:` for the generated POD member.
-#
-# Array descriptor
-# ----------------
-#   name           name of the payload member on AOTView_<Kind>.
-#   element        C++ type of each element (trivially copyable).
-#   count_from     `fields` member that holds this array's length.
-#   cpp_member     optional. Used only when the blob declares
-#                  `metadata_type`; names the C++ member of that class
-#                  to walk when Encoding/Decoding.
-#
-# Fields with `cpp_member`
-# ------------------------
-# A `cpp_member` on a field maps the wire field to an accessor path on
-# the hand-written metadata class named by `metadata_type`. Dot-separated
-# for nested sub-structs. Suffix `.length` on an array-count field asks
-# the encoder to source the count from the C++ container's length()
-# rather than assuming it comes from a named scalar.
-#
-# Bump image::Version in AOTImage.h for any wire-format change: adding a
-# blob kind, adding / reordering / resizing a field, changing a field
-# type, adding an array, renaming its count_from. Skipping the bump
-# means a stale image fails the fieldsSize check at load time.
+# Increment the image format version whenever the schema changes.
 
 blobs:
   BaselineInterpreter:
@@ -132,3 +104,21 @@ blobs:
          count_from: cacheIRCodeLength, cpp_member: cacheIRCode}
       - {name: fieldTypes,  element: "uint8_t",
          count_from: fieldTypesLength,  cpp_member: fieldTypes}
+
+  Configuration:
+    kind_id: 3
+    doc: "Code-generation options shared by all blobs in the image."
+    metadata_type: "js::jit::AOTConfigurationMetadata"
+    fields:
+      - {name: disableInlining, type: u8, cpp_member: disableInlining}
+      - {name: spectreObjectMitigations, type: u8,
+         cpp_member: spectreObjectMitigations}
+      - {name: spectreStringMitigations, type: u8,
+         cpp_member: spectreStringMitigations}
+      - {name: baselineBatching, type: u8, cpp_member: baselineBatching}
+      - {name: baselineJitWarmUpThreshold, type: u32,
+         cpp_member: baselineJitWarmUpThreshold}
+      - {name: baselineQueueCapacity, type: u32,
+         cpp_member: baselineQueueCapacity}
+      - {name: trialInliningWarmUpThreshold, type: u32,
+         cpp_member: trialInliningWarmUpThreshold}

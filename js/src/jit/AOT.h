@@ -26,33 +26,23 @@ extern const double MathRandomScaleInv;
 
 // [SMDOC] AOT JIT Code
 //
-// When built with `ENABLE_JS_AOT`, SpiderMonkey emits relocatable JIT
-// code for the baseline interpreter, inline cache stubs, and self-hosted
-// builtins.
-//
-// To make emitted code position-independent w.r.t. runtime pointers,
-// every value an AOT masm scope would otherwise bake in as an ImmPtr is
-// enumerated in AOTSlot and resolved at run time by an indirect load
-// through the JSRuntime-owned AOTIndirectionTable.
-//
-// Table access, per call path:
-//   Baseline frame:      frame slot -> table base -> slot value
-//                        (BaselineFrame::reverseOffsetOfAOTTableBase())
-//   Baseline stub frame: frame slot -> table base -> slot value
-//                        (BaselineStubFrameLayout::AOTTableOffsetFromFP)
-// Both are two loads. Pinning the table base into a register (one load)
-// is future work.
+// SpiderMonkey can emit relocatable code for the baseline interpreter, inline
+// cache stubs, and self hosted functions. Runtime addresses are loaded through
+// an indirection table so generated code does not embed process specific
+// pointers. Baseline and stub frames each store the table address used by
+// generated code.
 
-// Extended-slot capacities. Each region is a fixed range in the AOTSlot
-// enum, populated at runtime from JitRuntime state; codegen looks them
-// up by index via the helpers below. Sizes are conservative caps and
-// verified by MOZ_ASSERT in populateAOTIndirectionTable.
+// Reserves fixed index ranges for groups of runtime supplied entries. The
+// limits are intentionally conservative and checked when the table is
+// populated.
 static constexpr uint32_t AOTMaxVMWrappers = 512;
 static constexpr uint32_t AOTMaxABIFunctions = 256;
 
 enum class AOTSlot : uint32_t {
 #define AOT_SLOT(name, ...) name,
+#define AOT_ATOM_SLOT AOT_SLOT
 #include "jit/AOTSlots.tbl"
+#undef AOT_ATOM_SLOT
 #undef AOT_SLOT
   NamedSlot_End,
   VMWrapper_Begin = NamedSlot_End,
@@ -93,6 +83,7 @@ class AOTIndirectionTable {
   }
 
   mozilla::Maybe<AOTSlot> findSlot(uintptr_t value) const;
+  mozilla::Maybe<AOTSlot> findAtomSlot(uintptr_t value) const;
   AOTSlot findSlotOrCrash(uintptr_t value) const;
   void dump() const;
 
@@ -103,11 +94,9 @@ class AOTIndirectionTable {
   uintptr_t slots_[uint32_t(AOTSlot::Count)] = {};
 };
 
-// Ensure a preamble trampoline exists for |code|. The trampoline seeds
-// |passReg| with the runtime's AOT indirection table base and jumps to
-// code->raw(). Callers must pass the register the emitted code reads
-// from: AOTFuncPassReg for baseline JIT functions, AOTInterpPassReg for
-// the baseline interpreter. Idempotent.
+// Creates a preamble for static code when needed. The preamble initializes the
+// runtime indirection table and enters the target using the register expected
+// by that entry path. Repeated requests return the existing preamble.
 [[nodiscard]] bool EnsureAOTPreambleTrampolineFor(JSContext* cx, JitCode* code,
                                                   Register passReg);
 

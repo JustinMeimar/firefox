@@ -1383,13 +1383,13 @@ class CacheIRStubInfo {
                               const CacheIRWriter& writer);
 
 #ifdef ENABLE_JS_AOT
-  // AOT loader entry: reconstruct a CacheIRStubInfo from its wire
-  // representation (CacheIR bytes + trailing StubField::Type table)
-  // without a live CacheIRWriter. Ownership transfers on success.
+  // Reconstructs inline cache metadata from serialized operations and field
+  // types without requiring the original writer. Ownership transfers on
+  // success.
   static CacheIRStubInfo* NewFromSerialized(
       CacheKind kind, ICStubEngine engine, bool makesGCCalls,
-      uint32_t stubDataOffset, const uint8_t* cacheIRBytes,
-      uint32_t codeLength, const uint8_t* fieldTypeBytes, uint32_t numFields);
+      uint32_t stubDataOffset, const uint8_t* cacheIRBytes, uint32_t codeLength,
+      const uint8_t* fieldTypeBytes, uint32_t numFields);
 #endif
 
   template <class Stub, StubField::Type type>

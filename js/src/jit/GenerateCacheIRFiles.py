@@ -624,5 +624,3 @@ def generate_cacheirops_header(c_out, yaml_path):
     contents += "\n\n"
 
     generate_header(c_out, "jit_CacheIROpsGenerated_h", contents)
-
-

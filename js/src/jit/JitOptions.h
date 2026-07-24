@@ -7,6 +7,8 @@
 
 #include "mozilla/Maybe.h"
 
+#include <string>
+
 #include "jit/IonTypes.h"
 #include "js/TypeDecls.h"
 
@@ -127,32 +129,38 @@ struct DefaultJitOptions {
   uint32_t wasmBatchBaselineThreshold;
   uint32_t wasmBatchIonThreshold;
 #ifdef ENABLE_JS_AOT
-  // Compile the baseline interpreter in AOT capture mode and log a
-  // summary line. Emitted code still runs in-process; nothing is saved
-  // to disk.
+  // Capture and validate the baseline interpreter, then log a summary without
+  // saving the emitted code.
   bool dumpAOTBlinterp;
 
-  // Compile every baseline JIT function and IC stub in AOT capture mode
-  // before the real emit. The capture pass validates that every ImmPtr
-  // maps to an AOTSlot; the captured bytes are discarded and the second
-  // pass emits the code actually installed. No disk output.
+  // Before generating runtime baseline code, run an AOT capture pass to
+  // validate that every pointer has an indirection slot. Discard the captured
+  // bytes.
   bool dumpAOTBaseline;
 
-  // If non-null, the AOT capture pass hands its bytes plus metadata to
-  // AOTArtifactRecorder, which writes one .aotb file per artifact
-  // under this directory. Setting this flag also implies
-  // dumpAOTBlinterp and dumpAOTBaseline.
-  const char* aotRecordDir;
+  // When a recording directory is configured, each capture writes one artifact
+  // file there. Recording also enables capture of the interpreter, baseline
+  // functions, and inline cache stubs.
+  std::string aotRecordDir;
 
-  // Attempt to load AOT artifacts from the embedded AOTImage.bin at
-  // startup. Falls back to runtime codegen on any load failure
-  // (missing image, wrong version, decoding error). Interpreter-only
-  // in patch 11; extended to baseline functions and IC stubs in 12.
+  // Load AOT artifacts from the embedded image at startup. If the image is
+  // missing, stale, or invalid, generate code at runtime.
   bool useAOTImage;
 
-  // With useAOTImage on, crash on any AOT lookup miss instead of
-  // falling back. Keeps CI from silently drifting off the AOT path.
+  // Treat any lookup miss as fatal when strict AOT mode is enabled. This
+  // ensures CI uses only loaded artifacts.
   bool aotEnforce;
+
+  bool shouldCaptureAOTInterpreter() const {
+    return dumpAOTBlinterp || !aotRecordDir.empty();
+  }
+  bool shouldCaptureAOTBaseline() const {
+    return dumpAOTBaseline || !aotRecordDir.empty();
+  }
+  bool isAOTLoadOrCaptureEnabled() const {
+    return useAOTImage || shouldCaptureAOTInterpreter() ||
+           shouldCaptureAOTBaseline();
+  }
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

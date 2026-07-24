@@ -413,9 +413,9 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       compileDebugInstrumentation ||
       options.hasFlag(BaselineOption::ForceMainThreadCompilation);
 #ifdef ENABLE_JS_AOT
-  // Off-thread baseline compilation skips the two-pass capture wired
-  // into BaselineCompile, so pin capture runs to the main thread.
-  if (JitOptions.dumpAOTBaseline) {
+  // Run capture on the main thread because background baseline compilation does
+  // not perform AOT capture.
+  if (JitOptions.shouldCaptureAOTBaseline()) {
     forceMainThread = true;
   }
 #endif
@@ -461,13 +461,9 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   StackMacroAssembler masm(cx, temp);
 
 #ifdef ENABLE_JS_AOT
-  // Two-pass under --aot-dump-baseline (or --aot-record): run
-  // BaselineCompiler once on a throwaway masm wrapped in
-  // AutoAOTCodegen. The capture pass crashes at emit time on any
-  // ImmPtr not covered by an AOTSlot. Under --aot-record the AOT
-  // bytes are handed to the recorder; the second pass emits the code
-  // actually installed for this runtime.
-  if (JitOptions.dumpAOTBaseline || JitOptions.aotRecordDir) {
+  // Compile once in capture mode to validate pointer indirection and optionally
+  // record the artifact. Compile again to produce code for the current runtime.
+  if (JitOptions.shouldCaptureAOTBaseline()) {
     TempAllocator dumpTemp(&cx->tempLifoAlloc());
     StackMacroAssembler dumpMasm(cx, dumpTemp);
     if (cx->runtime()->geckoProfiler().enabled()) {
@@ -487,10 +483,8 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
     JitSpew(JitSpew_BaselineAOT,
             "baseline func AOT capture ok: %s:%u bytes=%zu",
             script->filename() ? script->filename() : "<null>",
-            unsigned(script->lineno()),
-            size_t(dumpMasm.instructionsSize()));
-    if (AOTArtifactRecorder* rec =
-            cx->runtime()->jitRuntime()->aotRecorder()) {
+            unsigned(script->lineno()), size_t(dumpMasm.instructionsSize()));
+    if (AOTArtifactRecorder* rec = cx->runtime()->jitRuntime()->aotRecorder()) {
       Linker linker(dumpMasm);
       JitCode* dumpCode = linker.newCode(cx, CodeKind::Baseline);
       if (!dumpCode) {
@@ -606,11 +600,14 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
-  // Debuggees have trap edits baked into runtime-generated code; the
-  // AOT copy would go stale on the first breakpoint.
+  // Debuggee code contains runtime trap edits. A static copy would become stale
+  // when the first breakpoint is installed.
   if (JitOptions.useAOTImage && !script->isDebuggee()) {
     if (TryInstallAOTBaselineScript(cx, script)) {
       return Method_Compiled;
+    }
+    if (cx->isExceptionPending()) {
+      return Method_Error;
     }
     if (JitOptions.aotEnforce) {
       MOZ_CRASH("AOT baseline function miss under --aot-enforce");
@@ -671,7 +668,7 @@ static bool MaybeCreateBaselineInterpreterEntryScript(JSContext* cx,
   }
 
   JitRuntime* jitRuntime = cx->runtime()->jitRuntime();
-  if (script->jitCodeRaw() != jitRuntime->baselineInterpreter().codeRaw()) {
+  if (script->jitCodeRaw() != jitRuntime->baselineInterpreterEntryAddr()) {
     // script already has an updated interpreter trampoline.
 #ifdef DEBUG
     auto ptr = map->lookup(script);
@@ -1265,6 +1262,28 @@ static void ToggleProfilerInstrumentation(JitCode* code,
                                        CodeOffset(profilerExitToggleOffset));
 
   code->setProfilerInstrumented(enable);
+
+#ifdef ENABLE_JS_AOT
+  // Static baseline code can be shared by several scripts. Track profiler
+  // instrumentation per code range so the shared bytes are changed only once.
+  if (code->isStaticCode()) {
+    auto& set =
+        code->runtimeFromMainThread()->jitRuntime()->staticCodeProfilerOn_;
+    bool currentlyOn = set.has(code->raw());
+    if (currentlyOn == enable) {
+      return;
+    }
+    if (enable) {
+      AutoEnterOOMUnsafeRegion oomUnsafe;
+      if (!set.put(code->raw())) {
+        oomUnsafe.crash("staticCodeProfilerOn_ OOM");
+      }
+    } else {
+      set.remove(code->raw());
+    }
+  }
+#endif
+
   if (enable) {
     Assembler::ToggleToCmp(enterToggleLocation);
     Assembler::ToggleToCmp(exitToggleLocation);
@@ -1415,47 +1434,12 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
 #ifdef ENABLE_JS_AOT
-    // Fast path: install the baseline interpreter from the embedded
-    // AOT image if --aot is on and the image carries a matching blob.
-    // Any failure falls through to the two-pass path below.
-    if (TryInstallAOTBaselineInterpreter(cx, interpreter)) {
+    if (JitOptions.useAOTImage &&
+        InstallAOTBaselineInterpreter(cx, interpreter)) {
       return true;
     }
-
-    // Two-pass generation under --aot-dump-blinterp: an AOT-capture
-    // pass runs first on a throwaway masm, then the normal pass emits
-    // the interpreter actually installed for this runtime. The capture
-    // pass validates that every ImmPtr the interpreter emits is
-    // covered by an AOTSlot; a miss crashes at emit time. The
-    // captured bytes have no consumer yet.
-    //
-    // The runtime interpreter must be the non-AOT one because it
-    // encodes runtime pointers directly, and the AOT-mode indirection
-    // requires per-frame table-base plumbing that the non-EnterJIT
-    // entry paths (bailouts, exception unwind) do not provide.
-    //
-    // Flag is cleared with a scope guard so a reentrant capture is
-    // impossible.
-    if (JitOptions.dumpAOTBlinterp || JitOptions.aotRecordDir) {
-      auto clearDumpFlag = mozilla::MakeScopeExit(
-          [] { JitOptions.dumpAOTBlinterp = false; });
-      TempAllocator dumpTemp(&cx->tempLifoAlloc());
-      StackMacroAssembler dumpMasm(cx, dumpTemp);
-      AutoAOTCodegen aot(dumpMasm, cx);
-      BaselineInterpreterGenerator dumpGen(cx, dumpTemp, dumpMasm);
-      BaselineInterpreter dumpInterp;
-      if (!dumpGen.generate(cx, dumpInterp)) {
-        return false;
-      }
-      JitSpew(JitSpew_BaselineAOT, "blinterp AOT capture ok: bytes=%zu",
-              size_t(dumpMasm.instructionsSize()));
-      if (AOTArtifactRecorder* rec =
-              cx->runtime()->jitRuntime()->aotRecorder()) {
-        if (!rec->recordInterpreter(cx, dumpInterp.code(),
-                                    dumpInterp.metadata())) {
-          return false;
-        }
-      }
+    if (cx->isExceptionPending()) {
+      return false;
     }
 #endif
 
@@ -1467,3 +1451,34 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
 
   return true;
 }
+
+#ifdef ENABLE_JS_AOT
+bool jit::CaptureAOTBaselineInterpreter(
+    JSContext* cx, const BaselineInterpreter& interpreter) {
+  if (!IsBaselineInterpreterEnabled() || interpreter.code()->isStaticCode() ||
+      !JitOptions.shouldCaptureAOTInterpreter()) {
+    return true;
+  }
+
+  auto clearDumpFlag =
+      mozilla::MakeScopeExit([] { JitOptions.dumpAOTBlinterp = false; });
+  TempAllocator temp(&cx->tempLifoAlloc());
+  StackMacroAssembler masm(cx, temp);
+  AutoAOTCodegen aot(masm, cx);
+  BaselineInterpreterGenerator generator(cx, temp, masm);
+  BaselineInterpreter capturedInterpreter;
+  if (!generator.generate(cx, capturedInterpreter)) {
+    return false;
+  }
+  JitSpew(JitSpew_BaselineAOT, "blinterp AOT capture ok: bytes=%zu",
+          size_t(masm.instructionsSize()));
+  if (AOTArtifactRecorder* recorder =
+          cx->runtime()->jitRuntime()->aotRecorder()) {
+    if (!recorder->recordInterpreter(cx, capturedInterpreter.code(),
+                                     capturedInterpreter.metadata())) {
+      return false;
+    }
+  }
+  return true;
+}
+#endif

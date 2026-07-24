@@ -32,64 +32,54 @@ struct AOTICStubMetadata;
 // [SMDOC] AOT Artifact Recorder
 // =============================
 //
-// Owned by JitRuntime; created lazily when JitOptions.aotRecordDir is
-// set. Every AOT capture point (baseline interpreter, baseline JIT'd
-// function, IC stub) hands the recorder a linked JitCode plus the
-// metadata needed to reconstruct the artifact at load time. The
-// recorder writes one .aotb file per artifact into the record
-// directory, keyed by identity, using O_CREAT|O_EXCL so parallel test
-// shells dedupe for free.
-//
-// Later (patch 13) PackAOTImage.py scans the directory, applies
-// SelectAOTCorpus.py's budget, and packs the survivors into a single
-// AOTImage.bin. That AOTImage.bin is the input to the incbin object
-// linked into the shell (patch 11).
+// Records captured AOT artifacts as individual files. Each file contains
+// generated code and the metadata required to rebuild the corresponding
+// runtime object. Identity based names and exclusive creation deduplicate
+// artifacts across concurrent processes.
 class AOTArtifactRecorder {
  public:
   AOTArtifactRecorder() = default;
   AOTArtifactRecorder(const AOTArtifactRecorder&) = delete;
   AOTArtifactRecorder& operator=(const AOTArtifactRecorder&) = delete;
 
-  // Prepare `dir` for use. Creates the directory if missing.
+  // Creates the recording directory if it does not already exist.
   [[nodiscard]] bool init(JSContext* cx, const char* dir);
 
   const std::string& directory() const { return directory_; }
 
-  // Baseline interpreter is a singleton: filename is always
-  // <dir>/interp.aotb.
+  // The baseline interpreter has a fixed artifact name because only one is
+  // recorded.
   [[nodiscard]] bool recordInterpreter(JSContext* cx, JitCode* code,
                                        const BaselineInterpreterMetadata& md);
 
-  // Baseline function is keyed by identityHash (SHA-1 over the
-  // compiler-relevant subset of JSScript state). Filename is
-  // <dir>/blfun-<identity16>.aotb.
-  [[nodiscard]] bool recordBaselineFunction(
-      JSContext* cx, JitCode* code, const uint8_t identityHash[20],
-      uint32_t probeHash, const BaselineScriptMetadata& md);
+  // Baseline function artifacts are named from a hash of the script state that
+  // affects compilation.
+  [[nodiscard]] bool recordBaselineFunction(JSContext* cx, JitCode* code,
+                                            const uint8_t identityHash[20],
+                                            uint32_t probeHash,
+                                            const BaselineScriptMetadata& md);
 
-  // IC stub identity is SHA-1 over (cacheKind, cacheIRCode, fieldTypes).
-  // Filename is <dir>/ic-<identity16>.aotb.
+  // Inline cache identities cover the cache kind, encoded operations, and field
+  // types. Artifact file names include a prefix of that hash.
   [[nodiscard]] bool recordICStub(JSContext* cx, JitCode* code,
                                   const AOTICStubMetadata& md);
 
-  // Iterates the runtime's self-hosted script map, delazifying each
-  // function and driving a baseline compile through the AOT capture
-  // path. Called from the shell after `--aot-record=<dir>` is armed
-  // (see js.cpp). Returns the number of blobs recorded; a zero count
-  // is not treated as failure.
+  // Records each self hosted function by delazifying it and triggering baseline
+  // compilation. Returns the number of artifacts recorded. An empty result is
+  // valid.
   [[nodiscard]] bool recordSelfHostedBaselineCorpus(JSContext* cx,
                                                     uint32_t* compiledOut,
                                                     uint32_t* skippedOut);
 
  private:
-  using SeenSet =
-      mozilla::HashSet<uint64_t, mozilla::DefaultHasher<uint64_t>,
-                       SystemAllocPolicy>;
+  using SeenSet = mozilla::HashSet<uint64_t, mozilla::DefaultHasher<uint64_t>,
+                                   SystemAllocPolicy>;
 
   [[nodiscard]] bool writeBlobFile(JSContext* cx, const std::string& path,
                                    const AOTBlobWriter& blob);
 
-  // In-process dedupe. Cross-process dedupe is by O_CREAT|O_EXCL.
+  // Duplicate artifacts within a process are filtered in memory. Exclusive file
+  // creation handles duplicates from other processes.
   bool wasSeen(const uint8_t identityHash[20]);
 
   std::string directory_;

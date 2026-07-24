@@ -181,8 +181,8 @@ set_config(
     depends_if("--enable-portable-baseline-interp-force")(lambda _: True),
 )
 
-# Enable ahead-of-time compiled JIT artifacts (baseline interpreter,
-# self-hosted, IC stubs). Currently x86_64-only.
+# Enable AOT artifacts for the baseline interpreter, self hosted functions, and
+# inline cache stubs. This is supported only on x86_64.
 option(
     "--enable-aot",
     default=False,

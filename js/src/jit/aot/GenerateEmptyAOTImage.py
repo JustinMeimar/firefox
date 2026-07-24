@@ -3,16 +3,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-# Emits an empty-but-valid AOTImage.bin into the objdir at build time.
-# The runtime loader (js/src/jit/AOTImage.cpp) reads this via .incbin
-# and, seeing zero blobs, falls back to runtime codegen. Overwritten
-# in stage 2 by `mach jit-aot build` after the shell has recorded a
-# real corpus.
+# Writes an empty valid image for builds that do not have recorded artifacts. An
+# image with no artifacts causes the runtime to generate code normally.
 
 import struct
 import sys
 
-# Mirror js/src/jit/AOTImage.h::image constants.
+# Keep these constants synchronized with the image format.
 IMAGE_MAGIC = 0x49544F41  # "AOTI"
 IMAGE_VERSION = 2
 FINGERPRINT_SIZE = 20
@@ -29,9 +26,7 @@ def align_up(v, a):
 
 def emit(fp):
     fingerprint_offset = HEADER_SIZE
-    directory_offset = align_up(
-        fingerprint_offset + FINGERPRINT_SIZE, ALIGNMENT
-    )
+    directory_offset = align_up(fingerprint_offset + FINGERPRINT_SIZE, ALIGNMENT)
     data_end = directory_offset  # no entries, no data
     text_offset = align_up(data_end, TEXT_ALIGNMENT)
     text_size = 0
@@ -53,7 +48,7 @@ def emit(fp):
         text_size,
         image_size,
     )
-    # Fingerprint left as 20 zero bytes: sentinel meaning "empty".
+    # A zero fingerprint marks an empty image.
     fp.write(bytes(buf))
 
 

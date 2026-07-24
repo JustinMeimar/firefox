@@ -10,6 +10,7 @@
 #ifdef ENABLE_JS_AOT
 
 #  include "mozilla/Assertions.h"
+#  include "mozilla/DebugOnly.h"
 #  include "mozilla/Maybe.h"
 #  include "mozilla/Span.h"
 
@@ -18,20 +19,17 @@
 #  include <ostream>
 #  include <type_traits>
 
-#  include "jstypes.h"
-
 #  include "js/AllocPolicy.h"
 #  include "js/Vector.h"
-
-struct JS_PUBLIC_API JSContext;
 
 namespace js::jit {
 
 // [SMDOC] AOT Image
 // =================
 //
-// An AOT image is a flat binary produced at build time and, when
-// present, mmapped at process start. Its wire format is:
+// An AOT image is a flat binary produced at build time and mapped when the
+// process starts. It contains a header, a fingerprint, an artifact directory,
+// serialized metadata, padding, and a page aligned code segment.
 //
 //   +---------------------------------------------------+
 //   | AOTImageHeader     (fixed layout, HeaderSize)    |
@@ -47,36 +45,25 @@ namespace js::jit {
 //   | Text segment  (concatenated code, page-aligned)   |
 //   +---------------------------------------------------+
 //
-// Everything a runtime needs to reconstruct a JitCode-backed class is
-// carried in the blob's fields POD and its element arrays. The typed
-// layout of a blob is described in AOTImageSchema.yaml; the generator
-// (GenerateAOTImage.py) emits AOTFields_<Kind> PODs, AOTView_<Kind>
-// decoded views, and (when a `metadata_type:` is declared) symmetric
-// Encode/Decode helpers that translate between a hand-written metadata
-// class and the wire representation.
+// Each artifact contains the metadata required to reconstruct its runtime
+// object. A shared schema defines the serialized layout used by readers and
+// writers.
 //
-// Reading side: AOTImage wraps the embedded byte range, verifies magic
-// and fingerprint, and exposes typed AOTBlobReaders over each entry in
-// the directory.
-//
-// Writing side: AOTImageBuilder accumulates AOTBlobWriters and emits a
-// finalized image byte stream. It is used by AOTArtifactRecorder
-// (patch 10+). PackAOTImage.py (also patch 10+) shares the schema so
-// tooling and runtime cannot diverge on wire layout.
+// The loader validates the header and fingerprint before exposing artifacts.
+// The builder emits a finalized image from recorded artifacts.
 
 class AOTImage;
 class AOTBlobReader;
 class AOTBlobWriter;
 class AOTImageBuilder;
-class JitCode;
-enum class CodeKind : uint8_t;
 
-// Blob kinds enumerated by AOTImageSchema.yaml.
-// Adding a kind: extend this enum, add its yaml entry, bump image::Version.
+// Artifact kinds are defined by the image schema. Adding a kind requires
+// updating the enumeration and image format version.
 enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
   BaselineFunction = 1,
   InlineCacheStub = 2,
+  Configuration = 3,
 };
 
 namespace image {
@@ -84,20 +71,19 @@ namespace image {
 // "AOTI" in little-endian.
 inline constexpr uint32_t Magic = 0x49544F41;
 
-// Bump on any layout / schema / fingerprint-input change.
-inline constexpr uint16_t Version = 2;
+// Increment the image format version whenever the layout, schema, or
+// fingerprint inputs change.
+inline constexpr uint16_t Version = 3;
 
-// SHA-1 of engine-relevant inputs (AOTSlots order, VMFunctionId order,
-// ABIFUNCTION_LIST order, JSOp numbering, ISA baseline, engine version).
-// Recorded at pack time; verified at load time. See patch 11's
-// installer for the check.
+// The fingerprint covers all engine inputs that affect generated code and is
+// checked when an image is loaded.
 inline constexpr uint32_t FingerprintSize = 20;
 
-// Directory + fields padding boundary. Rows fit within a cache line.
+// Align directory metadata to a cache line boundary.
 inline constexpr uint32_t Alignment = 16;
 
-// Text segment padding. Loader relies on this to give text its own page
-// so mprotect(RX) can flip it without dragging in header bytes.
+// Align generated code to a page boundary so its protection can change without
+// affecting image metadata.
 inline constexpr uint32_t TextAlignment = 4096;
 
 struct Header {
@@ -118,8 +104,8 @@ static_assert(sizeof(Header) == 36,
 
 struct DirectoryEntry {
   uint32_t kind;
-  // Cheap prefilter for identity matching. For BaselineFunction blobs
-  // this is a uint32 slice of identityHash; for others it is 0.
+  // Stores a short prefix of the identity hash for fast rejection during
+  // baseline artifact lookup. Other artifact kinds store zero.
   uint32_t probeHash;
   uint8_t identityHash[20];
   uint32_t textOffset;
@@ -134,8 +120,7 @@ static_assert(sizeof(DirectoryEntry) == 48,
 
 }  // namespace image
 
-// Reader for the fields POD + element arrays inside one blob. Element
-// arrays are read sequentially; a per-instance cursor tracks position.
+// Reads the serialized fields and arrays for one artifact in order.
 class AOTBlobReader {
  public:
   AOTBlobReader(const image::DirectoryEntry* entry, const uint8_t* imageBase,
@@ -172,8 +157,7 @@ class AOTBlobReader {
       return {};
     }
     MOZ_ASSERT(arraysCursor_ + count * sizeof(T) <= arraysEnd_);
-    auto span =
-        mozilla::Span(reinterpret_cast<const T*>(arraysCursor_), count);
+    auto span = mozilla::Span(reinterpret_cast<const T*>(arraysCursor_), count);
     arraysCursor_ += count * sizeof(T);
     return span;
   }
@@ -183,11 +167,11 @@ class AOTBlobReader {
   mozilla::Span<const uint8_t> code_;
   const uint8_t* fields_;
   const uint8_t* arraysCursor_;
-  const uint8_t* arraysEnd_;
+  mozilla::DebugOnly<const uint8_t*> arraysEnd_;
 };
 
-// Accumulator for one blob's code, fields, and array sections. The
-// resulting byte sequences are handed to AOTImageBuilder::addBlob.
+// Collects one artifact's code, fixed fields, and array data before adding it
+// to the image.
 class AOTBlobWriter {
  public:
   AOTBlobWriter(AOTBlobKind kind, uint32_t probeHash,
@@ -245,12 +229,12 @@ class AOTBlobWriter {
   Vector<uint8_t, 0, SystemAllocPolicy> arrays_;
 };
 
-// Read-only view over an in-memory AOT image. The bytes may come from
-// the embedded incbin symbol pair (AOTImage::embedded, patch 11+) or
-// from a jsapi-test round-trip buffer.
+// Provides a read only view of an image embedded in the binary or supplied by a
+// test.
 class AOTImage {
  public:
-  // Returns nullptr until patch 11 wires the embedded incbin symbols.
+  // No embedded image is available when the binary contains no linked image
+  // symbols.
   static const AOTImage* embedded();
 
   static mozilla::Maybe<AOTImage> fromBytes(mozilla::Span<const uint8_t> bytes);
@@ -277,14 +261,13 @@ class AOTImage {
         base_ + header()->directoryOffset);
   }
 
-  // Finds the sole blob of `kind`, or nothing.
+  // Finds the only artifact of a requested kind.
   mozilla::Maybe<AOTBlobReader> findUnique(AOTBlobKind kind) const;
 
-  // Finds a blob by kind + identity hash. `probeHash` is a fast reject
-  // check derived from identity; pass 0 to match all.
-  mozilla::Maybe<AOTBlobReader> findByIdentity(AOTBlobKind kind,
-                                               uint32_t probeHash,
-                                               const uint8_t* identityHash) const;
+  // Finds an artifact by kind and identity hash. A zero probe value disables
+  // the fast rejection step.
+  mozilla::Maybe<AOTBlobReader> findByIdentity(
+      AOTBlobKind kind, uint32_t probeHash, const uint8_t* identityHash) const;
 
  private:
   explicit AOTImage(mozilla::Span<const uint8_t> bytes)
@@ -294,11 +277,9 @@ class AOTImage {
   size_t size_;
 };
 
-// One-blob wire format used for intermediate `.aotb` files. Every
-// recorder-produced file starts with an AOTBlobFileHeader; the payload
-// order matches image::DirectoryEntry (fields, arrays, code). Both the
-// C++ recorder (AOTRecorder.cpp) and PackAOTImage.py parse this same
-// header.
+// Defines the intermediate format for one recorded artifact. Each file contains
+// a fixed header followed by fields, arrays, and code in image directory order.
+// Both the recorder and packer use this format.
 struct AOTBlobFileHeader {
   uint32_t magic;
   uint16_t version;
@@ -318,9 +299,8 @@ static_assert(sizeof(AOTBlobFileHeader) == 48,
 inline constexpr uint32_t BlobFileMagic = 0x42544F41;
 inline constexpr uint16_t BlobFileVersion = 1;
 
-// Builds an in-memory image from a sequence of AOTBlobWriters. The
-// fingerprint is caller-provided so record-time versus load-time inputs
-// stay symmetric.
+// Builds an image in memory from recorded artifacts using a supplied
+// fingerprint.
 class AOTImageBuilder {
  public:
   [[nodiscard]] bool addBlob(AOTBlobWriter&& blob) {
@@ -329,12 +309,10 @@ class AOTImageBuilder {
 
   uint32_t blobCount() const { return blobs_.length(); }
 
-  // Emits the finalized image to `out`. `fingerprint` must be
-  // image::FingerprintSize bytes.
-  [[nodiscard]] bool finalize(std::ostream& out,
-                              const uint8_t* fingerprint);
+  // Writes a finalized image. The fingerprint must have the expected length.
+  [[nodiscard]] bool finalize(std::ostream& out, const uint8_t* fingerprint);
 
-  // As above, but collects into a byte vector. Used by the jsapi-test.
+  // Collects a finalized image in memory for tests.
   [[nodiscard]] bool finalize(Vector<uint8_t, 0, SystemAllocPolicy>& out,
                               const uint8_t* fingerprint);
 
@@ -342,20 +320,9 @@ class AOTImageBuilder {
   Vector<AOTBlobWriter, 0, SystemAllocPolicy> blobs_;
 };
 
-// Allocates a JitCode over a static text range from the embedded AOT
-// image. The returned JitCode has isStaticCode() == true: no
-// ExecutablePool, no JitCodeHeader, no relocations. The caller must
-// keep the containing AOTImage alive; embedded() images live for the
-// life of the process.
-[[nodiscard]] JitCode* AllocateAOTCode(JSContext* cx, uint8_t* codeStart,
-                                       uint32_t codeSize, CodeKind kind);
-
-// Wire-adjacent runtime shape of an InlineCacheStub blob. The encoder
-// copies from a CacheIRStubInfo; the decoder rebuilds a
-// CacheIRStubInfo (via CacheIRStubInfo::NewFromSerialized) plus its
-// CacheIRStubKey::Lookup. Kept hand-written so the schema generator
-// stays free of CacheIR types; only the Encode/Decode helpers are
-// generated.
+// Holds the runtime representation of a serialized inline cache stub. Encoding
+// copies the relevant stub metadata. Decoding reconstructs the metadata and
+// lookup key. This keeps inline cache types out of the schema generator.
 struct AOTICStubMetadata {
   uint8_t cacheKind = 0;
   uint8_t makesGCCalls = 0;
@@ -364,6 +331,20 @@ struct AOTICStubMetadata {
   Vector<uint8_t, 0, SystemAllocPolicy> cacheIRCode;
   Vector<uint8_t, 0, SystemAllocPolicy> fieldTypes;
 };
+
+struct AOTConfigurationMetadata {
+  uint8_t disableInlining = 0;
+  uint8_t spectreObjectMitigations = 0;
+  uint8_t spectreStringMitigations = 0;
+  uint8_t baselineBatching = 0;
+  uint32_t baselineJitWarmUpThreshold = 0;
+  uint32_t baselineQueueCapacity = 0;
+  uint32_t trialInliningWarmUpThreshold = 0;
+
+  bool operator==(const AOTConfigurationMetadata& other) const = default;
+};
+
+AOTConfigurationMetadata CurrentAOTConfiguration();
 
 }  // namespace js::jit
 

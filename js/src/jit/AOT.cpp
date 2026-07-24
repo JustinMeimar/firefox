@@ -26,7 +26,9 @@ const char* AOTSlotName(AOTSlot slot) {
 #define AOT_SLOT(name, ...) \
   case AOTSlot::name:       \
     return #name;
+#define AOT_ATOM_SLOT AOT_SLOT
 #include "jit/AOTSlots.tbl"
+#undef AOT_ATOM_SLOT
 #undef AOT_SLOT
     default:
       break;
@@ -36,8 +38,7 @@ const char* AOTSlotName(AOTSlot slot) {
       s < uint32_t(AOTSlot::VMWrapper_End)) {
     return "VMWrapper";
   }
-  if (s >= uint32_t(AOTSlot::ABIFn_Begin) &&
-      s < uint32_t(AOTSlot::ABIFn_End)) {
+  if (s >= uint32_t(AOTSlot::ABIFn_Begin) && s < uint32_t(AOTSlot::ABIFn_End)) {
     return "ABIFn";
   }
   return "Unknown";
@@ -55,11 +56,26 @@ mozilla::Maybe<AOTSlot> AOTIndirectionTable::findSlot(uintptr_t value) const {
   return mozilla::Nothing();
 }
 
+mozilla::Maybe<AOTSlot> AOTIndirectionTable::findAtomSlot(
+    uintptr_t value) const {
+  if (value == 0) {
+    return mozilla::Nothing();
+  }
+#define AOT_SLOT(name, ...)
+#define AOT_ATOM_SLOT(name, ...)                  \
+  if (slots_[uint32_t(AOTSlot::name)] == value) { \
+    return mozilla::Some(AOTSlot::name);          \
+  }
+#include "jit/AOTSlots.tbl"
+#undef AOT_ATOM_SLOT
+#undef AOT_SLOT
+  return mozilla::Nothing();
+}
+
 void AOTIndirectionTable::dump() const {
   for (uint32_t i = 0; i < uint32_t(AOTSlot::Count); i++) {
     JitSpew(JitSpew_BaselineAOT, "  slot[%u] %-30s = %p", i,
-            AOTSlotName(AOTSlot(i)),
-            reinterpret_cast<void*>(get(AOTSlot(i))));
+            AOTSlotName(AOTSlot(i)), reinterpret_cast<void*>(get(AOTSlot(i))));
   }
 }
 

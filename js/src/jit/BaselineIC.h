@@ -279,9 +279,8 @@ class ICCacheIRStub final : public ICStub {
   const CacheIRStubInfo* stubInfo_;
 
 #ifdef ENABLE_JS_AOT
-  // Static AOT stubs have no JitCodeHeader before their code, so
-  // JitCode::FromExecutable cannot recover the owning JitCode. Cache
-  // it here.
+  // Static stubs do not have an allocation header before their code, so cache
+  // their owner explicitly.
   JitCode* jitCode_;
 #endif
 

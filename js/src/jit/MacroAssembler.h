@@ -419,12 +419,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // Seed the current BaselineFrame's AOT table slot from the courier
   // register set up by generateAOTPreambleTrampoline. Called once at
-  // frame init; no-op unless isAOT().
+  // frame init.
   void emitAOTStoreFrameTableBase(Register passReg, Register scratch,
                                   const Address& dst);
 
   // Generator resume path: copy the AOT table base from the caller's
-  // BaselineFrame slot into ours. No-op unless isAOT().
+  // BaselineFrame slot into ours.
   void emitAOTCopyFrameTableBaseFromCaller(Register scratch);
 #endif
 
@@ -5342,8 +5342,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Label done;
 #ifdef ENABLE_JS_AOT
     if (isAOT()) {
-      // AOT code has no baked-in realm, so the compile-time zone address
-      // isn't available. Load the zone from JSContext instead.
+      // AOT code does not embed a realm, so load the zone from the current
+      // execution context at runtime.
       branchTestNeedsMarkingBarrierAnyZone(Assembler::Zero, &done, ScratchReg);
     } else
 #endif

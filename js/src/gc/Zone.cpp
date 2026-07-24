@@ -515,16 +515,18 @@ js::jit::JitZone* Zone::createJitZone(JSContext* cx) {
     return nullptr;
   }
 
-  jitZone_ = jitZone.release();
-
 #ifdef ENABLE_JS_AOT
-  // Static IC stubs live in the atoms JitZone; this is the earliest
-  // point where that JitZone exists.
+  // Static inline cache stubs belong to the atoms zone. Install them when that
+  // zone first has JIT state.
   if (isAtomsZone() && jit::JitOptions.useAOTImage) {
-    (void)jit::TryLoadAOTICStubs(cx, jitZone_);
+    (void)jit::TryLoadAOTICStubs(cx, jitZone.get());
+    if (cx->isExceptionPending()) {
+      return nullptr;
+    }
   }
 #endif
 
+  jitZone_ = jitZone.release();
   return jitZone_;
 }
 

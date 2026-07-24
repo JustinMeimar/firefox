@@ -3438,7 +3438,18 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
       }
     }
     if (!usingEntryTrampoline) {
-      setJitCodeRaw(rt->jitRuntime()->baselineInterpreterEntryAddr());
+      uint8_t* addr = rt->jitRuntime()->baselineInterpreterEntryAddr();
+#ifdef ENABLE_JS_AOT
+      // Skip during shutdown teardown: clearAOTPreambleTrampolines() runs
+      // before forceDiscardJitCode, so scripts are legitimately reset to the
+      // raw interp bytes here. Only assert when the trampoline is live.
+      MOZ_ASSERT(!rt->jitRuntime()->hasAOTInterpPreambleTrampoline() ||
+                     !rt->jitRuntime()->pointsIntoAOTInterpText(addr),
+                 "updateJitCodeRaw about to publish raw AOT interp bytes as "
+                 "the script entry; every subsequent entry will bypass the "
+                 "preamble trampoline");
+#endif
+      setJitCodeRaw(addr);
     }
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   } else if (hasJitScript() &&

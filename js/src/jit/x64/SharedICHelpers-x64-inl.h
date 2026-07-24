@@ -65,9 +65,8 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register scratch) {
                 Address(StackPointer, sizeof(uintptr_t)));
 
 #ifdef ENABLE_JS_AOT
-  // The baseline prologue (emitInitFrameFields) writes the AOT table base
-  // into every baseline frame, so we can source it from there uniformly
-  // regardless of AOT mode. See BaselineStubFrameLayout::AOTTableOffsetFromFP.
+  // The baseline prologue stores the indirection table address in every frame.
+  // Stub entry copies it from the baseline frame into the stub frame.
   masm.loadPtr(
       Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()),
       scratch);

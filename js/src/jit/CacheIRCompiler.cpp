@@ -1597,8 +1597,7 @@ CacheIRStubInfo* CacheIRStubInfo::NewFromSerialized(
     CacheKind kind, ICStubEngine engine, bool makesGCCalls,
     uint32_t stubDataOffset, const uint8_t* cacheIRBytes, uint32_t codeLength,
     const uint8_t* fieldTypeBytes, uint32_t numFields) {
-  size_t bytesNeeded =
-      sizeof(CacheIRStubInfo) + codeLength + (numFields + 1);
+  size_t bytesNeeded = sizeof(CacheIRStubInfo) + codeLength + (numFields + 1);
   uint8_t* p = js_pod_malloc<uint8_t>(bytesNeeded);
   if (!p) {
     return nullptr;

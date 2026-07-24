@@ -20,18 +20,11 @@ namespace js::jit {
 
 // [SMDOC] AutoAOTCodegen
 //
-// RAII scope that switches a MacroAssembler into AOT capture mode. On
-// construction it installs the JitRuntime's AOTIndirectionTable on the
-// masm; on destruction it uninstalls. While alive, masm.isAOT() is true
-// and ImmPtr overrides route runtime pointers through the indirection
-// table instead of baking them in.
-//
-//   StackMacroAssembler masm(cx, temp);
-//   AutoAOTCodegen aot(masm, cx);
-//   // ... codegen ...
-//
-// Nesting is disallowed and the scope must be installed before any code
-// is emitted; both are enforced by MacroAssembler::setAOTTable.
+// This scope enables AOT capture for a macro assembler. It installs the runtime
+// indirection table when created and restores the previous state when
+// destroyed. While active, runtime pointers are emitted through the indirection
+// table. The scope cannot be nested and must be created before code emission
+// begins.
 class MOZ_STACK_CLASS AutoAOTCodegen {
  public:
   AutoAOTCodegen(MacroAssembler& masm, JSContext* cx) : masm_(masm) {

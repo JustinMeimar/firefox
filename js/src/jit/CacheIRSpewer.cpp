@@ -477,4 +477,3 @@ void CacheIRSpewer::endCache() {
 }
 
 #endif /* JS_CACHEIR_SPEW */
-

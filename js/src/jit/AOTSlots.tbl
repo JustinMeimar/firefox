@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// --- Runtime ---
+// Runtime
 
 AOT_SLOT(JSRuntimePtr,           rt)
 AOT_SLOT(JSContextPtr,           cx)
@@ -22,8 +22,7 @@ AOT_SLOT(StringToAtomCache,      &rt->caches().stringToAtomCache)
 AOT_SLOT(ExceptionTail,          getExceptionTail().value)
 AOT_SLOT(DebugTrapInterpreter,   debugTrapHandler(DebugTrapHandlerKind::Interpreter)->raw())
 AOT_SLOT(DebugTrapCompiler,      debugTrapHandler(DebugTrapHandlerKind::Compiler)->raw())
-// InterpretOp is set after GenerateBaselineInterpreter (see JitRuntime::initialize).
-AOT_SLOT(InterpretOp,            nullptr)
+AOT_SLOT(InterpretOp,            baselineInterpreter_.interpretOpAddr().value)
 AOT_SLOT(NurseryPosition,        rt->gc.addressOfNurseryPosition())
 AOT_SLOT(NurseryAllocatedSites,  rt->gc.addressOfNurseryAllocatedSites())
 AOT_SLOT(JitStackLimit,          cx->addressOfJitStackLimit())
@@ -31,7 +30,7 @@ AOT_SLOT(JitStackLimit,          cx->addressOfJitStackLimit())
 AOT_SLOT(GCZealModeBits,         rt->gc.addressOfZealModeBits())
 #endif
 
-// --- Pre-barriers ---
+// Pre barriers
 
 AOT_SLOT(PreBarrier_Value,       preBarrier(MIRType::Value).value)
 AOT_SLOT(PreBarrier_String,      preBarrier(MIRType::String).value)
@@ -39,17 +38,17 @@ AOT_SLOT(PreBarrier_Object,      preBarrier(MIRType::Object).value)
 AOT_SLOT(PreBarrier_Shape,       preBarrier(MIRType::Shape).value)
 AOT_SLOT(PreBarrier_WasmAnyRef,  preBarrier(MIRType::WasmAnyRef).value)
 
-// --- Atoms ---
+// Pointers from the atoms zone used while generating GC pointer operands
 
-AOT_SLOT(AtomEmpty,              static_cast<JSString*>(cx->names().empty_))
-AOT_SLOT(AtomTrue,               static_cast<JSString*>(cx->names().true_))
-AOT_SLOT(AtomFalse,              static_cast<JSString*>(cx->names().false_))
-AOT_SLOT(AtomFunction,           static_cast<JSString*>(cx->names().function))
-AOT_SLOT(AtomUndefined,          static_cast<JSString*>(cx->names().undefined))
-AOT_SLOT(AtomNull,               static_cast<JSString*>(cx->names().null))
-AOT_SLOT(AtomObject,             static_cast<JSString*>(cx->names().object))
+AOT_ATOM_SLOT(AtomEmpty,              static_cast<JSString*>(cx->names().empty_))
+AOT_ATOM_SLOT(AtomTrue,               static_cast<JSString*>(cx->names().true_))
+AOT_ATOM_SLOT(AtomFalse,              static_cast<JSString*>(cx->names().false_))
+AOT_ATOM_SLOT(AtomFunction,           static_cast<JSString*>(cx->names().function))
+AOT_ATOM_SLOT(AtomUndefined,          static_cast<JSString*>(cx->names().undefined))
+AOT_ATOM_SLOT(AtomNull,               static_cast<JSString*>(cx->names().null))
+AOT_ATOM_SLOT(AtomObject,             static_cast<JSString*>(cx->names().object))
 
-// --- JSClass pointers ---
+// JavaScript class pointers
 
 AOT_SLOT(Class_WithEnvironment,              &WithEnvironmentObject::class_)
 AOT_SLOT(Class_Function,                     &FunctionClass)
@@ -76,7 +75,7 @@ AOT_SLOT(Class_WeakSet,                      &WeakSetObject::class_)
 AOT_SLOT(Class_Generator,                    &GeneratorObject::class_)
 AOT_SLOT(Class_WindowProxy,                  rt->maybeWindowProxyClass())
 
-// --- Misc pointers ---
+// Other pointers
 
 AOT_SLOT(Ptr_DeadObjectProxy,               &DeadObjectProxy::singleton)
 AOT_SLOT(Ptr_WrapperFamily,                 &js::Wrapper::family)
@@ -90,12 +89,8 @@ AOT_SLOT(Ptr_DateTimeInfo_UTCOffset,        DateTimeInfo::addressOfUTCToLocalOff
 AOT_SLOT(Ptr_DOMProxyHandlerFamily,         GetDOMProxyHandlerFamily())
 AOT_SLOT(Ptr_MathRandomScaleInv,            &js::jit::MathRandomScaleInv)
 
-// TypedArray class-array anchors. The three arrays (fixedLength,
-// immutable, resizable) live contiguously; range checks and per-type
-// dispatch in MacroAssembler::{typedArrayElementSize,
-// resizableTypedArrayElementShiftBy, branchIfClassIsNot*TypedArray}
-// emit an ImmPtr for each distinct address they visit. Every address
-// they can visit gets a slot below.
+// The three typed array class tables are contiguous. Add an indirection slot
+// for every address that range checks and type dispatch may access.
 AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_Begin,       std::begin(TypedArrayObject::fixedLengthClasses))
 AOT_SLOT(Ptr_TypedArrayClasses_FixedLength_End,         std::end(TypedArrayObject::fixedLengthClasses))
 AOT_SLOT(Ptr_TypedArrayClasses_Immutable_LastElem,      std::prev(std::end(TypedArrayObject::immutableClasses)))
@@ -114,4 +109,3 @@ AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float64,       &TypedArrayObject::resiz
 AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Uint8Clamped,  &TypedArrayObject::resizableClasses[Scalar::Uint8Clamped])
 AOT_SLOT(Ptr_TypedArrayClasses_Resizable_BigInt64,      &TypedArrayObject::resizableClasses[Scalar::BigInt64])
 AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float16,       &TypedArrayObject::resizableClasses[Scalar::Float16])
-

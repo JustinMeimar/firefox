@@ -53,8 +53,8 @@ namespace js {
 namespace jit {
 
 bool ICStub::isStaticCode() const {
-  // Placeholder. Becomes a real AOT text-range check once the AOT
-  // loader introduces an embedded text segment.
+  // The current implementation returns false because embedded code is not
+  // loaded.
   return false;
 }
 
@@ -130,11 +130,9 @@ AllocatableGeneralRegisterSet BaselineICAvailableGeneralRegs(size_t numInputs) {
   regs.take(ICStubReg);
 
 #ifdef ENABLE_JS_AOT
-  // AOTFuncPassReg is the courier register used by baseline JIT'd
-  // frames to seed their AOT indirection table slot. Reserving it in
-  // AOT builds keeps IC codegen from clobbering it before the frame
-  // init that reads it. On x64 it aliases ScratchReg and is already
-  // non-allocatable, so use takeUnchecked to cover both cases.
+  // Reserve the entry register used to initialize baseline frame indirection
+  // state. On x64 it aliases the nonallocatable scratch register, so reserve it
+  // without checking availability.
   regs.takeUnchecked(AOTFuncPassReg);
 #endif
 

@@ -12024,8 +12024,7 @@ auto minVal(T a, Ts... args) {
         return false;
       }
     } else {
-      fprintf(stderr,
-              "--aot-record-self-hosted requires --aot-record=<dir>\n");
+      fprintf(stderr, "--aot-record-self-hosted requires --aot-record=<dir>\n");
       return false;
     }
   }

@@ -513,7 +513,7 @@ struct BaselineInterpreterMetadata {
   // Offset of the code to start interpreting a bytecode op.
   uint32_t interpretOpOffset = 0;
 
-  // Like interpretOpOffset but skips the debug trap for the current op.
+  // Offset for the current operation that skips the debug trap.
   uint32_t interpretOpNoDebugTrapOffset = 0;
 
   // Early Ion bailouts will enter at this address. This is after frame
@@ -545,10 +545,9 @@ struct BaselineInterpreterMetadata {
   CallVMOffsets callVMOffsets;
 };
 
-// Offsets and entry arrays for one baseline-compiled function. Fields
-// are populated by BaselineCompiler at emit time; the encoder side
-// (jit/AOTRecorder.cpp) serializes them into an AOT image blob and the
-// installer (patch 11+) reconstructs a BaselineScript from them.
+// Holds the offsets and entry metadata for a compiled baseline function. The
+// recorder serializes this data and the installer uses it to rebuild the
+// script.
 struct BaselineScriptMetadata {
   // Direct mirror of BaselineScript's own header fields.
   uint32_t warmUpCheckPrologueOffset = 0;
@@ -556,10 +555,9 @@ struct BaselineScriptMetadata {
   uint32_t profilerExitToggleOffset = 0;
   uint8_t flags = 0;
 
-  // Trailing arrays copied out of BaselineCompiler / BaselineScript. The
-  // resume-offset list is stored as pc->native pairs; the installer
-  // reruns computeResumeNativeOffsets to rebuild the absolute pointer
-  // vector for the freshly loaded JitCode.
+  // Stores entry tables copied from the compiler. Resume offsets are serialized
+  // as bytecode and native offset pairs, then converted back to absolute code
+  // addresses during installation.
   Vector<RetAddrEntry, 0, SystemAllocPolicy> retAddrEntries;
   Vector<BaselineScript::OSREntry, 0, SystemAllocPolicy> osrEntries;
   Vector<BaselineScript::DebugTrapEntry, 0, SystemAllocPolicy> debugTrapEntries;
@@ -622,6 +620,11 @@ class BaselineInterpreter {
 
 [[nodiscard]] bool GenerateBaselineInterpreter(
     JSContext* cx, BaselineInterpreter& interpreter);
+
+#ifdef ENABLE_JS_AOT
+[[nodiscard]] bool CaptureAOTBaselineInterpreter(
+    JSContext* cx, const BaselineInterpreter& interpreter);
+#endif
 
 inline bool IsBaselineJitEnabled(JSContext* cx) {
   if (MOZ_UNLIKELY(!IsBaselineInterpreterEnabled())) {

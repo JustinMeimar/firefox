@@ -420,17 +420,15 @@ class BaselineCompilerHandler {
   bool compilingOffThread() const { return compilingOffThread_; }
   void setCompilingOffThread() { compilingOffThread_ = true; }
 
-  // Env alloc-site setup used to be conditional on a codegen-time flag.
-  // For AOT replayability the compiler must always emit the load, so this
-  // is now unconditional. The install-time walk in
-  // FinalizeInstalledBaselineScript decides whether to actually populate
-  // the site based on script->needsFunctionEnvironmentObjects().
+  // Always emit environment allocation site setup so captured code can be
+  // reused. Installation populates the site only for scripts that need
+  // environment objects.
   bool usesEnvAllocSite() const { return true; }
 
   bool realmIndependentJitcode() const {
-    // AOT-context codegen must be replayable on any matching JSScript in
-    // any realm. The experimental self-hosted cache is a separate flavor
-    // of the same requirement, restricted to self-hosted scripts.
+    // AOT code generation must produce code that can be reused by any
+    // compatible script in any realm. The same requirement applies to self
+    // hosted scripts.
     return isAOT_ || (JS::Prefs::experimental_self_hosted_cache() &&
                       script()->selfHosted());
   }
@@ -472,9 +470,9 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
   }
 
 #ifdef ENABLE_JS_AOT
-  // Populates `md` from this compiler's post-emit state. Only used by
-  // the AOT capture pass, whose compiler is discarded immediately
-  // afterward. Returns false on allocation failure.
+  // Copies the completed compiler metadata for AOT capture. The capture
+  // compiler is discarded immediately afterward. Returns false if allocation
+  // fails.
   [[nodiscard]] bool extractAOTMetadata(BaselineScriptMetadata& md);
 #endif
 
@@ -616,10 +614,9 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   void emitOutOfLineCodeCoverageInstrumentation();
 };
 
-// Post-compile / install-time step for a baseline-compiled script. Walks
-// the JitScript's ICEntries and creates per-op alloc sites, and populates
-// the env alloc site if the script has function environment objects.
-// Runs on the main thread; silent on OOM.
+// After baseline code is compiled or installed, create allocation sites for its
+// inline cache entries and initialize the environment allocation site when
+// needed. This runs on the main thread and ignores allocation failure.
 void FinalizeInstalledBaselineScript(JSScript* script);
 
 }  // namespace jit

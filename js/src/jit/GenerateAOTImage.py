@@ -2,18 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-# Parses jit/AOTImageSchema.yaml and emits jit/AOTImageGenerated.h.
-# For each blob kind the schema declares, we generate:
-#
-#   struct AOTFields_<Kind>         fixed-size POD, on-disk layout
-#   struct AOTView_<Kind>           decoded view: fields + arrays
-#   bool EncodeBlob_<Kind>(...)     metadata -> AOTBlobWriter, if
-#                                   `metadata_type:` is set
-#   bool DecodeBlob_<Kind>(...)     AOTBlobReader -> metadata, if
-#                                   `metadata_type:` is set
-#
-# The schema is also imported by jit/aot/PackAOTImage.py so the Python
-# packer and the C++ reader stay bit-compatible.
+# Generates the C++ metadata structures and serialization helpers for each
+# artifact kind declared by the image schema.
 
 import io
 
@@ -71,9 +61,9 @@ def field_cpp_type(f):
     raise ValueError(f["type"])
 
 
-# Reproduces the C++ aggregate layout rule: natural alignment per field,
-# trailing padding to max_align. The static_assert emitted alongside the
-# struct is the safety net if this drifts from what the compiler picks.
+# Matches the compiler's aggregate layout by aligning each field naturally and
+# padding the complete structure to its maximum alignment. A generated compile
+# time assertion detects layout differences.
 def pod_sizeof(fields):
     offset = 0
     max_align = 1
@@ -106,8 +96,7 @@ def emit_fields_pod(name, fields, doc=None):
     lines.append("};")
     size = pod_sizeof(fields)
     lines.append("static_assert(sizeof(%s) == %d," % (name, size))
-    lines.append('              "%s size drift; edit AOTImageSchema.yaml");'
-                 % name)
+    lines.append('              "%s size drift; edit AOTImageSchema.yaml");' % name)
     return emit_lines(lines)
 
 
@@ -173,16 +162,13 @@ def emit_decode(kind, view_type, fields_type, fields, arrays, metadata_type):
         cpp = a.get("cpp_member")
         if cpp is None:
             continue
-        lines.append(
-            "  {"
-        )
+        lines.append("  {")
         lines.append(
             "    auto src = reader.readArray<%s>(f.%s);"
             % (a["element"], a["count_from"])
         )
         lines.append(
-            "    if (!md->%s.append(src.data(), src.size())) return false;"
-            % cpp
+            "    if (!md->%s.append(src.data(), src.size())) return false;" % cpp
         )
         lines.append("  }")
     lines.append("  return true;")
@@ -221,22 +207,22 @@ def emit_blob(kind, blob):
     out.append(emit_view_struct(view_type, fields_type, arrays))
     out.append(emit_view_reader(kind, view_type, fields_type, arrays))
     if metadata_type:
-        out.append(emit_encode(kind, view_type, fields_type, fields, arrays,
-                               metadata_type))
-        out.append(emit_decode(kind, view_type, fields_type, fields, arrays,
-                               metadata_type))
+        out.append(
+            emit_encode(kind, view_type, fields_type, fields, arrays, metadata_type)
+        )
+        out.append(
+            emit_decode(kind, view_type, fields_type, fields, arrays, metadata_type)
+        )
     return "\n".join(out)
 
 
 def emit_kind_assertions(blobs):
-    # AOTBlobKind is hand-written in AOTImage.h. The generator's role
-    # here is to guarantee the yaml kind_ids match the enum values, so
-    # a rename or renumber in one place is caught at compile time.
+    # Ensures schema kind identifiers match the runtime enumeration so a rename
+    # or renumbering causes a compile error.
     lines = []
     for name, blob in blobs.items():
         lines.append(
-            "static_assert(uint32_t(AOTBlobKind::%s) == %d,"
-            % (name, blob["kind_id"])
+            "static_assert(uint32_t(AOTBlobKind::%s) == %d," % (name, blob["kind_id"])
         )
         lines.append(
             '              "AOTImageSchema.yaml kind_id drift for %s");' % name
@@ -264,7 +250,10 @@ def main(c_out, yaml_path):
         body.append(emit_blob(name, blob))
     body.append("}  // namespace js::jit")
 
-    c_out.write(HEADER_TEMPLATE % {
-        "includeguard": "jit_AOTImageGenerated_h",
-        "contents": "\n".join(body),
-    })
+    c_out.write(
+        HEADER_TEMPLATE
+        % {
+            "includeguard": "jit_AOTImageGenerated_h",
+            "contents": "\n".join(body),
+        }
+    )

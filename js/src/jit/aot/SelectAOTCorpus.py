@@ -25,12 +25,12 @@ import struct
 import sys
 from pathlib import Path
 
-# Mirror AOTBlobFileHeader (see js/src/jit/AOTImage.h).
+# Keep these values synchronized with the binary artifact header.
 BLOB_FILE_MAGIC = 0x42544F41  # "AOTB"
 BLOB_FILE_FMT = "<IHHII20sIII"
 BLOB_FILE_HEADER_SIZE = struct.calcsize(BLOB_FILE_FMT)
 
-# Mirror AOTBlobKind.
+# Keep these values synchronized with the artifact kind definitions.
 KIND_BASELINE_INTERPRETER = 0
 KIND_BASELINE_FUNCTION = 1
 KIND_INLINE_CACHE_STUB = 2
@@ -47,8 +47,8 @@ def _read_header(path):
         buf = f.read(BLOB_FILE_HEADER_SIZE)
     if len(buf) < BLOB_FILE_HEADER_SIZE:
         raise ValueError(f"{path}: truncated header")
-    (magic, version, _r, kind, _probe, _id, fields, arrays, code) = (
-        struct.unpack(BLOB_FILE_FMT, buf)
+    (magic, version, _r, kind, _probe, _id, fields, arrays, code) = struct.unpack(
+        BLOB_FILE_FMT, buf
     )
     if magic != BLOB_FILE_MAGIC:
         raise ValueError(f"{path}: bad magic {magic:#x}")
@@ -102,18 +102,26 @@ def main(argv):
     p.add_argument("record_dir", help="input directory of .aotb files")
     p.add_argument("out_dir", help="output directory for kept .aotb files")
     p.add_argument(
-        "--blfun-budget", type=int, default=None,
+        "--blfun-budget",
+        type=int,
+        default=None,
         help="byte budget for baseline-function code; no budget by default",
     )
     p.add_argument(
-        "--ic-budget", type=int, default=None,
+        "--ic-budget",
+        type=int,
+        default=None,
         help="byte budget for IC stub code; no budget by default",
     )
     args = p.parse_args(argv)
-    prune(args.record_dir, args.out_dir, {
-        "blfun": args.blfun_budget,
-        "ic": args.ic_budget,
-    })
+    prune(
+        args.record_dir,
+        args.out_dir,
+        {
+            "blfun": args.blfun_budget,
+            "ic": args.ic_budget,
+        },
+    )
 
 
 if __name__ == "__main__":

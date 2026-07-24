@@ -181,8 +181,8 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
 #ifdef ENABLE_JS_AOT
   // Construct a JitCode that refers directly to static AOT .text. There
   // is no ExecutablePool or JitCodeHeader backing it.
-  static JitCode* NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
-                            CodeKind kind);
+  [[nodiscard]] static JitCode* NewStatic(JSContext* cx, uint8_t* code,
+                                          uint32_t codeSize, CodeKind kind);
 #endif
 
  public:

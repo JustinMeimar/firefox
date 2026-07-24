@@ -30,6 +30,7 @@
 #include "jit/shared/Assembler-shared.h"
 #include "jit/TrampolineNatives.h"
 #include "js/AllocPolicy.h"
+#include "js/HashTable.h"
 #include "js/ProfilingFrameIterator.h"
 #include "js/TypeDecls.h"
 #include "js/UniquePtr.h"
@@ -239,15 +240,20 @@ class JitRuntime {
   AOTIndirectionTable aotIndirectionTable_;
 
  public:
-  // A per-target shim that seeds the courier register with
-  // &aotIndirectionTable before jumping to the AOT target. Kept
-  // alive by the GC via traceAOTPreambleTrampolines.
+  // Keeps one entry trampoline for each AOT target alive through garbage
+  // collection.
   struct AOTPreambleTrampolineEntry {
     uint8_t* aotCode;
     JitCode* trampoline;
   };
   Vector<AOTPreambleTrampolineEntry, 0, SystemAllocPolicy>
       aotPreambleTrampolines_;
+
+  // Dedicated slot for the baseline interpreter's preamble trampoline.
+  // Callers reach the AOT interp exclusively through this pointer so
+  // there is no path that can hand out the raw interp entry and bypass
+  // the courier-register seed. Traced via traceAOTPreambleTrampolines.
+  JitCode* aotInterpPreambleTrampoline_ = nullptr;
 
   uint8_t* lookupAOTPreambleTrampoline(uint8_t* codeRaw) const {
     for (const auto& e : aotPreambleTrampolines_) {
@@ -259,7 +265,15 @@ class JitRuntime {
   }
 
   void traceAOTPreambleTrampolines(JSTracer* trc);
-  void clearAOTPreambleTrampolines() { aotPreambleTrampolines_.clear(); }
+  void clearAOTPreambleTrampolines() {
+    aotPreambleTrampolines_.clear();
+    aotInterpPreambleTrampoline_ = nullptr;
+  }
+
+  // Tracks which shared baseline code ranges already have profiler
+  // instrumentation enabled.
+  HashSet<uint8_t*, mozilla::DefaultHasher<uint8_t*>, SystemAllocPolicy>
+      staticCodeProfilerOn_;
 
   AOTArtifactRecorder* aotRecorder() const { return aotRecorder_.get(); }
   [[nodiscard]] bool ensureAOTRecorder(JSContext* cx);
@@ -353,25 +367,46 @@ class JitRuntime {
   }
   [[nodiscard]] bool populateAOTIndirectionTable(JSContext* cx);
 
-  // Emit a two-instruction shim that seeds passReg with
-  // &aotIndirectionTable_ and jumps to target. The returned JitCode is
-  // typically kept in aotPreambleTrampolines_ so the GC keeps it alive.
+  // Creates an entry trampoline that initializes the indirection table before
+  // entering static code.
   JitCode* generateAOTPreambleTrampoline(JSContext* cx, void* target,
                                          Register passReg);
 #endif
 
-  // Entry address for the baseline interpreter. Under AOT this is the
-  // preamble trampoline that seeds AOTFuncPassReg with the indirection
-  // table base; otherwise it is the raw interpreter code.
+  // Stores the baseline interpreter entry point. AOT code enters through a
+  // preamble that initializes the indirection table. Runtime generated code
+  // enters directly.
   uint8_t* baselineInterpreterEntryAddr() const {
-    uint8_t* raw = baselineInterpreter_.codeRaw();
 #ifdef ENABLE_JS_AOT
-    if (uint8_t* trampoline = lookupAOTPreambleTrampoline(raw)) {
-      return trampoline;
+    if (aotInterpPreambleTrampoline_) {
+      return aotInterpPreambleTrampoline_->raw();
     }
+    // No assert here: clearAOTPreambleTrampolines() nulls this field during
+    // runtime shutdown while scripts still get updateJitCodeRaw'd. The call
+    // sites that actually use the returned address for entry (EnterJit,
+    // EnterInterpreterEntryTrampoline, updateJitCodeRaw for live scripts)
+    // guard the raw-bytes case themselves via pointsIntoAOTInterpText.
 #endif
-    return raw;
+    return baselineInterpreter_.codeRaw();
   }
+
+#ifdef ENABLE_JS_AOT
+  // True iff addr lies within the AOT-loaded baseline interpreter's static
+  // .text region. Used by debug asserts that catch entries into the interp
+  // that bypass the preamble trampoline (which seeds AOTInterpPassReg).
+  bool pointsIntoAOTInterpText(uint8_t* addr) const {
+    JitCode* c = baselineInterpreter_.code();
+    if (!c || !c->isStaticCode()) {
+      return false;
+    }
+    uint8_t* start = c->raw();
+    uint8_t* end = start + c->instructionsSize();
+    return addr >= start && addr < end;
+  }
+  bool hasAOTInterpPreambleTrampoline() const {
+    return aotInterpPreambleTrampoline_ != nullptr;
+  }
+#endif
 
   static void TraceAtomZoneRoots(JSTracer* trc);
   static void TraceWeakJitcodeGlobalTable(JSRuntime* rt, JSTracer* trc);

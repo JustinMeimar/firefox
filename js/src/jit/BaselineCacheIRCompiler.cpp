@@ -2045,7 +2045,35 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::Baseline,
                                 writer.codeStart(), writer.codeLength());
 
-  code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+  stubInfo = nullptr;
+  code = nullptr;
+
+#ifdef ENABLE_JS_AOT
+  if (JitOptions.useAOTImage) {
+    JitZone* atomsJitZone = cx->runtime()->atomsZone()->jitZone();
+    MOZ_ASSERT(atomsJitZone);
+
+    JitCode* candidate =
+        atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+    bool hit = candidate && candidate->isStaticCode();
+    code = hit ? candidate : nullptr;
+    if (!hit) {
+      stubInfo = nullptr;
+    }
+
+    if (hit) {
+      MOZ_RELEASE_ASSERT(stubInfo);
+    } else if (JitOptions.aotEnforce) {
+      MOZ_CRASH_UNSAFE_PRINTF("AOT IC miss: kind=%s hash=%u",
+                              CacheKindNames[uint8_t(kind)],
+                              unsigned(CacheIRStubKey::hash(lookup)));
+    }
+  }
+#endif
+
+  if (!code) {
+    code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+  }
 
   if (!code && !IsPortableBaselineInterpreterEnabled()) {
     // We have to generate stub code.
@@ -2057,11 +2085,10 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     }
 
 #ifdef ENABLE_JS_AOT
-    // Two-pass under --aot-dump-baseline (or --aot-record): throwaway
-    // compile inside AutoAOTCodegen validates every ImmPtr against an
-    // AOTSlot. Under --aot-record the AOT bytes are handed to the
-    // recorder; otherwise they are discarded.
-    if (JitOptions.dumpAOTBaseline || JitOptions.aotRecordDir) {
+    // A throwaway AOT compilation validates that every pointer can be
+    // represented indirectly. Recording mode saves the captured bytes.
+    // Validation mode discards them.
+    if (JitOptions.shouldCaptureAOTBaseline()) {
       TempAllocator dumpTemp(&cx->tempLifoAlloc());
       BaselineCacheIRCompiler dumpComp(cx, dumpTemp, writer, StubDataOffset);
       if (!dumpComp.init(kind)) {
@@ -2075,10 +2102,9 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
       if (!dumpCode) {
         return false;
       }
-      JitSpew(JitSpew_BaselineAOT,
-              "baseline IC AOT capture ok: kind=%s bytes=%zu",
-              CacheKindNames[uint8_t(kind)],
-              size_t(dumpCode->instructionsSize()));
+      JitSpew(
+          JitSpew_BaselineAOT, "baseline IC AOT capture ok: kind=%s bytes=%zu",
+          CacheKindNames[uint8_t(kind)], size_t(dumpCode->instructionsSize()));
       if (AOTArtifactRecorder* rec =
               cx->runtime()->jitRuntime()->aotRecorder()) {
         AOTICStubMetadata md;

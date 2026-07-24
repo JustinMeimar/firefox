@@ -20,5 +20,6 @@ SOURCES += [
     "AOTImageIncbin.S",
 ]
 
-# The .incbin lookup is objdir-relative when using ASFLAGS -I.
+# The assembler searches for the generated image relative to the object
+# directory.
 LOCAL_INCLUDES += ["!."]

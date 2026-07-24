@@ -224,8 +224,7 @@ class FrameInfo {
   }
 #ifdef ENABLE_JS_AOT
   Address addressOfAOTTableBase() const {
-    return Address(FramePointer,
-                   BaselineFrame::reverseOffsetOfAOTTableBase());
+    return Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase());
   }
 #endif
 };

@@ -2,21 +2,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-# mach jit-aot: drives the two-stage AOT bootstrap.
-#
-# Stage 1 is the ordinary build linking against the empty placeholder
-# AOTImage.bin planted by GenerateEmptyAOTImage.py. Stage 2 lives
-# here:
-#
-#   `mach jit-aot build`      run the stage-1 shell to fill a record
-#                             dir, pack it into a real AOTImage.bin,
-#                             and touch AOTImageIncbin.S so a
-#                             follow-up ./mach build relinks
-#                             only the incbin object.
-#   `mach jit-aot regenerate` alias for build; re-runs even if the
-#                             stage-1 shell has not changed.
-#   `mach jit-aot verify`     run the jit-test suite under --aot and
-#                             report the two known allowed failures.
+# These commands create and validate AOT images. Building records artifacts with
+# a shell linked to an empty image, packs the selected artifacts, and prepares
+# the next build to relink the image. Regeneration repeats this work even when
+# the shell has not changed. Verification runs the JIT test suite with AOT
+# enabled.
 
 import logging
 import shutil
@@ -58,7 +48,8 @@ def jit_aot(command_context):
 
 
 @SubCommand(
-    "jit-aot", "build",
+    "jit-aot",
+    "build",
     description=(
         "Stage 2: run the stage-1 shell with --aot-record to fill an "
         "objdir record dir, pack it into AOTImage.bin, and touch the "
@@ -66,7 +57,8 @@ def jit_aot(command_context):
     ),
 )
 @CommandArgument(
-    "--workload", "-w",
+    "--workload",
+    "-w",
     default=None,
     help=(
         "Optional JS file to run under --aot-record after the self-"
@@ -78,7 +70,9 @@ def jit_aot_build(command_context, workload=None):
     shell = _shell_path(command_context)
     if not shell.exists():
         command_context.log(
-            logging.ERROR, "jit-aot", {},
+            logging.ERROR,
+            "jit-aot",
+            {},
             f"Stage-1 shell missing at {shell}; run ./mach build first.",
         )
         return 1
@@ -103,49 +97,64 @@ def jit_aot_build(command_context, workload=None):
         argv += ["-e", "quit(0);"]
 
     command_context.log(
-        logging.INFO, "jit-aot", {},
+        logging.INFO,
+        "jit-aot",
+        {},
         f"Recording AOT corpus into {record_dir}",
     )
     rc = command_context.run_process(
-        argv, pass_thru=True, ensure_exit_code=False,
+        argv,
+        pass_thru=True,
+        ensure_exit_code=False,
     )
     if rc != 0:
         return rc
 
     pack = aot_dir / "PackAOTImage.py"
-    schema = Path(command_context.topsrcdir) / "js" / "src" / "jit" \
-        / "AOTImageSchema.yaml"
+    schema = (
+        Path(command_context.topsrcdir) / "js" / "src" / "jit" / "AOTImageSchema.yaml"
+    )
     command_context.log(
-        logging.INFO, "jit-aot", {}, f"Packing corpus into {image_out}",
+        logging.INFO,
+        "jit-aot",
+        {},
+        f"Packing corpus into {image_out}",
     )
     rc = command_context.run_process(
-        [sys.executable, str(pack), "--schema", str(schema),
-         str(record_dir), str(image_out)],
-        pass_thru=True, ensure_exit_code=False,
+        [
+            sys.executable,
+            str(pack),
+            "--schema",
+            str(schema),
+            str(record_dir),
+            str(image_out),
+        ],
+        pass_thru=True,
+        ensure_exit_code=False,
     )
     if rc != 0:
         return rc
 
-    # The .S file .incbins the .bin; touching it forces a reassemble
-    # and relink on the next ./mach build without dirtying anything
-    # else.
+    # Touch the assembly source so the next build reassembles and relinks the
+    # embedded image.
     (aot_dir / "AOTImageIncbin.S").touch()
     command_context.log(
-        logging.INFO, "jit-aot", {},
+        logging.INFO,
+        "jit-aot",
+        {},
         "Wrote AOTImage.inc. Run `./mach build binaries` to relink.",
     )
     return 0
 
 
-@SubCommand("jit-aot", "regenerate",
-            description="Alias for `jit-aot build`.")
+@SubCommand("jit-aot", "regenerate", description="Alias for `jit-aot build`.")
 @CommandArgument("--workload", "-w", default=None)
 def jit_aot_regenerate(command_context, workload=None):
     return jit_aot_build(command_context, workload=workload)
 
 
-# Tests that fail under --aot for reasons unrelated to correctness.
-# See CLAUDE.md in js/src.
+# These tests are expected to fail with AOT enabled for reasons unrelated to
+# correctness.
 _ALLOWED_AOT_FAILURES = frozenset({
     "baseline/blinterp-trial-inlining.js",
     "ion/recover-objects.js",
@@ -153,25 +162,35 @@ _ALLOWED_AOT_FAILURES = frozenset({
 
 
 @SubCommand(
-    "jit-aot", "verify",
+    "jit-aot",
+    "verify",
     description=(
-        "Run the jit-test suite under --aot and report the two known "
-        "allowed failures."
+        "Run the jit-test suite under --aot and report the two known allowed failures."
     ),
 )
 def jit_aot_verify(command_context):
     shell = _shell_path(command_context)
     if not shell.exists():
         command_context.log(
-            logging.ERROR, "jit-aot", {}, f"Shell missing at {shell}",
+            logging.ERROR,
+            "jit-aot",
+            {},
+            f"Shell missing at {shell}",
         )
         return 1
-    jit_test = (Path(command_context.topsrcdir) / "js" / "src" / "jit-test"
-                / "jit_test.py")
+    jit_test = (
+        Path(command_context.topsrcdir) / "js" / "src" / "jit-test" / "jit_test.py"
+    )
     argv = [
-        sys.executable, str(jit_test), "--args=--aot", str(shell),
+        sys.executable,
+        str(jit_test),
+        "--args=--aot",
+        str(shell),
     ]
     command_context.log(
-        logging.INFO, "jit-aot", {}, f"Running: {' '.join(argv)}",
+        logging.INFO,
+        "jit-aot",
+        {},
+        f"Running: {' '.join(argv)}",
     )
     return subprocess.call(argv)

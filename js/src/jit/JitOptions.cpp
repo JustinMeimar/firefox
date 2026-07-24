@@ -47,6 +47,8 @@ T overrideDefault(const char* param, T dflt) {
       return false;
     }
     Warn(param, str);
+  } else if constexpr (std::is_same_v<T, const char*>) {
+    return str;
   } else {
     Maybe<int> value = ParseInt(str);
     if (value.isSome()) {
@@ -197,7 +199,9 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(dumpAOTBaseline, false);
   SET_DEFAULT(useAOTImage, false);
   SET_DEFAULT(aotEnforce, false);
-  aotRecordDir = nullptr;
+  if (const char* dir = getenv("JIT_OPTION_aotRecordDir")) {
+    aotRecordDir = dir;
+  }
 #endif
 
   // How many invocations or loop iterations are needed before functions

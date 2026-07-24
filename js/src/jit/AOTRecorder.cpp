@@ -39,9 +39,7 @@
 
 namespace js::jit {
 
-// ------------------------------------------------------------------
 // Filename helpers
-// ------------------------------------------------------------------
 
 static void HexEncode(const uint8_t* bytes, size_t len, char* out) {
   static const char Hex[] = "0123456789abcdef";
@@ -58,9 +56,7 @@ static uint64_t Prefix64(const uint8_t* bytes) {
   return v;
 }
 
-// ------------------------------------------------------------------
 // AOTArtifactRecorder
-// ------------------------------------------------------------------
 
 bool AOTArtifactRecorder::init(JSContext* cx, const char* dir) {
   directory_.assign(dir);
@@ -69,7 +65,12 @@ bool AOTArtifactRecorder::init(JSContext* cx, const char* dir) {
             directory_.c_str(), strerror(errno));
     return false;
   }
-  return true;
+  AOTBlobWriter blob(AOTBlobKind::Configuration, /* probeHash = */ 0,
+                     /* identityHash = */ nullptr);
+  if (!EncodeBlob_Configuration(blob, CurrentAOTConfiguration())) {
+    return false;
+  }
+  return writeBlobFile(cx, directory_ + "/configuration.aotb", blob);
 }
 
 bool AOTArtifactRecorder::wasSeen(const uint8_t identityHash[20]) {
@@ -84,15 +85,15 @@ bool AOTArtifactRecorder::wasSeen(const uint8_t identityHash[20]) {
 
 bool AOTArtifactRecorder::writeBlobFile(JSContext* cx, const std::string& path,
                                         const AOTBlobWriter& blob) {
-  // O_EXCL: filename encodes identity, so first writer wins. Concurrent
-  // record shells never race.
+  // Artifact names encode identity, so the first successful writer owns the
+  // file and concurrent recorders can safely ignore duplicates.
   int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
   if (fd < 0) {
     if (errno == EEXIST) {
       return true;
     }
-    JitSpew(JitSpew_BaselineAOT, "AOT record open failed: %s: %s",
-            path.c_str(), strerror(errno));
+    JitSpew(JitSpew_BaselineAOT, "AOT record open failed: %s: %s", path.c_str(),
+            strerror(errno));
     return false;
   }
   auto closeGuard = mozilla::MakeScopeExit([&] { close(fd); });
@@ -155,8 +156,9 @@ bool AOTArtifactRecorder::recordBaselineFunction(
   return writeBlobFile(cx, path, blob);
 }
 
-bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(
-    JSContext* cx, uint32_t* compiledOut, uint32_t* skippedOut) {
+bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
+                                                         uint32_t* compiledOut,
+                                                         uint32_t* skippedOut) {
   *compiledOut = 0;
   *skippedOut = 0;
 
@@ -177,8 +179,8 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(
     }
   }
 
-  // Mirrors GlobalObject::resolveSelfHostedFunctionSlow: self-hosted
-  // instantiation must not run the allocation-metadata builder.
+  // Self hosted function instantiation must not invoke the allocation metadata
+  // builder.
   AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
 
   for (JSAtom* rawAtom : names.get()) {
@@ -205,9 +207,8 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(
       continue;
     }
 
-    // Force the AOT capture pass by triggering a baseline compile at
-    // this point. The recorder receives the artifact via the normal
-    // BaselineCompile path.
+    // Trigger baseline compilation here so the recorder receives the generated
+    // artifact through the normal compilation path.
     Rooted<JSScript*> script(cx, fun->nonLazyScript());
     if (!script || !CanBaselineInterpretScript(script)) {
       (*skippedOut)++;
@@ -233,18 +234,15 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(
     (*compiledOut)++;
   }
 
-  JitSpew(JitSpew_BaselineAOT,
-          "AOT self-hosted corpus: recorded=%u skipped=%u",
+  JitSpew(JitSpew_BaselineAOT, "AOT self-hosted corpus: recorded=%u skipped=%u",
           *compiledOut, *skippedOut);
   return true;
 }
 
 bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
                                        const AOTICStubMetadata& md) {
-  // Identity: SHA-1 over the stub inputs that make its emitted code
-  // reproducible. Two stubs with the same identity have byte-identical
-  // .text (assuming identical AOT-mode masm state), so filename dedupe
-  // on identity is safe.
+  // Hash the inputs that determine generated stub code. Equal identities are
+  // safe to deduplicate by file name.
   mozilla::SHA1Sum sha;
   sha.update(&md.cacheKind, sizeof(md.cacheKind));
   if (!md.cacheIRCode.empty()) {

@@ -260,6 +260,9 @@ static constexpr Register AOTInterpPassReg = r12;
 // calls) and nothing in the baseline prologue touches it before
 // emitInitFrameFields reads it into the frame slot.
 static constexpr Register AOTFuncPassReg = r11;
+static_assert(AOTFuncPassReg == ScratchReg);
+static_assert(AOTInterpPassReg != ScratchReg);
+static_assert(Registers::VolatileMask & (1 << X86Encoding::r11));
 #endif
 
 static constexpr uint32_t ABIStackAlignment = 16;

@@ -17,9 +17,8 @@ using namespace js::jit;
 #ifdef ENABLE_JS_AOT
 
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
-  // Inside a baseline stub frame, source the table base from the stub
-  // frame slot (BaselineStubFrameLayout::AOTTableOffsetFromFP); everywhere
-  // else it lives in the baseline frame slot.
+  // Load the indirection table address from the stub frame when one is active.
+  // Otherwise load it from the baseline frame.
   if (inAOTStubFrame_) {
     MacroAssemblerSpecific::loadPtr(
         Address(FramePointer, BaselineStubFrameLayout::AOTTableOffsetFromFP),
@@ -85,27 +84,21 @@ void MacroAssembler::emitAOTStoreFrameTableBase(Register passReg,
                                                 Register scratch,
                                                 const Address& dst) {
   if (isAOT()) {
-    // AOT capture: table base was placed in the courier register by the
-    // AOT preamble trampoline.
+    // The entry preamble places the indirection table address in the register
+    // used to initialize this frame.
     storePtr(passReg, dst);
     return;
   }
-  // Non-AOT baseline frames still carry the table base as a hedge: any
-  // AOT-loaded stub called from this frame reads the slot to find the
-  // table. Guarding this on a JitOption is future work.
-  movePtr(
-      ImmPtr(runtime()->jitRuntime()->aotIndirectionTable().baseAddress()),
-      scratch);
+  // All baseline frames store the indirection table address so static inline
+  // cache stubs can access it.
+  movePtr(ImmPtr(runtime()->jitRuntime()->aotIndirectionTable().baseAddress()),
+          scratch);
   storePtr(scratch, dst);
 }
 
 void MacroAssembler::emitAOTCopyFrameTableBaseFromCaller(Register scratch) {
-  if (!isAOT()) {
-    return;
-  }
-  // Generator resume rebuilds a BaselineFrame from a saved snapshot; the
-  // caller's FP sits at [FramePointer + 0]. Follow it to read the caller's
-  // AOT table slot and mirror it into ours.
+  // When resuming a generator, copy the indirection table address from the
+  // caller's saved baseline frame into the reconstructed frame.
   loadPtr(Address(FramePointer, 0), scratch);
   loadPtr(Address(scratch, BaselineFrame::reverseOffsetOfAOTTableBase()),
           scratch);

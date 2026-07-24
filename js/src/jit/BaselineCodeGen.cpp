@@ -298,9 +298,8 @@ bool BaselineCompiler::extractAOTMetadata(BaselineScriptMetadata& md) {
   md.flags = compileDebugInstrumentation()
                  ? uint8_t(BaselineScript::HAS_DEBUG_INSTRUMENTATION)
                  : uint8_t(0);
-  // The compiler's RetAddrEntryVector and OSREntryVector carry an
-  // inline capacity that the metadata's Vector<T, 0> does not; copy
-  // rather than move to bridge the type mismatch.
+  // The compiler and serialized metadata use vectors with different inline
+  // capacities, so copy the entries instead of moving them.
   auto copyInto = [](auto& dst, const auto& src) {
     return dst.append(src.begin(), src.end());
   };
@@ -1497,8 +1496,8 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   }
 
 #ifdef ENABLE_JS_AOT
-  // scratch1 may still hold the interpreter PC on architectures with
-  // InterpreterPCReg. Use scratch2 for the store.
+  // The first scratch register may still hold the interpreter program counter
+  // on some targets, so use the second scratch register for this store.
   masm.emitAOTStoreFrameTableBase(AOTInterpPassReg, scratch2,
                                   frame.addressOfAOTTableBase());
 #endif
@@ -2098,7 +2097,10 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   // jump. Starts off initially disabled.
   Label noInstrument;
   CodeOffset toggleOffset = masm.toggledJump(&noInstrument);
-  masm.profilerExitFrame();
+  Register ptrReg = R1.scratchReg();
+  masm.movePtr(ImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value),
+               ptrReg);
+  masm.jump(ptrReg);
   masm.bind(&noInstrument);
 
   // Store the start offset in the appropriate location.
@@ -6630,9 +6632,8 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   masm.emitAOTCopyFrameTableBaseFromCaller(scratch1);
 #endif
 
-  // The profiler block must follow the AOT table-base init above:
-  // loadJSContext can reach through emitAOTSlotLoad and therefore depends
-  // on the frame slot being populated.
+  // Initialize the frame's indirection table before entering the profiler
+  // because profiler setup may load runtime state through that table.
   {
     Register scratchReg = scratch2;
     Label skip;

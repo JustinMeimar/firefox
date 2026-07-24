@@ -14,18 +14,16 @@ namespace js::jit {
 
 #ifdef ENABLE_JS_AOT
 
-// Immediate pointer values below this threshold are sentinel constants
-// (nullptr, tagged bits, etc.), not real runtime addresses. Bake them
-// in rather than looking them up in the indirection table.
+// Values below this threshold represent sentinels rather than runtime
+// addresses, so encode them directly.
 static constexpr uintptr_t kAOTBakeableSentinelLimit = 16;
 
 #  define AOT_CRASH_ON_UNKNOWN_PTR(kind, val)                             \
     do {                                                                  \
       if ((val) >= kAOTBakeableSentinelLimit) {                           \
-        MOZ_CRASH_UNSAFE_PRINTF(                                          \
-            "AOT: no indirection slot for " kind                          \
-            " %p, add to the AOT indirection table.",                     \
-            reinterpret_cast<void*>(val));                                \
+        MOZ_CRASH_UNSAFE_PRINTF("AOT: no indirection slot for " kind      \
+                                " %p, add to the AOT indirection table.", \
+                                reinterpret_cast<void*>(val));            \
       }                                                                   \
     } while (0)
 #endif
@@ -61,12 +59,11 @@ inline void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 inline void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
 #ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
-    if (auto slot = aotTable().findSlot(uintptr_t(imm.value))) {
+    if (auto slot = aotTable().findAtomSlot(uintptr_t(imm.value))) {
       emitAOTSlotLoad(*slot, dest);
       return;
     }
-    // GC pointers with no matching slot (for example script-specific
-    // atoms) fall through to a normal relocatable move.
+    // Other GC pointers retain their normal relocation behavior.
   }
 #endif
   MacroAssemblerSpecific::movePtr(imm, dest);

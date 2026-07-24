@@ -10,7 +10,7 @@
 
 #  include <cstring>
 
-#  include "jit/JitCode.h"
+#  include "jit/JitOptions.h"
 #  include "jit/JitSpewer.h"
 
 // Symbols exported by js/src/jit/aot/AOTImageIncbin.S. The .S file
@@ -73,8 +73,7 @@ mozilla::Maybe<AOTBlobReader> AOTImage::findUnique(AOTBlobKind kind) const {
 }
 
 mozilla::Maybe<AOTBlobReader> AOTImage::findByIdentity(
-    AOTBlobKind kind, uint32_t probeHash,
-    const uint8_t* identityHash) const {
+    AOTBlobKind kind, uint32_t probeHash, const uint8_t* identityHash) const {
   const auto* dir = directory();
   const uint8_t* textBase = base_ + header()->textOffset;
   for (uint32_t i = 0; i < blobCount(); i++) {
@@ -94,9 +93,8 @@ static uint32_t AlignUp(uint32_t v, uint32_t a) {
   return (v + (a - 1)) & ~(a - 1);
 }
 
-// Layout accumulator: assigns wire offsets for every section of the
-// finalized image. Kept separate from finalize() below so both stream
-// and buffer variants can share it.
+// Computes byte offsets for every section of a finalized image. Keeping layout
+// separate allows stream and buffer output to share the calculation.
 namespace {
 struct ImageLayout {
   uint32_t fingerprintOffset;
@@ -114,8 +112,7 @@ static bool ComputeLayout(
     const Vector<AOTBlobWriter, 0, SystemAllocPolicy>& blobs,
     ImageLayout& out) {
   out.fingerprintOffset = sizeof(image::Header);
-  uint32_t afterFingerprint =
-      out.fingerprintOffset + image::FingerprintSize;
+  uint32_t afterFingerprint = out.fingerprintOffset + image::FingerprintSize;
   out.directoryOffset = AlignUp(afterFingerprint, image::Alignment);
 
   uint32_t cursor =
@@ -174,8 +171,7 @@ bool AOTImageBuilder::finalize(Vector<uint8_t, 0, SystemAllocPolicy>& out,
 
   uint8_t* base = out.begin();
   WriteHeader(base, layout, uint32_t(blobs_.length()));
-  memcpy(base + layout.fingerprintOffset, fingerprint,
-         image::FingerprintSize);
+  memcpy(base + layout.fingerprintOffset, fingerprint, image::FingerprintSize);
   memcpy(base + layout.directoryOffset, layout.entries.begin(),
          layout.entries.length() * sizeof(image::DirectoryEntry));
   for (size_t i = 0; i < blobs_.length(); i++) {
@@ -196,8 +192,7 @@ bool AOTImageBuilder::finalize(Vector<uint8_t, 0, SystemAllocPolicy>& out,
   return true;
 }
 
-bool AOTImageBuilder::finalize(std::ostream& out,
-                               const uint8_t* fingerprint) {
+bool AOTImageBuilder::finalize(std::ostream& out, const uint8_t* fingerprint) {
   Vector<uint8_t, 0, SystemAllocPolicy> buffer;
   if (!finalize(buffer, fingerprint)) return false;
   out.write(reinterpret_cast<const char*>(buffer.begin()),
@@ -205,9 +200,16 @@ bool AOTImageBuilder::finalize(std::ostream& out,
   return bool(out);
 }
 
-JitCode* AllocateAOTCode(JSContext* cx, uint8_t* codeStart, uint32_t codeSize,
-                         CodeKind kind) {
-  return JitCode::NewStatic(cx, codeStart, codeSize, kind);
+AOTConfigurationMetadata CurrentAOTConfiguration() {
+  return {
+      .disableInlining = JitOptions.disableInlining,
+      .spectreObjectMitigations = JitOptions.spectreObjectMitigations,
+      .spectreStringMitigations = JitOptions.spectreStringMitigations,
+      .baselineBatching = JitOptions.baselineBatching,
+      .baselineJitWarmUpThreshold = JitOptions.baselineJitWarmUpThreshold,
+      .baselineQueueCapacity = JitOptions.baselineQueueCapacity,
+      .trialInliningWarmUpThreshold = JitOptions.trialInliningWarmUpThreshold,
+  };
 }
 
 }  // namespace js::jit

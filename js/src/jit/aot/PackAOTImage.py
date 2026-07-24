@@ -3,10 +3,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-# Reads all .aotb files under a record directory and packs them into a
-# single AOTImage.bin. Bit-compatible with the C++ AOTImage reader
-# defined in js/src/jit/AOTImage.h; the layout constants below mirror
-# the definitions there and must be updated in lockstep.
+# Combines recorded artifacts into one image. Its layout constants must remain
+# synchronized with the runtime reader.
 
 import argparse
 import glob
@@ -15,27 +13,28 @@ import os
 import struct
 import sys
 
-# Wire constants (mirror image::* in js/src/jit/AOTImage.h).
+# Constants shared with the runtime image format.
 IMAGE_MAGIC = 0x49544F41  # "AOTI"
-IMAGE_VERSION = 2
+IMAGE_VERSION = 3
 FINGERPRINT_SIZE = 20
 ALIGNMENT = 16
 TEXT_ALIGNMENT = 4096
-# JitCode addresses land in GC cell words that reserve the low 3 bits;
-# CodeAlignment on every supported arch is >= 8, so 16 is safe.
+# JIT code addresses reserve three low bits in GC cell words. All supported
+# targets use at least eight byte alignment, so sixteen byte alignment is
+# sufficient.
 CODE_ALIGNMENT = 16
 
-# Header layout: <IHHIIIIIII (36 bytes)
+# The image header occupies 36 bytes.
 HEADER_FMT = "<IHHIIIIIII"
 HEADER_SIZE = struct.calcsize(HEADER_FMT)
 assert HEADER_SIZE == 36, HEADER_SIZE
 
-# DirectoryEntry: <II20sIIIII (48 bytes)
+# Each directory entry occupies 48 bytes.
 DIR_ENTRY_FMT = "<II20sIIIII"
 DIR_ENTRY_SIZE = struct.calcsize(DIR_ENTRY_FMT)
 assert DIR_ENTRY_SIZE == 48, DIR_ENTRY_SIZE
 
-# Blob file constants (mirror AOTBlobFileHeader).
+# Constants shared with the intermediate artifact header.
 BLOB_FILE_MAGIC = 0x42544F41  # "AOTB"
 BLOB_FILE_VERSION = 1
 BLOB_FILE_FMT = "<IHHII20sIII"
@@ -96,12 +95,8 @@ def pack(record_dir, schema_path, out_path):
     blobs = [Blob(p) for p in paths]
 
     fingerprint_offset = HEADER_SIZE
-    directory_offset = align_up(
-        fingerprint_offset + FINGERPRINT_SIZE, ALIGNMENT
-    )
-    data_start = align_up(
-        directory_offset + DIR_ENTRY_SIZE * len(blobs), ALIGNMENT
-    )
+    directory_offset = align_up(fingerprint_offset + FINGERPRINT_SIZE, ALIGNMENT)
+    data_start = align_up(directory_offset + DIR_ENTRY_SIZE * len(blobs), ALIGNMENT)
 
     entries = []
     cursor = data_start
@@ -165,9 +160,7 @@ def pack(record_dir, schema_path, out_path):
         b = blobs[i]
         p = e["dataOffset"]
         buf[p : p + e["fieldsSize"]] = b.fields
-        buf[p + e["fieldsSize"] : p + e["fieldsSize"] + e["arraysSize"]] = (
-            b.arrays
-        )
+        buf[p + e["fieldsSize"] : p + e["fieldsSize"] + e["arraysSize"]] = b.arrays
         t = text_offset + e["textOffset"]
         buf[t : t + e["textSize"]] = b.code
 

@@ -45,11 +45,10 @@ class MOZ_RAII AutoWritableJitCodeFallible {
   AutoMarkJitCodeWritableForThread writableForThread_;
 
 #ifdef ENABLE_JS_AOT
-  // Static AOT code lives in the binary's r-x .text pages rather than
-  // the JIT pool, so ExecutableAllocator::makeWritable would assert.
-  // Toggle protection with mprotect over the page range covering
-  // [addr, addr + size). This CoWs the page on first write; sharing
-  // across processes is lost until the process exits.
+  // Static code lives in executable pages outside the JIT allocator.
+  // Temporarily make the containing pages writable when instrumentation
+  // modifies the code. The first write makes those pages private to the
+  // process.
   [[nodiscard]] static bool StaticMprotect(void* addr, size_t size,
                                            bool writable) {
     size_t page = gc::SystemPageSize();
