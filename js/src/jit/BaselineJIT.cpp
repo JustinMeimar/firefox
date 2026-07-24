@@ -473,7 +473,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
     if (cx->runtime()->geckoProfiler().enabled()) {
       dumpMasm.enableProfilingInstrumentation();
     }
-    AutoAOTCodegen aotScope(dumpMasm, cx);
+    AutoAOTCodegen aotScope(dumpMasm, cx, script->zone());
     BaselineCompiler dumpCompiler(dumpTemp, CompileRuntime::get(cx->runtime()),
                                   dumpMasm, &snapshot);
     if (!dumpCompiler.init()) {

@@ -34,15 +34,35 @@ inline void MacroAssembler::loadRuntime(Register reg) {
   movePtr(ImmPtr(runtime()), reg);
 }
 
-inline void MacroAssembler::loadZoneBase(Register dest) {
+inline CompileZone* MacroAssembler::compilationZone() const {
 #ifdef ENABLE_JS_AOT
-  if (isAOT()) {
-    loadZoneForAOT(dest);
-    return;
+  if (MOZ_UNLIKELY(isAOT())) {
+    MOZ_ASSERT(aotCaptureZone_);
+    return aotCaptureZone_;
   }
 #endif
-  MacroAssemblerSpecific::movePtr(ImmPtr(realm()->zone()->zone()), dest);
+  return realm()->zone();
 }
+
+#ifdef ENABLE_JS_AOT
+inline mozilla::Maybe<int32_t> MacroAssembler::findAOTZoneAddressOffset(
+    uintptr_t address) const {
+  MOZ_ASSERT(isAOT());
+  return FindAOTZoneAddressOffset(address, aotCaptureZone_->zone());
+}
+
+inline mozilla::Maybe<int32_t> MacroAssembler::findAOTZoneValueOffset(
+    uintptr_t value) const {
+  MOZ_ASSERT(isAOT());
+  return FindAOTZoneValueOffset(value, aotCaptureZone_->zone());
+}
+
+inline void MacroAssembler::computeAOTZoneAddress(int32_t offset,
+                                                  Register dest) {
+  loadZoneForAOT(dest);
+  addPtr(Imm32(offset), dest);
+}
+#endif
 
 inline void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 #ifdef ENABLE_JS_AOT
@@ -50,6 +70,15 @@ inline void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
     uintptr_t val = uintptr_t(imm.value);
     if (auto slot = aotTable().findSlot(val)) {
       emitAOTSlotLoad(*slot, dest);
+      return;
+    }
+    if (auto offset = findAOTZoneAddressOffset(val)) {
+      computeAOTZoneAddress(*offset, dest);
+      return;
+    }
+    if (auto offset = findAOTZoneValueOffset(val)) {
+      computeAOTZoneAddress(*offset, dest);
+      MacroAssemblerSpecific::loadPtr(Address(dest, 0), dest);
       return;
     }
     AOT_CRASH_ON_UNKNOWN_PTR("movePtr(ImmPtr)", val);
@@ -78,6 +107,11 @@ inline void MacroAssembler::loadPtr(AbsoluteAddress addr, Register dest) {
     uintptr_t val = uintptr_t(addr.addr);
     if (auto slot = aotTable().findSlot(val)) {
       emitAOTSlotLoad(*slot, dest);
+      MacroAssemblerSpecific::loadPtr(Address(dest, 0), dest);
+      return;
+    }
+    if (auto offset = findAOTZoneAddressOffset(val)) {
+      computeAOTZoneAddress(*offset, dest);
       MacroAssemblerSpecific::loadPtr(Address(dest, 0), dest);
       return;
     }
@@ -112,6 +146,13 @@ inline void MacroAssembler::storePtr(Register src, AbsoluteAddress address) {
     if (auto slot = aotTable().findSlot(val)) {
       ScratchRegisterScope scratch(*this);
       emitAOTSlotLoad(*slot, scratch);
+      MacroAssemblerSpecific::storePtr(src, Address(scratch, 0));
+      return;
+    }
+    if (auto offset = findAOTZoneAddressOffset(val)) {
+      ScratchRegisterScope scratch(*this);
+      MOZ_ASSERT(src != scratch);
+      computeAOTZoneAddress(*offset, scratch);
       MacroAssemblerSpecific::storePtr(src, Address(scratch, 0));
       return;
     }

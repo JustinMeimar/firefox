@@ -18,6 +18,10 @@
 
 struct JS_PUBLIC_API JSContext;
 
+namespace JS {
+class Zone;
+}
+
 namespace js::jit {
 
 class JitCode;
@@ -30,10 +34,9 @@ extern const double MathRandomScaleInv;
 // code for the baseline interpreter, inline cache stubs, and self-hosted
 // builtins.
 //
-// To make emitted code position-independent w.r.t. runtime pointers,
-// every value an AOT masm scope would otherwise bake in as an ImmPtr is
-// enumerated in AOTSlot and resolved at run time by an indirect load
-// through the JSRuntime-owned AOTIndirectionTable.
+// Runtime-wide pointers are enumerated in AOTSlot and resolved through
+// the JSRuntime-owned AOTIndirectionTable. Zone-relative operands declared
+// in AOTSlots.tbl are rebuilt from the current JSContext's Zone.
 //
 // Table access, per call path:
 //   Baseline frame:      frame slot -> table base -> slot value
@@ -75,6 +78,11 @@ inline AOTSlot AOTSlotForABIFn(uint32_t idx) {
 }
 
 const char* AOTSlotName(AOTSlot slot);
+
+mozilla::Maybe<int32_t> FindAOTZoneAddressOffset(uintptr_t address,
+                                                 JS::Zone* zone);
+mozilla::Maybe<int32_t> FindAOTZoneValueOffset(uintptr_t value,
+                                               JS::Zone* zone);
 
 class AOTIndirectionTable {
  public:

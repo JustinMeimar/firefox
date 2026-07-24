@@ -9,6 +9,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Maybe.h"
 
+#include "gc/Zone.h"
 #include "jit/JitContext.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
@@ -68,6 +69,49 @@ mozilla::Maybe<AOTSlot> AOTIndirectionTable::findAtomSlot(
     return mozilla::Some(AOTSlot::name);          \
   }
 #include "jit/AOTSlots.tbl"
+#undef AOT_ATOM_SLOT
+#undef AOT_SLOT
+  return mozilla::Nothing();
+}
+
+static int32_t AOTZoneOffset(size_t offset) {
+  MOZ_ASSERT(offset <= size_t(INT32_MAX));
+  return int32_t(offset);
+}
+
+mozilla::Maybe<int32_t> FindAOTZoneAddressOffset(uintptr_t address,
+                                                 JS::Zone* zone) {
+  uintptr_t zoneBase = uintptr_t(zone);
+  if (address < zoneBase) {
+    return mozilla::Nothing();
+  }
+  uintptr_t offset = address - zoneBase;
+#define AOT_SLOT(...)
+#define AOT_ATOM_SLOT(...)
+#define AOT_ZONE_ADDRESS_SLOT(name, offsetExpr)      \
+  if (offset == uintptr_t(offsetExpr)) {             \
+    return mozilla::Some(AOTZoneOffset(offsetExpr)); \
+  }
+#include "jit/AOTSlots.tbl"
+#undef AOT_ZONE_ADDRESS_SLOT
+#undef AOT_ATOM_SLOT
+#undef AOT_SLOT
+  return mozilla::Nothing();
+}
+
+mozilla::Maybe<int32_t> FindAOTZoneValueOffset(uintptr_t value,
+                                               JS::Zone* zone) {
+  if (value == 0) {
+    return mozilla::Nothing();
+  }
+#define AOT_SLOT(...)
+#define AOT_ATOM_SLOT(...)
+#define AOT_ZONE_VALUE_SLOT(name, offsetExpr, valueExpr) \
+  if (value == uintptr_t(valueExpr)) {                   \
+    return mozilla::Some(AOTZoneOffset(offsetExpr));     \
+  }
+#include "jit/AOTSlots.tbl"
+#undef AOT_ZONE_VALUE_SLOT
 #undef AOT_ATOM_SLOT
 #undef AOT_SLOT
   return mozilla::Nothing();

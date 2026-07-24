@@ -3813,9 +3813,7 @@ static void CallRegExpStub(MacroAssembler& masm, size_t jitZoneStubOffset,
   // pretenuring heuristics that affect behavior of the stub). This is uncommon
   // but can happen if we discarded all JIT code but had some active (Baseline)
   // scripts on the stack.
-  masm.loadJSContext(temp);
-  masm.loadPtr(Address(temp, JSContext::offsetOfZone()), temp);
-  masm.loadPtr(Address(temp, Zone::offsetOfJitZone()), temp);
+  masm.movePtr(ImmPtr(masm.compilationZone()->jitZone()), temp);
   masm.loadPtr(Address(temp, jitZoneStubOffset), temp);
   masm.branchTestPtr(Assembler::Zero, temp, temp, vmCall);
   masm.call(Address(temp, JitCode::offsetOfCode()));

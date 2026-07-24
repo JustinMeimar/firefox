@@ -11,6 +11,7 @@
 
 #  include "mozilla/Attributes.h"
 
+#  include "jit/CompileWrappers.h"
 #  include "jit/JitRuntime.h"
 #  include "jit/MacroAssembler.h"
 #  include "vm/JSContext.h"
@@ -21,10 +22,10 @@ namespace js::jit {
 // [SMDOC] AutoAOTCodegen
 //
 // RAII scope that switches a MacroAssembler into AOT capture mode. On
-// construction it installs the JitRuntime's AOTIndirectionTable on the
-// masm; on destruction it uninstalls. While alive, masm.isAOT() is true
-// and ImmPtr overrides route runtime pointers through the indirection
-// table instead of baking them in.
+// construction it installs the JitRuntime's AOTIndirectionTable and the
+// capture Zone on the masm; on destruction it uninstalls them. While alive,
+// masm.isAOT() is true and pointer overrides emit relocatable operands. The
+// capture Zone is only used to classify operands.
 //
 //   StackMacroAssembler masm(cx, temp);
 //   AutoAOTCodegen aot(masm, cx);
@@ -34,11 +35,17 @@ namespace js::jit {
 // is emitted; both are enforced by MacroAssembler::setAOTTable.
 class MOZ_STACK_CLASS AutoAOTCodegen {
  public:
-  AutoAOTCodegen(MacroAssembler& masm, JSContext* cx) : masm_(masm) {
-    masm_.setAOTTable(&cx->runtime()->jitRuntime()->aotIndirectionTable());
+  AutoAOTCodegen(MacroAssembler& masm, JSContext* cx)
+      : AutoAOTCodegen(masm, cx, cx->zone()) {}
+
+  AutoAOTCodegen(MacroAssembler& masm, JSContext* cx, JS::Zone* zone)
+      : masm_(masm) {
+    MOZ_ASSERT(zone);
+    masm_.setAOTTable(&cx->runtime()->jitRuntime()->aotIndirectionTable(),
+                      CompileZone::get(zone));
   }
 
-  ~AutoAOTCodegen() { masm_.setAOTTable(nullptr); }
+  ~AutoAOTCodegen() { masm_.setAOTTable(nullptr, nullptr); }
 
   AutoAOTCodegen(const AutoAOTCodegen&) = delete;
   AutoAOTCodegen& operator=(const AutoAOTCodegen&) = delete;

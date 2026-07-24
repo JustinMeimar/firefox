@@ -383,25 +383,21 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
 void MacroAssembler::freeListAllocate(Register result, Register temp,
                                       gc::AllocKind allocKind, Label* fail) {
   int thingSize = int(gc::Arena::thingSize(allocKind));
+  AbsoluteAddress freeList(compilationZone()->addressOfFreeList(allocKind));
 
   Label fallback;
   Label success;
 
   // Load the first and last offsets of the zone's free list for |allocKind|.
   // If there is no room remaining in the span, fall back to get the next one.
-  auto loadFreeList = [this, allocKind](Register target) {
-    loadZoneBase(target);
-    loadPtr(Address(target, Zone::offsetOfFreeList(allocKind)), target);
-  };
-
-  loadFreeList(temp);
+  loadPtr(freeList, temp);
   load16ZeroExtend(Address(temp, js::gc::FreeSpan::offsetOfFirst()), result);
   load16ZeroExtend(Address(temp, js::gc::FreeSpan::offsetOfLast()), temp);
   branch32(Assembler::AboveOrEqual, result, temp, &fallback);
 
   // Bump the offset for the next allocation.
   add32(Imm32(thingSize), result);
-  loadFreeList(temp);
+  loadPtr(freeList, temp);
   store16(result, Address(temp, js::gc::FreeSpan::offsetOfFirst()));
   sub32(Imm32(thingSize), result);
   addPtr(temp, result);  // Turn the offset into a pointer.
@@ -412,7 +408,7 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   // interpreter will call the GC allocator to set up a new arena to allocate
   // from, after which we can resume allocating in the jit.
   branchTest32(Assembler::Zero, result, result, fail);
-  loadFreeList(temp);
+  loadPtr(freeList, temp);
   addPtr(temp, result);  // Turn the offset into a pointer.
   Push(result);
   // Update the free list to point to the next span (which may be empty).
@@ -833,20 +829,19 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
                                      Register scratch2,
                                      const LiveRegisterSet& liveRegs) {
   Label done, abiCall;
+  JS::Zone* zone = compilationZone()->zone();
 
-  loadZoneBase(scratch2);
-  loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappersCount()),
+  loadPtr(AbsoluteAddress(zone->addressOfPreservedWrappersCount()),
           scratchSuccess);
   branchPtr(Assembler::Equal,
-            Address(scratch2, Zone::offsetOfPreservedWrappersCapacity()),
+            AbsoluteAddress(zone->addressOfPreservedWrappersCapacity()),
             scratchSuccess, &abiCall);
-  loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappers()), scratch2);
+  loadPtr(AbsoluteAddress(zone->addressOfPreservedWrappers()), scratch2);
 
   storePtr(wrapper, BaseIndex(scratch2, scratchSuccess, ScalePointer));
   addPtr(Imm32(1), scratchSuccess);
-  loadZoneBase(scratch2);
   storePtr(scratchSuccess,
-           Address(scratch2, Zone::offsetOfPreservedWrappersCount()));
+           AbsoluteAddress(zone->addressOfPreservedWrappersCount()));
   move32(Imm32(1), scratchSuccess);
 
   jump(&done);

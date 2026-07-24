@@ -113,3 +113,24 @@ AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float64,       &TypedArrayObject::resiz
 AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Uint8Clamped,  &TypedArrayObject::resizableClasses[Scalar::Uint8Clamped])
 AOT_SLOT(Ptr_TypedArrayClasses_Resizable_BigInt64,      &TypedArrayObject::resizableClasses[Scalar::BigInt64])
 AOT_SLOT(Ptr_TypedArrayClasses_Resizable_Float16,       &TypedArrayObject::resizableClasses[Scalar::Float16])
+
+// --- Zone-relative operands ---
+
+#ifdef AOT_ZONE_ADDRESS_SLOT
+#define AOT_FREE_LIST_SLOT(kind, ...) \
+  AOT_ZONE_ADDRESS_SLOT(FreeList_##kind, \
+                        Zone::offsetOfFreeList(gc::AllocKind::kind))
+FOR_EACH_ALLOCKIND(AOT_FREE_LIST_SLOT)
+#undef AOT_FREE_LIST_SLOT
+
+AOT_ZONE_ADDRESS_SLOT(PreservedWrappers,
+                      Zone::offsetOfPreservedWrappers())
+AOT_ZONE_ADDRESS_SLOT(PreservedWrappersCount,
+                      Zone::offsetOfPreservedWrappersCount())
+AOT_ZONE_ADDRESS_SLOT(PreservedWrappersCapacity,
+                      Zone::offsetOfPreservedWrappersCapacity())
+#endif
+
+#ifdef AOT_ZONE_VALUE_SLOT
+AOT_ZONE_VALUE_SLOT(JitZone, Zone::offsetOfJitZone(), zone->jitZone())
+#endif

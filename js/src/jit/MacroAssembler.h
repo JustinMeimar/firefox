@@ -359,6 +359,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
 #ifdef ENABLE_JS_AOT
   AOTIndirectionTable* aotTable_ = nullptr;
+  CompileZone* aotCaptureZone_ = nullptr;
   bool inAOTStubFrame_ = false;
 #endif
 
@@ -386,15 +387,17 @@ class MacroAssembler : public MacroAssemblerSpecific {
     return *aotTable_;
   }
 
-  void setAOTTable(AOTIndirectionTable* table) {
+  void setAOTTable(AOTIndirectionTable* table, CompileZone* captureZone) {
     MOZ_ASSERT((aotTable_ == nullptr) != (table == nullptr),
                "AOT table must be installed and uninstalled in balanced pairs");
+    MOZ_ASSERT((table == nullptr) == (captureZone == nullptr));
     if (table) {
       MOZ_ASSERT(currentOffset() == 0,
                  "AOT scope must be installed before any code is emitted");
       maybeRealm_ = nullptr;
     }
     aotTable_ = table;
+    aotCaptureZone_ = captureZone;
   }
 
   class MOZ_RAII AutoInAOTStubFrame {
@@ -412,6 +415,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   };
 
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
+  mozilla::Maybe<int32_t> findAOTZoneAddressOffset(uintptr_t address) const;
+  mozilla::Maybe<int32_t> findAOTZoneValueOffset(uintptr_t value) const;
+  void computeAOTZoneAddress(int32_t offset, Register dest);
   void loadZoneForAOT(Register dest);
   void callPreBarrierAOT(MIRType type, Register scratch);
   void emitAOTDispatch(Register opcodeReg, Register tableReg);
@@ -448,6 +454,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
     return maybeRealm();
   }
   CompileRealm* maybeRealm() const { return maybeRealm_; }
+  inline CompileZone* compilationZone() const;
   CompileRuntime* runtime() const {
     MOZ_ASSERT(maybeRuntime_);
     return maybeRuntime_;
@@ -6142,7 +6149,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void jump(TrampolinePtr code);
 
   inline void loadRuntime(Register reg);
-  inline void loadZoneBase(Register dest);
 
  private:
   void handleFailure();
