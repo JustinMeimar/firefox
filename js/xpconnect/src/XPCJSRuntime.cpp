@@ -10,6 +10,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/UniquePtr.h"
 
+#include "JitInstrReporter.h"
 #include "xpcprivate.h"
 #include "xpcpublic.h"
 #include "XPCMaps.h"
@@ -3279,6 +3280,7 @@ void XPCJSRuntime::Initialize(JSContext* cx) {
   RegisterStrongMemoryReporter(MakeAndAddRef<JSMainRuntimeRealmsReporter>());
   RegisterStrongMemoryReporter(
       MakeAndAddRef<JSMainRuntimeTemporaryPeakReporter>());
+  mozilla::JitInstrReporter::Register();
   RegisterJSMainRuntimeGCHeapDistinguishedAmount(
       JSMainRuntimeGCHeapDistinguishedAmount);
   RegisterJSMainRuntimeTemporaryPeakDistinguishedAmount(

@@ -12733,11 +12733,7 @@ int main(int argc, char** argv) {
   JS_SetAccumulateTelemetryCallback(cx, AccumulateTelemetryDataCallback);
   JS_SetSetUseCounterCallback(cx, SetUseCounterCallback);
 
-  js::jit::JSInstr::RuntimeAttach(cx);
-  auto destroyCx = MakeScopeExit([cx] {
-    js::jit::JSInstr::RuntimeDetach(cx);
-    JS_DestroyContext(cx);
-  });
+  auto destroyCx = MakeScopeExit([cx] { JS_DestroyContext(cx); });
 
   UniquePtr<ShellContext> sc =
       MakeUnique<ShellContext>(cx, ShellContext::MainThread);

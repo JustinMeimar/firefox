@@ -10,6 +10,8 @@
 #include "mozilla/HashTable.h"
 #include "mozilla/TimeStamp.h"
 
+#include "prtime.h"
+
 #ifndef JS_STANDALONE
 #  include "mozilla/ProcessType.h"
 #endif
@@ -25,22 +27,15 @@
 #include <unistd.h>
 
 #include "jit/ExecutableAllocator.h"
-#include "jit/InstrSnapshot.h"
 #include "jit/JitCode.h"
 #include "jit/JitOptions.h"
 #include "js/AllocPolicy.h"
-#include "js/Interrupt.h"
 #include "js/Vector.h"
 #include "threading/LockGuard.h"
 #include "threading/Mutex.h"
 #include "vm/JSContext.h"
 #include "vm/JSScript.h"
 #include "vm/MutexIDs.h"
-
-#ifdef XP_LINUX
-#  include <pthread.h>
-#  include <signal.h>
-#endif
 
 using namespace js;
 using namespace js::jit;
@@ -690,11 +685,6 @@ class InstrRegistry {
 
 // -------------------------- singleton state --------------------------
 
-struct CtxEntry {
-  JSContext* cx;
-  uint64_t lastEpoch;
-};
-
 struct InstrGlobal {
   std::atomic<uint32_t> channels{0};
   InstrMode mode = InstrMode::Structural;
@@ -702,24 +692,6 @@ struct InstrGlobal {
   InstrRegistry registry;
   char runId[256] = {0};
   bool initialized = false;
-
-  // Registered runtimes (owning JSContext*). Snapshot signal thread
-  // walks this list and calls JS_RequestInterruptCallback on each. The
-  // per-entry lastEpoch is compared against the signal thread's global
-  // epoch so the interrupt callback fires the snapshot only once per
-  // SIGUSR1, no matter how many spurious internal interrupts occur.
-  js::Mutex ctxLock MOZ_UNANNOTATED{js::mutexid::JSInstrumentation};
-  js::Vector<CtxEntry, 4, js::SystemAllocPolicy> ctxs;
-
-  // Snapshot signal state. epoch is bumped by the reader thread on
-  // each SIGUSR1; marker holds the string that ships with the next
-  // snapshot round. Written by reader thread, read by interrupt
-  // callbacks; protected by signalLock.
-  js::Mutex signalLock MOZ_UNANNOTATED{js::mutexid::JSInstrumentation};
-  uint64_t signalEpoch = 0;
-  char signalMarker[256] = {0};
-  int signalPipeR = -1;
-  int signalPipeW = -1;
 };
 
 InstrGlobal* GlobalPtr() {
@@ -748,8 +720,6 @@ uint32_t ParseChannels(const char* env) {
 }  // namespace
 
 namespace js::jit {
-
-static void InitInstrSignal();
 
 const char* Name(InstrMode m) { return NameOf(m); }
 const char* Name(SourceClass c) { return NameOf(c); }
@@ -784,13 +754,20 @@ void JSInstr::Init() {
       JitOptions.instrDemandMode = true;
     }
 
-    g->sink.EmitLine("run-header", 0, [g, channels](JsonlBuilder& b) {
+    // Wall-clock epoch in microseconds since the Unix epoch, captured
+    // at log-open time. Every subsequent event line's `ts_us` is an
+    // offset from this moment. The harness computes absolute wall
+    // time for any event as `wall_us_epoch + ts_us`, which is how it
+    // aligns per-process JSONL files without needing coordinated
+    // triggers.
+    uint64_t wallUsEpoch = uint64_t(PR_Now());
+
+    g->sink.EmitLine("run-header", 0, [g, channels, wallUsEpoch](JsonlBuilder& b) {
       b.Str("run_id", g->runId);
       b.Str("mode", NameOf(g->mode));
       b.U32("channels", channels);
+      b.U64("wall_us_epoch", wallUsEpoch);
     });
-
-    InitInstrSignal();
   });
 
   InstrGlobal* g = GlobalPtr();
@@ -1037,19 +1014,14 @@ void JSInstr::LogSnapshotMarker(const char* marker) {
 }
 
 void JSInstr::LogSnapshotFootprint(uint32_t poolId, const char* poolKind,
-                                   size_t mmapBytes, int64_t residentBytes,
-                                   size_t usedBytes, size_t unusedBytes) {
+                                   size_t mmapBytes, size_t usedBytes,
+                                   size_t unusedBytes) {
   if (!Enabled(InstrCh_Snapshot)) return;
   auto* g = GlobalPtr();
   g->sink.EmitLine("snapshot-footprint", 0, [&](JsonlBuilder& b) {
     b.U32("pool_id", poolId);
     b.Str("pool_kind", poolKind ? poolKind : "");
     b.U64("mmap_bytes", uint64_t(mmapBytes));
-    if (residentBytes < 0) {
-      b.Null("resident_bytes");
-    } else {
-      b.U64("resident_bytes", uint64_t(residentBytes));
-    }
     b.U64("used_bytes", uint64_t(usedBytes));
     b.U64("unused_bytes", uint64_t(unusedBytes));
   });
@@ -1122,152 +1094,6 @@ void JSInstr::ForEachLivePool(void* userdata, PoolCallback cb) {
         cb(userdata, info);
       });
 }
-
-// Interrupt callback installed on every registered runtime. When
-// SIGUSR1 fires, the reader thread bumps signalEpoch and requests an
-// interrupt on every runtime. On this runtime's next safe point we
-// arrive here; if signalEpoch has advanced since we last snapshotted,
-// take a snapshot with the pending marker.
-extern "C" bool InstrInterruptCallback(JSContext* cx) {
-  auto* g = GlobalPtr();
-  uint64_t curEpoch;
-  char localMarker[256];
-  {
-    js::LockGuard<js::Mutex> s(g->signalLock);
-    curEpoch = g->signalEpoch;
-    strncpy(localMarker, g->signalMarker, sizeof(localMarker));
-    localMarker[sizeof(localMarker) - 1] = 0;
-  }
-  if (curEpoch == 0) return true;
-
-  bool shouldSnap = false;
-  {
-    js::LockGuard<js::Mutex> c(g->ctxLock);
-    for (auto& e : g->ctxs) {
-      if (e.cx == cx) {
-        if (e.lastEpoch < curEpoch) {
-          e.lastEpoch = curEpoch;
-          shouldSnap = true;
-        }
-        break;
-      }
-    }
-  }
-  if (shouldSnap) {
-    js::jit::InstrSnapshot::Now(cx, localMarker[0] ? localMarker : "snapshot");
-  }
-  return true;
-}
-
-void JSInstr::RuntimeAttach(JSContext* cx) {
-  if (!cx) return;
-  auto* g = GlobalPtr();
-  {
-    js::LockGuard<js::Mutex> gg(g->ctxLock);
-    for (const auto& e : g->ctxs) {
-      if (e.cx == cx) return;
-    }
-    (void)g->ctxs.append(CtxEntry{cx, 0});
-  }
-  (void)JS_AddInterruptCallback(cx, InstrInterruptCallback);
-}
-
-void JSInstr::RuntimeDetach(JSContext* cx) {
-  if (!cx) return;
-  auto* g = GlobalPtr();
-  js::LockGuard<js::Mutex> gg(g->ctxLock);
-  for (size_t i = 0; i < g->ctxs.length(); ++i) {
-    if (g->ctxs[i].cx == cx) {
-      g->ctxs.erase(&g->ctxs[i]);
-      return;
-    }
-  }
-}
-
-#ifdef XP_LINUX
-
-// Signal handler must be async-signal-safe: only write(2) to the
-// self-pipe. The reader thread does everything else at leisure.
-extern "C" void InstrSignalHandler(int) {
-  auto* g = GlobalPtr();
-  int fd = g->signalPipeW;
-  if (fd < 0) return;
-  char c = 1;
-  (void)write(fd, &c, 1);
-}
-
-static void* InstrSignalReader(void*) {
-  auto* g = GlobalPtr();
-  char drain[64];
-  while (true) {
-    ssize_t n = read(g->signalPipeR, drain, sizeof(drain));
-    if (n <= 0) return nullptr;
-
-    char markerBuf[256] = "snapshot";
-    const char* dir = getenv("JS_INSTR_DIR");
-    if (dir) {
-      char path[2048];
-      int r = snprintf(path, sizeof(path), "%s/marker.txt", dir);
-      if (r > 0 && size_t(r) < sizeof(path)) {
-        FILE* f = fopen(path, "r");
-        if (f) {
-          if (fgets(markerBuf, sizeof(markerBuf), f)) {
-            size_t l = strlen(markerBuf);
-            while (l && (markerBuf[l - 1] == '\n' || markerBuf[l - 1] == '\r' ||
-                         markerBuf[l - 1] == ' ')) {
-              markerBuf[--l] = 0;
-            }
-          }
-          fclose(f);
-        }
-      }
-    }
-    {
-      js::LockGuard<js::Mutex> s(g->signalLock);
-      g->signalEpoch++;
-      strncpy(g->signalMarker, markerBuf, sizeof(g->signalMarker));
-      g->signalMarker[sizeof(g->signalMarker) - 1] = 0;
-    }
-    // Copy the ctx list out from under the registry lock; issuing the
-    // interrupt request acquires SpiderMonkey's FutexThread mutex,
-    // and the mutex-order checker forbids nesting that acquisition
-    // inside our JSInstrumentation lock.
-    js::Vector<JSContext*, 4, js::SystemAllocPolicy> snapshot;
-    {
-      js::LockGuard<js::Mutex> c(g->ctxLock);
-      for (const auto& e : g->ctxs) {
-        (void)snapshot.append(e.cx);
-      }
-    }
-    for (JSContext* cx : snapshot) {
-      JS_RequestInterruptCallback(cx);
-    }
-  }
-}
-
-static void InitInstrSignal() {
-  auto* g = GlobalPtr();
-  int fds[2];
-  if (pipe(fds) != 0) return;
-  g->signalPipeR = fds[0];
-  g->signalPipeW = fds[1];
-
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = InstrSignalHandler;
-  sigemptyset(&sa.sa_mask);
-  sa.sa_flags = SA_RESTART;
-  sigaction(SIGUSR1, &sa, nullptr);
-
-  pthread_t tid;
-  if (pthread_create(&tid, nullptr, InstrSignalReader, nullptr) == 0) {
-    pthread_detach(tid);
-  }
-}
-
-#else
-static void InitInstrSignal() {}
-#endif
 
 void JSInstr::LogEntriesFlush(const char* reason,
                               mozilla::Span<const EntriesFlushRow> scripts,

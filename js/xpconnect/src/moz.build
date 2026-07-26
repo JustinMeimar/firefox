@@ -15,6 +15,7 @@ EXPORTS += [
 UNIFIED_SOURCES += [
     "ExecutionTracerIntegration.cpp",
     "ExportHelpers.cpp",
+    "JitInstrReporter.cpp",
     "JSServices.cpp",
     "nsXPConnect.cpp",
     "Sandbox.cpp",
@@ -68,6 +69,7 @@ LOCAL_INCLUDES += [
     "/dom/base",
     "/dom/bindings",
     "/dom/html",
+    "/js/src",
     "/layout/base",
     "/layout/style",
     "/netwerk/base",

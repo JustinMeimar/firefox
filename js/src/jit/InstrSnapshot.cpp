@@ -25,11 +25,6 @@
 #include "gc/GC-inl.h"
 #include "vm/JSScript-inl.h"
 
-#ifdef XP_LINUX
-#  include <sys/mman.h>
-#  include <unistd.h>
-#endif
-
 namespace js::jit {
 
 namespace {
@@ -49,36 +44,6 @@ void CollectPool(void* userdata, const JSInstr::PoolInfo& info) {
   (void)v->append(
       PoolCopy{info.poolId, info.poolKind, info.base, info.mmapBytes,
                info.usedBytes});
-}
-
-// Returns bytes resident (rounded up to page granularity) on Linux;
-// -1 elsewhere. Uses mincore to sample each page in [base, base+size)
-// and counts pages whose LSB is 1.
-int64_t ResidentBytes(void* base, size_t size) {
-#ifdef XP_LINUX
-  if (!base || !size) return 0;
-  long pageSize = sysconf(_SC_PAGESIZE);
-  if (pageSize <= 0) return -1;
-  size_t nPages = (size + size_t(pageSize) - 1) / size_t(pageSize);
-  // Cap to avoid pathological allocations on absurdly large pools.
-  if (nPages > (16 * 1024 * 1024)) return -1;
-  auto* vec = static_cast<unsigned char*>(malloc(nPages));
-  if (!vec) return -1;
-  if (mincore(base, size, vec) != 0) {
-    free(vec);
-    return -1;
-  }
-  uint64_t resident = 0;
-  for (size_t i = 0; i < nPages; ++i) {
-    if (vec[i] & 1) resident += uint64_t(pageSize);
-  }
-  free(vec);
-  return int64_t(resident);
-#else
-  (void)base;
-  (void)size;
-  return -1;
-#endif
 }
 
 // Parses a "Name: value kB" style line from smaps into an unsigned int.
@@ -288,10 +253,9 @@ void InstrSnapshot::Now(JSContext* cx, const char* marker) {
   JSInstr::ForEachLivePool(&pools, &CollectPool);
 
   for (const PoolCopy& p : pools) {
-    int64_t resident = ResidentBytes(p.base, p.mmapBytes);
     size_t unused =
         p.mmapBytes > p.usedBytes ? (p.mmapBytes - p.usedBytes) : 0;
-    JSInstr::LogSnapshotFootprint(p.poolId, p.poolKind, p.mmapBytes, resident,
+    JSInstr::LogSnapshotFootprint(p.poolId, p.poolKind, p.mmapBytes,
                                   p.usedBytes, unused);
   }
 

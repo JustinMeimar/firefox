@@ -232,8 +232,8 @@ class JSInstr {
   static void ForEachLivePool(void* userdata, PoolCallback cb);
 
   static void LogSnapshotFootprint(uint32_t poolId, const char* poolKind,
-                                   size_t mmapBytes, int64_t residentBytes,
-                                   size_t usedBytes, size_t unusedBytes);
+                                   size_t mmapBytes, size_t usedBytes,
+                                   size_t unusedBytes);
 
   struct LiveByOwnerRow {
     JitCodeOwner owner;
@@ -266,12 +266,6 @@ class JSInstr {
     const char* path;
   };
   static void LogSnapshotSmapsRow(const SmapsRow& r);
-
-  // Runtime registration for the SIGUSR1 snapshot path. Every JitRuntime
-  // registers its owning JSContext so the signal thread can request an
-  // interrupt to run InstrSnapshot::Now on the runtime's own thread.
-  static void RuntimeAttach(JSContext* cx);
-  static void RuntimeDetach(JSContext* cx);
 
   // Demand mode -- flushed on shutdown, GC-purge boundaries, and
   // every snapshot. Two flat spans are joined by (icEntryStart,
