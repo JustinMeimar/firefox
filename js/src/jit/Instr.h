@@ -170,6 +170,8 @@ class JSInstr {
   static bool Enabled(uint32_t channel);
 
   static uint32_t RuntimeLocalId(JSRuntime* rt);
+  static uint32_t ScriptLocalId(JSScript* script);
+  static uint32_t SiteLocalId(JSScript* script, uint32_t bcOffset);
 
   // Lifecycle
   static void LogPoolCreate(ExecutablePool* pool, ExecPoolKind kind,
@@ -210,18 +212,87 @@ class JSInstr {
                                   IcDetachReason reason, uint32_t enteredCount,
                                   bool isFallback, uint32_t chainLengthBefore);
 
-  // Snapshot -- called from InstrSnapshot on each process.
+  // Snapshot -- called from InstrSnapshot on each process. All five
+  // snapshot event kinds share the same conceptual checkpoint: the
+  // marker line anchors the checkpoint, and everything else is
+  // per-artifact-class detail joinable by (pid, marker).
   static void LogSnapshotMarker(const char* marker);
 
+  struct PoolInfo {
+    uint32_t poolId;
+    const char* poolKind;
+    void* base;
+    size_t mmapBytes;
+    size_t usedBytes;
+  };
+  // Snapshot helper: hands each currently-registered ExecutablePool to
+  // `cb`, called under the registry lock. Caller must not re-enter
+  // JSInstr from inside `cb`.
+  using PoolCallback = void (*)(void* userdata, const PoolInfo&);
+  static void ForEachLivePool(void* userdata, PoolCallback cb);
+
+  static void LogSnapshotFootprint(uint32_t poolId, const char* poolKind,
+                                   size_t mmapBytes, int64_t residentBytes,
+                                   size_t usedBytes, size_t unusedBytes);
+
+  struct LiveByOwnerRow {
+    JitCodeOwner owner;
+    uint64_t count;
+    uint64_t codeBytes;
+  };
+  struct LiveCounters {
+    LiveByOwnerRow perOwner[8];  // sized to JitCodeOwner max + 1
+    uint64_t livePoolCount;
+    uint64_t liveMmapBytes;
+    uint64_t liveIcBodyCount;
+    uint64_t liveIcBodyBytes;
+  };
+  static void GetLiveCounters(LiveCounters* out);
+  static void LogSnapshotLive(const LiveCounters& c);
+
+  struct SmapsRow {
+    uint64_t startAddr;
+    uint64_t endAddr;
+    uint64_t sizeKb;
+    uint64_t rssKb;
+    uint64_t pssKb;
+    uint64_t sharedCleanKb;
+    uint64_t sharedDirtyKb;
+    uint64_t privateCleanKb;
+    uint64_t privateDirtyKb;
+    uint64_t referencedKb;
+    uint64_t anonymousKb;
+    const char* perms;
+    const char* path;
+  };
+  static void LogSnapshotSmapsRow(const SmapsRow& r);
+
+  // Runtime registration for the SIGUSR1 snapshot path. Every JitRuntime
+  // registers its owning JSContext so the signal thread can request an
+  // interrupt to run InstrSnapshot::Now on the runtime's own thread.
+  static void RuntimeAttach(JSContext* cx);
+  static void RuntimeDetach(JSContext* cx);
+
   // Demand mode -- flushed on shutdown, GC-purge boundaries, and
-  // every snapshot. `entries` is a slice of {scriptLocalId,
-  // enteredCount} pairs; copied under the sink mutex.
+  // every snapshot. Two flat spans are joined by (icEntryStart,
+  // icEntryCount): the harness walks `scripts` and for each row takes
+  // a `icEntryCount`-long slice out of `icEntries` starting at
+  // `icEntryStart`.
+  struct IcEntryRow {
+    uint32_t siteLocalId;
+    Sha1Digest icBodyId;
+    uint64_t enteredCount;
+    bool isFallback;
+  };
   struct EntriesFlushRow {
     uint32_t scriptLocalId;
     uint64_t enteredCount;
+    uint32_t icEntryStart;
+    uint32_t icEntryCount;
   };
   static void LogEntriesFlush(const char* reason,
-                              mozilla::Span<const EntriesFlushRow> entries);
+                              mozilla::Span<const EntriesFlushRow> scripts,
+                              mozilla::Span<const IcEntryRow> icEntries);
   static void LogEntriesOverflow(uint32_t scriptLocalId);
 };
 

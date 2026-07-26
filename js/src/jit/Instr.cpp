@@ -25,13 +25,22 @@
 #include <unistd.h>
 
 #include "jit/ExecutableAllocator.h"
+#include "jit/InstrSnapshot.h"
 #include "jit/JitCode.h"
 #include "jit/JitOptions.h"
 #include "js/AllocPolicy.h"
+#include "js/Interrupt.h"
+#include "js/Vector.h"
 #include "threading/LockGuard.h"
 #include "threading/Mutex.h"
+#include "vm/JSContext.h"
 #include "vm/JSScript.h"
 #include "vm/MutexIDs.h"
+
+#ifdef XP_LINUX
+#  include <pthread.h>
+#  include <signal.h>
+#endif
 
 using namespace js;
 using namespace js::jit;
@@ -477,6 +486,19 @@ class InstrRegistry {
     }
   };
 
+  struct PoolRecord {
+    uint32_t id;
+    ExecPoolKind kind;
+    size_t mmapBytes;
+  };
+  struct CodeRecord {
+    uint32_t id;
+    JitCodeOwner owner;
+    uint64_t bytes;
+  };
+
+  static constexpr size_t kNumOwners = 8;  // JitCodeOwner enumerators
+
   js::Mutex lock_ MOZ_UNANNOTATED;
   std::atomic<uint32_t> nextRt_{1};
   std::atomic<uint32_t> nextPool_{1};
@@ -485,11 +507,19 @@ class InstrRegistry {
   std::atomic<uint32_t> nextSite_{1};
   std::atomic<uint32_t> nextIcBody_{1};
 
+  std::atomic<uint64_t> liveCountByOwner_[kNumOwners]{};
+  std::atomic<uint64_t> liveBytesByOwner_[kNumOwners]{};
+  std::atomic<uint64_t> livePoolCount_{0};
+  std::atomic<uint64_t> liveMmapBytes_{0};
+  std::atomic<uint64_t> liveIcBodyCount_{0};
+  std::atomic<uint64_t> liveIcBodyBytes_{0};
+
   mozilla::HashMap<const void*, uint32_t, PtrHasher, js::SystemAllocPolicy>
       runtimes_;
-  mozilla::HashMap<const void*, uint32_t, PtrHasher, js::SystemAllocPolicy>
+  mozilla::HashMap<const ExecutablePool*, PoolRecord, PtrHasher,
+                   js::SystemAllocPolicy>
       pools_;
-  mozilla::HashMap<const void*, uint32_t, PtrHasher, js::SystemAllocPolicy>
+  mozilla::HashMap<const JitCode*, CodeRecord, PtrHasher, js::SystemAllocPolicy>
       codes_;
   mozilla::HashMap<const void*, uint32_t, PtrHasher, js::SystemAllocPolicy>
       scripts_;
@@ -510,38 +540,104 @@ class InstrRegistry {
     return id;
   }
 
-  uint32_t PoolId(const ExecutablePool* pool, bool* isNew = nullptr) {
+  uint32_t RegisterPool(const ExecutablePool* pool, ExecPoolKind kind,
+                        size_t mmapBytes, bool* isNew) {
     js::LockGuard<js::Mutex> g(lock_);
     auto p = pools_.lookupForAdd(pool);
     if (p) {
-      if (isNew) *isNew = false;
-      return p->value();
+      *isNew = false;
+      return p->value().id;
     }
     uint32_t id = nextPool_.fetch_add(1, std::memory_order_relaxed);
-    (void)pools_.add(p, pool, id);
-    if (isNew) *isNew = true;
+    PoolRecord rec{id, kind, mmapBytes};
+    (void)pools_.add(p, pool, rec);
+    *isNew = true;
+    livePoolCount_.fetch_add(1, std::memory_order_relaxed);
+    liveMmapBytes_.fetch_add(mmapBytes, std::memory_order_relaxed);
     return id;
   }
-  void ForgetPool(const ExecutablePool* pool) {
+  uint32_t PoolId(const ExecutablePool* pool) {
     js::LockGuard<js::Mutex> g(lock_);
-    pools_.remove(pool);
+    auto p = pools_.lookup(pool);
+    return p ? p->value().id : 0;
+  }
+  // Returns the removed record so LogPoolUnmap can decrement live
+  // counters. If the pool was never registered, returns {0, Other, 0}.
+  PoolRecord ForgetPool(const ExecutablePool* pool) {
+    js::LockGuard<js::Mutex> g(lock_);
+    auto p = pools_.lookup(pool);
+    if (!p) return {0, ExecPoolKind::Other, 0};
+    PoolRecord rec = p->value();
+    pools_.remove(p);
+    livePoolCount_.fetch_sub(1, std::memory_order_relaxed);
+    liveMmapBytes_.fetch_sub(rec.mmapBytes, std::memory_order_relaxed);
+    return rec;
   }
 
-  uint32_t CodeId(const JitCode* code, bool* isNew = nullptr) {
+  uint32_t RegisterCode(const JitCode* code, JitCodeOwner owner, uint64_t bytes,
+                        bool* isNew) {
     js::LockGuard<js::Mutex> g(lock_);
     auto p = codes_.lookupForAdd(code);
     if (p) {
-      if (isNew) *isNew = false;
-      return p->value();
+      *isNew = false;
+      return p->value().id;
     }
     uint32_t id = nextCode_.fetch_add(1, std::memory_order_relaxed);
-    (void)codes_.add(p, code, id);
-    if (isNew) *isNew = true;
+    CodeRecord rec{id, owner, bytes};
+    (void)codes_.add(p, code, rec);
+    *isNew = true;
+    liveCountByOwner_[size_t(owner)].fetch_add(1, std::memory_order_relaxed);
+    liveBytesByOwner_[size_t(owner)].fetch_add(bytes,
+                                               std::memory_order_relaxed);
     return id;
   }
-  void ForgetCode(const JitCode* code) {
+  uint32_t CodeId(const JitCode* code) {
     js::LockGuard<js::Mutex> g(lock_);
-    codes_.remove(code);
+    auto p = codes_.lookup(code);
+    return p ? p->value().id : 0;
+  }
+  CodeRecord ForgetCode(const JitCode* code) {
+    js::LockGuard<js::Mutex> g(lock_);
+    auto p = codes_.lookup(code);
+    if (!p) return {0, JitCodeOwner::Other, 0};
+    CodeRecord rec = p->value();
+    codes_.remove(p);
+    liveCountByOwner_[size_t(rec.owner)].fetch_sub(1,
+                                                   std::memory_order_relaxed);
+    liveBytesByOwner_[size_t(rec.owner)].fetch_sub(rec.bytes,
+                                                   std::memory_order_relaxed);
+    return rec;
+  }
+
+  // Snapshot iteration. Holds the registry lock while `cb` is invoked
+  // for each live pool. Callback must not re-enter the registry.
+  template <typename Cb>
+  void ForEachLivePool(Cb cb) {
+    js::LockGuard<js::Mutex> g(lock_);
+    for (auto r = pools_.iter(); !r.done(); r.next()) {
+      const ExecutablePool* pool = r.get().key();
+      const PoolRecord& rec = r.get().value();
+      cb(pool, rec.id, rec.kind, rec.mmapBytes);
+    }
+  }
+
+  void ReadLiveCounters(uint64_t (&count)[kNumOwners],
+                        uint64_t (&bytes)[kNumOwners],
+                        uint64_t& poolCount, uint64_t& mmapBytes,
+                        uint64_t& icBodyCount, uint64_t& icBodyBytes) {
+    for (size_t i = 0; i < kNumOwners; ++i) {
+      count[i] = liveCountByOwner_[i].load(std::memory_order_relaxed);
+      bytes[i] = liveBytesByOwner_[i].load(std::memory_order_relaxed);
+    }
+    poolCount = livePoolCount_.load(std::memory_order_relaxed);
+    mmapBytes = liveMmapBytes_.load(std::memory_order_relaxed);
+    icBodyCount = liveIcBodyCount_.load(std::memory_order_relaxed);
+    icBodyBytes = liveIcBodyBytes_.load(std::memory_order_relaxed);
+  }
+
+  void BumpIcBody(uint32_t bodyBytes) {
+    liveIcBodyCount_.fetch_add(1, std::memory_order_relaxed);
+    liveIcBodyBytes_.fetch_add(bodyBytes, std::memory_order_relaxed);
   }
 
   uint32_t ScriptId(const JSScript* script, bool* isNew = nullptr) {
@@ -594,6 +690,11 @@ class InstrRegistry {
 
 // -------------------------- singleton state --------------------------
 
+struct CtxEntry {
+  JSContext* cx;
+  uint64_t lastEpoch;
+};
+
 struct InstrGlobal {
   std::atomic<uint32_t> channels{0};
   InstrMode mode = InstrMode::Structural;
@@ -601,6 +702,24 @@ struct InstrGlobal {
   InstrRegistry registry;
   char runId[256] = {0};
   bool initialized = false;
+
+  // Registered runtimes (owning JSContext*). Snapshot signal thread
+  // walks this list and calls JS_RequestInterruptCallback on each. The
+  // per-entry lastEpoch is compared against the signal thread's global
+  // epoch so the interrupt callback fires the snapshot only once per
+  // SIGUSR1, no matter how many spurious internal interrupts occur.
+  js::Mutex ctxLock MOZ_UNANNOTATED{js::mutexid::JSInstrumentation};
+  js::Vector<CtxEntry, 4, js::SystemAllocPolicy> ctxs;
+
+  // Snapshot signal state. epoch is bumped by the reader thread on
+  // each SIGUSR1; marker holds the string that ships with the next
+  // snapshot round. Written by reader thread, read by interrupt
+  // callbacks; protected by signalLock.
+  js::Mutex signalLock MOZ_UNANNOTATED{js::mutexid::JSInstrumentation};
+  uint64_t signalEpoch = 0;
+  char signalMarker[256] = {0};
+  int signalPipeR = -1;
+  int signalPipeW = -1;
 };
 
 InstrGlobal* GlobalPtr() {
@@ -629,6 +748,8 @@ uint32_t ParseChannels(const char* env) {
 }  // namespace
 
 namespace js::jit {
+
+static void InitInstrSignal();
 
 const char* Name(InstrMode m) { return NameOf(m); }
 const char* Name(SourceClass c) { return NameOf(c); }
@@ -668,6 +789,8 @@ void JSInstr::Init() {
       b.Str("mode", NameOf(g->mode));
       b.U32("channels", channels);
     });
+
+    InitInstrSignal();
   });
 
   InstrGlobal* g = GlobalPtr();
@@ -680,6 +803,15 @@ bool JSInstr::Enabled(uint32_t channel) {
 
 uint32_t JSInstr::RuntimeLocalId(JSRuntime* rt) {
   return GlobalPtr()->registry.RuntimeId(rt);
+}
+
+uint32_t JSInstr::ScriptLocalId(JSScript* script) {
+  bool _isNew = false;
+  return GlobalPtr()->registry.ScriptId(script, &_isNew);
+}
+
+uint32_t JSInstr::SiteLocalId(JSScript* script, uint32_t bcOffset) {
+  return GlobalPtr()->registry.SiteId(script, bcOffset);
 }
 
 void JSInstr::RuntimeShutdown(JSRuntime* rt) {
@@ -703,7 +835,7 @@ void JSInstr::LogPoolCreate(ExecutablePool* pool, ExecPoolKind kind,
   if (!Enabled(InstrCh_Lifecycle)) return;
   auto* g = GlobalPtr();
   bool isNew = false;
-  uint32_t poolId = g->registry.PoolId(pool, &isNew);
+  uint32_t poolId = g->registry.RegisterPool(pool, kind, mmapBytes, &isNew);
   if (!isNew) return;
   g->sink.EmitLine("pool-create", 0, [&](JsonlBuilder& b) {
     b.U32("pool_id", poolId);
@@ -715,25 +847,25 @@ void JSInstr::LogPoolCreate(ExecutablePool* pool, ExecPoolKind kind,
 void JSInstr::LogPoolUnmap(ExecutablePool* pool) {
   if (!Enabled(InstrCh_Lifecycle)) return;
   auto* g = GlobalPtr();
-  uint32_t poolId = g->registry.PoolId(pool);
+  auto rec = g->registry.ForgetPool(pool);
   g->sink.EmitLine("pool-unmap", 0, [&](JsonlBuilder& b) {
-    b.U32("pool_id", poolId);
+    b.U32("pool_id", rec.id);
   });
-  g->registry.ForgetPool(pool);
 }
 
 void JSInstr::LogJitCodeCreate(JitCode* code, JitCodeOwner owner) {
   if (!Enabled(InstrCh_Lifecycle)) return;
   auto* g = GlobalPtr();
   bool isNew = false;
-  uint32_t codeId = g->registry.CodeId(code, &isNew);
+  uint64_t bytes = uint64_t(code->instructionsSize());
+  uint32_t codeId = g->registry.RegisterCode(code, owner, bytes, &isNew);
   if (!isNew) return;
   ExecutablePool* pool = code->pool();
   uint32_t poolId = pool ? g->registry.PoolId(pool) : 0;
   g->sink.EmitLine("jitcode-create", 0, [&](JsonlBuilder& b) {
     b.U32("code_local_id", codeId);
     b.U32("pool_id", poolId);
-    b.U64("bytes", uint64_t(code->instructionsSize()));
+    b.U64("bytes", bytes);
     b.Str("owner", NameOf(owner));
   });
 }
@@ -741,11 +873,10 @@ void JSInstr::LogJitCodeCreate(JitCode* code, JitCodeOwner owner) {
 void JSInstr::LogJitCodeFinalize(JitCode* code) {
   if (!Enabled(InstrCh_Lifecycle)) return;
   auto* g = GlobalPtr();
-  uint32_t codeId = g->registry.CodeId(code);
+  auto rec = g->registry.ForgetCode(code);
   g->sink.EmitLine("jitcode-finalize", 0, [&](JsonlBuilder& b) {
-    b.U32("code_local_id", codeId);
+    b.U32("code_local_id", rec.id);
   });
-  g->registry.ForgetCode(code);
 }
 
 static SourceClass ClassifyScript(JSScript* script) {
@@ -835,6 +966,7 @@ void JSInstr::LogIcBodyEmit(const Sha1Digest& icBodyId, const char* cacheKind,
   bool first = false;
   uint32_t bodyLocalId = g->registry.InternIcBody(icBodyId, &first);
   if (!first) return;
+  g->registry.BumpIcBody(bodyBytes);
   const bool includeCoupling = Enabled(InstrCh_Coupling);
   g->sink.EmitLine("ic-body-emit", 0, [&](JsonlBuilder& b) {
     b.U32("ic_body_local_id", bodyLocalId);
@@ -904,18 +1036,266 @@ void JSInstr::LogSnapshotMarker(const char* marker) {
                    [&](JsonlBuilder& b) { b.Str("marker", marker); });
 }
 
+void JSInstr::LogSnapshotFootprint(uint32_t poolId, const char* poolKind,
+                                   size_t mmapBytes, int64_t residentBytes,
+                                   size_t usedBytes, size_t unusedBytes) {
+  if (!Enabled(InstrCh_Snapshot)) return;
+  auto* g = GlobalPtr();
+  g->sink.EmitLine("snapshot-footprint", 0, [&](JsonlBuilder& b) {
+    b.U32("pool_id", poolId);
+    b.Str("pool_kind", poolKind ? poolKind : "");
+    b.U64("mmap_bytes", uint64_t(mmapBytes));
+    if (residentBytes < 0) {
+      b.Null("resident_bytes");
+    } else {
+      b.U64("resident_bytes", uint64_t(residentBytes));
+    }
+    b.U64("used_bytes", uint64_t(usedBytes));
+    b.U64("unused_bytes", uint64_t(unusedBytes));
+  });
+}
+
+void JSInstr::GetLiveCounters(LiveCounters* out) {
+  auto* g = GlobalPtr();
+  uint64_t counts[8];
+  uint64_t bytes[8];
+  uint64_t poolCount, mmapBytes, icBodyCount, icBodyBytes;
+  g->registry.ReadLiveCounters(counts, bytes, poolCount, mmapBytes, icBodyCount,
+                               icBodyBytes);
+  for (size_t i = 0; i < 8; ++i) {
+    out->perOwner[i] = {JitCodeOwner(i), counts[i], bytes[i]};
+  }
+  out->livePoolCount = poolCount;
+  out->liveMmapBytes = mmapBytes;
+  out->liveIcBodyCount = icBodyCount;
+  out->liveIcBodyBytes = icBodyBytes;
+}
+
+void JSInstr::LogSnapshotLive(const LiveCounters& c) {
+  if (!Enabled(InstrCh_Snapshot)) return;
+  auto* g = GlobalPtr();
+  g->sink.EmitLine("snapshot-live", 0, [&](JsonlBuilder& b) {
+    b.U64("live_pool_count", c.livePoolCount);
+    b.U64("live_mmap_bytes", c.liveMmapBytes);
+    b.U64("live_ic_body_count", c.liveIcBodyCount);
+    b.U64("live_ic_body_bytes", c.liveIcBodyBytes);
+    b.BeginArray("by_owner");
+    for (size_t i = 0; i < 8; ++i) {
+      if (c.perOwner[i].count == 0 && c.perOwner[i].codeBytes == 0) continue;
+      b.BeginObjectElement();
+      b.Str("owner", NameOf(c.perOwner[i].owner));
+      b.U64("count", c.perOwner[i].count);
+      b.U64("code_bytes", c.perOwner[i].codeBytes);
+      b.EndObjectElement();
+    }
+    b.EndArray();
+  });
+}
+
+void JSInstr::LogSnapshotSmapsRow(const SmapsRow& r) {
+  if (!Enabled(InstrCh_Snapshot)) return;
+  auto* g = GlobalPtr();
+  g->sink.EmitLine("snapshot-smaps", 0, [&](JsonlBuilder& b) {
+    b.U64("start", r.startAddr);
+    b.U64("end", r.endAddr);
+    b.U64("size_kb", r.sizeKb);
+    b.U64("rss_kb", r.rssKb);
+    b.U64("pss_kb", r.pssKb);
+    b.U64("shared_clean_kb", r.sharedCleanKb);
+    b.U64("shared_dirty_kb", r.sharedDirtyKb);
+    b.U64("private_clean_kb", r.privateCleanKb);
+    b.U64("private_dirty_kb", r.privateDirtyKb);
+    b.U64("referenced_kb", r.referencedKb);
+    b.U64("anonymous_kb", r.anonymousKb);
+    b.Str("perms", r.perms ? r.perms : "");
+    b.Str("path", r.path ? r.path : "");
+  });
+}
+
+void JSInstr::ForEachLivePool(void* userdata, PoolCallback cb) {
+  auto* g = GlobalPtr();
+  g->registry.ForEachLivePool(
+      [&](const ExecutablePool* pool, uint32_t id, ExecPoolKind kind,
+          size_t mmapBytes) {
+        PoolInfo info{id, NameOf(kind), pool->base(), mmapBytes,
+                      pool->usedCodeBytes()};
+        cb(userdata, info);
+      });
+}
+
+// Interrupt callback installed on every registered runtime. When
+// SIGUSR1 fires, the reader thread bumps signalEpoch and requests an
+// interrupt on every runtime. On this runtime's next safe point we
+// arrive here; if signalEpoch has advanced since we last snapshotted,
+// take a snapshot with the pending marker.
+extern "C" bool InstrInterruptCallback(JSContext* cx) {
+  auto* g = GlobalPtr();
+  uint64_t curEpoch;
+  char localMarker[256];
+  {
+    js::LockGuard<js::Mutex> s(g->signalLock);
+    curEpoch = g->signalEpoch;
+    strncpy(localMarker, g->signalMarker, sizeof(localMarker));
+    localMarker[sizeof(localMarker) - 1] = 0;
+  }
+  if (curEpoch == 0) return true;
+
+  bool shouldSnap = false;
+  {
+    js::LockGuard<js::Mutex> c(g->ctxLock);
+    for (auto& e : g->ctxs) {
+      if (e.cx == cx) {
+        if (e.lastEpoch < curEpoch) {
+          e.lastEpoch = curEpoch;
+          shouldSnap = true;
+        }
+        break;
+      }
+    }
+  }
+  if (shouldSnap) {
+    js::jit::InstrSnapshot::Now(cx, localMarker[0] ? localMarker : "snapshot");
+  }
+  return true;
+}
+
+void JSInstr::RuntimeAttach(JSContext* cx) {
+  if (!cx) return;
+  auto* g = GlobalPtr();
+  {
+    js::LockGuard<js::Mutex> gg(g->ctxLock);
+    for (const auto& e : g->ctxs) {
+      if (e.cx == cx) return;
+    }
+    (void)g->ctxs.append(CtxEntry{cx, 0});
+  }
+  (void)JS_AddInterruptCallback(cx, InstrInterruptCallback);
+}
+
+void JSInstr::RuntimeDetach(JSContext* cx) {
+  if (!cx) return;
+  auto* g = GlobalPtr();
+  js::LockGuard<js::Mutex> gg(g->ctxLock);
+  for (size_t i = 0; i < g->ctxs.length(); ++i) {
+    if (g->ctxs[i].cx == cx) {
+      g->ctxs.erase(&g->ctxs[i]);
+      return;
+    }
+  }
+}
+
+#ifdef XP_LINUX
+
+// Signal handler must be async-signal-safe: only write(2) to the
+// self-pipe. The reader thread does everything else at leisure.
+extern "C" void InstrSignalHandler(int) {
+  auto* g = GlobalPtr();
+  int fd = g->signalPipeW;
+  if (fd < 0) return;
+  char c = 1;
+  (void)write(fd, &c, 1);
+}
+
+static void* InstrSignalReader(void*) {
+  auto* g = GlobalPtr();
+  char drain[64];
+  while (true) {
+    ssize_t n = read(g->signalPipeR, drain, sizeof(drain));
+    if (n <= 0) return nullptr;
+
+    char markerBuf[256] = "snapshot";
+    const char* dir = getenv("JS_INSTR_DIR");
+    if (dir) {
+      char path[2048];
+      int r = snprintf(path, sizeof(path), "%s/marker.txt", dir);
+      if (r > 0 && size_t(r) < sizeof(path)) {
+        FILE* f = fopen(path, "r");
+        if (f) {
+          if (fgets(markerBuf, sizeof(markerBuf), f)) {
+            size_t l = strlen(markerBuf);
+            while (l && (markerBuf[l - 1] == '\n' || markerBuf[l - 1] == '\r' ||
+                         markerBuf[l - 1] == ' ')) {
+              markerBuf[--l] = 0;
+            }
+          }
+          fclose(f);
+        }
+      }
+    }
+    {
+      js::LockGuard<js::Mutex> s(g->signalLock);
+      g->signalEpoch++;
+      strncpy(g->signalMarker, markerBuf, sizeof(g->signalMarker));
+      g->signalMarker[sizeof(g->signalMarker) - 1] = 0;
+    }
+    // Copy the ctx list out from under the registry lock; issuing the
+    // interrupt request acquires SpiderMonkey's FutexThread mutex,
+    // and the mutex-order checker forbids nesting that acquisition
+    // inside our JSInstrumentation lock.
+    js::Vector<JSContext*, 4, js::SystemAllocPolicy> snapshot;
+    {
+      js::LockGuard<js::Mutex> c(g->ctxLock);
+      for (const auto& e : g->ctxs) {
+        (void)snapshot.append(e.cx);
+      }
+    }
+    for (JSContext* cx : snapshot) {
+      JS_RequestInterruptCallback(cx);
+    }
+  }
+}
+
+static void InitInstrSignal() {
+  auto* g = GlobalPtr();
+  int fds[2];
+  if (pipe(fds) != 0) return;
+  g->signalPipeR = fds[0];
+  g->signalPipeW = fds[1];
+
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = InstrSignalHandler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESTART;
+  sigaction(SIGUSR1, &sa, nullptr);
+
+  pthread_t tid;
+  if (pthread_create(&tid, nullptr, InstrSignalReader, nullptr) == 0) {
+    pthread_detach(tid);
+  }
+}
+
+#else
+static void InitInstrSignal() {}
+#endif
+
 void JSInstr::LogEntriesFlush(const char* reason,
-                              mozilla::Span<const EntriesFlushRow> entries) {
+                              mozilla::Span<const EntriesFlushRow> scripts,
+                              mozilla::Span<const IcEntryRow> icEntries) {
   if (!Enabled(InstrCh_Demand)) return;
   auto* g = GlobalPtr();
   g->sink.EmitLine("entries-flush", 0, [&](JsonlBuilder& b) {
     b.Str("reason", reason ? reason : "");
-    b.U32("count", uint32_t(entries.size()));
-    b.BeginArray("entries");
-    for (const auto& r : entries) {
+    b.U32("script_count", uint32_t(scripts.size()));
+    b.BeginArray("scripts");
+    for (const auto& r : scripts) {
       b.BeginObjectElement();
       b.U32("script_local_id", r.scriptLocalId);
       b.U64("entered_count", r.enteredCount);
+      if (r.icEntryCount) {
+        b.BeginArray("ic_entries");
+        const size_t end = size_t(r.icEntryStart) + r.icEntryCount;
+        for (size_t i = r.icEntryStart; i < end && i < icEntries.size(); ++i) {
+          const IcEntryRow& e = icEntries[i];
+          b.BeginObjectElement();
+          b.U32("site_local_id", e.siteLocalId);
+          b.Sha("ic_body_id", e.icBodyId);
+          b.U64("entered_count", e.enteredCount);
+          b.Bool("is_fallback", e.isFallback);
+          b.EndObjectElement();
+        }
+        b.EndArray();
+      }
       b.EndObjectElement();
     }
     b.EndArray();

@@ -92,6 +92,8 @@
 #include "jit/BaselineCompileQueue.h"
 #include "jit/CacheIRHealth.h"
 #include "jit/InlinableNatives.h"
+#include "jit/Instr.h"
+#include "jit/InstrSnapshot.h"
 #include "jit/Ion.h"
 #include "jit/JitcodeMap.h"
 #include "jit/JitZone.h"
@@ -3589,6 +3591,19 @@ static bool CpuNow(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   double now = double(std::clock()) / double(CLOCKS_PER_SEC);
   args.rval().setDouble(now);
+  return true;
+}
+
+static bool InstrSnapshotBuiltin(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  UniqueChars marker;
+  if (args.length() > 0 && args[0].isString()) {
+    RootedString s(cx, args[0].toString());
+    marker = JS_EncodeStringToUTF8(cx, s);
+    if (!marker) return false;
+  }
+  js::jit::InstrSnapshot::Now(cx, marker ? marker.get() : "snapshot");
+  args.rval().setUndefined();
   return true;
 }
 
@@ -10032,6 +10047,14 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "dateNow()",
 "  Return the current time with sub-ms precision."),
 
+    JS_FN_HELP("instrSnapshot", InstrSnapshotBuiltin, 1, 0,
+"instrSnapshot(marker)",
+"  If Phase-3 instrumentation is enabled (JS_INSTR + JS_INSTR_DIR),\n"
+"  emits a synchronized snapshot into the current process's JSONL log:\n"
+"  snapshot-marker, snapshot-footprint per live ExecutablePool,\n"
+"  snapshot-live totals, and snapshot-smaps rows for pool-overlapping\n"
+"  mappings (Linux). No-op if instrumentation is disabled."),
+
     JS_FN_HELP("help", Help, 0, 0,
 "help([function or interface object or /pattern/])",
 "  Display usage and help messages."),
@@ -12710,7 +12733,11 @@ int main(int argc, char** argv) {
   JS_SetAccumulateTelemetryCallback(cx, AccumulateTelemetryDataCallback);
   JS_SetSetUseCounterCallback(cx, SetUseCounterCallback);
 
-  auto destroyCx = MakeScopeExit([cx] { JS_DestroyContext(cx); });
+  js::jit::JSInstr::RuntimeAttach(cx);
+  auto destroyCx = MakeScopeExit([cx] {
+    js::jit::JSInstr::RuntimeDetach(cx);
+    JS_DestroyContext(cx);
+  });
 
   UniquePtr<ShellContext> sc =
       MakeUnique<ShellContext>(cx, ShellContext::MainThread);

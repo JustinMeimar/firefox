@@ -105,11 +105,7 @@ class ExecutablePool {
   }
   bool isMarked() const { return m_mark; }
 
- private:
-  void* alloc(size_t n, CodeKind kind);
-
-  size_t available() const;
-
+ public:
   // Returns the number of bytes that are currently in use (referenced by
   // live JitCode objects).
   size_t usedCodeBytes() const {
@@ -119,6 +115,14 @@ class ExecutablePool {
     }
     return res;
   }
+
+  void* base() const { return m_allocation.pages; }
+  size_t size() const { return m_allocation.size; }
+
+ private:
+  void* alloc(size_t n, CodeKind kind);
+
+  size_t available() const;
 };
 
 struct JitPoisonRange {

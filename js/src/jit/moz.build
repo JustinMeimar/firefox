@@ -49,6 +49,7 @@ UNIFIED_SOURCES += [
     "InlinableNatives.cpp",
     "Instr.cpp",
     "InstrIds.cpp",
+    "InstrSnapshot.cpp",
     "InstructionReordering.cpp",
     "InterpreterEntryTrampoline.cpp",
     "Ion.cpp",
