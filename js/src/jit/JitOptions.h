@@ -142,6 +142,13 @@ struct DefaultJitOptions {
 
   bool writeProtectCode;
 
+  // Phase-3 instrumentation demand mode. When true, the compiled
+  // baseline prologue emits a 64-bit increment on
+  // ICScript::entryCount_ so downstream analysis can measure
+  // per-script dynamic entries. Only enabled when the JS_INSTR_MODE
+  // env var is "demand".
+  bool instrDemandMode;
+
   bool supportsUnalignedAccesses;
   BaseRegForAddress baseRegForLocals;
 

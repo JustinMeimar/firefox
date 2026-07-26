@@ -25,12 +25,14 @@
 
 #include "jit/ExecutableAllocator.h"
 
+#include "jit/Instr.h"
 #include "js/MemoryMetrics.h"
 #include "util/Poison.h"
 
 using namespace js::jit;
 
 ExecutablePool::~ExecutablePool() {
+  JSInstr::LogPoolUnmap(this);
 #ifdef DEBUG
   for (size_t bytes : m_codeBytes) {
     MOZ_ASSERT(bytes == 0);
@@ -188,6 +190,7 @@ ExecutablePool* ExecutableAllocator::createPool(size_t n) {
     return nullptr;
   }
 
+  JSInstr::LogPoolCreate(pool, ExecPoolKind::Other, allocSize);
   return pool;
 }
 

@@ -7,23 +7,64 @@
 #ifndef jit_BaselineInstr_h
 #define jit_BaselineInstr_h
 
-#include <cstdint>
+#include "jit/Instr.h"
+#include "jit/InstrIds.h"
+#include "js/TypeDecls.h"
 
-#include "vm/JSScript.h"
+// Baseline-specific instrumentation helpers. The identity of a
+// baseline-compiled script for the phase-3 log is a SHA-1 over its
+// canonical bytecode representation: two scripts share semantic_id
+// iff baseline codegen would emit byte-identical code (up to the
+// codegen flags recorded on the run-header).
+//
+// This header only exposes computation helpers; emission is done by
+// JSInstr from `BaselineJIT.cpp` at compile time.
 
 namespace js::jit {
 
-// Cheap probe hash on the JSScript's shared bytecode data. Suitable as
-// a first-level fingerprint but not as a canonical identity, since two
-// scripts with identical bytecode may still differ in flags or shape.
-uint32_t ComputeBaselineProbeHash(JSScript* script);
+class BaselineScript;
+class CacheIRStubInfo;
+enum class CacheKind : uint8_t;
+class ICEntry;
+class ICFallbackStub;
+class ICCacheIRStub;
+class ICStub;
 
-// Emit a `baseline-compile` line to the JSInstr_Baseline channel when
-// enabled. Fires per successful baseline compile so
-// `JS_INSTR=baseline` yields per-workload frequency logs suitable for
-// the phase-2 preliminary evaluations. Cheap no-op when the channel is
-// off.
+// SHA-1 identity as defined by [SMDOC] Phase-3 instrumentation
+// identities in InstrIds.h.
+Sha1Digest ComputeBaselineSemanticId(JSScript* script);
+
+// Code identity over the finished baseline JitCode + relocation
+// layout. Called immediately after BaselineScript::New completes.
+Sha1Digest ComputeBaselineCodeId(BaselineScript* baseline);
+
+// Emit a `baseline-compile` line if the Baseline channel is enabled.
+// Idempotent-safe wrapper around JSInstr::LogBaselineCompile.
 void EmitBaselineCompileEvent(JSContext* cx, JSScript* script);
+
+// Walk the whole IC chain reachable from `icEntry->firstStub()`
+// through `fallback` and emit one ic-instance-detach per stub,
+// including the fallback itself.
+//
+// MUST be called BEFORE the caller invokes discardStubs / unlinkStub:
+// after the unlink the chain no longer reaches the removed stubs and
+// their enteredCount_ is lost.
+//
+// `outerScript` is the script whose ICEntry contains this chain, used
+// to derive site_id. `reason` classifies why the chain is being torn
+// down.
+void HarvestIcChain(ICEntry* icEntry, ICFallbackStub* fallback,
+                    JSScript* outerScript, IcDetachReason reason);
+
+// Emit ic-instance-detach for a single stub in a chain (weak-sweep
+// path). The rest of the chain remains intact.
+void HarvestOneIcStub(ICCacheIRStub* stub, ICFallbackStub* fallback,
+                      JSScript* outerScript, IcDetachReason reason);
+
+// If this CacheIR body has not been seen before in this process, emit
+// an ic-body-emit event with a stub-data-derived coupling census.
+// Called from LookupOrCompileStub's miss branch.
+void EmitIcBodyIfNew(CacheKind kind, const CacheIRStubInfo* stubInfo);
 
 }  // namespace js::jit
 

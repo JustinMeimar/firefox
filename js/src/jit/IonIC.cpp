@@ -748,14 +748,14 @@ void IonIC::attachStub(IonICStub* newStub, JitCode* code) {
   MOZ_ASSERT(newStub);
   MOZ_ASSERT(code);
 
-  JS_INSTR(JSInstr_IC,
-           "ic-attach kind=%s code=%u hash=%u engine=ion proc=%s\n",
-           CacheKindNames[uint8_t(kind_)],
-           unsigned(code->instructionsSize()),
-           unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
-               kind_, ICStubEngine::IonIC, newStub->stubInfo()->code(),
-               newStub->stubInfo()->codeLength()))),
-           gJSInstr.procTag);
+  if (JSInstr::Enabled(InstrCh_IC)) {
+    Sha1Digest icBodyId = Sha1(mozilla::Span<const uint8_t>(
+        reinterpret_cast<const uint8_t*>(newStub->stubInfo()->code()),
+        newStub->stubInfo()->codeLength()));
+    uint32_t bcOffset =
+        uint32_t(script_->pcToOffset(pc_));
+    JSInstr::LogIcInstanceAttach(script_, bcOffset, icBodyId, IcEngine::Ion);
+  }
 
   if (firstStub_) {
     newStub->setNext(firstStub_, codeRaw_);

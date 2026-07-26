@@ -318,6 +318,10 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(writeProtectCode, true);
 #endif
 
+  // Phase-3 instrumentation demand mode; toggled at Init when the
+  // JS_INSTR_MODE=demand env var is set.
+  SET_DEFAULT(instrDemandMode, false);
+
   // This is set to its actual value in InitializeJit.
   SET_DEFAULT(supportsUnalignedAccesses, false);
 

@@ -10,6 +10,7 @@
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
+#include "jit/BaselineInstr.h"
 #include "jit/BytecodeAnalysis.h"
 #include "jit/CacheIRCloner.h"
 #include "jit/CacheIRHealth.h"
@@ -137,6 +138,7 @@ bool TrialInliner::replaceICStub(ICEntry& entry, ICFallbackStub* fallback,
   MOZ_ASSERT(fallback->trialInliningState() == TrialInliningState::Candidate);
   writer.setTrialInliningState(TrialInliningState::Inlined);
 
+  HarvestIcChain(&entry, fallback, script_, IcDetachReason::TrialInline);
   fallback->discardStubs(cx()->zone(), &entry);
 
   // Note: AttachBaselineCacheIRStub never throws an exception.

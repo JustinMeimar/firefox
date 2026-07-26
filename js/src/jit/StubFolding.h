@@ -27,7 +27,8 @@ bool TryFoldingStubsLocked(JSContext* cx, ICFallbackStub* fallback,
                            gc::AutoMarkingLock& lock);
 
 bool AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
-                     ICScript* icScript, ICFallbackStub* fallback);
+                     JSScript* outerScript, ICScript* icScript,
+                     ICFallbackStub* fallback);
 
 }  // namespace jit
 }  // namespace js

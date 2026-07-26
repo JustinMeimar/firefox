@@ -11,6 +11,7 @@
 
 #include "builtin/Eval.h"
 #include "jit/BaselineCacheIRCompiler.h"
+#include "jit/BaselineInstr.h"
 #include "jit/CacheIRGenerator.h"
 #include "jit/CacheIRHealth.h"
 #include "jit/JitFrames.h"
@@ -479,6 +480,7 @@ static void MaybeTransition(JSContext* cx, BaselineFrame* frame,
                                            stub)) {
       ICEntry* icEntry = frame->icScript()->icEntryForStub(stub);
       stub->state().forceTransition();
+      HarvestIcChain(icEntry, stub, frame->script(), IcDetachReason::Overflow);
       stub->discardStubs(cx->zone(), icEntry);
       return;
     }
@@ -499,6 +501,8 @@ static void MaybeTransition(JSContext* cx, BaselineFrame* frame,
                               SpewContext::Transition);
       }
 #endif
+      HarvestIcChain(icEntry, stub, frame->script(),
+                     IcDetachReason::Transition);
       stub->discardStubs(cx->zone(), icEntry);
     }
   }

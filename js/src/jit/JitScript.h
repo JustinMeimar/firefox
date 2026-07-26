@@ -172,6 +172,11 @@ class alignas(uintptr_t) ICScript final : public TrailingArray<ICScript> {
   static constexpr Offset offsetOfWarmUpCount() {
     return offsetof(ICScript, warmUpCount_);
   }
+  static constexpr Offset offsetOfEntryCount() {
+    return offsetof(ICScript, entryCount_);
+  }
+  uint64_t entryCount() const { return entryCount_; }
+  void resetEntryCount() { entryCount_ = 0; }
   static constexpr Offset offsetOfIonThreshold() {
     return offsetof(ICScript, ionThreshold_);
   }
@@ -253,6 +258,13 @@ class alignas(uintptr_t) ICScript final : public TrailingArray<ICScript> {
   // backedges taken.  Reset if the script's JIT code is forcibly discarded.
   // See also the ScriptWarmUpData class.
   mozilla::Atomic<uint32_t, mozilla::Relaxed> warmUpCount_ = {};
+
+  // Phase-3 instrumentation counter: number of entries into the
+  // compiled baseline prologue for this ICScript. Only bumped when
+  // JitOptions.instrDemandMode is on; measures compiled-baseline
+  // executions, not interpreter runs or loop backedges. Structural
+  // runs skip the bump so measured code bytes are not contaminated.
+  uint64_t entryCount_ = 0;
 
   uint32_t ionThreshold_;
 

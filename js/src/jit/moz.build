@@ -47,6 +47,8 @@ UNIFIED_SOURCES += [
     "FoldTests.cpp",
     "GraphSpewer.cpp",
     "InlinableNatives.cpp",
+    "Instr.cpp",
+    "InstrIds.cpp",
     "InstructionReordering.cpp",
     "InterpreterEntryTrampoline.cpp",
     "Ion.cpp",

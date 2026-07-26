@@ -8,129 +8,227 @@
 #define jit_Instr_h
 
 #include "mozilla/Likely.h"
-#ifndef JS_STANDALONE
-#  include "mozilla/ProcessType.h"
-#endif
-#include "mozilla/TimeStamp.h"
-#include <cerrno>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include "mozilla/Span.h"
 
-#include "threading/LockGuard.h"
-#include "threading/Mutex.h"
-#include "vm/MutexIDs.h"
+#include <cstddef>
+#include <cstdint>
 
-// Research instrumentation for the FrostMonkey phase-2 preliminary
-// evaluations; not intended for production. Env vars read at init():
+#include "jit/InstrIds.h"
+#include "js/TypeDecls.h"
+
+// [SMDOC] Phase-3 JIT instrumentation
+//
+// This subsystem produces the durable JSONL logs consumed by the
+// research harness described in
+// `notes/07_26_2026_instr_plan.md`. It has three design goals:
+//
+//   1. The log is the interface. Every event is a JSON object on one
+//      line, prefixed with a versioned header, so the harness can
+//      parse producer output without any coupling to engine
+//      internals. Schema version is `v` on every line; bump on any
+//      incompatible change.
+//
+//   2. Each responsibility is a small class, not a macro pile. The
+//      global `JSInstr` facade is the only symbol callers touch; it
+//      forwards to a private JsonlSink, a per-process InstrRegistry
+//      that hands out monotonic local ids, and per-event serializers.
+//      Callers never see FILE*, never see JSONWriter, never take
+//      locks.
+//
+//   3. Every event site is O(cache-line) on the disabled path.
+//      `JSInstr::Enabled(channel)` is a single relaxed atomic load;
+//      when disabled, no allocation, no formatting, no lock.
+//
+// Runtime activation is via environment variables, read once at first
+// JitRuntime init and immutable thereafter:
 //
 //   JS_INSTR       "1" or "all" enables every channel. Otherwise a
-//                  substring match against the channel names
-//                  {ic, lifecycle, timing, blinterp, baseline}; a
-//                  match that resolves to no channels falls back to
-//                  all. Unset leaves instrumentation disabled and
-//                  emission sites are a single predicted-taken branch.
+//                  comma-separated subset of channel names:
+//                  {lifecycle, ic, demand, coupling, snapshot, timing,
+//                   baseline}. Unset leaves the subsystem disabled.
 //
-//   JS_INSTR_FILE  Output path; ".$PID" is appended. Falls back to
-//                  stderr if unset or fopen fails.
+//   JS_INSTR_DIR   Required when JS_INSTR is set. Output directory;
+//                  one file per process: `<proc>.<pid>.jsonl`. If the
+//                  directory cannot be opened, the subsystem stays
+//                  disabled (never falls back to stderr; mixed
+//                  streams break the harness).
+//
+//   JS_INSTR_RUN_ID  Opaque string recorded in the run-header event;
+//                    lets the harness correlate multi-process output.
+//                    Required when JS_INSTR is set.
+//
+//   JS_INSTR_MODE  "structural" or "demand". Recorded in the header.
+//                  In demand mode, the baseline JIT prologue emits an
+//                  additional counter increment for the per-JitScript
+//                  entry counter (structural runs skip it so measured
+//                  code bytes are not contaminated).
+
+namespace js::jit {
+class ExecutablePool;
+class JitCode;
+}  // namespace js::jit
+
 
 namespace js::jit {
 
-enum JSInstrCh : uint32_t {
-  JSInstr_IC = 1 << 0,
-  JSInstr_Lifecycle = 1 << 1,
-  JSInstr_Timing = 1 << 2,
-  JSInstr_BLInterp = 1 << 3,
-  JSInstr_Baseline = 1 << 4,
-  JSInstr_All = 0xFFFFFFFF,
+enum InstrChannel : uint32_t {
+  InstrCh_Lifecycle = 1 << 0,  // pool/jitcode/script create+retire
+  InstrCh_IC = 1 << 1,         // ic body emit, attach, detach
+  InstrCh_Demand = 1 << 2,     // per-JitScript entry counter flushes
+  InstrCh_Coupling = 1 << 3,   // coupling census on IC bodies
+  InstrCh_Snapshot = 1 << 4,   // snapshot-marker, footprint, smaps
+  InstrCh_Timing = 1 << 5,     // component timing (compile, gc, etc.)
+  InstrCh_Baseline = 1 << 6,   // legacy channel: baseline compiles
+  InstrCh_All = 0xFFFFFFFFu,
 };
 
-struct JSInstrumentation {
-  uint32_t channels = 0;
-  FILE* out = nullptr;
-  mozilla::TimeStamp epoch;
-  const char* procTag = "parent";
-  js::Mutex lock MOZ_UNANNOTATED;
-
-  JSInstrumentation() : lock(mutexid::JSInstrumentation) {}
-
-  void init() {
-    const char* env = getenv("JS_INSTR");
-    if (!env) return;
-    epoch = mozilla::TimeStamp::Now();
-    const char* file = getenv("JS_INSTR_FILE");
-    if (file && *file) {
-      char buf[2048];
-      snprintf(buf, sizeof(buf), "%s.%d", file, int(getpid()));
-      out = fopen(buf, "w");
-      if (out) setbuf(out, nullptr);
-    }
-    if (!out) out = stderr;
-    if (strcmp(env, "1") == 0 || strcmp(env, "all") == 0) {
-      channels = JSInstr_All;
-    } else {
-      channels = 0;
-      if (strstr(env, "ic")) channels |= JSInstr_IC;
-      if (strstr(env, "lifecycle")) channels |= JSInstr_Lifecycle;
-      if (strstr(env, "timing")) channels |= JSInstr_Timing;
-      if (strstr(env, "blinterp")) channels |= JSInstr_BLInterp;
-      if (strstr(env, "baseline")) channels |= JSInstr_Baseline;
-      if (!channels) channels = JSInstr_All;
-    }
-#ifndef JS_STANDALONE
-    if (mozilla::GetGeckoProcessType() == GeckoProcessType_Content) {
-      procTag = "content";
-    }
-#endif
-  }
-
-  bool enabled(uint32_t ch) const { return (channels & ch) != 0; }
-
-  double elapsedUs() const {
-    return (mozilla::TimeStamp::Now() - epoch).ToMicroseconds();
-  }
-
-  void close() {
-    if (out && out != stderr && out != stdout) {
-      fclose(out);
-    }
-    out = nullptr;
-    channels = 0;
-  }
+enum class InstrMode : uint8_t {
+  Structural,
+  Demand,
 };
 
-inline JSInstrumentation gJSInstr;
+enum class SourceClass : uint8_t {
+  SelfHosted,
+  Chrome,
+  Guest,
+};
 
-#define JS_INSTR(ch, fmt, ...)                                       \
-  do {                                                               \
-    if (MOZ_UNLIKELY(::js::jit::gJSInstr.enabled(ch))) {             \
-      js::LockGuard<js::Mutex> _jsInstrLock(::js::jit::gJSInstr.lock); \
-      fprintf(::js::jit::gJSInstr.out, "ts=%.0f " fmt,               \
-              ::js::jit::gJSInstr.elapsedUs(), ##__VA_ARGS__);       \
-    }                                                                \
-  } while (0)
+enum class IcEngine : uint8_t {
+  Baseline,
+  Ion,
+};
 
-#define JS_INSTR_TIMER_BEGIN(label)                                  \
-  mozilla::TimeStamp jsInstrTimer_##label;                           \
-  if (MOZ_UNLIKELY(                                                  \
-          ::js::jit::gJSInstr.enabled(::js::jit::JSInstr_Timing))) { \
-    jsInstrTimer_##label = mozilla::TimeStamp::Now();                \
-  }
+enum class IcDetachReason : uint8_t {
+  Transition,
+  Fold,
+  Overflow,
+  TrialInline,
+  IonTransition,
+  GcPurge,
+  WeakSweep,
+  ScriptDestroy,
+  RuntimeShutdown,
+  Clone,
+  WarpAbort,
+};
 
-#define JS_INSTR_TIMER_END(label, event, component, extraFmt, ...)     \
-  do {                                                                 \
-    if (MOZ_UNLIKELY(                                                  \
-            ::js::jit::gJSInstr.enabled(::js::jit::JSInstr_Timing)) && \
-        !jsInstrTimer_##label.IsNull()) {                              \
-      auto elapsed_ = mozilla::TimeStamp::Now() - jsInstrTimer_##label; \
-      double us_ = elapsed_.ToMicroseconds();                          \
-      js::LockGuard<js::Mutex> _jsInstrLock(::js::jit::gJSInstr.lock); \
-      fprintf(::js::jit::gJSInstr.out,                                 \
-              "ts=%.0f %s component=%s us=%.0f" extraFmt "\n",         \
-              ::js::jit::gJSInstr.elapsedUs(), event, component, us_,  \
-              ##__VA_ARGS__);                                          \
-    }                                                                  \
-  } while (0)
+enum class JitCodeOwner : uint8_t {
+  BaselineScript,
+  BaselineIC,
+  SharedIC,
+  Trampoline,
+  Ion,
+  Regexp,
+  Wasm,
+  Other,
+};
+
+enum class ExecPoolKind : uint8_t {
+  Baseline,
+  Ion,
+  Other,
+  Regexp,
+  Wasm,
+};
+
+const char* Name(InstrMode);
+const char* Name(SourceClass);
+const char* Name(IcEngine);
+const char* Name(IcDetachReason);
+const char* Name(JitCodeOwner);
+const char* Name(ExecPoolKind);
+
+struct CouplingRecord {
+  const char* operandKind;   // e.g. "ImmGCPtr", "AbsoluteAddress"
+  uint32_t patchOffset;      // offset within the code body
+  const char* targetKind;    // e.g. "Shape", "Realm", "Runtime"
+  const char* relocKind;     // e.g. "gcptr", "cellptr", "none"
+  const char* eligibility;   // "direct-relocatable" | "table" | "instance"
+};
+
+// Facade. All engine code calls into this. The methods are declared
+// as inline no-ops on the disabled path so the caller pays for a
+// single atomic-relaxed load before deciding to build any arguments.
+class JSInstr {
+ public:
+  // Process-idempotent. Called from JitRuntime::init. A second call
+  // (second JitRuntime in the same PID) does not truncate the log,
+  // does not reopen the file, and emits a runtime-init event instead
+  // of a new run-header.
+  static void Init();
+
+  // Called from JitRuntime::finish on graceful shutdown to flush
+  // buffers and emit runtime-shutdown for that runtime.
+  static void RuntimeShutdown(JSRuntime* rt);
+
+  // Called at process exit if the caller has a hook. Optional; log
+  // is durable line-by-line so a hard exit is also safe.
+  static void ProcessShutdown();
+
+  // Cheap disabled-path check. The channel mask is a single relaxed
+  // atomic uint32_t; the branch is predicted-not-taken.
+  static bool Enabled(uint32_t channel);
+
+  static uint32_t RuntimeLocalId(JSRuntime* rt);
+
+  // Lifecycle
+  static void LogPoolCreate(ExecutablePool* pool, ExecPoolKind kind,
+                            size_t mmapBytes);
+  static void LogPoolUnmap(ExecutablePool* pool);
+
+  static void LogJitCodeCreate(JitCode* code, JitCodeOwner owner);
+  static void LogJitCodeFinalize(JitCode* code);
+
+  static void LogScriptCreate(JSScript* script);
+  static void LogScriptDestroy(JSScript* script);
+
+  // Baseline compile / retire.
+  //
+  // semanticId is computed by BaselineInstr::ComputeSemanticId, which
+  // hashes the canonical bytecode representation. codeId is over the
+  // finished machine code.
+  static void LogBaselineCompile(JSRuntime* rt, JSScript* script,
+                                 const Sha1Digest& semanticId,
+                                 const Sha1Digest& codeId,
+                                 uint32_t methodBytes,
+                                 uint32_t metadataBytes,
+                                 uint32_t numIcEntries);
+  static void LogBaselineRetire(JSScript* script);
+
+  // A brand new baseline CacheIR body was compiled. Fires exactly
+  // once per unique ic_body_id per process. `coupling` is a slice
+  // that is copied under the sink mutex; the caller owns the storage.
+  static void LogIcBodyEmit(const Sha1Digest& icBodyId, const char* cacheKind,
+                            uint32_t bodyBytes, uint32_t stubDataBytes,
+                            mozilla::Span<const CouplingRecord> coupling);
+
+  static void LogIcInstanceAttach(JSScript* outerScript, uint32_t bcOffset,
+                                  const Sha1Digest& icBodyId, IcEngine engine);
+
+  static void LogIcInstanceDetach(JSScript* outerScript, uint32_t bcOffset,
+                                  const Sha1Digest& icBodyId,
+                                  IcDetachReason reason, uint32_t enteredCount,
+                                  bool isFallback, uint32_t chainLengthBefore);
+
+  // Snapshot -- called from InstrSnapshot on each process.
+  static void LogSnapshotMarker(const char* marker);
+
+  // Demand mode -- flushed on shutdown, GC-purge boundaries, and
+  // every snapshot. `entries` is a slice of {scriptLocalId,
+  // enteredCount} pairs; copied under the sink mutex.
+  struct EntriesFlushRow {
+    uint32_t scriptLocalId;
+    uint64_t enteredCount;
+  };
+  static void LogEntriesFlush(const char* reason,
+                              mozilla::Span<const EntriesFlushRow> entries);
+  static void LogEntriesOverflow(uint32_t scriptLocalId);
+};
+
+// Backwards-compatible convenience macro; new code should prefer the
+// typed log methods. Kept for the two existing sites that used
+// JS_INSTR(...) formatted output.
+#define JS_INSTR_ENABLED(ch) MOZ_UNLIKELY(::js::jit::JSInstr::Enabled(ch))
 
 }  // namespace js::jit
 

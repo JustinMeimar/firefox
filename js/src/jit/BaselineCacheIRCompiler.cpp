@@ -7,6 +7,7 @@
 #include "mozilla/RandomNum.h"
 
 #include "gc/GC.h"
+#include "jit/BaselineInstr.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRAOT.h"
 #include "jit/CacheIRSpewer.h"
@@ -2111,6 +2112,8 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, code)) {
       return false;
     }
+
+    EmitIcBodyIfNew(kind, stubInfo);
   } else if (!stubInfo) {
     MOZ_ASSERT(IsPortableBaselineInterpreterEnabled());
 
@@ -2229,7 +2232,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
 
   // Try including this case in an existing folded stub.
   if (stub->mayHaveFoldedStub() &&
-      AddToFoldedStub(cx, writer, icScript, stub)) {
+      AddToFoldedStub(cx, writer, outerScript, icScript, stub)) {
     JitSpew(JitSpew_StubFolding,
             "Added to folded stub at offset %u (icScript: %p) (%s:%u:%u)",
             stub->pcOffset(), icScript, outerScript->filename(),
@@ -2304,6 +2307,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
     case TrialInliningState::Inlined:
       stub->setTrialInliningState(TrialInliningState::Failure);
       // Ensure we stop using the callee's trial inlining ICScript.
+      HarvestIcChain(icEntry, stub, outerScript, IcDetachReason::TrialInline);
       stub->discardStubs(cx->zone(), icEntry);
       icScript->removeInlinedChild(stub->pcOffset());
       break;
@@ -2315,13 +2319,13 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   writer.copyStubData(newStub->stubDataStart());
   newStub->setTypeData(writer.typeData());
 
-  JS_INSTR(JSInstr_IC,
-           "ic-attach kind=%s code=%u hash=%u engine=baseline proc=%s\n",
-           CacheKindNames[uint8_t(kind)], unsigned(code->instructionsSize()),
-           unsigned(CacheIRStubKey::hash(CacheIRStubKey::Lookup(
-               kind, ICStubEngine::Baseline, stubInfo->code(),
-               stubInfo->codeLength()))),
-           gJSInstr.procTag);
+  if (JSInstr::Enabled(InstrCh_IC)) {
+    Sha1Digest icBodyId = Sha1(mozilla::Span<const uint8_t>(
+        reinterpret_cast<const uint8_t*>(stubInfo->code()),
+        stubInfo->codeLength()));
+    JSInstr::LogIcInstanceAttach(outerScript, stub->pcOffset(), icBodyId,
+                                 IcEngine::Baseline);
+  }
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   newStub->updateRawJitCode(pbl::GetICInterpreter());

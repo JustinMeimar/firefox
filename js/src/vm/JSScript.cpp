@@ -36,6 +36,7 @@
 #include "gc/GCContext.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIRHealth.h"
+#include "jit/Instr.h"
 #include "jit/Ion.h"
 #include "jit/IonScript.h"
 #include "jit/JitCode.h"
@@ -126,6 +127,7 @@ void js::BaseScript::finalize(JS::GCContext* gcx) {
 
   if (warmUpData_.isJitScript()) {
     JSScript* script = this->asJSScript();
+    js::jit::JSInstr::LogScriptDestroy(script);
     script->releaseJitScriptOnFinalize(gcx);
   }
 

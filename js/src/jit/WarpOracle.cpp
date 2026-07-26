@@ -10,6 +10,7 @@
 
 #include <algorithm>
 
+#include "jit/BaselineInstr.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRReader.h"
@@ -1438,6 +1439,8 @@ AbortReasonOr<bool> WarpScriptOracle::maybeInlineCall(
         MOZ_ASSERT_IF(entry->firstStub() != stub,
                       entry->firstStub() == stub->next());
         if (entry->firstStub() == stub) {
+          HarvestOneIcStub(stub, fallbackStub, script_,
+                           IcDetachReason::WarpAbort);
           fallbackStub->unlinkStub(cx_->zone(), entry, /*prev=*/nullptr, stub);
         }
         targetScript->setUninlineable();

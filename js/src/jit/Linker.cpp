@@ -4,6 +4,7 @@
 
 #include "jit/Linker.h"
 
+#include "jit/Instr.h"
 #include "jit/JitZone.h"
 #include "util/Memory.h"
 
@@ -70,6 +71,23 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
   if (masm.embedsNurseryPointers()) {
     cx->runtime()->gc.storeBuffer().putWholeCell(code);
   }
+  JitCodeOwner owner;
+  switch (kind) {
+    case CodeKind::Ion:
+      owner = JitCodeOwner::Ion;
+      break;
+    case CodeKind::Baseline:
+      owner = JitCodeOwner::BaselineScript;
+      break;
+    case CodeKind::RegExp:
+      owner = JitCodeOwner::Regexp;
+      break;
+    case CodeKind::Other:
+    default:
+      owner = JitCodeOwner::Other;
+      break;
+  }
+  JSInstr::LogJitCodeCreate(code, owner);
   return code;
 }
 

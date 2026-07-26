@@ -563,6 +563,40 @@ void BaselineInterpreterCodeGen::restoreInterpreterPCReg() {
 }
 
 template <>
+void BaselineInterpreterCodeGen::emitInstrDemandEntryBump() {
+  // Interpreter loop entries are not counted; only compiled baseline
+  // prologues are, so demand mode can attribute exact per-script
+  // entries without conflating with interpreter runs.
+}
+
+template <>
+void BaselineCompilerCodeGen::emitInstrDemandEntryBump() {
+  Register scriptReg = R2.scratchReg();
+  Register lowReg = R0.scratchReg();
+
+  masm.loadPtr(frame.addressOfICScript(), scriptReg);
+
+  Address entryCountLo(scriptReg, ICScript::offsetOfEntryCount());
+  Address entryCountHi(scriptReg, ICScript::offsetOfEntryCount() + 4);
+
+  masm.load32(entryCountLo, lowReg);
+  masm.add32(Imm32(1), lowReg);
+  masm.store32(lowReg, entryCountLo);
+
+  // Propagate the carry into the high 32 bits: after the add above,
+  // if lowReg is zero the low half wrapped and the high half needs a
+  // +1. The counter is not atomic; multiple threads calling the same
+  // ICScript's prologue may race, but a small over- or undercount is
+  // acceptable for demand accounting.
+  Label noCarry;
+  masm.branch32(Assembler::NotEqual, lowReg, Imm32(0), &noCarry);
+  masm.load32(entryCountHi, lowReg);
+  masm.add32(Imm32(1), lowReg);
+  masm.store32(lowReg, entryCountHi);
+  masm.bind(&noCarry);
+}
+
+template <>
 void BaselineCompilerCodeGen::emitInitializeLocals() {
   // Initialize all locals to |undefined|. Lexical bindings are temporal
   // dead zoned in bytecode.
@@ -6968,6 +7002,13 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   // case GC gets run during stack check). For global and eval scripts, the env
   // chain is in R1. For function scripts, the env chain is in the callee.
   emitInitFrameFields(R1.scratchReg());
+
+  // Bump the demand counter only after the frame's ICScript slot has
+  // been populated by emitInitFrameFields; reading it before that
+  // point yields uninitialised stack memory.
+  if (JitOptions.instrDemandMode) {
+    emitInstrDemandEntryBump();
+  }
 
   // When compiling with Debugger instrumentation, set the debuggeeness of
   // the frame before any operation that can call into the VM.

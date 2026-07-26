@@ -9,6 +9,7 @@
 #include "gc/GC.h"
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/BaselineIC.h"
+#include "jit/BaselineInstr.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRCloner.h"
 #include "jit/CacheIRCompiler.h"
@@ -434,6 +435,7 @@ static bool TryFoldingGuardShapes(JSContext* cx, ICFallbackStub* fallback,
   }
 
   // Replace the existing stubs with the new folded stub.
+  HarvestIcChain(icEntry, fallback, script, IcDetachReason::Fold);
   fallback->discardStubs(cx->zone(), icEntry);
 
   ICAttachResult result = AttachBaselineCacheIRStubLocked(
@@ -507,7 +509,8 @@ bool js::jit::TryFoldingStubsLocked(JSContext* cx, ICFallbackStub* fallback,
 }
 
 bool js::jit::AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
-                              ICScript* icScript, ICFallbackStub* fallback) {
+                              JSScript* outerScript, ICScript* icScript,
+                              ICFallbackStub* fallback) {
   ICEntry* icEntry = icScript->icEntryForStub(fallback);
   ICStub* entryStub = icEntry->firstStub();
 
@@ -753,6 +756,7 @@ bool js::jit::AddToFoldedStub(JSContext* cx, const CacheIRWriter& writer,
   if (numShapes == maxLength) {
     MOZ_ASSERT(fallback->state().mode() != ICState::Mode::Generic);
     fallback->state().forceTransition();
+    HarvestIcChain(icEntry, fallback, outerScript, IcDetachReason::Overflow);
     fallback->discardStubs(cx->zone(), icEntry);
     return false;
   }

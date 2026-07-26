@@ -49,6 +49,8 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   // which is stored above the code.
   uint8_t* allocatedMemory() const { return headerPtr() - headerSize_; }
 
+  ExecutablePool* pool() const { return pool_; }
+
  protected:
   ExecutablePool* pool_;
   uint32_t bufferSize_;  // Total buffer size. Does not include headerSize_.

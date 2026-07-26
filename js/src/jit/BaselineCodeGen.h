@@ -109,6 +109,11 @@ class BaselineCodeGen {
   void saveInterpreterPCReg();
   void restoreInterpreterPCReg();
 
+  // Phase-3 instrumentation demand counter. Emits an increment of
+  // ICScript::entryCount_ (uint64 in memory, done as two 32-bit adds
+  // with a carry branch). No-op on the interpreter path.
+  void emitInstrDemandEntryBump();
+
   // Subtracts |script->nslots() * sizeof(Value)| from reg.
   void subtractScriptSlotsSize(Register reg, Register scratch);
 

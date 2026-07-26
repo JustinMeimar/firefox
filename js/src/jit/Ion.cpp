@@ -117,7 +117,7 @@ uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
 bool JitRuntime::initialize(JSContext* cx) {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
 
-  gJSInstr.init();
+  JSInstr::Init();
 
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
@@ -623,6 +623,7 @@ void JitCode::traceChildren(JSTracer* trc) {
 }
 
 void JitCode::finalize(JS::GCContext* gcx) {
+  JSInstr::LogJitCodeFinalize(this);
   // If this jitcode had a bytecode map, either the entry has been removed
   // from the table, or it has been detached (jitcode_ set to null) because
   // the profiler buffer still references it.
