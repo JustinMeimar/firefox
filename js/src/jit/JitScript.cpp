@@ -11,9 +11,11 @@
 
 #include "gc/GCMarker.h"
 #include "jit/BaselineIC.h"
+#include "jit/BaselineInstr.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BytecodeAnalysis.h"
 #include "jit/CacheIRCompiler.h"
+#include "jit/Instr.h"
 #include "jit/IonOptimizationLevels.h"  // jit::OptimizationInfo
 #include "jit/IonScript.h"
 #include "jit/JitFrames.h"
@@ -148,6 +150,11 @@ bool JSScript::createJitScript(JSContext* cx) {
   // Baseline Interpreter code.
   updateJitCodeRaw(cx->runtime());
 
+  // Mirror BaseScript::finalize's LogScriptDestroy gate: only scripts
+  // that reach a JitScript get lifecycle events. Every script-destroy
+  // now has a matching prior script-create.
+  JSInstr::LogScriptCreate(this);
+
   return true;
 }
 
@@ -176,6 +183,17 @@ void JSScript::releaseJitScript(JS::GCContext* gcx) {
 
 void JSScript::releaseJitScriptOnFinalize(JS::GCContext* gcx) {
   MOZ_ASSERT(hasJitScript());
+
+  // Instrumentation: record baseline retirement if the script had
+  // baseline code. We do NOT walk the IC chain here to emit detach
+  // events -- by the time this finalize hook runs, the zone's
+  // ICStubSpace has typically been swept and the stub chain is
+  // freed memory. The analyzer treats a script-destroy event as
+  // implicitly detaching every IC instance still attached to that
+  // script (see instr_stream.reconcile).
+  if (hasBaselineScript()) {
+    JSInstr::LogBaselineRetire(this);
+  }
 
   if (hasIonScript()) {
     IonScript* ion = jitScript()->clearIonScript(gcx, this);

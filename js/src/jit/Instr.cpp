@@ -10,8 +10,6 @@
 #include "mozilla/HashTable.h"
 #include "mozilla/TimeStamp.h"
 
-#include "prtime.h"
-
 #ifndef JS_STANDALONE
 #  include "mozilla/ProcessType.h"
 #endif
@@ -20,6 +18,7 @@
 #  include <sys/syscall.h>
 #endif
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -732,17 +731,43 @@ void JSInstr::Init() {
   std::call_once(gInitOnce, [] {
     InstrGlobal* g = GlobalPtr();
 
+    // Loud-fail path: if any JS_INSTR_* env var is set the operator
+    // intends to record. Any early return silently disables logging
+    // and produces zero-byte artefacts, which corrupts multi-hour
+    // experiments. So when intent is detected, hard-fail instead.
+    auto Intent = []() {
+      return getenv("JS_INSTR") || getenv("JS_INSTR_DIR") ||
+             getenv("JS_INSTR_RUN_ID") || getenv("JS_INSTR_MODE");
+    };
+    auto Die = [&](const char* why) {
+      if (Intent()) {
+        fprintf(stderr, "JS_INSTR misconfigured: %s\n", why);
+        _exit(1);
+      }
+    };
+
     const char* env = getenv("JS_INSTR");
     uint32_t channels = ParseChannels(env);
-    if (!channels) return;
+    if (!channels) {
+      Die("JS_INSTR env var missing or empty (want '1', 'all', or "
+          "comma-separated channels: lifecycle,ic,demand,coupling,snapshot,"
+          "timing,baseline)");
+      return;
+    }
 
     const char* dir = getenv("JS_INSTR_DIR");
     const char* runId = getenv("JS_INSTR_RUN_ID");
     const char* mode = getenv("JS_INSTR_MODE");
-    if (!dir || !runId) return;
+    if (!dir || !runId) {
+      Die("JS_INSTR_DIR and JS_INSTR_RUN_ID are both required");
+      return;
+    }
 
     const char* proc = GetProcTag();
-    if (!g->sink.Open(dir, proc)) return;
+    if (!g->sink.Open(dir, proc)) {
+      Die("JsonlSink::Open failed (check JS_INSTR_DIR exists and is writable)");
+      return;
+    }
 
     g->mode = InstrMode::Structural;
     if (mode && strcmp(mode, "demand") == 0) g->mode = InstrMode::Demand;
@@ -754,13 +779,18 @@ void JSInstr::Init() {
       JitOptions.instrDemandMode = true;
     }
 
+    atexit(&JSInstr::ProcessShutdown);
+
     // Wall-clock epoch in microseconds since the Unix epoch, captured
     // at log-open time. Every subsequent event line's `ts_us` is an
     // offset from this moment. The harness computes absolute wall
     // time for any event as `wall_us_epoch + ts_us`, which is how it
     // aligns per-process JSONL files without needing coordinated
     // triggers.
-    uint64_t wallUsEpoch = uint64_t(PR_Now());
+    uint64_t wallUsEpoch = uint64_t(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
 
     g->sink.EmitLine("run-header", 0, [g, channels, wallUsEpoch](JsonlBuilder& b) {
       b.Str("run_id", g->runId);
@@ -1049,8 +1079,11 @@ void JSInstr::LogSnapshotLive(const LiveCounters& c) {
   g->sink.EmitLine("snapshot-live", 0, [&](JsonlBuilder& b) {
     b.U64("live_pool_count", c.livePoolCount);
     b.U64("live_mmap_bytes", c.liveMmapBytes);
-    b.U64("live_ic_body_count", c.liveIcBodyCount);
-    b.U64("live_ic_body_bytes", c.liveIcBodyBytes);
+    // Interned bodies live for the whole process, not the whole
+    // program run. Field name reflects "distinct ever seen", not
+    // "currently attached to any IC".
+    b.U64("distinct_ic_body_count", c.liveIcBodyCount);
+    b.U64("distinct_ic_body_bytes", c.liveIcBodyBytes);
     b.BeginArray("by_owner");
     for (size_t i = 0; i < 8; ++i) {
       if (c.perOwner[i].count == 0 && c.perOwner[i].codeBytes == 0) continue;
