@@ -3201,7 +3201,7 @@ static JitCode* GenerateRegExpMatchStubShared(JSContext* cx,
   masm.ret();
 
   Linker linker(masm);
-  JitCode* code = linker.newCode(cx, CodeKind::Other);
+  JitCode* code = linker.newCode(cx, CodeKind::Other, JitCodeOwner::Trampoline);
   if (!code) {
     return nullptr;
   }
@@ -3408,7 +3408,7 @@ JitCode* JitZone::generateRegExpSearcherStub(JSContext* cx) {
   masm.ret();
 
   Linker linker(masm);
-  JitCode* code = linker.newCode(cx, CodeKind::Other);
+  JitCode* code = linker.newCode(cx, CodeKind::Other, JitCodeOwner::Trampoline);
   if (!code) {
     return nullptr;
   }
@@ -3564,7 +3564,7 @@ JitCode* JitZone::generateRegExpExecTestStub(JSContext* cx) {
   masm.ret();
 
   Linker linker(masm);
-  JitCode* code = linker.newCode(cx, CodeKind::Other);
+  JitCode* code = linker.newCode(cx, CodeKind::Other, JitCodeOwner::Trampoline);
   if (!code) {
     return nullptr;
   }
@@ -14125,7 +14125,7 @@ JitCode* JitZone::generateStringConcatStub(JSContext* cx) {
   masm.ret();
 
   Linker linker(masm);
-  JitCode* code = linker.newCode(cx, CodeKind::Other);
+  JitCode* code = linker.newCode(cx, CodeKind::Other, JitCodeOwner::Trampoline);
 
   CollectPerfSpewerJitCodeProfile(code, "StringConcatStub");
 #ifdef MOZ_VTUNE

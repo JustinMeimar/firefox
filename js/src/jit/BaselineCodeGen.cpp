@@ -7412,7 +7412,8 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
       return false;
     }
 
-    JitCode* code = linker.newCode(cx, CodeKind::Other);
+    JitCode* code =
+        linker.newCode(cx, CodeKind::Other, JitCodeOwner::BaselineInterpreter);
     if (!code) {
       return false;
     }
@@ -7543,7 +7544,8 @@ JitCode* JitRuntime::generateDebugTrapHandler(JSContext* cx,
   masm.abiret();
 
   Linker linker(masm);
-  JitCode* handlerCode = linker.newCode(cx, CodeKind::Other);
+  JitCode* handlerCode =
+      linker.newCode(cx, CodeKind::Other, JitCodeOwner::Trampoline);
   if (!handlerCode) {
     return nullptr;
   }

@@ -2740,7 +2740,7 @@ bool JitRuntime::generateBaselineICFallbackCode(JSContext* cx) {
 #undef EMIT_CODE
 
   Linker linker(masm);
-  JitCode* code = linker.newCode(cx, CodeKind::Other);
+  JitCode* code = linker.newCode(cx, CodeKind::Other, JitCodeOwner::SharedIC);
   if (!code) {
     return false;
   }

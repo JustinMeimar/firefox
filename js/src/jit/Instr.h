@@ -114,6 +114,7 @@ enum class IcDetachReason : uint8_t {
 
 enum class JitCodeOwner : uint8_t {
   BaselineScript,
+  BaselineInterpreter,
   BaselineIC,
   SharedIC,
   Trampoline,
@@ -122,6 +123,8 @@ enum class JitCodeOwner : uint8_t {
   Wasm,
   Other,
 };
+inline constexpr size_t kJitCodeOwnerCount =
+    size_t(JitCodeOwner::Other) + 1;
 
 enum class ExecPoolKind : uint8_t {
   Baseline,
@@ -241,7 +244,7 @@ class JSInstr {
     uint64_t codeBytes;
   };
   struct LiveCounters {
-    LiveByOwnerRow perOwner[8];  // sized to JitCodeOwner max + 1
+    LiveByOwnerRow perOwner[kJitCodeOwnerCount];
     uint64_t livePoolCount;
     uint64_t liveMmapBytes;
     uint64_t liveIcBodyCount;

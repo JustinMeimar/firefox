@@ -278,7 +278,7 @@ JitCode* BaselineCacheIRCompiler::compile() {
   perfSpewer_.endRecording();
 
   Linker linker(masm);
-  JitCode* newStubCode = linker.newCode(cx_, CodeKind::Baseline);
+  JitCode* newStubCode = linker.newCode(cx_, CodeKind::Baseline, JitCodeOwner::BaselineIC);
   if (!newStubCode) {
     cx_->recoverFromOutOfMemory();
     return nullptr;

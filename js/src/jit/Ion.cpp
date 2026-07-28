@@ -235,7 +235,7 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   generateTrampolineNatives(masm, nativeOffsets, rangeRecorder);
 
   Linker linker(masm);
-  trampolineCode_ = linker.newCode(cx, CodeKind::Other);
+  trampolineCode_ = linker.newCode(cx, CodeKind::Other, JitCodeOwner::Trampoline);
   if (!trampolineCode_) {
     return false;
   }

@@ -26,7 +26,7 @@ here = os.path.dirname(__file__)
 mitm_folder = os.path.dirname(os.path.realpath(__file__))
 
 # maximal allowed runtime of a mitmproxy command
-MITMDUMP_COMMAND_TIMEOUT = 30
+MITMDUMP_COMMAND_TIMEOUT = 120
 
 
 class Mitmproxy(Playback):
@@ -423,9 +423,12 @@ class Mitmproxy(Playback):
         LOG.info("Starting mitmproxy playback using command: %s" % " ".join(command))
         # to turn off mitmproxy log output, use these params for Popen:
         # Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        logfile = os.path.join(self.upload_dir, "mitmproxy.log")
+        if os.path.exists(logfile):
+            os.remove(logfile)
         self.mitmproxy_proc = ProcessHandler(
             command,
-            logfile=os.path.join(self.upload_dir, "mitmproxy.log"),
+            logfile=logfile,
             env=env,
             storeOutput=False,
         )
@@ -434,7 +437,13 @@ class Mitmproxy(Playback):
 
         ready = False
         while time.time() < end_time:
-            ready = self.check_proxy(host=self.host, port=self.port)
+            # mitmdump binds its listener before the replay addon has
+            # finished reading the recordings, so a bare TCP connect is
+            # not a readiness signal: it succeeds seconds before any
+            # request can be served. Require the "listening" banner too.
+            ready = self.check_proxy(
+                host=self.host, port=self.port
+            ) and self.check_proxy_ready()
             if ready:
                 LOG.info(
                     "Mitmproxy playback successfully started on %s:%d as pid %d"
@@ -490,6 +499,18 @@ class Mitmproxy(Playback):
             log_func("Mitmproxy exited with error code %d" % exit_code)
         else:
             LOG.info("Successfully killed the mitmproxy playback process")
+
+    def check_proxy_ready(self):
+        """Check that mitmdump has announced its listener, which happens
+        only after the replay addon has loaded every recording.
+        :return: True if the startup banner is present in the log
+        """
+        logfile = os.path.join(self.upload_dir, "mitmproxy.log")
+        try:
+            with open(logfile, errors="replace") as f:
+                return "listening at" in f.read()
+        except OSError:
+            return False
 
     def check_proxy(self, host, port):
         """Check that mitmproxy process is working by doing a socket call using the proxy settings

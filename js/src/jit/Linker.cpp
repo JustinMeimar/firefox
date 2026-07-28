@@ -13,7 +13,25 @@
 namespace js {
 namespace jit {
 
+static JitCodeOwner OwnerForKind(CodeKind kind) {
+  switch (kind) {
+    case CodeKind::Ion:
+      return JitCodeOwner::Ion;
+    case CodeKind::Baseline:
+      return JitCodeOwner::BaselineScript;
+    case CodeKind::RegExp:
+      return JitCodeOwner::Regexp;
+    case CodeKind::Other:
+    default:
+      return JitCodeOwner::Other;
+  }
+}
+
 JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
+  return newCode(cx, kind, OwnerForKind(kind));
+}
+
+JitCode* Linker::newCode(JSContext* cx, CodeKind kind, JitCodeOwner owner) {
   JS::AutoAssertNoGC nogc(cx);
   if (masm.oom()) {
     return fail(cx);
@@ -70,22 +88,6 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
   masm.link(code);
   if (masm.embedsNurseryPointers()) {
     cx->runtime()->gc.storeBuffer().putWholeCell(code);
-  }
-  JitCodeOwner owner;
-  switch (kind) {
-    case CodeKind::Ion:
-      owner = JitCodeOwner::Ion;
-      break;
-    case CodeKind::Baseline:
-      owner = JitCodeOwner::BaselineScript;
-      break;
-    case CodeKind::RegExp:
-      owner = JitCodeOwner::Regexp;
-      break;
-    case CodeKind::Other:
-    default:
-      owner = JitCodeOwner::Other;
-      break;
   }
   JSInstr::LogJitCodeCreate(code, owner);
   return code;

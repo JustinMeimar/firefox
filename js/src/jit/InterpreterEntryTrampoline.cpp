@@ -232,7 +232,7 @@ JitCode* JitRuntime::generateEntryTrampolineForScript(JSContext* cx,
   rangeRecorder.recordOffset("Interpreter", cx, script);
 
   Linker linker(masm);
-  JitCode* code = linker.newCode(cx, CodeKind::Other);
+  JitCode* code = linker.newCode(cx, CodeKind::Other, JitCodeOwner::Trampoline);
   if (!code) {
     return nullptr;
   }

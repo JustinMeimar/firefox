@@ -104,6 +104,8 @@ const char* NameOf(JitCodeOwner o) {
   switch (o) {
     case JitCodeOwner::BaselineScript:
       return "baseline-script";
+    case JitCodeOwner::BaselineInterpreter:
+      return "baseline-interpreter";
     case JitCodeOwner::BaselineIC:
       return "baseline-ic";
     case JitCodeOwner::SharedIC:
@@ -491,7 +493,7 @@ class InstrRegistry {
     uint64_t bytes;
   };
 
-  static constexpr size_t kNumOwners = 8;  // JitCodeOwner enumerators
+  static constexpr size_t kNumOwners = kJitCodeOwnerCount;
 
   js::Mutex lock_ MOZ_UNANNOTATED;
   std::atomic<uint32_t> nextRt_{1};
@@ -1059,12 +1061,12 @@ void JSInstr::LogSnapshotFootprint(uint32_t poolId, const char* poolKind,
 
 void JSInstr::GetLiveCounters(LiveCounters* out) {
   auto* g = GlobalPtr();
-  uint64_t counts[8];
-  uint64_t bytes[8];
+  uint64_t counts[kJitCodeOwnerCount];
+  uint64_t bytes[kJitCodeOwnerCount];
   uint64_t poolCount, mmapBytes, icBodyCount, icBodyBytes;
   g->registry.ReadLiveCounters(counts, bytes, poolCount, mmapBytes, icBodyCount,
                                icBodyBytes);
-  for (size_t i = 0; i < 8; ++i) {
+  for (size_t i = 0; i < kJitCodeOwnerCount; ++i) {
     out->perOwner[i] = {JitCodeOwner(i), counts[i], bytes[i]};
   }
   out->livePoolCount = poolCount;
@@ -1085,7 +1087,7 @@ void JSInstr::LogSnapshotLive(const LiveCounters& c) {
     b.U64("distinct_ic_body_count", c.liveIcBodyCount);
     b.U64("distinct_ic_body_bytes", c.liveIcBodyBytes);
     b.BeginArray("by_owner");
-    for (size_t i = 0; i < 8; ++i) {
+    for (size_t i = 0; i < kJitCodeOwnerCount; ++i) {
       if (c.perOwner[i].count == 0 && c.perOwner[i].codeBytes == 0) continue;
       b.BeginObjectElement();
       b.Str("owner", NameOf(c.perOwner[i].owner));

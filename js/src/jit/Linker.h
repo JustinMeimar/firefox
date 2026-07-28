@@ -12,6 +12,7 @@
 #include "jstypes.h"
 
 #include "jit/AutoWritableJitCode.h"
+#include "jit/Instr.h"
 #include "jit/MacroAssembler.h"
 #include "vm/Runtime.h"
 
@@ -42,6 +43,12 @@ class Linker {
   //
   // This method cannot GC. Errors are reported to the context.
   JitCode* newCode(JSContext* cx, CodeKind kind);
+
+  // CodeKind is too coarse to attribute instrumentation: Baseline covers
+  // both script method code and IC stub code, and Other covers the
+  // baseline interpreter alongside every trampoline. Callers that know
+  // which they are emitting pass the owner explicitly.
+  JitCode* newCode(JSContext* cx, CodeKind kind, JitCodeOwner owner);
 };
 
 }  // namespace jit
