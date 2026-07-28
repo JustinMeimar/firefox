@@ -1518,6 +1518,9 @@ void JSContext::resetJitStackLimit() {
   jitStackLimit = nativeStackLimit[JS::StackForUntrustedScript];
 #endif
   jitStackLimitNoInterrupt = jitStackLimit;
+#ifdef ENABLE_JS_AOT
+  mirrorAOTInterruptState();
+#endif
 }
 
 void JSContext::initJitStackLimit() {

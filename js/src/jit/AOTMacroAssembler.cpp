@@ -16,7 +16,7 @@ using namespace js::jit;
 
 #ifdef ENABLE_JS_AOT
 
-void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
+void MacroAssembler::emitAOTLoadTableBase(Register dest) {
   // Load the indirection table address from the stub frame when one is active.
   // Otherwise load it from the baseline frame.
   if (inAOTStubFrame_) {
@@ -28,6 +28,10 @@ void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
         Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()),
         dest);
   }
+}
+
+void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
+  emitAOTLoadTableBase(dest);
   int32_t slotOff = int32_t(AOTIndirectionTable::offsetOfSlot(slot));
   MacroAssemblerSpecific::loadPtr(Address(dest, slotOff), dest);
 }

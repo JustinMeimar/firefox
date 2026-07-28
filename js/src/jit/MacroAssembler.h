@@ -411,6 +411,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
     void operator=(const AutoInAOTStubFrame&) = delete;
   };
 
+  void emitAOTLoadTableBase(Register dest);
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
   void loadZoneForAOT(Register dest);
   void callPreBarrierAOT(MIRType type, Register scratch);
@@ -5342,8 +5343,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Label done;
 #ifdef ENABLE_JS_AOT
     if (isAOT()) {
-      // AOT code does not embed a realm, so load the zone from the current
-      // execution context at runtime.
+      // Cheap runtime-wide test first; only while an incremental GC is
+      // active do we pay for the precise per-zone test, which has to load
+      // the zone from the current execution context.
+      emitAOTLoadTableBase(ScratchReg);
+      branch32(Assembler::Equal,
+               Address(ScratchReg, AOTIndirectionTable::offsetOfSlot(
+                                       AOTSlot::PreBarrierZoneCount)),
+               Imm32(0), &done);
       branchTestNeedsMarkingBarrierAnyZone(Assembler::Zero, &done, ScratchReg);
     } else
 #endif

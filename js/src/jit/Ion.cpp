@@ -226,6 +226,20 @@ bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
         uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
   }
 
+  // Seed the mirrored values from the current runtime state. Later changes
+  // write through to these slots at their mutation sites.
+  aotIndirectionTable_.setMirrored(AOTSlot::InterruptBitsValue,
+                                   uintptr_t(cx->hasAnyPendingInterrupt()));
+  aotIndirectionTable_.setMirrored(AOTSlot::JitStackLimitValue,
+                                   uintptr_t(cx->jitStackLimit));
+  uintptr_t barrierZones = 0;
+  for (AllZonesIter zone(rt); !zone.done(); zone.next()) {
+    if (zone->needsMarkingBarrier()) {
+      barrierZones++;
+    }
+  }
+  aotIndirectionTable_.set(AOTSlot::PreBarrierZoneCount, barrierZones);
+
   return true;
 }
 

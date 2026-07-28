@@ -49,7 +49,15 @@ enum class AOTSlot : uint32_t {
   VMWrapper_End = VMWrapper_Begin + AOTMaxVMWrappers,
   ABIFn_Begin = VMWrapper_End,
   ABIFn_End = ABIFn_Begin + AOTMaxABIFunctions,
-  Count = ABIFn_End
+  // Mirrored values rather than addresses. The runtime rewrites these
+  // whenever the source of truth changes, saving generated code a
+  // dereference on hot checks.
+  Mirror_Begin = ABIFn_End,
+  InterruptBitsValue = Mirror_Begin,
+  JitStackLimitValue,
+  PreBarrierZoneCount,
+  Mirror_End,
+  Count = Mirror_End
 };
 
 inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
@@ -76,6 +84,18 @@ class AOTIndirectionTable {
   uintptr_t get(AOTSlot slot) const {
     MOZ_ASSERT(uint32_t(slot) < uint32_t(AOTSlot::Count));
     return slots_[uint32_t(slot)];
+  }
+
+  static constexpr bool isMirrorSlot(AOTSlot slot) {
+    return uint32_t(slot) >= uint32_t(AOTSlot::Mirror_Begin) &&
+           uint32_t(slot) < uint32_t(AOTSlot::Mirror_End);
+  }
+
+  // Mirror slots may be rewritten from another thread while jit code on the
+  // owning thread polls them.
+  void setMirrored(AOTSlot slot, uintptr_t value) {
+    MOZ_ASSERT(isMirrorSlot(slot));
+    __atomic_store_n(&slots_[uint32_t(slot)], value, __ATOMIC_SEQ_CST);
   }
 
   static constexpr uint32_t offsetOfSlot(AOTSlot slot) {

@@ -464,9 +464,34 @@ static bool HandleInterrupt(JSContext* cx, bool invokeCallback,
   return false;
 }
 
+#ifdef ENABLE_JS_AOT
+void JSContext::mirrorAOTInterruptState() {
+  jit::JitRuntime* jrt = runtime()->jitRuntime();
+  if (!jrt) {
+    return;
+  }
+  jit::AOTIndirectionTable& table = jrt->aotIndirectionTable();
+  // Requesting and clearing threads race on the mirror slots. Re-reading the
+  // authoritative fields after the sequentially consistent store guarantees
+  // the last writer leaves the mirror in sync.
+  while (true) {
+    uint32_t bits = interruptBits_;
+    uintptr_t limit = uintptr_t(jitStackLimit);
+    table.setMirrored(jit::AOTSlot::InterruptBitsValue, uintptr_t(bits));
+    table.setMirrored(jit::AOTSlot::JitStackLimitValue, limit);
+    if (interruptBits_ == bits && uintptr_t(jitStackLimit) == limit) {
+      break;
+    }
+  }
+}
+#endif
+
 void JSContext::requestInterrupt(InterruptReason reason) {
   interruptBits_ |= uint32_t(reason);
   jitStackLimit = JS::NativeStackLimitMin;
+#ifdef ENABLE_JS_AOT
+  mirrorAOTInterruptState();
+#endif
 
   if (reason == InterruptReason::CallbackUrgent) {
     // If this interrupt is urgent (slow script dialog for instance), take
@@ -516,6 +541,9 @@ bool JSContext::handleInterruptNoCallbacks() {
 void JSContext::clearPendingInterrupt(js::InterruptReason reason) {
   // Interrupt bit have already been cleared.
   interruptBits_ &= ~uint32_t(reason);
+#ifdef ENABLE_JS_AOT
+  mirrorAOTInterruptState();
+#endif
 }
 
 void JSRuntime::setDefaultLocale(LanguageId locale) {
