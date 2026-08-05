@@ -201,11 +201,27 @@ class JSInstr {
   static void LogBaselineRetire(JSScript* script);
 
   // A brand new baseline CacheIR body was compiled. Fires exactly
-  // once per unique ic_body_id per process. `coupling` is a slice
-  // that is copied under the sink mutex; the caller owns the storage.
-  static void LogIcBodyEmit(const Sha1Digest& icBodyId, const char* cacheKind,
-                            uint32_t bodyBytes, uint32_t stubDataBytes,
+  // once per unique source_sha per process. `sourceSha` is the SHA
+  // over the CacheIR bytecode (also serialized as `ic_body_id` for
+  // correlation with attach/detach events). `codeSha` is the SHA
+  // over the finished machine code. `sourceBytes` is the CacheIR
+  // bytecode length; `machineBytes` is the compiled JitCode length.
+  // `coupling` is a slice copied under the sink mutex.
+  static void LogIcBodyEmit(const Sha1Digest& sourceSha,
+                            const Sha1Digest& codeSha, const char* cacheKind,
+                            uint32_t sourceBytes, uint32_t machineBytes,
+                            uint32_t stubDataBytes,
                             mozilla::Span<const CouplingRecord> coupling);
+
+  // Regexp JIT code was compiled. Fires from
+  // SMRegExpMacroAssembler::GetCode after all backpatches are
+  // applied. `sourceSha` is SHA over the pattern atom bytes + flags
+  // (an IR-level identity); `codeSha` is SHA over the finished
+  // machine code.
+  static void LogRegExpEmit(const uint8_t* patternBytes,
+                            uint32_t patternLen, bool patternLatin1,
+                            uint32_t flagsRaw, uint32_t machineBytes,
+                            const Sha1Digest& codeSha);
 
   static void LogIcInstanceAttach(JSScript* outerScript, uint32_t bcOffset,
                                   const Sha1Digest& icBodyId, IcEngine engine);

@@ -11,6 +11,7 @@ import shutil
 import sys
 import tempfile
 import time
+import uuid
 
 import mozlog.structured
 from marionette_driver import Wait
@@ -181,6 +182,14 @@ class AwsyTestCase(MarionetteTestCase):
         :param minimize: If true, minimize memory before getting the report.
         """
         self.logger.info("starting checkpoint %s..." % checkpointName)
+
+        instr_dir = os.environ.get("JS_INSTR_DIR")
+        if instr_dir:
+            marker_path = os.path.join(instr_dir, "marker.txt")
+            with open(marker_path, "w", encoding="utf-8") as marker_file:
+                marker_file.write(
+                    "%s:%d:%s\n" % (checkpointName, iteration, uuid.uuid4())
+                )
 
         checkpoint_file = "memory-report-%s-%d.json.gz" % (checkpointName, iteration)
         checkpoint_path = os.path.join(self._resultsDir, checkpoint_file)

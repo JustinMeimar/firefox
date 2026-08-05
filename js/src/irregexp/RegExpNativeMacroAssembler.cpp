@@ -9,10 +9,14 @@
 #include "irregexp/imported/regexp-macro-assembler-arch.h"
 #include "irregexp/imported/regexp-stack.h"
 #include "irregexp/imported/special-case.h"
+#include "jit/Instr.h"
+#include "jit/InstrIds.h"
 #include "jit/Linker.h"
 #include "jit/PerfSpewer.h"
 #include "vm/MatchPairs.h"
 #include "vm/Realm.h"
+#include "vm/RegExpShared.h"
+#include "vm/StringType.h"
 #ifdef MOZ_VTUNE
 #  include "vtune/VTuneWrapper.h"
 #endif
@@ -1039,6 +1043,35 @@ Handle<HeapObject> SMRegExpMacroAssembler::GetCode(Handle<RegExpData> data,
   for (js::jit::CodeOffset& offset : backtrackCodeOffsetPatches_) {
     Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, offset),
                                        ImmPtr(code->raw()), ImmPtr(nullptr));
+  }
+
+  if (js::jit::JSInstr::Enabled(js::jit::InstrCh_Lifecycle)) {
+    js::RegExpShared* shared = data->instrShared();
+    JSAtom* patternAtom = shared ? shared->getSource() : nullptr;
+    JS::AutoCheckCannotGC nogc;
+    const uint8_t* patternBytes = nullptr;
+    uint32_t patternLen = 0;
+    bool latin1 = false;
+    if (patternAtom) {
+      patternLen = uint32_t(patternAtom->length());
+      latin1 = patternAtom->hasLatin1Chars();
+      if (patternLen) {
+        if (latin1) {
+          patternBytes = reinterpret_cast<const uint8_t*>(
+              patternAtom->latin1Chars(nogc));
+        } else {
+          patternBytes = reinterpret_cast<const uint8_t*>(
+              patternAtom->twoByteChars(nogc));
+          patternLen *= uint32_t(sizeof(char16_t));
+        }
+      }
+    }
+    uint32_t machineBytes = uint32_t(code->instructionsSize());
+    js::jit::Sha1Digest codeSha = js::jit::Sha1(
+        mozilla::Span<const uint8_t>(code->raw(), machineBytes));
+    uint32_t flagsRaw = shared ? uint32_t(shared->getFlags().value()) : 0u;
+    js::jit::JSInstr::LogRegExpEmit(patternBytes, patternLen, latin1, flagsRaw,
+                                    machineBytes, codeSha);
   }
 
   CollectPerfSpewerJitCodeProfile(code, "RegExp");

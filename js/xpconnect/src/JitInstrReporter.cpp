@@ -62,12 +62,9 @@ JitInstrReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
     return NS_OK;
   }
 
-  // Every reporter call gets a fresh sequence number; the harness
-  // joins snapshots across per-process files by (wall_us_epoch +
-  // ts_us) proximity, so the marker string is human-readable
-  // convenience only. A user who wants a specific marker name can
-  // write it to `$JS_INSTR_DIR/marker.txt` before triggering the
-  // report; the file is consumed once per snapshot.
+  // Every reporter call gets a fresh sequence number. A harness can write a
+  // coordinated marker to `$JS_INSTR_DIR/marker.txt` before triggering the
+  // report so every process emits the same snapshot identity.
   static Atomic<uint32_t> sSeq{0};
   uint32_t seq = ++sSeq;
 

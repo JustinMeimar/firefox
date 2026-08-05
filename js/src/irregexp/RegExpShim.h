@@ -1339,6 +1339,10 @@ class RegExpData : public HeapObject {
 
   Tagged<String> escaped_source() const { return String(inner()->getSource()); }
 
+  // Instrumentation-only: expose the underlying RegExpShared so
+  // LogRegExpEmit can hash the pattern atom + flags into a source_sha.
+  js::RegExpShared* instrShared() const { return inner(); }
+
  private:
   js::RegExpShared* inner() const {
     return value().toGCThing()->as<js::RegExpShared>();

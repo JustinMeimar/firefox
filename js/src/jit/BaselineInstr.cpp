@@ -218,11 +218,20 @@ static const char* RelocKindOf(StubField::Type ty) {
   return "unknown";
 }
 
-void EmitIcBodyIfNew(CacheKind kind, const CacheIRStubInfo* stubInfo) {
+void EmitIcBodyIfNew(CacheKind kind, const CacheIRStubInfo* stubInfo,
+                     JitCode* code) {
   if (!JSInstr::Enabled(InstrCh_IC)) return;
   if (!stubInfo) return;
 
-  Sha1Digest bodyId = StubBodyId(stubInfo);
+  Sha1Digest sourceSha = StubBodyId(stubInfo);
+  Sha1Digest codeSha;
+  uint32_t machineBytes = 0;
+  if (code) {
+    machineBytes = uint32_t(code->instructionsSize());
+    codeSha = Sha1(mozilla::Span<const uint8_t>(code->raw(), machineBytes));
+  } else {
+    memset(codeSha.bytes, 0, sizeof(codeSha.bytes));
+  }
 
   Vector<CouplingRecord, 16, SystemAllocPolicy> records;
   uint32_t offset = 0;
@@ -243,8 +252,8 @@ void EmitIcBodyIfNew(CacheKind kind, const CacheIRStubInfo* stubInfo) {
   }
 
   JSInstr::LogIcBodyEmit(
-      bodyId, CacheKindNames[uint8_t(kind)], stubInfo->codeLength(),
-      uint32_t(stubInfo->stubDataSize()),
+      sourceSha, codeSha, CacheKindNames[uint8_t(kind)], stubInfo->codeLength(),
+      machineBytes, uint32_t(stubInfo->stubDataSize()),
       mozilla::Span<const CouplingRecord>(records.begin(), records.length()));
 }
 

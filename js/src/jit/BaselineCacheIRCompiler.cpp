@@ -2113,7 +2113,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
       return false;
     }
 
-    EmitIcBodyIfNew(kind, stubInfo);
+    EmitIcBodyIfNew(kind, stubInfo, code);
   } else if (!stubInfo) {
     MOZ_ASSERT(IsPortableBaselineInterpreterEnabled());
 

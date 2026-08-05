@@ -967,21 +967,26 @@ void JSInstr::LogBaselineRetire(JSScript* script) {
 
 // -------------------------------- IC --------------------------------
 
-void JSInstr::LogIcBodyEmit(const Sha1Digest& icBodyId, const char* cacheKind,
-                            uint32_t bodyBytes, uint32_t stubDataBytes,
+void JSInstr::LogIcBodyEmit(const Sha1Digest& sourceSha,
+                            const Sha1Digest& codeSha, const char* cacheKind,
+                            uint32_t sourceBytes, uint32_t machineBytes,
+                            uint32_t stubDataBytes,
                             mozilla::Span<const CouplingRecord> coupling) {
   if (!Enabled(InstrCh_IC)) return;
   auto* g = GlobalPtr();
   bool first = false;
-  uint32_t bodyLocalId = g->registry.InternIcBody(icBodyId, &first);
+  uint32_t bodyLocalId = g->registry.InternIcBody(sourceSha, &first);
   if (!first) return;
-  g->registry.BumpIcBody(bodyBytes);
+  g->registry.BumpIcBody(sourceBytes);
   const bool includeCoupling = Enabled(InstrCh_Coupling);
   g->sink.EmitLine("ic-body-emit", 0, [&](JsonlBuilder& b) {
     b.U32("ic_body_local_id", bodyLocalId);
-    b.Sha("ic_body_id", icBodyId);
+    b.Sha("ic_body_id", sourceSha);
+    b.Sha("source_sha", sourceSha);
+    b.Sha("code_sha", codeSha);
     b.Str("cache_kind", cacheKind ? cacheKind : "?");
-    b.U32("body_bytes", bodyBytes);
+    b.U32("source_bytes", sourceBytes);
+    b.U32("machine_bytes", machineBytes);
     b.U32("stub_data_bytes", stubDataBytes);
     if (includeCoupling) {
       b.BeginArray("coupling");
@@ -1033,6 +1038,31 @@ void JSInstr::LogIcInstanceDetach(JSScript* outerScript, uint32_t bcOffset,
     b.U32("entered_count", enteredCount);
     b.Bool("is_fallback", isFallback);
     b.U32("chain_length_before", chainLengthBefore);
+  });
+}
+
+// ----------------------------- regexp -----------------------------
+
+void JSInstr::LogRegExpEmit(const uint8_t* patternBytes, uint32_t patternLen,
+                            bool patternLatin1, uint32_t flagsRaw,
+                            uint32_t machineBytes, const Sha1Digest& codeSha) {
+  if (!Enabled(InstrCh_Lifecycle)) return;
+  auto* g = GlobalPtr();
+  Sha1Mixer m;
+  const uint8_t latin1 = patternLatin1 ? 1 : 0;
+  m.AppendPod(latin1);
+  m.AppendPod(flagsRaw);
+  m.AppendPod(patternLen);
+  if (patternLen && patternBytes) {
+    m.Append(patternBytes, patternLen);
+  }
+  Sha1Digest sourceSha = m.Finish();
+  g->sink.EmitLine("regexp-emit", 0, [&](JsonlBuilder& b) {
+    b.Sha("source_sha", sourceSha);
+    b.Sha("code_sha", codeSha);
+    b.U32("machine_bytes", machineBytes);
+    b.U32("pattern_len", patternLen);
+    b.U32("flags_raw", flagsRaw);
   });
 }
 

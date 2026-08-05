@@ -62,9 +62,14 @@ void HarvestOneIcStub(ICCacheIRStub* stub, ICFallbackStub* fallback,
                       JSScript* outerScript, IcDetachReason reason);
 
 // If this CacheIR body has not been seen before in this process, emit
-// an ic-body-emit event with a stub-data-derived coupling census.
-// Called from LookupOrCompileStub's miss branch.
-void EmitIcBodyIfNew(CacheKind kind, const CacheIRStubInfo* stubInfo);
+// an ic-body-emit event with both source_sha (CacheIR bytecode) and
+// code_sha (compiled JitCode bytes), plus a stub-data-derived coupling
+// census. Called from LookupOrCompileStub's miss branch. `code` may be
+// null on the portable-baseline path (no native code compiled); the
+// event still fires with a zero code_sha and zero machine_bytes so
+// harnesses see the CacheIR source identity.
+void EmitIcBodyIfNew(CacheKind kind, const CacheIRStubInfo* stubInfo,
+                     JitCode* code);
 
 }  // namespace js::jit
 
