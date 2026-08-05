@@ -6,14 +6,17 @@
 #define xpc_JitInstrReporter_h
 
 #include "nsIMemoryReporter.h"
+#include "nsIObserver.h"
 #include "mozilla/AlreadyAddRefed.h"
 
 namespace mozilla {
 
 // Registered once per process from XPCJSRuntime::Initialize. Its
-// CollectReports drives Phase-3 instrumentation snapshots; see the
+// CollectReports drives Phase-3 instrumentation snapshots; its
+// xpcom-shutdown observer emits the shutdown entries-flush that
+// exposes live per-stub enteredCount() before teardown. See the
 // SMDOC block in JitInstrReporter.cpp.
-class JitInstrReporter final : public nsIMemoryReporter {
+class JitInstrReporter final : public nsIMemoryReporter, public nsIObserver {
   ~JitInstrReporter() = default;
 
  public:
@@ -21,6 +24,7 @@ class JitInstrReporter final : public nsIMemoryReporter {
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIMEMORYREPORTER
+  NS_DECL_NSIOBSERVER
 
   static already_AddRefed<JitInstrReporter> Create();
   static void Register();

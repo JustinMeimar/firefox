@@ -6,8 +6,11 @@
 
 #include "jit/Instr.h"
 #include "jit/InstrSnapshot.h"
+#include "js/Context.h"
 #include "mozilla/Atomics.h"
+#include "mozilla/Services.h"
 #include "nsIMemoryReporter.h"
+#include "nsIObserverService.h"
 #include "xpcprivate.h"
 
 // [SMDOC] Phase-3 instrumentation memory reporter
@@ -37,7 +40,7 @@
 
 namespace mozilla {
 
-NS_IMPL_ISUPPORTS(JitInstrReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(JitInstrReporter, nsIMemoryReporter, nsIObserver)
 
 /* static */
 already_AddRefed<JitInstrReporter> JitInstrReporter::Create() {
@@ -45,8 +48,65 @@ already_AddRefed<JitInstrReporter> JitInstrReporter::Create() {
 }
 
 /* static */
+// Shutdown topics we listen for. Parent processes fire
+// "xpcom-shutdown"; content processes never do -- they fire
+// "content-child-shutdown" from ContentChild::ShutdownInternal
+// (dom/ipc/ContentChild.cpp). Registering for both catches every
+// process type on the first-fired path.
+static const char* const kShutdownTopics[] = {
+    "xpcom-shutdown",
+    "content-child-shutdown",
+};
+
 void JitInstrReporter::Register() {
-  RegisterStrongMemoryReporter(Create());
+  RefPtr<JitInstrReporter> reporter = Create();
+  // Also observe process shutdown so we can emit a final entries-flush
+  // before JS teardown. Without this hook, JSRuntime::destroyRuntime
+  // often runs too late (or never, for abruptly-torn-down content
+  // procs) and enteredCount() data is lost.
+  if (nsCOMPtr<nsIObserverService> obs =
+          mozilla::services::GetObserverService()) {
+    for (const char* topic : kShutdownTopics) {
+      obs->AddObserver(reporter, topic, false);
+    }
+  }
+  RefPtr<nsIMemoryReporter> asRep = reporter;
+  RegisterStrongMemoryReporter(asRep.forget());
+}
+
+NS_IMETHODIMP
+JitInstrReporter::Observe(nsISupports* aSubject, const char* aTopic,
+                          const char16_t* aData) {
+  using namespace js::jit;
+  bool matched = false;
+  for (const char* topic : kShutdownTopics) {
+    if (strcmp(aTopic, topic) == 0) {
+      matched = true;
+      break;
+    }
+  }
+  if (!matched) return NS_OK;
+  // Self-gated: no-op unless Demand channel is on, matching the
+  // rest of InstrSnapshot.
+  if (JSInstr::Enabled(InstrCh_Demand)) {
+    if (XPCJSContext* xpcCx = XPCJSContext::Get()) {
+      if (JSContext* cx = xpcCx->Context()) {
+        if (JSRuntime* rt = JS_GetRuntime(cx)) {
+          InstrSnapshot::AtRuntimeShutdown(rt);
+        }
+      }
+    }
+  }
+  // Fires-once semantics: remove ourselves from ALL topics after the
+  // first shutdown notification lands, so we don't double-flush if
+  // both xpcom-shutdown and content-child-shutdown reach us.
+  if (nsCOMPtr<nsIObserverService> obs =
+          mozilla::services::GetObserverService()) {
+    for (const char* topic : kShutdownTopics) {
+      obs->RemoveObserver(this, topic);
+    }
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP
