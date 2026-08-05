@@ -921,12 +921,7 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
     masm.push(FrameDescriptor(FrameType::BaselineJS));
   }
   // Perform the call.
-  uint32_t callOffset;
-  {
-    Register scratch = R0.scratchReg();
-    masm.loadVMWrapper(id, scratch);
-    callOffset = masm.callJit(scratch);
-  }
+  uint32_t callOffset = masm.callVMWrapper(id, R0.scratchReg());
 
   // Pop arguments from framePushed.
   masm.implicitPop(argSize);

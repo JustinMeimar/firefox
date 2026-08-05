@@ -450,7 +450,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void emitAOTCopyFrameTableBaseFromCaller(Register scratch);
 #endif
 
-  void loadVMWrapper(VMFunctionId id, Register dest);
+  uint32_t callVMWrapper(VMFunctionId id, Register scratch);
   void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
                                const Label& handler);
 
