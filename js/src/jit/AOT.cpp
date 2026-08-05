@@ -74,7 +74,8 @@ mozilla::Maybe<AOTSlot> AOTIndirectionTable::findSlot(uintptr_t value) const {
   }
   // Mirror slots hold arbitrary values that could collide with a pointer
   // being looked up, so they are excluded from the reverse search.
-  for (uint32_t i = 0; i < uint32_t(AOTSlot::Mirror_Begin); i++) {
+  for (uint32_t i = uint32_t(AOTSlot::NamedSlot_Begin);
+       i < uint32_t(AOTSlot::Count); i++) {
     if (slots_[i] == value) {
       return mozilla::Some(AOTSlot(i));
     }

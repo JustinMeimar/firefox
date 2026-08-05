@@ -39,6 +39,15 @@ static constexpr uint32_t AOTMaxVMWrappers = 512;
 static constexpr uint32_t AOTMaxABIFunctions = 256;
 
 enum class AOTSlot : uint32_t {
+  // Mirrored values rather than addresses. The runtime rewrites these
+  // whenever the source of truth changes, saving generated code a
+  // dereference on hot checks. They lead the table so that their offsets
+  // reach an eight bit displacement, and the most frequently emitted one
+  // needs no displacement at all.
+  PreBarrierZoneCount = 0,
+  InterruptBitsValue,
+  JitStackLimitValue,
+
 #define AOT_SLOT(name, ...) name,
 #define AOT_ATOM_SLOT AOT_SLOT
 #define AOT_LINK_SLOT AOT_SLOT
@@ -51,15 +60,13 @@ enum class AOTSlot : uint32_t {
   VMWrapper_End = VMWrapper_Begin + AOTMaxVMWrappers,
   ABIFn_Begin = VMWrapper_End,
   ABIFn_End = ABIFn_Begin + AOTMaxABIFunctions,
-  // Mirrored values rather than addresses. The runtime rewrites these
-  // whenever the source of truth changes, saving generated code a
-  // dereference on hot checks.
-  Mirror_Begin = ABIFn_End,
-  InterruptBitsValue = Mirror_Begin,
-  JitStackLimitValue,
-  PreBarrierZoneCount,
-  Mirror_End,
-  Count = Mirror_End
+  Count = ABIFn_End,
+
+  // Region markers, declared last so they alias entries already numbered
+  // rather than consuming indices of their own.
+  Mirror_Begin = PreBarrierZoneCount,
+  Mirror_End = JitStackLimitValue + 1,
+  NamedSlot_Begin = Mirror_End,
 };
 
 inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
@@ -98,7 +105,8 @@ bool IsAOTLinkSlot(AOTSlot slot);
 // slots by index, so an image recorded against a different numbering would
 // bind to the wrong symbol. Hashing the effective slot list rather than the
 // table source also covers conditionally compiled entries, which shift every
-// following index.
+// following index. The region boundaries go in too, because moving a region
+// renumbers everything after it without changing any name.
 constexpr uint32_t AOTSlotTableHash() {
   const char* const names[] = {
 #define AOT_SLOT(name, ...) #name,
@@ -117,9 +125,16 @@ constexpr uint32_t AOTSlotTableHash() {
     }
     mix('|');
   }
-  const uint32_t limits[] = {AOTMaxVMWrappers, AOTMaxABIFunctions,
+  const uint32_t layout[] = {uint32_t(AOTSlot::Mirror_Begin),
+                             uint32_t(AOTSlot::Mirror_End),
+                             uint32_t(AOTSlot::NamedSlot_Begin),
+                             uint32_t(AOTSlot::NamedSlot_End),
+                             uint32_t(AOTSlot::VMWrapper_Begin),
+                             uint32_t(AOTSlot::VMWrapper_End),
+                             uint32_t(AOTSlot::ABIFn_Begin),
+                             uint32_t(AOTSlot::ABIFn_End),
                              uint32_t(AOTSlot::Count)};
-  for (uint32_t v : limits) {
+  for (uint32_t v : layout) {
     for (int i = 0; i < 4; i++) {
       mix(uint8_t(v >> (8 * i)));
     }
@@ -154,8 +169,8 @@ class AOTIndirectionTable {
   }
 
   static constexpr bool isMirrorSlot(AOTSlot slot) {
-    return uint32_t(slot) >= uint32_t(AOTSlot::Mirror_Begin) &&
-           uint32_t(slot) < uint32_t(AOTSlot::Mirror_End);
+    static_assert(uint32_t(AOTSlot::Mirror_Begin) == 0);
+    return uint32_t(slot) < uint32_t(AOTSlot::Mirror_End);
   }
 
   // Mirror slots may be rewritten from another thread while jit code on the
