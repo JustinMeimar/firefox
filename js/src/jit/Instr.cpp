@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #include "jit/ExecutableAllocator.h"
+#include "jit/InstrSnapshot.h"
 #include "jit/JitCode.h"
 #include "jit/JitOptions.h"
 #include "js/AllocPolicy.h"
@@ -824,6 +825,10 @@ uint32_t JSInstr::SiteLocalId(JSScript* script, uint32_t bcOffset) {
 }
 
 void JSInstr::RuntimeShutdown(JSRuntime* rt) {
+  // Flush live IC state BEFORE the lifecycle gate so shutdown coverage
+  // works with any channel mask that includes Demand, whether or not
+  // Lifecycle is on. InstrSnapshot self-gates on Demand.
+  InstrSnapshot::AtRuntimeShutdown(rt);
   if (!Enabled(InstrCh_Lifecycle)) return;
   uint32_t rid = RuntimeLocalId(rt);
   GlobalPtr()->sink.EmitLine("runtime-shutdown", rid, [](JsonlBuilder&) {});

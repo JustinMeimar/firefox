@@ -175,9 +175,9 @@ void EmitSmaps(const PoolCopyVec& pools) {
 
 }  // namespace
 
-// Walks every BaseScript in every zone of `cx`'s runtime and collects
-// its ICScript::entryCount_ plus the live enteredCount of every
-// attached IC stub (optimized chain + fallback). Called from the
+// Walks every BaseScript in every zone of `rt` and collects its
+// ICScript::entryCount_ plus the live enteredCount of every attached
+// IC stub (optimized chain + fallback). Must be called from the
 // runtime's owning thread at a safe point.
 //
 // The two output vectors are flat and joined by (icEntryStart,
@@ -185,9 +185,8 @@ void EmitSmaps(const PoolCopyVec& pools) {
 // icEntryCount-long slice of the ic-row vector starting at
 // icEntryStart. This keeps the on-disk representation compact and
 // avoids per-script mallocs.
-static void CollectAndEmitEntries(JSContext* cx, const char* reason) {
+static void CollectAndEmitEntries(JSRuntime* rt, const char* reason) {
   if (!JSInstr::Enabled(InstrCh_Demand)) return;
-  JSRuntime* rt = cx->runtime();
   if (!rt) return;
 
   Vector<JSInstr::EntriesFlushRow, 128, SystemAllocPolicy> scripts;
@@ -264,10 +263,18 @@ void InstrSnapshot::Now(JSContext* cx, const char* marker) {
   JSInstr::LogSnapshotLive(c);
 
   if (cx) {
-    CollectAndEmitEntries(cx, "snapshot");
+    CollectAndEmitEntries(cx->runtime(), "snapshot");
   }
 
   EmitSmaps(pools);
+}
+
+// Called from JSRuntime::destroyRuntime BEFORE gc/script teardown so
+// every stub is still live and enteredCount is authoritative. Emits
+// one entries-flush row per JitScript with each live IC stub's real
+// execution count -- the coverage question's only sound weighting.
+void InstrSnapshot::AtRuntimeShutdown(JSRuntime* rt) {
+  CollectAndEmitEntries(rt, "runtime-shutdown");
 }
 
 }  // namespace js::jit

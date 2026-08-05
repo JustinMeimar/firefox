@@ -36,6 +36,10 @@ namespace js::jit {
 class InstrSnapshot {
  public:
   static void Now(JSContext* cx, const char* marker);
+  // Emit a runtime-shutdown entries-flush. Safe to call from
+  // JSRuntime::destroyRuntime; must run before scripts/GC teardown so
+  // ICStub::enteredCount() is still authoritative.
+  static void AtRuntimeShutdown(JSRuntime* rt);
 };
 
 }  // namespace js::jit
