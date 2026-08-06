@@ -52,6 +52,9 @@ UNIFIED_SOURCES += [
 if CONFIG["FUZZING_INTERFACES"]:
     UNIFIED_SOURCES += ["xpcrtfuzzing/xpcrtfuzzing.cpp"]
 
+if CONFIG["ENABLE_JS_AOT"]:
+    UNIFIED_SOURCES += ["AOTCoverageShutdown.cpp"]
+
 XPCOM_MANIFESTS += [
     "components.conf",
 ]
