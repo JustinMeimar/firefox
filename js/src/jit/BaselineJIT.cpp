@@ -15,6 +15,7 @@
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #ifdef ENABLE_JS_AOT
+#  include "jit/AOTCoverage.h"
 #  include "jit/AOTInstaller.h"
 #  include "jit/AutoAOTCodegen.h"
 #endif
@@ -615,6 +616,9 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     }
     if (JitOptions.aotEnforce) {
       MOZ_CRASH("AOT baseline function miss under --aot-enforce");
+    }
+    if (AOTCoverage::IsEnabled()) {
+      AOTCoverage::NoteBaselineCompiled();
     }
   }
 #endif

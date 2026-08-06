@@ -14,6 +14,9 @@
 #include "xpcpublic.h"
 #include "XPCMaps.h"
 #include "XPCJSMemoryReporter.h"
+#ifdef ENABLE_JS_AOT
+#  include "AOTCoverageShutdown.h"
+#endif
 #include "XrayWrapper.h"
 #include "WrapperFactory.h"
 #include "mozJSModuleLoader.h"
@@ -3295,6 +3298,10 @@ void XPCJSRuntime::Initialize(JSContext* cx) {
 
   // Set the callback for reporting memory to ubi::Node.
   JS::ubi::SetConstructUbiNodeForDOMObjectCallback(cx, &ConstructUbiNode);
+
+#ifdef ENABLE_JS_AOT
+  mozilla::AOTCoverageShutdown::Register();
+#endif
 
   xpc_LocalizeRuntime(JS_GetRuntime(cx));
 }

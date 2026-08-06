@@ -99,6 +99,7 @@ EXPORTS.js += [
     "../public/AllocationLogging.h",
     "../public/AllocationRecording.h",
     "../public/AllocPolicy.h",
+    "../public/AOTCoverage.h",
     "../public/Array.h",
     "../public/ArrayBuffer.h",
     "../public/ArrayBufferMaybeShared.h",

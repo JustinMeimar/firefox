@@ -8,6 +8,7 @@
 
 #include "gc/GC.h"
 #ifdef ENABLE_JS_AOT
+#  include "jit/AOTCoverage.h"
 #  include "jit/AOTImage.h"
 #  include "jit/AOTRecorder.h"
 #  include "jit/AutoAOTCodegen.h"
@@ -2063,6 +2064,10 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 
     if (hit) {
       MOZ_RELEASE_ASSERT(stubInfo);
+      if (AOTCoverage::IsEnabled()) {
+        AOTCoverage::NoteICRequestAOTHit(candidate,
+                                         CacheIRStubKey::hash(lookup));
+      }
     } else if (JitOptions.aotEnforce) {
       MOZ_CRASH_UNSAFE_PRINTF("AOT IC miss: kind=%s hash=%u",
                               CacheKindNames[uint8_t(kind)],
@@ -2073,6 +2078,11 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 
   if (!code) {
     code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
+#ifdef ENABLE_JS_AOT
+    if (code && AOTCoverage::IsEnabled()) {
+      AOTCoverage::NoteICRequestZoneHit(CacheIRStubKey::hash(lookup));
+    }
+#endif
   }
 
   if (!code && !IsPortableBaselineInterpreterEnabled()) {
@@ -2133,6 +2143,12 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     if (!code) {
       return false;
     }
+
+#ifdef ENABLE_JS_AOT
+    if (AOTCoverage::IsEnabled()) {
+      AOTCoverage::NoteICRequestCompiled(CacheIRStubKey::hash(lookup));
+    }
+#endif
 
     comp.perfSpewer().saveProfile(code, name);
 

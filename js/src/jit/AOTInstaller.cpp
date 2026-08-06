@@ -13,6 +13,7 @@
 #  include <cstring>
 
 #  include "jit/AOT.h"
+#  include "jit/AOTCoverage.h"
 #  include "jit/AOTImage.h"
 #  include "jit/AOTImageGenerated.h"
 #  include "jit/AutoWritableJitCode.h"
@@ -274,6 +275,12 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
 
   FinalizeInstalledBaselineScript(script);
 
+  AOTCoverage::EnsureInit(image);
+  if (AOTCoverage::IsEnabled()) {
+    uint32_t blobIdx = uint32_t(reader.entry() - image->directory());
+    AOTCoverage::NoteBaselineInstalled(blobIdx, script->selfHosted());
+  }
+
   // Register the static baseline code with the profiler so stack walkers can
   // associate return addresses with the script.
   JitcodeGlobalTable* globalTable =
@@ -319,6 +326,8 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
   if (!image || !IsAOTImageCompatible(image)) {
     return false;
   }
+
+  AOTCoverage::EnsureInit(image);
 
   uint32_t loaded = 0;
   uint32_t attempted = 0;
@@ -378,6 +387,9 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
         return false;
       }
       continue;
+    }
+    if (AOTCoverage::IsEnabled()) {
+      AOTCoverage::NoteICStubLoaded(jitCode, i);
     }
     loaded++;
   }

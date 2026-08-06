@@ -16,6 +16,9 @@
 #include "frontend/ParserAtom.h"  // frontend::WellKnownParserAtoms
 #include "gc/GC.h"
 #include "gc/PublicIterators.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTCoverage.h"
+#endif
 #include "jit/IonCompileTask.h"
 #include "jit/JitOptions.h"  // js::fuzzingSafe
 #include "jit/JitRuntime.h"
@@ -203,6 +206,10 @@ void JSRuntime::destroyRuntime() {
   MOZ_ASSERT(!JS::RuntimeHeapIsBusy());
   MOZ_ASSERT(childRuntimeCount == 0);
   MOZ_ASSERT(initialized_);
+
+#ifdef ENABLE_JS_AOT
+  js::jit::AOTCoverage::FlushAndWrite();
+#endif
 
 #ifdef JS_HAS_INTL_API
   sharedIntlData.ref().destroyInstance();
