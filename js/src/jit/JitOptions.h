@@ -151,11 +151,11 @@ struct DefaultJitOptions {
   // ensures CI uses only loaded artifacts.
   bool aotEnforce;
 
-  // Keep guest scripts in the baseline interpreter so only self hosted scripts
-  // reach the baseline JIT. Self hosted and guest baseline artifacts share one
-  // blob kind, so this gate is what isolates the self hosted subset of the AOT
-  // baseline corpus from the whole corpus.
-  bool aotSelfHostedBaselineOnly;
+  // Honor AOT artifacts when they hit; on any miss stay in the tier that
+  // requires no per-script or per-IC codegen (baseline interpreter for
+  // scripts, shared IC fallback stub for ICs). Implies useAOTImage and
+  // forces ion=false.
+  bool aotOnly;
 
   bool shouldCaptureAOTInterpreter() const {
     return dumpAOTBlinterp || !aotRecordDir.empty();

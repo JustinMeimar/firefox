@@ -2075,6 +2075,13 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     code = jitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
   }
 
+#ifdef ENABLE_JS_AOT
+  if (!code && JitOptions.aotOnly) {
+    stubInfo = nullptr;
+    return true;
+  }
+#endif
+
   if (!code && !IsPortableBaselineInterpreterEnabled()) {
     // We have to generate stub code.
     TempAllocator temp(&cx->tempLifoAlloc());
@@ -2241,6 +2248,14 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
                            cx->zone()->jitZone())) {
     return ICAttachResult::OOM;
   }
+
+#ifdef ENABLE_JS_AOT
+  if (!code) {
+    MOZ_ASSERT(JitOptions.aotOnly);
+    MOZ_ASSERT(!stubInfo);
+    return ICAttachResult::AOTMissSkipped;
+  }
+#endif
 
   ICEntry* icEntry = icScript->icEntryForStub(stub);
 

@@ -600,10 +600,6 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
-  if (JitOptions.aotSelfHostedBaselineOnly && !script->selfHosted()) {
-    return Method_Skipped;
-  }
-
   // Debuggee code contains runtime trap edits. A static copy would become stale
   // when the first breakpoint is installed.
   if (JitOptions.useAOTImage && !script->isDebuggee()) {
@@ -615,6 +611,10 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     }
     if (JitOptions.aotEnforce) {
       MOZ_CRASH("AOT baseline function miss under --aot-enforce");
+    }
+    if (JitOptions.aotOnly) {
+      script->disableBaselineCompile();
+      return Method_CantCompile;
     }
   }
 #endif
@@ -1444,6 +1444,11 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     }
     if (cx->isExceptionPending()) {
       return false;
+    }
+    if (JitOptions.aotOnly) {
+      JitSpew(JitSpew_BaselineAOT,
+              "AOT blinterp install failed under --aot-only; "
+              "falling back to runtime codegen for the interpreter blob");
     }
 #endif
 

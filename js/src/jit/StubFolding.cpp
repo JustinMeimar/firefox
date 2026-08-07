@@ -7,6 +7,7 @@
 #include "mozilla/Maybe.h"
 
 #include "gc/GC.h"
+#include "gc/Zone.h"
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/BaselineIC.h"
 #include "jit/CacheIR.h"
@@ -15,7 +16,10 @@
 #include "jit/CacheIRSpewer.h"
 #include "jit/CacheIRWriter.h"
 #include "jit/JitScript.h"
+#include "jit/JitZone.h"
 #include "jit/ShapeList.h"
+#include "vm/JSContext.h"
+#include "vm/Runtime.h"
 
 #include "vm/List-inl.h"
 
@@ -432,6 +436,23 @@ static bool TryFoldingGuardShapes(JSContext* cx, ICFallbackStub* fallback,
     cx->runtime()->setUseCounter(cx->global(), JSUseCounter::IC_STUB_TOO_LARGE);
     return true;
   }
+
+#ifdef ENABLE_JS_AOT
+  // Under --aot-only, peek the corpus before we discard existing stubs. If
+  // the folded variant isn't present we would destroy accumulated ICs to
+  // install nothing.
+  if (JitOptions.aotOnly) {
+    CacheIRStubKey::Lookup lookup(cacheKind, ICStubEngine::Baseline,
+                                  writer.codeStart(), writer.codeLength());
+    JitZone* atomsJitZone = cx->runtime()->atomsZone()->jitZone();
+    CacheIRStubInfo* peekInfo = nullptr;
+    JitCode* candidate =
+        atomsJitZone->getBaselineCacheIRStubCode(lookup, &peekInfo);
+    if (!candidate || !candidate->isStaticCode()) {
+      return true;
+    }
+  }
+#endif
 
   // Replace the existing stubs with the new folded stub.
   fallback->discardStubs(cx->zone(), icEntry);

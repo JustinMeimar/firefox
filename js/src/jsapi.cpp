@@ -4478,6 +4478,13 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
       break;
     case JSJITCOMPILER_ION_ENABLE:
       if (value == 1) {
+#ifdef ENABLE_JS_AOT
+        if (jit::JitOptions.aotOnly) {
+          JitSpew(js::jit::JitSpew_IonScripts,
+                  "Ignoring Ion enable; --aot-only forces Ion off");
+          break;
+        }
+#endif
         jit::JitOptions.ion = true;
         JitSpew(js::jit::JitSpew_IonScripts, "Enable ion");
       } else if (value == 0) {
