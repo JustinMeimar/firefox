@@ -26,6 +26,15 @@ namespace js {
 namespace jit {
 
 bool DoTrialInlining(JSContext* cx, BaselineFrame* frame) {
+#ifdef ENABLE_JS_AOT
+  // aotOnly forces ion=false, so trial inlining's Inlined marker is never
+  // consumed by Warp. Skip the VM call outright rather than paying for IR
+  // generation and a discard-then-reattach whose result nobody reads.
+  if (JitOptions.aotOnly) {
+    return true;
+  }
+#endif
+
   RootedScript script(cx, frame->script());
   ICScript* icScript = frame->icScript();
   bool isRecursive = icScript->depth() > 0;
@@ -155,8 +164,8 @@ bool TrialInliner::replaceICStub(ICEntry& entry, ICFallbackStub* fallback,
     return false;
   }
 
-  // We failed to attach a new IC stub due to CacheIR size limits. Disable trial
-  // inlining for this location and return true.
+  // We failed to attach a new IC stub due to CacheIR size limits. Disable
+  // trial inlining for this location and return true.
   MOZ_ASSERT(result == ICAttachResult::TooLarge);
   fallback->setTrialInliningState(TrialInliningState::Failure);
   return true;

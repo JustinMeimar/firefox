@@ -13098,6 +13098,13 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "aot-enforce",
                         "With --aot: crash on any AOT lookup miss "
                         "instead of falling back to codegen.") ||
+      !op.addBoolOption('\0', "aot-only",
+                        "Honor AOT artifacts when they hit; on any miss "
+                        "stay in the baseline interpreter (scripts) or the "
+                        "shared IC fallback stub (ICs), never generating "
+                        "baseline JIT code or IC stubs at runtime. Implies "
+                        "--aot and forces Ion off. Mutually exclusive with "
+                        "--aot-enforce.") ||
       !op.addBoolOption('\0', "aot-record-self-hosted",
                         "With --aot-record=<dir>: iterate every "
                         "self-hosted function, delazify it, and drive "
@@ -14210,6 +14217,15 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("aot-enforce")) {
     jit::JitOptions.aotEnforce = true;
+  }
+  if (op.getBoolOption("aot-only")) {
+    if (jit::JitOptions.aotEnforce) {
+      fprintf(stderr, "--aot-only and --aot-enforce are mutually exclusive\n");
+      return false;
+    }
+    jit::JitOptions.aotOnly = true;
+    jit::JitOptions.useAOTImage = true;
+    jit::JitOptions.ion = false;
   }
 #endif
 

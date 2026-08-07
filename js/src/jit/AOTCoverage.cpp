@@ -21,6 +21,7 @@
 
 #  include "jit/AOTImage.h"
 #  include "jit/JitCode.h"
+#  include "jit/JitOptions.h"
 #  include "js/HashTable.h"
 
 namespace js::jit {
@@ -135,6 +136,8 @@ void AOTCoverage::NoteBaselineInstalled(uint32_t blobIdx, bool selfHosted) {
 }
 
 void AOTCoverage::NoteBaselineCompiled() {
+  MOZ_ASSERT(!JitOptions.aotOnly,
+             "--aot-only must never fall through to baseline codegen");
   State* s = CoverageState();
   if (!s) return;
 
@@ -182,6 +185,8 @@ void AOTCoverage::NoteICRequestZoneHit(uint32_t shapeHash) {
 }
 
 void AOTCoverage::NoteICRequestCompiled(uint32_t shapeHash) {
+  MOZ_ASSERT(!JitOptions.aotOnly,
+             "--aot-only must never fall through to IC codegen");
   State* s = CoverageState();
   if (!s) return;
 

@@ -199,7 +199,11 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(dumpAOTBaseline, false);
   SET_DEFAULT(useAOTImage, false);
   SET_DEFAULT(aotEnforce, false);
-  SET_DEFAULT(aotSelfHostedBaselineOnly, false);
+  SET_DEFAULT(aotOnly, false);
+  if (aotOnly) {
+    useAOTImage = true;
+    ion = false;
+  }
   if (const char* dir = getenv("JIT_OPTION_aotRecordDir")) {
     aotRecordDir = dir;
   }
