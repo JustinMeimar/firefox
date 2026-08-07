@@ -947,37 +947,11 @@ bool BaselineCodeGen<Handler>::emitStackCheck() {
     Register scratch = R1.scratchReg();
     masm.moveStackPtrTo(scratch);
     subtractScriptSlotsSize(scratch, R2.scratchReg());
-#ifdef ENABLE_JS_AOT
-    if (masm.isAOT()) {
-      Register base = R0.scratchReg();
-      masm.emitAOTLoadTableBase(base);
-      masm.branchPtr(Assembler::BelowOrEqual,
-                     Address(base, AOTIndirectionTable::offsetOfSlot(
-                                       AOTSlot::JitStackLimitValue)),
-                     scratch, &skipCall);
-    } else
-#endif
-    {
-      masm.branchPtr(Assembler::BelowOrEqual,
-                     AbsoluteAddress(runtime->addressOfJitStackLimit()),
-                     scratch, &skipCall);
-    }
+    masm.branchMirroredJitStackLimit(Assembler::BelowOrEqual, scratch,
+                                     R0.scratchReg(), &skipCall);
   } else {
-#ifdef ENABLE_JS_AOT
-    if (masm.isAOT()) {
-      Register base = R1.scratchReg();
-      masm.emitAOTLoadTableBase(base);
-      masm.branchStackPtrRhs(Assembler::BelowOrEqual,
-                             Address(base, AOTIndirectionTable::offsetOfSlot(
-                                               AOTSlot::JitStackLimitValue)),
-                             &skipCall);
-    } else
-#endif
-    {
-      masm.branchStackPtrRhs(Assembler::BelowOrEqual,
-                             AbsoluteAddress(runtime->addressOfJitStackLimit()),
-                             &skipCall);
-    }
+    masm.branchStackPtrRhsMirroredJitStackLimit(
+        Assembler::BelowOrEqual, R1.scratchReg(), &skipCall);
   }
 
   prepareVMCall();
@@ -1675,21 +1649,8 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
   frame.syncStack(0);
 
   Label done;
-#ifdef ENABLE_JS_AOT
-  if (masm.isAOT()) {
-    Register scratch = R0.scratchReg();
-    masm.emitAOTLoadTableBase(scratch);
-    masm.branch32(Assembler::Equal,
-                  Address(scratch, AOTIndirectionTable::offsetOfSlot(
-                                       AOTSlot::InterruptBitsValue)),
-                  Imm32(0), &done);
-  } else
-#endif
-  {
-    masm.branch32(Assembler::Equal,
-                  AbsoluteAddress(runtime->addressOfInterruptBits()), Imm32(0),
-                  &done);
-  }
+  masm.branchMirroredInterruptBits(Assembler::Equal, Imm32(0), R0.scratchReg(),
+                                   &done);
 
   prepareVMCall();
 
