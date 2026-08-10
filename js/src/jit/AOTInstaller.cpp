@@ -43,19 +43,35 @@ namespace js::jit {
 static bool IsAOTImageCompatible(const AOTImage* image) {
   auto readerOpt = image->findUnique(AOTBlobKind::Configuration);
   if (readerOpt.isNothing()) {
-    JitSpew(JitSpew_BaselineAOT, "AOT image lacks configuration metadata");
-    return false;
+    MOZ_CRASH("AOT image lacks configuration metadata");
   }
   AOTBlobReader reader = readerOpt.ref();
   AOTConfigurationMetadata recorded;
   if (!DecodeBlob_Configuration(reader, &recorded)) {
-    JitSpew(JitSpew_BaselineAOT, "AOT image configuration decode failed");
-    return false;
+    MOZ_CRASH("AOT image configuration decode failed");
   }
-  if (recorded != CurrentAOTConfiguration()) {
-    JitSpew(JitSpew_BaselineAOT,
-            "AOT image configuration mismatch; using runtime codegen");
-    return false;
+  AOTConfigurationMetadata current = CurrentAOTConfiguration();
+  if (recorded != current) {
+    fprintf(stderr,
+            "AOT image configuration mismatch:\n"
+            "  field                          recorded  current\n"
+            "  disableInlining                %8u  %8u\n"
+            "  spectreObjectMitigations       %8u  %8u\n"
+            "  spectreStringMitigations       %8u  %8u\n"
+            "  baselineBatching               %8u  %8u\n"
+            "  baselineJitWarmUpThreshold     %8u  %8u\n"
+            "  baselineQueueCapacity          %8u  %8u\n"
+            "  trialInliningWarmUpThreshold   %8u  %8u\n",
+            recorded.disableInlining, current.disableInlining,
+            recorded.spectreObjectMitigations, current.spectreObjectMitigations,
+            recorded.spectreStringMitigations, current.spectreStringMitigations,
+            recorded.baselineBatching, current.baselineBatching,
+            recorded.baselineJitWarmUpThreshold,
+            current.baselineJitWarmUpThreshold,
+            recorded.baselineQueueCapacity, current.baselineQueueCapacity,
+            recorded.trialInliningWarmUpThreshold,
+            current.trialInliningWarmUpThreshold);
+    MOZ_CRASH("AOT image configuration mismatch");
   }
   return true;
 }
