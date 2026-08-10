@@ -78,9 +78,12 @@ blobs:
     metadata_type: "js::jit::AOTConfigurationMetadata"
     fields:
       - u8: disableInlining
+      - u8: spectreIndexMasking
       - u8: spectreObjectMitigations
       - u8: spectreStringMitigations
       - u8: baselineBatching
+      - u8: baselineJit
+      - u8: enableICFramePointers
       - u32: baselineJitWarmUpThreshold
       - u32: baselineQueueCapacity
       - u32: trialInliningWarmUpThreshold

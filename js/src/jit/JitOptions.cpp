@@ -306,13 +306,15 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(ionMaxLocalsAndArgs, 10 * 1000);
   SET_DEFAULT(ionMaxLocalsAndArgsMainThread, 256);
 
-  SET_DEFAULT(spectreIndexMasking, false);
 #ifdef ENABLE_JS_AOT
-  // Match browser defaults so AOT artifacts recorded under browser prefs load
-  // cleanly in the shell. The two mitigations are part of the AOT fingerprint.
+  // Match browser prefs so AOT artifacts recorded under browser defaults load
+  // in the shell without --spectre-mitigations=on. These three are baked into
+  // blinterp/baseline/IC bytes and are part of the AOT fingerprint.
+  SET_DEFAULT(spectreIndexMasking, true);
   SET_DEFAULT(spectreObjectMitigations, true);
   SET_DEFAULT(spectreStringMitigations, true);
 #else
+  SET_DEFAULT(spectreIndexMasking, false);
   SET_DEFAULT(spectreObjectMitigations, false);
   SET_DEFAULT(spectreStringMitigations, false);
 #endif

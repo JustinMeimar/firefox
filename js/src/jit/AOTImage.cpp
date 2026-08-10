@@ -202,9 +202,12 @@ bool AOTImageBuilder::finalize(std::ostream& out, const uint8_t* fingerprint) {
 AOTConfigurationMetadata CurrentAOTConfiguration() {
   return {
       .disableInlining = JitOptions.disableInlining,
+      .spectreIndexMasking = JitOptions.spectreIndexMasking,
       .spectreObjectMitigations = JitOptions.spectreObjectMitigations,
       .spectreStringMitigations = JitOptions.spectreStringMitigations,
       .baselineBatching = JitOptions.baselineBatching,
+      .baselineJit = JitOptions.baselineJit,
+      .enableICFramePointers = JitOptions.enableICFramePointers,
       .baselineJitWarmUpThreshold = JitOptions.baselineJitWarmUpThreshold,
       .baselineQueueCapacity = JitOptions.baselineQueueCapacity,
       .trialInliningWarmUpThreshold = JitOptions.trialInliningWarmUpThreshold,

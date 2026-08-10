@@ -339,9 +339,12 @@ struct AOTICStubMetadata {
 
 struct AOTConfigurationMetadata {
   uint8_t disableInlining = 0;
+  uint8_t spectreIndexMasking = 0;
   uint8_t spectreObjectMitigations = 0;
   uint8_t spectreStringMitigations = 0;
   uint8_t baselineBatching = 0;
+  uint8_t baselineJit = 0;
+  uint8_t enableICFramePointers = 0;
   uint32_t baselineJitWarmUpThreshold = 0;
   uint32_t baselineQueueCapacity = 0;
   uint32_t trialInliningWarmUpThreshold = 0;

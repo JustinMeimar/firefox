@@ -56,16 +56,22 @@ static bool IsAOTImageCompatible(const AOTImage* image) {
             "AOT image configuration mismatch:\n"
             "  field                          recorded  current\n"
             "  disableInlining                %8u  %8u\n"
+            "  spectreIndexMasking            %8u  %8u\n"
             "  spectreObjectMitigations       %8u  %8u\n"
             "  spectreStringMitigations       %8u  %8u\n"
             "  baselineBatching               %8u  %8u\n"
+            "  baselineJit                    %8u  %8u\n"
+            "  enableICFramePointers          %8u  %8u\n"
             "  baselineJitWarmUpThreshold     %8u  %8u\n"
             "  baselineQueueCapacity          %8u  %8u\n"
             "  trialInliningWarmUpThreshold   %8u  %8u\n",
             recorded.disableInlining, current.disableInlining,
+            recorded.spectreIndexMasking, current.spectreIndexMasking,
             recorded.spectreObjectMitigations, current.spectreObjectMitigations,
             recorded.spectreStringMitigations, current.spectreStringMitigations,
             recorded.baselineBatching, current.baselineBatching,
+            recorded.baselineJit, current.baselineJit,
+            recorded.enableICFramePointers, current.enableICFramePointers,
             recorded.baselineJitWarmUpThreshold,
             current.baselineJitWarmUpThreshold,
             recorded.baselineQueueCapacity, current.baselineQueueCapacity,
