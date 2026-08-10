@@ -601,14 +601,17 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
-  // Debuggee code contains runtime trap edits. A static copy would become stale
-  // when the first breakpoint is installed.
-  if (JitOptions.useAOTImage && !script->isDebuggee()) {
-    if (TryInstallAOTBaselineScript(cx, script)) {
-      return Method_Compiled;
-    }
-    if (cx->isExceptionPending()) {
-      return Method_Error;
+  if (JitOptions.useAOTImage) {
+    // Debuggee scripts skip AOT install because runtime trap edits would make
+    // a static copy stale. Enforcement still applies below so debuggees never
+    // escape to runtime codegen under --aot-only or --aot-enforce.
+    if (!script->isDebuggee()) {
+      if (TryInstallAOTBaselineScript(cx, script)) {
+        return Method_Compiled;
+      }
+      if (cx->isExceptionPending()) {
+        return Method_Error;
+      }
     }
     if (JitOptions.aotEnforce) {
       MOZ_CRASH("AOT baseline function miss under --aot-enforce");
@@ -617,7 +620,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
       script->disableBaselineCompile();
       return Method_CantCompile;
     }
-    if (AOTCoverage::IsEnabled()) {
+    if (!script->isDebuggee() && AOTCoverage::IsEnabled()) {
       AOTCoverage::NoteBaselineCompiled();
     }
   }
