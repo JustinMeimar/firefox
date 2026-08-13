@@ -11,6 +11,7 @@
 #  include "jit/AOTCoverage.h"
 #  include "jit/AOTImage.h"
 #  include "jit/AOTRecorder.h"
+#  include "jit/AOTTiming.h"
 #  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/CacheIR.h"
@@ -204,6 +205,9 @@ void BaselineCacheIRCompiler::callVM(MacroAssembler& masm) {
 }
 
 JitCode* BaselineCacheIRCompiler::compile() {
+#ifdef ENABLE_JS_AOT
+  AutoAOTTimer timer(AOTTimingPhase::RuntimeICCompile);
+#endif
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compile");
 
 #ifndef JS_USE_LINK_REGISTER
@@ -2054,6 +2058,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     JitZone* atomsJitZone = cx->runtime()->atomsZone()->jitZone();
     MOZ_ASSERT(atomsJitZone);
 
+    AutoAOTTimer timer(AOTTimingPhase::ICImageLookup);
     JitCode* candidate =
         atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
     bool hit = candidate && candidate->isStaticCode();
@@ -2063,15 +2068,19 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     }
 
     if (hit) {
+      AOTTiming::AddCounter(AOTTimingCounter::ICImageLookupHits);
       MOZ_RELEASE_ASSERT(stubInfo);
       if (AOTCoverage::IsEnabled()) {
         AOTCoverage::NoteICRequestAOTHit(candidate,
                                          CacheIRStubKey::hash(lookup));
       }
     } else if (JitOptions.aotEnforce) {
+      AOTTiming::AddCounter(AOTTimingCounter::ICImageLookupMisses);
       MOZ_CRASH_UNSAFE_PRINTF("AOT IC miss: kind=%s hash=%u",
                               CacheKindNames[uint8_t(kind)],
                               unsigned(CacheIRStubKey::hash(lookup)));
+    } else {
+      AOTTiming::AddCounter(AOTTimingCounter::ICImageLookupMisses);
     }
   }
 #endif
@@ -2355,6 +2364,10 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   // Time to allocate and attach a new stub.
 
   size_t bytesNeeded = stubInfo->stubDataOffset() + stubInfo->stubDataSize();
+#ifdef ENABLE_JS_AOT
+  AutoAOTTimer attachTimer(AOTTimingPhase::ICPrivateAttach,
+                           code->isStaticCode());
+#endif
 
   void* newStubMem = cx->zone()->jitZone()->stubSpace()->alloc(bytesNeeded);
   if (!newStubMem) {
@@ -2392,6 +2405,14 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
 #endif
 
   stub->addNewStub(icEntry, newStub);
+
+#ifdef ENABLE_JS_AOT
+  if (code->isStaticCode()) {
+    AOTTiming::AddCounter(AOTTimingCounter::ICPrivateStubs);
+    AOTTiming::AddCounter(AOTTimingCounter::ICPrivateStubBytes, bytesNeeded);
+  }
+  attachTimer.Stop();
+#endif
 
   JSScript* owningScript = icScript->isInlined()
                                ? icScript->inliningRoot()->owningScript()

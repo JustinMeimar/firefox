@@ -12,6 +12,7 @@
 #  include <cstring>
 
 #  include "js/AOTCoverage.h"
+#  include "js/AOTTiming.h"
 #  include "mozilla/Services.h"
 #  include "nsIObserverService.h"
 
@@ -30,10 +31,10 @@ static const char* const kShutdownTopics[] = {
 
 /* static */
 void AOTCoverageShutdown::Register() {
-  // Gate on the env var directly: coverage does not arm until the first AOT
-  // install, which is strictly later than this.
   const char* path = getenv("JS_AOT_COVERAGE_OUT");
-  if (!path || !*path) return;
+  const char* timing = getenv("JS_AOT_TIMING");
+  bool timingEnabled = timing && *timing && strcmp(timing, "0") != 0;
+  if ((!path || !*path) && !timingEnabled) return;
 
   RefPtr<AOTCoverageShutdown> observer = new AOTCoverageShutdown();
   if (nsCOMPtr<nsIObserverService> obs =
@@ -57,6 +58,8 @@ AOTCoverageShutdown::Observe(nsISupports* aSubject, const char* aTopic,
   if (!matched) return NS_OK;
 
   JS::FlushAOTCoverage();
+  JS::FlushAOTTiming(strcmp(aTopic, "content-child-shutdown") == 0 ? "content"
+                                                                   : "xpcom");
 
   if (nsCOMPtr<nsIObserverService> obs =
           mozilla::services::GetObserverService()) {
