@@ -274,6 +274,7 @@ if CONFIG["ENABLE_JS_AOT"]:
         "AOTInstaller.cpp",
         "AOTMacroAssembler.cpp",
         "AOTRecorder.cpp",
+        "AOTTiming.cpp",
     ]
 
     GeneratedFile(

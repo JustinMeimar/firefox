@@ -77,6 +77,7 @@
 #  include "builtin/Math.h"
 #  include "builtin/WeakMapObject.h"
 #  include "builtin/WeakSetObject.h"
+#  include "jit/AOTTiming.h"
 #  include "js/Wrapper.h"
 #  include "proxy/DeadObjectProxy.h"
 #  include "proxy/DOMProxy.h"
@@ -146,6 +147,7 @@ uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
 #ifdef ENABLE_JS_AOT
 // TODO: Move AOT table population to a dedicated source file.
 bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
+  AutoAOTTimer timer(AOTTimingPhase::RITInitialization);
   if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Interpreter) ||
       !ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Compiler)) {
     return false;
