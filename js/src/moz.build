@@ -100,6 +100,7 @@ EXPORTS.js += [
     "../public/AllocationRecording.h",
     "../public/AllocPolicy.h",
     "../public/AOTCoverage.h",
+    "../public/AOTRecording.h",
     "../public/AOTTiming.h",
     "../public/Array.h",
     "../public/ArrayBuffer.h",

@@ -207,6 +207,10 @@ DefaultJitOptions::DefaultJitOptions() {
   if (const char* dir = getenv("JIT_OPTION_aotRecordDir")) {
     aotRecordDir = dir;
   }
+  SET_DEFAULT(aotRecordSelfHosted, false);
+  if (const char* value = getenv("JIT_OPTION_aotRecordSelfHosted")) {
+    aotRecordSelfHosted = *value && strcmp(value, "0") != 0;
+  }
 #endif
 
   // How many invocations or loop iterations are needed before functions
