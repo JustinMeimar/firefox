@@ -174,6 +174,9 @@ void JSScript::releaseJitScript(JS::GCContext* gcx) {
   MOZ_ASSERT(!hasBaselineScript());
   MOZ_ASSERT(!hasIonScript());
 
+  JSInstr::LogBaselineEntriesRetire(gcx->runtime(), this,
+                                    jitScript()->icScript()->entryCount());
+
   gcx->removeCellMemory(this, jitScript()->allocBytes(), MemoryUse::JitScript);
 
   JitScript::Destroy(zone(), jitScript());

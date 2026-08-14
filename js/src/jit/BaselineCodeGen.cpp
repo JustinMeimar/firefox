@@ -10,6 +10,7 @@
 #include "jit/BaselineCompileQueue.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineIC.h"
+#include "jit/BaselineInstr.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRGenerator.h"
@@ -429,6 +430,7 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
   script->jitScript()->setIonThreshold(handler.baseWarmUpThreshold());
 
   script->jitScript()->setBaselineScript(script, baselineScript.release());
+  EmitBaselineCompileEvent(cx, script);
 
   perfSpewer_.saveProfile(cx, script, code);
 

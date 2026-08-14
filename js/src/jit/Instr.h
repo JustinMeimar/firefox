@@ -68,7 +68,6 @@ class ExecutablePool;
 class JitCode;
 }  // namespace js::jit
 
-
 namespace js::jit {
 
 enum InstrChannel : uint32_t {
@@ -123,8 +122,7 @@ enum class JitCodeOwner : uint8_t {
   Wasm,
   Other,
 };
-inline constexpr size_t kJitCodeOwnerCount =
-    size_t(JitCodeOwner::Other) + 1;
+inline constexpr size_t kJitCodeOwnerCount = size_t(JitCodeOwner::Other) + 1;
 
 enum class ExecPoolKind : uint8_t {
   Baseline,
@@ -142,11 +140,11 @@ const char* Name(JitCodeOwner);
 const char* Name(ExecPoolKind);
 
 struct CouplingRecord {
-  const char* operandKind;   // e.g. "ImmGCPtr", "AbsoluteAddress"
-  uint32_t patchOffset;      // offset within the code body
-  const char* targetKind;    // e.g. "Shape", "Realm", "Runtime"
-  const char* relocKind;     // e.g. "gcptr", "cellptr", "none"
-  const char* eligibility;   // "direct-relocatable" | "table" | "instance"
+  const char* operandKind;  // e.g. "ImmGCPtr", "AbsoluteAddress"
+  uint32_t patchOffset;     // offset within the code body
+  const char* targetKind;   // e.g. "Shape", "Realm", "Runtime"
+  const char* relocKind;    // e.g. "gcptr", "cellptr", "none"
+  const char* eligibility;  // "direct-relocatable" | "table" | "instance"
 };
 
 // Facade. All engine code calls into this. The methods are declared
@@ -175,6 +173,8 @@ class JSInstr {
   static uint32_t RuntimeLocalId(JSRuntime* rt);
   static uint32_t ScriptLocalId(JSScript* script);
   static uint32_t SiteLocalId(JSScript* script, uint32_t bcOffset);
+  static bool MarkRuntimeEntriesFlushed(JSRuntime* rt);
+  static bool RuntimeEntriesFlushed(JSRuntime* rt);
 
   // Lifecycle
   static void LogPoolCreate(ExecutablePool* pool, ExecPoolKind kind,
@@ -194,11 +194,11 @@ class JSInstr {
   // finished machine code.
   static void LogBaselineCompile(JSRuntime* rt, JSScript* script,
                                  const Sha1Digest& semanticId,
-                                 const Sha1Digest& codeId,
-                                 uint32_t methodBytes,
-                                 uint32_t metadataBytes,
-                                 uint32_t numIcEntries);
+                                 const Sha1Digest& codeId, uint32_t methodBytes,
+                                 uint32_t metadataBytes, uint32_t numIcEntries);
   static void LogBaselineRetire(JSScript* script);
+  static void LogBaselineEntriesRetire(JSRuntime* rt, JSScript* script,
+                                       uint64_t enteredCount);
 
   // A brand new baseline CacheIR body was compiled. Fires exactly
   // once per unique source_sha per process. `sourceSha` is the SHA
@@ -218,10 +218,9 @@ class JSInstr {
   // applied. `sourceSha` is SHA over the pattern atom bytes + flags
   // (an IR-level identity); `codeSha` is SHA over the finished
   // machine code.
-  static void LogRegExpEmit(const uint8_t* patternBytes,
-                            uint32_t patternLen, bool patternLatin1,
-                            uint32_t flagsRaw, uint32_t machineBytes,
-                            const Sha1Digest& codeSha);
+  static void LogRegExpEmit(const uint8_t* patternBytes, uint32_t patternLen,
+                            bool patternLatin1, uint32_t flagsRaw,
+                            uint32_t machineBytes, const Sha1Digest& codeSha);
 
   static void LogIcInstanceAttach(JSScript* outerScript, uint32_t bcOffset,
                                   const Sha1Digest& icBodyId, IcEngine engine);
@@ -303,7 +302,7 @@ class JSInstr {
     uint32_t icEntryStart;
     uint32_t icEntryCount;
   };
-  static void LogEntriesFlush(const char* reason,
+  static void LogEntriesFlush(uint32_t runtimeLocalId, const char* reason,
                               mozilla::Span<const EntriesFlushRow> scripts,
                               mozilla::Span<const IcEntryRow> icEntries);
   static void LogEntriesOverflow(uint32_t scriptLocalId);

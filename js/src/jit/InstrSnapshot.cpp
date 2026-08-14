@@ -41,9 +41,8 @@ using PoolCopyVec = Vector<PoolCopy, 32, SystemAllocPolicy>;
 
 void CollectPool(void* userdata, const JSInstr::PoolInfo& info) {
   auto* v = static_cast<PoolCopyVec*>(userdata);
-  (void)v->append(
-      PoolCopy{info.poolId, info.poolKind, info.base, info.mmapBytes,
-               info.usedBytes});
+  (void)v->append(PoolCopy{info.poolId, info.poolKind, info.base,
+                           info.mmapBytes, info.usedBytes});
 }
 
 // Parses a "Name: value kB" style line from smaps into an unsigned int.
@@ -152,17 +151,24 @@ void EmitSmaps(const PoolCopyVec& pools) {
       continue;
     }
     if (!cur.valid) continue;
-    if (uint64_t v = ParseKb(line, "Size")) cur.sizeKb = v;
-    else if (uint64_t v = ParseKb(line, "Rss")) cur.rssKb = v;
-    else if (uint64_t v = ParseKb(line, "Pss")) cur.pssKb = v;
-    else if (uint64_t v = ParseKb(line, "Shared_Clean")) cur.sharedCleanKb = v;
-    else if (uint64_t v = ParseKb(line, "Shared_Dirty")) cur.sharedDirtyKb = v;
+    if (uint64_t v = ParseKb(line, "Size"))
+      cur.sizeKb = v;
+    else if (uint64_t v = ParseKb(line, "Rss"))
+      cur.rssKb = v;
+    else if (uint64_t v = ParseKb(line, "Pss"))
+      cur.pssKb = v;
+    else if (uint64_t v = ParseKb(line, "Shared_Clean"))
+      cur.sharedCleanKb = v;
+    else if (uint64_t v = ParseKb(line, "Shared_Dirty"))
+      cur.sharedDirtyKb = v;
     else if (uint64_t v = ParseKb(line, "Private_Clean"))
       cur.privateCleanKb = v;
     else if (uint64_t v = ParseKb(line, "Private_Dirty"))
       cur.privateDirtyKb = v;
-    else if (uint64_t v = ParseKb(line, "Referenced")) cur.referencedKb = v;
-    else if (uint64_t v = ParseKb(line, "Anonymous")) cur.anonymousKb = v;
+    else if (uint64_t v = ParseKb(line, "Referenced"))
+      cur.referencedKb = v;
+    else if (uint64_t v = ParseKb(line, "Anonymous"))
+      cur.anonymousKb = v;
   }
   if (cur.valid && OverlapsAnyPool(cur, pools)) {
     EmitSmapsEntry(cur);
@@ -214,12 +220,11 @@ static void CollectAndEmitEntries(JSRuntime* rt, const char* reason) {
         while (s && !s->isFallback()) {
           ICCacheIRStub* cs = s->toCacheIRStub();
           const CacheIRStubInfo* info = cs->stubInfo();
-          Sha1Digest bodyId = info
-                                  ? Sha1(mozilla::Span<const uint8_t>(
-                                        reinterpret_cast<const uint8_t*>(
-                                            info->code()),
-                                        info->codeLength()))
-                                  : Sha1Digest{};
+          Sha1Digest bodyId =
+              info ? Sha1(mozilla::Span<const uint8_t>(
+                         reinterpret_cast<const uint8_t*>(info->code()),
+                         info->codeLength()))
+                   : Sha1Digest{};
           (void)icRows.append(JSInstr::IcEntryRow{
               siteId, bodyId, uint64_t(cs->enteredCount()), false});
           s = cs->next();
@@ -230,17 +235,16 @@ static void CollectAndEmitEntries(JSRuntime* rt, const char* reason) {
       }
 
       uint32_t icCount = uint32_t(icRows.length() - icStart);
-      (void)scripts.append(JSInstr::EntriesFlushRow{
-          scriptId, ic->entryCount(), icStart, icCount});
+      (void)scripts.append(JSInstr::EntriesFlushRow{scriptId, ic->entryCount(),
+                                                    icStart, icCount});
     }
   }
 
-  JSInstr::LogEntriesFlush(
-      reason,
-      mozilla::Span<const JSInstr::EntriesFlushRow>(scripts.begin(),
-                                                    scripts.length()),
-      mozilla::Span<const JSInstr::IcEntryRow>(icRows.begin(),
-                                                icRows.length()));
+  JSInstr::LogEntriesFlush(JSInstr::RuntimeLocalId(rt), reason,
+                           mozilla::Span<const JSInstr::EntriesFlushRow>(
+                               scripts.begin(), scripts.length()),
+                           mozilla::Span<const JSInstr::IcEntryRow>(
+                               icRows.begin(), icRows.length()));
 }
 
 void InstrSnapshot::Now(JSContext* cx, const char* marker) {
@@ -252,8 +256,7 @@ void InstrSnapshot::Now(JSContext* cx, const char* marker) {
   JSInstr::ForEachLivePool(&pools, &CollectPool);
 
   for (const PoolCopy& p : pools) {
-    size_t unused =
-        p.mmapBytes > p.usedBytes ? (p.mmapBytes - p.usedBytes) : 0;
+    size_t unused = p.mmapBytes > p.usedBytes ? (p.mmapBytes - p.usedBytes) : 0;
     JSInstr::LogSnapshotFootprint(p.poolId, p.poolKind, p.mmapBytes,
                                   p.usedBytes, unused);
   }
@@ -274,6 +277,8 @@ void InstrSnapshot::Now(JSContext* cx, const char* marker) {
 // one entries-flush row per JitScript with each live IC stub's real
 // execution count -- the coverage question's only sound weighting.
 void InstrSnapshot::AtRuntimeShutdown(JSRuntime* rt) {
+  if (!JSInstr::Enabled(InstrCh_Demand) || !rt) return;
+  if (!JSInstr::MarkRuntimeEntriesFlushed(rt)) return;
   CollectAndEmitEntries(rt, "runtime-shutdown");
 }
 

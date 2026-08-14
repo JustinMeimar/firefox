@@ -127,8 +127,8 @@ void js::BaseScript::finalize(JS::GCContext* gcx) {
 
   if (warmUpData_.isJitScript()) {
     JSScript* script = this->asJSScript();
-    js::jit::JSInstr::LogScriptDestroy(script);
     script->releaseJitScriptOnFinalize(gcx);
+    js::jit::JSInstr::LogScriptDestroy(script);
   }
 
   freeSharedData();

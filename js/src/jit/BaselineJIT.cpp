@@ -542,11 +542,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   if (osrSourceFrame && osrSourceFrame.isDebuggee()) {
     options.setFlag(BaselineOption::ForceDebugInstrumentation);
   }
-  MethodStatus status = BaselineCompile(cx, script, options);
-  if (status == Method_Compiled) {
-    EmitBaselineCompileEvent(cx, script);
-  }
-  return status;
+  return BaselineCompile(cx, script, options);
 }
 
 bool jit::CanBaselineInterpretScript(JSScript* script) {

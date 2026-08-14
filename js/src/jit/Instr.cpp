@@ -323,9 +323,7 @@ class JsonlBuilder {
     RawCh(':');
     EscString(value);
   }
-  void Sha(const char* key, const Sha1Digest& d) {
-    Str(key, ToHex(d).c_str());
-  }
+  void Sha(const char* key, const Sha1Digest& d) { Str(key, ToHex(d).c_str()); }
   void U32(const char* key, uint32_t v) {
     CommaIfNeeded();
     EscString(key);
@@ -482,6 +480,10 @@ class InstrRegistry {
       return a == b;
     }
   };
+  struct RuntimeRecord {
+    uint32_t id;
+    bool entriesFlushed;
+  };
 
   struct PoolRecord {
     uint32_t id;
@@ -511,7 +513,7 @@ class InstrRegistry {
   std::atomic<uint64_t> liveIcBodyCount_{0};
   std::atomic<uint64_t> liveIcBodyBytes_{0};
 
-  mozilla::HashMap<const void*, uint32_t, PtrHasher, js::SystemAllocPolicy>
+  mozilla::HashMap<const void*, RuntimeRecord, PtrHasher, js::SystemAllocPolicy>
       runtimes_;
   mozilla::HashMap<const ExecutablePool*, PoolRecord, PtrHasher,
                    js::SystemAllocPolicy>
@@ -531,10 +533,29 @@ class InstrRegistry {
     if (!rt) return 0;
     js::LockGuard<js::Mutex> g(lock_);
     auto p = runtimes_.lookupForAdd(rt);
-    if (p) return p->value();
+    if (p) return p->value().id;
     uint32_t id = nextRt_.fetch_add(1, std::memory_order_relaxed);
-    (void)runtimes_.add(p, rt, id);
+    (void)runtimes_.add(p, rt, RuntimeRecord{id, false});
     return id;
+  }
+  bool MarkRuntimeEntriesFlushed(JSRuntime* rt) {
+    if (!rt) return false;
+    js::LockGuard<js::Mutex> g(lock_);
+    auto p = runtimes_.lookupForAdd(rt);
+    if (p) {
+      if (p->value().entriesFlushed) return false;
+      p->value().entriesFlushed = true;
+      return true;
+    }
+    uint32_t id = nextRt_.fetch_add(1, std::memory_order_relaxed);
+    (void)runtimes_.add(p, rt, RuntimeRecord{id, true});
+    return true;
+  }
+  bool RuntimeEntriesFlushed(JSRuntime* rt) {
+    if (!rt) return false;
+    js::LockGuard<js::Mutex> g(lock_);
+    auto p = runtimes_.lookup(rt);
+    return p && p->value().entriesFlushed;
   }
 
   uint32_t RegisterPool(const ExecutablePool* pool, ExecPoolKind kind,
@@ -619,9 +640,9 @@ class InstrRegistry {
   }
 
   void ReadLiveCounters(uint64_t (&count)[kNumOwners],
-                        uint64_t (&bytes)[kNumOwners],
-                        uint64_t& poolCount, uint64_t& mmapBytes,
-                        uint64_t& icBodyCount, uint64_t& icBodyBytes) {
+                        uint64_t (&bytes)[kNumOwners], uint64_t& poolCount,
+                        uint64_t& mmapBytes, uint64_t& icBodyCount,
+                        uint64_t& icBodyBytes) {
     for (size_t i = 0; i < kNumOwners; ++i) {
       count[i] = liveCountByOwner_[i].load(std::memory_order_relaxed);
       bytes[i] = liveBytesByOwner_[i].load(std::memory_order_relaxed);
@@ -790,17 +811,18 @@ void JSInstr::Init() {
     // time for any event as `wall_us_epoch + ts_us`, which is how it
     // aligns per-process JSONL files without needing coordinated
     // triggers.
-    uint64_t wallUsEpoch = uint64_t(
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count());
+    uint64_t wallUsEpoch =
+        uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::system_clock::now().time_since_epoch())
+                     .count());
 
-    g->sink.EmitLine("run-header", 0, [g, channels, wallUsEpoch](JsonlBuilder& b) {
-      b.Str("run_id", g->runId);
-      b.Str("mode", NameOf(g->mode));
-      b.U32("channels", channels);
-      b.U64("wall_us_epoch", wallUsEpoch);
-    });
+    g->sink.EmitLine("run-header", 0,
+                     [g, channels, wallUsEpoch](JsonlBuilder& b) {
+                       b.Str("run_id", g->runId);
+                       b.Str("mode", NameOf(g->mode));
+                       b.U32("channels", channels);
+                       b.U64("wall_us_epoch", wallUsEpoch);
+                     });
   });
 
   InstrGlobal* g = GlobalPtr();
@@ -822,6 +844,14 @@ uint32_t JSInstr::ScriptLocalId(JSScript* script) {
 
 uint32_t JSInstr::SiteLocalId(JSScript* script, uint32_t bcOffset) {
   return GlobalPtr()->registry.SiteId(script, bcOffset);
+}
+
+bool JSInstr::MarkRuntimeEntriesFlushed(JSRuntime* rt) {
+  return GlobalPtr()->registry.MarkRuntimeEntriesFlushed(rt);
+}
+
+bool JSInstr::RuntimeEntriesFlushed(JSRuntime* rt) {
+  return GlobalPtr()->registry.RuntimeEntriesFlushed(rt);
 }
 
 void JSInstr::RuntimeShutdown(JSRuntime* rt) {
@@ -862,9 +892,8 @@ void JSInstr::LogPoolUnmap(ExecutablePool* pool) {
   if (!Enabled(InstrCh_Lifecycle)) return;
   auto* g = GlobalPtr();
   auto rec = g->registry.ForgetPool(pool);
-  g->sink.EmitLine("pool-unmap", 0, [&](JsonlBuilder& b) {
-    b.U32("pool_id", rec.id);
-  });
+  g->sink.EmitLine("pool-unmap", 0,
+                   [&](JsonlBuilder& b) { b.U32("pool_id", rec.id); });
 }
 
 void JSInstr::LogJitCodeCreate(JitCode* code, JitCodeOwner owner) {
@@ -888,9 +917,8 @@ void JSInstr::LogJitCodeFinalize(JitCode* code) {
   if (!Enabled(InstrCh_Lifecycle)) return;
   auto* g = GlobalPtr();
   auto rec = g->registry.ForgetCode(code);
-  g->sink.EmitLine("jitcode-finalize", 0, [&](JsonlBuilder& b) {
-    b.U32("code_local_id", rec.id);
-  });
+  g->sink.EmitLine("jitcode-finalize", 0,
+                   [&](JsonlBuilder& b) { b.U32("code_local_id", rec.id); });
 }
 
 static SourceClass ClassifyScript(JSScript* script) {
@@ -933,9 +961,8 @@ void JSInstr::LogScriptDestroy(JSScript* script) {
   if (!Enabled(InstrCh_Lifecycle)) return;
   auto* g = GlobalPtr();
   uint32_t sid = g->registry.ScriptId(script);
-  g->sink.EmitLine("script-destroy", 0, [&](JsonlBuilder& b) {
-    b.U32("script_local_id", sid);
-  });
+  g->sink.EmitLine("script-destroy", 0,
+                   [&](JsonlBuilder& b) { b.U32("script_local_id", sid); });
   g->registry.ForgetScript(script);
 }
 
@@ -965,8 +992,19 @@ void JSInstr::LogBaselineRetire(JSScript* script) {
   if (!Enabled(InstrCh_Baseline)) return;
   auto* g = GlobalPtr();
   uint32_t sid = g->registry.ScriptId(script);
-  g->sink.EmitLine("baseline-retire", 0, [&](JsonlBuilder& b) {
+  g->sink.EmitLine("baseline-retire", 0,
+                   [&](JsonlBuilder& b) { b.U32("script_local_id", sid); });
+}
+
+void JSInstr::LogBaselineEntriesRetire(JSRuntime* rt, JSScript* script,
+                                       uint64_t enteredCount) {
+  if (!Enabled(InstrCh_Demand) || RuntimeEntriesFlushed(rt)) return;
+  auto* g = GlobalPtr();
+  uint32_t sid = g->registry.ScriptId(script);
+  uint32_t rid = RuntimeLocalId(rt);
+  g->sink.EmitLine("baseline-entries-retire", rid, [&](JsonlBuilder& b) {
     b.U32("script_local_id", sid);
+    b.U64("entered_count", enteredCount);
   });
 }
 
@@ -1010,8 +1048,7 @@ void JSInstr::LogIcBodyEmit(const Sha1Digest& sourceSha,
 }
 
 void JSInstr::LogIcInstanceAttach(JSScript* outerScript, uint32_t bcOffset,
-                                  const Sha1Digest& icBodyId,
-                                  IcEngine engine) {
+                                  const Sha1Digest& icBodyId, IcEngine engine) {
   if (!Enabled(InstrCh_IC)) return;
   auto* g = GlobalPtr();
   uint32_t siteId = g->registry.SiteId(outerScript, bcOffset);
@@ -1029,8 +1066,7 @@ void JSInstr::LogIcInstanceAttach(JSScript* outerScript, uint32_t bcOffset,
 void JSInstr::LogIcInstanceDetach(JSScript* outerScript, uint32_t bcOffset,
                                   const Sha1Digest& icBodyId,
                                   IcDetachReason reason, uint32_t enteredCount,
-                                  bool isFallback,
-                                  uint32_t chainLengthBefore) {
+                                  bool isFallback, uint32_t chainLengthBefore) {
   if (!Enabled(InstrCh_IC)) return;
   auto* g = GlobalPtr();
   uint32_t siteId = g->registry.SiteId(outerScript, bcOffset);
@@ -1156,21 +1192,20 @@ void JSInstr::LogSnapshotSmapsRow(const SmapsRow& r) {
 
 void JSInstr::ForEachLivePool(void* userdata, PoolCallback cb) {
   auto* g = GlobalPtr();
-  g->registry.ForEachLivePool(
-      [&](const ExecutablePool* pool, uint32_t id, ExecPoolKind kind,
-          size_t mmapBytes) {
-        PoolInfo info{id, NameOf(kind), pool->base(), mmapBytes,
-                      pool->usedCodeBytes()};
-        cb(userdata, info);
-      });
+  g->registry.ForEachLivePool([&](const ExecutablePool* pool, uint32_t id,
+                                  ExecPoolKind kind, size_t mmapBytes) {
+    PoolInfo info{id, NameOf(kind), pool->base(), mmapBytes,
+                  pool->usedCodeBytes()};
+    cb(userdata, info);
+  });
 }
 
-void JSInstr::LogEntriesFlush(const char* reason,
+void JSInstr::LogEntriesFlush(uint32_t runtimeLocalId, const char* reason,
                               mozilla::Span<const EntriesFlushRow> scripts,
                               mozilla::Span<const IcEntryRow> icEntries) {
   if (!Enabled(InstrCh_Demand)) return;
   auto* g = GlobalPtr();
-  g->sink.EmitLine("entries-flush", 0, [&](JsonlBuilder& b) {
+  g->sink.EmitLine("entries-flush", runtimeLocalId, [&](JsonlBuilder& b) {
     b.Str("reason", reason ? reason : "");
     b.U32("script_count", uint32_t(scripts.size()));
     b.BeginArray("scripts");
