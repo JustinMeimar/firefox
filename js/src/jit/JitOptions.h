@@ -143,6 +143,12 @@ struct DefaultJitOptions {
   // functions, and inline cache stubs.
   std::string aotRecordDir;
 
+  // When set alongside aotRecordDir, sweep the self-host stencil at JIT
+  // runtime init and record a baseline artifact for every self-hosted
+  // function. Mirrors the shell's --aot-record-self-hosted flag so the
+  // browser can dump the corpus itself instead of relying on shell parity.
+  bool aotRecordSelfHosted;
+
   // Load AOT artifacts from the embedded image at startup. If the image is
   // missing, stale, or invalid, generate code at runtime.
   bool useAOTImage;

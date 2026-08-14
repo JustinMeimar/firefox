@@ -25,9 +25,12 @@
 #  include "jit/BaselineJIT.h"
 #  include "jit/CacheIR.h"
 #  include "jit/JitCode.h"
+#  include "jit/JitOptions.h"
+#  include "jit/JitRuntime.h"
 #  include "jit/JitScript.h"
 #  include "jit/JitSpewer.h"
 #  include "jit/JitZone.h"
+#  include "js/AOTRecording.h"
 #  include "vm/JSAtomUtils.h"
 #  include "vm/JSContext.h"
 #  include "vm/JSFunction.h"
@@ -278,5 +281,24 @@ bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
 }
 
 }  // namespace js::jit
+
+JS_PUBLIC_API bool JS::MaybeRecordAOTSelfHostedBaselineCorpus(JSContext* cx) {
+  if (!js::jit::JitOptions.aotRecordSelfHosted) {
+    return true;
+  }
+  js::jit::JitRuntime* jrt = cx->runtime()->jitRuntime();
+  if (!jrt) {
+    return true;
+  }
+  js::jit::AOTArtifactRecorder* rec = jrt->aotRecorder();
+  if (!rec) {
+    return true;
+  }
+  uint32_t compiled = 0, skipped = 0;
+  if (!rec->recordSelfHostedBaselineCorpus(cx, &compiled, &skipped)) {
+    return false;
+  }
+  return true;
+}
 
 #endif  // ENABLE_JS_AOT
