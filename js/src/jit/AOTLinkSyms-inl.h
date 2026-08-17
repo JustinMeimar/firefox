@@ -30,6 +30,7 @@
 #  include "vm/SharedArrayObject.h"
 #  include "vm/TypedArrayObject.h"
 
+#  include "jit/ABIFunctionList-inl.h"
 #  include "jit/AOTABIFns-inl.h"
 
 namespace js::jit {

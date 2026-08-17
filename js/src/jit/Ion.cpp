@@ -98,6 +98,7 @@
 #endif
 
 #ifdef ENABLE_JS_AOT
+#  include "jit/ABIFunctionList-inl.h"
 #  include "jit/AOTABIFns-inl.h"
 #endif
 #include "gc/GC-inl.h"

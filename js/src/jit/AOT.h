@@ -8,13 +8,17 @@
 #define jit_AOT_h
 
 #include "mozilla/Assertions.h"
+#include "mozilla/HashFunctions.h"
 #include "mozilla/Maybe.h"
 
 #include <cstdint>
+#include <iterator>
 
 #include "jstypes.h"
 
+#include "jit/ABIFunctionList.h"
 #include "jit/Registers.h"
+#include "js/experimental/TypedData.h"  // JS_FOR_EACH_TYPED_ARRAY
 
 struct JS_PUBLIC_API JSContext;
 
@@ -32,11 +36,26 @@ extern const double MathRandomScaleInv;
 // pointers. Baseline and stub frames each store the table address used by
 // generated code.
 
-// Reserves fixed index ranges for groups of runtime supplied entries. The
-// limits are intentionally conservative and checked when the table is
-// populated.
+// The wrapper range is a fixed reservation because a trampoline is only
+// generated for a wrapper the first time something calls it, so the runtime
+// count is not known at compile time.
 static constexpr uint32_t AOTMaxVMWrappers = 512;
-static constexpr uint32_t AOTMaxABIFunctions = 256;
+
+// Only the shape of the ABI function list matters here, so the entries are
+// never named or evaluated; that keeps the declarations behind them out of
+// this header. The array size fixes the ABIFn slot range and is the same
+// count the image shim's link table binds against.
+inline constexpr bool kAOTABIFnLinkable[] = {
+#define AOT_ABIFN(fp) true,
+#define AOT_ABIFN_NOLINK(fp) false,
+#define AOT_ABIFN_TYPED(fp, ...) true,
+#include "jit/AOTABIFns.tbl"
+#undef AOT_ABIFN_TYPED
+#undef AOT_ABIFN_NOLINK
+#undef AOT_ABIFN
+};
+
+inline constexpr uint32_t kAOTABIFnCount = std::size(kAOTABIFnLinkable);
 
 enum class AOTSlot : uint32_t {
   // Mirrored values rather than addresses. The runtime rewrites these
@@ -59,7 +78,7 @@ enum class AOTSlot : uint32_t {
   VMWrapper_Begin = NamedSlot_End,
   VMWrapper_End = VMWrapper_Begin + AOTMaxVMWrappers,
   ABIFn_Begin = VMWrapper_End,
-  ABIFn_End = ABIFn_Begin + AOTMaxABIFunctions,
+  ABIFn_End = ABIFn_Begin + kAOTABIFnCount,
   Count = ABIFn_End,
 
   // Region markers, declared last so they alias entries already numbered
@@ -75,7 +94,7 @@ inline AOTSlot AOTSlotForVMWrapper(uint32_t id) {
 }
 
 constexpr AOTSlot AOTSlotForABIFn(uint32_t idx) {
-  MOZ_ASSERT(idx < AOTMaxABIFunctions);
+  MOZ_ASSERT(idx < kAOTABIFnCount);
   return AOTSlot(uint32_t(AOTSlot::ABIFn_Begin) + idx);
 }
 
@@ -107,7 +126,7 @@ bool IsAOTLinkSlot(AOTSlot slot);
 // table source also covers conditionally compiled entries, which shift every
 // following index. The region boundaries go in too, because moving a region
 // renumbers everything after it without changing any name.
-constexpr uint32_t AOTSlotTableHash() {
+constexpr mozilla::HashNumber AOTSlotTableHash() {
   const char* const names[] = {
 #define AOT_SLOT(name, ...) #name,
 #define AOT_ATOM_SLOT(name, ...) "@" #name,
@@ -117,13 +136,9 @@ constexpr uint32_t AOTSlotTableHash() {
 #undef AOT_ATOM_SLOT
 #undef AOT_SLOT
   };
-  uint32_t h = 2166136261u;
-  auto mix = [&h](uint8_t b) { h = (h ^ b) * 16777619u; };
+  mozilla::HashNumber h = 0;
   for (const char* n : names) {
-    for (; *n; n++) {
-      mix(uint8_t(*n));
-    }
-    mix('|');
+    h = mozilla::AddToHash(h, mozilla::HashStringUntilZero(n));
   }
   const uint32_t layout[] = {uint32_t(AOTSlot::Mirror_Begin),
                              uint32_t(AOTSlot::Mirror_End),
@@ -135,9 +150,7 @@ constexpr uint32_t AOTSlotTableHash() {
                              uint32_t(AOTSlot::ABIFn_End),
                              uint32_t(AOTSlot::Count)};
   for (uint32_t v : layout) {
-    for (int i = 0; i < 4; i++) {
-      mix(uint8_t(v >> (8 * i)));
-    }
+    h = mozilla::AddToHash(h, v);
   }
   return h;
 }
