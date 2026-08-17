@@ -13098,6 +13098,10 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "aot-enforce",
                         "With --aot: crash on any AOT lookup miss "
                         "instead of falling back to codegen.") ||
+      !op.addBoolOption('\0', "aot-loose-fingerprint",
+                        "With --aot: warn instead of crashing on an image "
+                        "configuration mismatch, and fall back to runtime "
+                        "codegen.") ||
       !op.addBoolOption('\0', "aot-only",
                         "Honor AOT artifacts when they hit; on any miss "
                         "stay in the baseline interpreter (scripts) or the "
@@ -14217,6 +14221,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("aot-enforce")) {
     jit::JitOptions.aotEnforce = true;
+  }
+  if (op.getBoolOption("aot-loose-fingerprint")) {
+    jit::JitOptions.aotLooseFingerprint = true;
   }
   if (op.getBoolOption("aot-only")) {
     if (jit::JitOptions.aotEnforce) {

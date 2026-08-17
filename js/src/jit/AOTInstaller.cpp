@@ -53,7 +53,12 @@ static bool IsAOTImageCompatible(const AOTImage* image) {
     MOZ_CRASH("AOT image configuration decode failed");
   }
   AOTConfigurationMetadata current = CurrentAOTConfiguration();
-  if (recorded != current) {
+  if (recorded == current) {
+    return true;
+  }
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
     fprintf(stderr,
             "AOT image configuration mismatch:\n"
             "  field                          recorded  current\n"
@@ -79,9 +84,11 @@ static bool IsAOTImageCompatible(const AOTImage* image) {
             current.baselineQueueCapacity,
             recorded.trialInliningWarmUpThreshold,
             current.trialInliningWarmUpThreshold);
+  }
+  if (!JitOptions.aotLooseFingerprint) {
     MOZ_CRASH("AOT image configuration mismatch");
   }
-  return true;
+  return false;
 }
 
 // Identity

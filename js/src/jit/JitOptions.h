@@ -157,6 +157,10 @@ struct DefaultJitOptions {
   // ensures CI uses only loaded artifacts.
   bool aotEnforce;
 
+  // Warn instead of crashing on a configuration mismatch, and fall back to
+  // codegen.
+  bool aotLooseFingerprint;
+
   // Honor AOT artifacts when they hit; on any miss stay in the tier that
   // requires no per-script or per-IC codegen (baseline interpreter for
   // scripts, shared IC fallback stub for ICs). Implies useAOTImage and
