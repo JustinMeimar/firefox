@@ -199,6 +199,7 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(dumpAOTBaseline, false);
   SET_DEFAULT(useAOTImage, false);
   SET_DEFAULT(aotEnforce, false);
+  SET_DEFAULT(aotLooseFingerprint, false);
   SET_DEFAULT(aotOnly, false);
   if (aotOnly) {
     useAOTImage = true;
