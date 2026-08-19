@@ -206,7 +206,7 @@ void BaselineCacheIRCompiler::callVM(MacroAssembler& masm) {
 
 JitCode* BaselineCacheIRCompiler::compile() {
 #ifdef ENABLE_JS_AOT
-  AutoAOTTimer timer(AOTTimingPhase::RuntimeICCompile);
+  AutoAOTTimer timer(AOTTimingPhase::ICCompile);
 #endif
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compile");
 
@@ -2058,7 +2058,6 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     JitZone* atomsJitZone = cx->runtime()->atomsZone()->jitZone();
     MOZ_ASSERT(atomsJitZone);
 
-    AutoAOTTimer timer(AOTTimingPhase::ICImageLookup);
     JitCode* candidate =
         atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
     bool hit = candidate && candidate->isStaticCode();
@@ -2068,19 +2067,15 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     }
 
     if (hit) {
-      AOTTiming::AddCounter(AOTTimingCounter::ICImageLookupHits);
       MOZ_RELEASE_ASSERT(stubInfo);
       if (AOTCoverage::IsEnabled()) {
         AOTCoverage::NoteICRequestAOTHit(candidate,
                                          CacheIRStubKey::hash(lookup));
       }
     } else if (JitOptions.aotEnforce) {
-      AOTTiming::AddCounter(AOTTimingCounter::ICImageLookupMisses);
       MOZ_CRASH_UNSAFE_PRINTF("AOT IC miss: kind=%s hash=%u",
                               CacheKindNames[uint8_t(kind)],
                               unsigned(CacheIRStubKey::hash(lookup)));
-    } else {
-      AOTTiming::AddCounter(AOTTimingCounter::ICImageLookupMisses);
     }
   }
 #endif
@@ -2365,8 +2360,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
 
   size_t bytesNeeded = stubInfo->stubDataOffset() + stubInfo->stubDataSize();
 #ifdef ENABLE_JS_AOT
-  AutoAOTTimer attachTimer(AOTTimingPhase::ICPrivateAttach,
-                           code->isStaticCode());
+  AutoAOTTimer attachTimer(AOTTimingPhase::ICInstall, code->isStaticCode());
 #endif
 
   void* newStubMem = cx->zone()->jitZone()->stubSpace()->alloc(bytesNeeded);
@@ -2408,8 +2402,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
 
 #ifdef ENABLE_JS_AOT
   if (code->isStaticCode()) {
-    AOTTiming::AddCounter(AOTTimingCounter::ICPrivateStubs);
-    AOTTiming::AddCounter(AOTTimingCounter::ICPrivateStubBytes, bytesNeeded);
+    AOTTiming::AddCounter(AOTTimingCounter::ICImageBytes, bytesNeeded);
   }
   attachTimer.Stop();
 #endif

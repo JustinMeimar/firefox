@@ -17,6 +17,7 @@
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTCoverage.h"
 #  include "jit/AOTInstaller.h"
+#  include "jit/AOTTiming.h"
 #  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/AutoWritableJitCode.h"
@@ -1469,6 +1470,9 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     TempAllocator temp(&cx->tempLifoAlloc());
     StackMacroAssembler masm(cx, temp);
     BaselineInterpreterGenerator generator(cx, temp, masm);
+#ifdef ENABLE_JS_AOT
+    AutoAOTTimer timer(AOTTimingPhase::InterpreterGenerate);
+#endif
     return generator.generate(cx, interpreter);
   }
 

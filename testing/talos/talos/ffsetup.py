@@ -86,8 +86,10 @@ class FFSetup:
 
         self.env["MOZ_DISABLE_NONLOCAL_CONNECTIONS"] = "1"
 
-        self.env["LD_LIBRARY_PATH"] = os.path.dirname(
-            self.browser_config["browser_path"]
+        _browser_lib = os.path.dirname(self.browser_config["browser_path"])
+        _inherited_ld = self.env.get("LD_LIBRARY_PATH", "")
+        self.env["LD_LIBRARY_PATH"] = (
+            _browser_lib + os.pathsep + _inherited_ld if _inherited_ld else _browser_lib
         )
 
     def _init_profile(self):

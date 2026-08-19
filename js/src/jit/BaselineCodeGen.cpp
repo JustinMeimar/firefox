@@ -264,7 +264,7 @@ bool BaselineCompiler::PrepareToCompile(JSContext* cx, Handle<JSScript*> script,
 
 MethodStatus BaselineCompiler::compile(JSContext* cx) {
 #ifdef ENABLE_JS_AOT
-  AutoAOTTimer timer(AOTTimingPhase::RuntimeBaselineCompile);
+  AutoAOTTimer timer(AOTTimingPhase::BaselineCompile);
 #endif
   Rooted<JSScript*> script(cx, handler.script());
 
@@ -291,7 +291,7 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
 
 MethodStatus BaselineCompiler::compileOffThread() {
 #ifdef ENABLE_JS_AOT
-  AutoAOTTimer timer(AOTTimingPhase::RuntimeBaselineCompile);
+  AutoAOTTimer timer(AOTTimingPhase::BaselineCompile);
 #endif
   handler.setCompilingOffThread();
   if (!compileImpl()) {

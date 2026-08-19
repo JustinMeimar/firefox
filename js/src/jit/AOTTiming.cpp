@@ -41,26 +41,18 @@ State gState;
 
 constexpr const char* PhaseName(AOTTimingPhase phase) {
   switch (phase) {
-    case AOTTimingPhase::ImageCompatibility:
-      return "image_compatibility";
-    case AOTTimingPhase::InterpreterAttach:
-      return "interpreter_attach";
-    case AOTTimingPhase::RITInitialization:
-      return "rit_initialization";
-    case AOTTimingPhase::ICCorpusAttach:
-      return "ic_corpus_attach";
-    case AOTTimingPhase::BaselineFunctionLookup:
-      return "baseline_function_lookup";
-    case AOTTimingPhase::BaselineFunctionReconstruct:
-      return "baseline_function_reconstruct";
-    case AOTTimingPhase::ICImageLookup:
-      return "ic_image_lookup";
-    case AOTTimingPhase::ICPrivateAttach:
-      return "ic_private_attach";
-    case AOTTimingPhase::RuntimeBaselineCompile:
-      return "runtime_baseline_compile";
-    case AOTTimingPhase::RuntimeICCompile:
-      return "runtime_ic_compile";
+    case AOTTimingPhase::InterpreterInstall:
+      return "interpreter_install";
+    case AOTTimingPhase::InterpreterGenerate:
+      return "interpreter_generate";
+    case AOTTimingPhase::BaselineInstall:
+      return "baseline_install";
+    case AOTTimingPhase::BaselineCompile:
+      return "baseline_compile";
+    case AOTTimingPhase::ICInstall:
+      return "ic_install";
+    case AOTTimingPhase::ICCompile:
+      return "ic_compile";
     case AOTTimingPhase::Limit:
       break;
   }
@@ -69,40 +61,12 @@ constexpr const char* PhaseName(AOTTimingPhase phase) {
 
 constexpr const char* CounterName(AOTTimingCounter counter) {
   switch (counter) {
-    case AOTTimingCounter::InterpreterCodeBytes:
-      return "interpreter_code_bytes";
-    case AOTTimingCounter::InterpreterMetadataBytes:
-      return "interpreter_metadata_bytes";
-    case AOTTimingCounter::InterpreterWrappers:
-      return "interpreter_wrappers";
-    case AOTTimingCounter::ICCorpusAttempted:
-      return "ic_corpus_attempted";
-    case AOTTimingCounter::ICCorpusLoaded:
-      return "ic_corpus_loaded";
-    case AOTTimingCounter::ICCorpusCodeBytes:
-      return "ic_corpus_code_bytes";
-    case AOTTimingCounter::ICCorpusMetadataBytes:
-      return "ic_corpus_metadata_bytes";
-    case AOTTimingCounter::ICCorpusWrappers:
-      return "ic_corpus_wrappers";
-    case AOTTimingCounter::BaselineLookupHits:
-      return "baseline_lookup_hits";
-    case AOTTimingCounter::BaselineLookupMisses:
-      return "baseline_lookup_misses";
-    case AOTTimingCounter::BaselineCodeBytes:
-      return "baseline_code_bytes";
-    case AOTTimingCounter::BaselineMetadataBytes:
-      return "baseline_metadata_bytes";
-    case AOTTimingCounter::BaselineWrappers:
-      return "baseline_wrappers";
-    case AOTTimingCounter::ICImageLookupHits:
-      return "ic_image_lookup_hits";
-    case AOTTimingCounter::ICImageLookupMisses:
-      return "ic_image_lookup_misses";
-    case AOTTimingCounter::ICPrivateStubs:
-      return "ic_private_stubs";
-    case AOTTimingCounter::ICPrivateStubBytes:
-      return "ic_private_stub_bytes";
+    case AOTTimingCounter::InterpreterImageBytes:
+      return "interpreter_image_bytes";
+    case AOTTimingCounter::BaselineImageBytes:
+      return "baseline_image_bytes";
+    case AOTTimingCounter::ICImageBytes:
+      return "ic_image_bytes";
     case AOTTimingCounter::Limit:
       break;
   }

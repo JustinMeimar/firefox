@@ -42,7 +42,6 @@
 namespace js::jit {
 
 static bool IsAOTImageCompatible(const AOTImage* image) {
-  AutoAOTTimer timer(AOTTimingPhase::ImageCompatibility);
   auto readerOpt = image->findUnique(AOTBlobKind::Configuration);
   if (readerOpt.isNothing()) {
     MOZ_CRASH("AOT image lacks configuration metadata");
@@ -154,7 +153,7 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
   if (!IsAOTImageCompatible(image)) {
     return false;
   }
-  AutoAOTTimer timer(AOTTimingPhase::InterpreterAttach);
+  AutoAOTTimer timer(AOTTimingPhase::InterpreterInstall);
 
   auto readerOpt = image->findUnique(AOTBlobKind::BaselineInterpreter);
   if (readerOpt.isNothing()) {
@@ -162,9 +161,8 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
   }
 
   AOTBlobReader reader = readerOpt.ref();
-  AOTTiming::AddCounter(
-      AOTTimingCounter::InterpreterMetadataBytes,
-      uint64_t(reader.entry()->fieldsSize) + reader.entry()->arraysSize);
+  uint64_t interpMetadataBytes =
+      uint64_t(reader.entry()->fieldsSize) + reader.entry()->arraysSize;
   BaselineInterpreterMetadata md;
   if (!DecodeBlob_BaselineInterpreter(reader, &md)) {
     MOZ_CRASH("AOT baseline interpreter decode failed");
@@ -212,8 +210,8 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
     interp.toggleCodeCoverageInstrumentationUnchecked(true);
   }
 
-  AOTTiming::AddCounter(AOTTimingCounter::InterpreterCodeBytes, code.size());
-  AOTTiming::AddCounter(AOTTimingCounter::InterpreterWrappers);
+  AOTTiming::AddCounter(AOTTimingCounter::InterpreterImageBytes,
+                        interpMetadataBytes + code.size());
 
   JitSpew(JitSpew_BaselineAOT,
           "installed baseline interpreter from AOT image: bytes=%zu",
@@ -235,21 +233,15 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
     return false;
   }
 
-  mozilla::Maybe<AOTBlobReader> readerOpt;
-  {
-    AutoAOTTimer timer(AOTTimingPhase::BaselineFunctionLookup);
-    uint32_t probe = ComputeBaselineProbeHash(script);
-    mozilla::SHA1Sum::Hash liveHash;
-    ComputeBaselineIdentityHash(script, liveHash);
-    readerOpt =
-        image->findByIdentity(AOTBlobKind::BaselineFunction, probe, liveHash);
-  }
+  uint32_t probe = ComputeBaselineProbeHash(script);
+  mozilla::SHA1Sum::Hash liveHash;
+  ComputeBaselineIdentityHash(script, liveHash);
+  mozilla::Maybe<AOTBlobReader> readerOpt =
+      image->findByIdentity(AOTBlobKind::BaselineFunction, probe, liveHash);
   if (readerOpt.isNothing()) {
-    AOTTiming::AddCounter(AOTTimingCounter::BaselineLookupMisses);
     return false;
   }
-  AOTTiming::AddCounter(AOTTimingCounter::BaselineLookupHits);
-  AutoAOTTimer reconstructTimer(AOTTimingPhase::BaselineFunctionReconstruct);
+  AutoAOTTimer installTimer(AOTTimingPhase::BaselineInstall);
 
   // The script may not have its baseline metadata initialized when AOT
   // installation begins. Initialize it before installing the compiled code.
@@ -265,9 +257,8 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   }
 
   AOTBlobReader reader = readerOpt.ref();
-  AOTTiming::AddCounter(
-      AOTTimingCounter::BaselineMetadataBytes,
-      uint64_t(reader.entry()->fieldsSize) + reader.entry()->arraysSize);
+  uint64_t baselineMetadataBytes =
+      uint64_t(reader.entry()->fieldsSize) + reader.entry()->arraysSize;
   BaselineScriptMetadata md;
   if (!DecodeBlob_BaselineFunction(reader, &md)) {
     JitSpew(JitSpew_BaselineAOT,
@@ -355,8 +346,8 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
     bs->toggleProfilerInstrumentation(true);
   }
 
-  AOTTiming::AddCounter(AOTTimingCounter::BaselineCodeBytes, code.size());
-  AOTTiming::AddCounter(AOTTimingCounter::BaselineWrappers);
+  AOTTiming::AddCounter(AOTTimingCounter::BaselineImageBytes,
+                        baselineMetadataBytes + code.size());
 
   JitSpew(JitSpew_BaselineAOT,
           "installed baseline function from AOT image: %s:%u bytes=%zu",
@@ -376,7 +367,6 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
   if (!image || !IsAOTImageCompatible(image)) {
     return false;
   }
-  AutoAOTTimer timer(AOTTimingPhase::ICCorpusAttach);
 
   AOTCoverage::EnsureInit(image);
 
@@ -388,10 +378,6 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
       continue;
     }
     attempted++;
-    AOTTiming::AddCounter(AOTTimingCounter::ICCorpusAttempted);
-    AOTTiming::AddCounter(
-        AOTTimingCounter::ICCorpusMetadataBytes,
-        uint64_t(reader.entry()->fieldsSize) + reader.entry()->arraysSize);
 
     AOTICStubMetadata md;
     if (!DecodeBlob_InlineCacheStub(reader, &md)) {
@@ -447,9 +433,6 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
       AOTCoverage::NoteICStubLoaded(jitCode, i);
     }
     loaded++;
-    AOTTiming::AddCounter(AOTTimingCounter::ICCorpusLoaded);
-    AOTTiming::AddCounter(AOTTimingCounter::ICCorpusCodeBytes, codeSpan.size());
-    AOTTiming::AddCounter(AOTTimingCounter::ICCorpusWrappers);
   }
 
   if (attempted > 0) {

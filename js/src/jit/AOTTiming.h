@@ -14,38 +14,26 @@
 
 namespace js::jit {
 
+// Three artifact classes, two events each. A cell that runs without AOT
+// records only the compile phases; a cell with AOT installed records the
+// install phases and any residual compile work for artifacts missing from
+// the image.
 enum class AOTTimingPhase : uint8_t {
-  ImageCompatibility,
-  InterpreterAttach,
-  RITInitialization,
-  ICCorpusAttach,
-  BaselineFunctionLookup,
-  BaselineFunctionReconstruct,
-  ICImageLookup,
-  ICPrivateAttach,
-  RuntimeBaselineCompile,
-  RuntimeICCompile,
+  InterpreterInstall,
+  InterpreterGenerate,
+  BaselineInstall,
+  BaselineCompile,
+  ICInstall,
+  ICCompile,
   Limit,
 };
 
+// Bytes contributed by the AOT image per artifact class (code + metadata).
+// Runtime cells leave these at zero.
 enum class AOTTimingCounter : uint8_t {
-  InterpreterCodeBytes,
-  InterpreterMetadataBytes,
-  InterpreterWrappers,
-  ICCorpusAttempted,
-  ICCorpusLoaded,
-  ICCorpusCodeBytes,
-  ICCorpusMetadataBytes,
-  ICCorpusWrappers,
-  BaselineLookupHits,
-  BaselineLookupMisses,
-  BaselineCodeBytes,
-  BaselineMetadataBytes,
-  BaselineWrappers,
-  ICImageLookupHits,
-  ICImageLookupMisses,
-  ICPrivateStubs,
-  ICPrivateStubBytes,
+  InterpreterImageBytes,
+  BaselineImageBytes,
+  ICImageBytes,
   Limit,
 };
 
