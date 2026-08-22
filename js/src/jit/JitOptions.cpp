@@ -208,6 +208,7 @@ DefaultJitOptions::DefaultJitOptions() {
   if (const char* dir = getenv("JIT_OPTION_aotRecordDir")) {
     aotRecordDir = dir;
   }
+  SET_DEFAULT(aotSkipBaselineFn, false);
 #endif
 
   // How many invocations or loop iterations are needed before functions

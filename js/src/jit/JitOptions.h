@@ -161,6 +161,13 @@ struct DefaultJitOptions {
   // forces ion=false.
   bool aotOnly;
 
+  // Skip AOT attach for Baseline function artifacts even when the image
+  // contains them. The Baseline Interpreter and IC corpus continue to load;
+  // functions that would have received an AOT Baseline body fall back to the
+  // Baseline Interpreter. Used to isolate the perf contribution of AOT
+  // self-hosted (and any other) Baseline functions from the IC corpus.
+  bool aotSkipBaselineFn;
+
   bool shouldCaptureAOTInterpreter() const {
     return dumpAOTBlinterp || !aotRecordDir.empty();
   }

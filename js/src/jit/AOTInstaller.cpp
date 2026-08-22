@@ -219,6 +219,9 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   if (!JitOptions.useAOTImage) {
     return false;
   }
+  if (JitOptions.aotSkipBaselineFn) {
+    return false;
+  }
 
   const AOTImage* image = AOTImage::embedded();
   if (!image || !IsAOTImageCompatible(image)) {
