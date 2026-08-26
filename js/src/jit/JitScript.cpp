@@ -150,9 +150,8 @@ bool JSScript::createJitScript(JSContext* cx) {
   // Baseline Interpreter code.
   updateJitCodeRaw(cx->runtime());
 
-  // Mirror BaseScript::finalize's LogScriptDestroy gate: only scripts
-  // that reach a JitScript get lifecycle events. Every script-destroy
-  // now has a matching prior script-create.
+  // Pair with LogScriptDestroy in releaseJitScript: sid lifetime tracks
+  // JitScript lifetime, so a pointer reused after GC discard looks fresh.
   JSInstr::LogScriptCreate(this);
 
   return true;
@@ -182,6 +181,8 @@ void JSScript::releaseJitScript(JS::GCContext* gcx) {
   JitScript::Destroy(zone(), jitScript());
   warmUpData_.clearJitScript();
   updateJitCodeRaw(gcx->runtime());
+
+  JSInstr::LogScriptDestroy(this);
 }
 
 void JSScript::releaseJitScriptOnFinalize(JS::GCContext* gcx) {
