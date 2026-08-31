@@ -2157,7 +2157,9 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 
 #ifdef ENABLE_JS_AOT
     if (AOTCoverage::IsEnabled()) {
-      AOTCoverage::NoteICRequestCompiled(CacheIRStubKey::hash(lookup));
+      AOTCoverage::NoteICRequestCompiled(CacheIRStubKey::hash(lookup),
+                                         uint8_t(kind), writer.codeStart(),
+                                         writer.codeLength());
     }
 #endif
 

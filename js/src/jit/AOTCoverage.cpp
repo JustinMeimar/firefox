@@ -18,6 +18,7 @@
 #  include <mutex>
 #  include <string>
 #  include <unistd.h>
+#  include <vector>
 
 #  include "jit/AOTImage.h"
 #  include "jit/JitCode.h"
@@ -45,6 +46,17 @@ using CodeMap =
                 js::SystemAllocPolicy>;
 using ShapeSet =
     js::HashSet<uint32_t, js::DefaultHasher<uint32_t>, js::SystemAllocPolicy>;
+using ShapeCountMap =
+    js::HashMap<uint32_t, uint64_t, js::DefaultHasher<uint32_t>,
+                js::SystemAllocPolicy>;
+
+struct MissedShapeIR {
+  uint8_t cacheKind = 0;
+  std::vector<uint8_t> cacheIR;
+};
+using MissedIRMap =
+    js::HashMap<uint32_t, MissedShapeIR, js::DefaultHasher<uint32_t>,
+                js::SystemAllocPolicy>;
 
 struct State {
   std::mutex mu;
@@ -62,6 +74,15 @@ struct State {
   CodeMap codeToStubBlob;
   ShapeSet shapesAOT;
   ShapeSet shapesOther;
+  // Per-missed-shape attach-request count: zone-hit + compiled events for
+  // the same shape hash. Companion to shapesOther; the set gives coverage
+  // ratios, the map lets the reducer rank misses by how often each shape
+  // actually earned an attach.
+  ShapeCountMap otherShapeAttaches;
+  // Snapshots the CacheIR of each miss the first time it's seen. Zone-hit
+  // shapes never enter here because their stub body was compiled earlier
+  // in this process; only compiler runs contribute an entry.
+  MissedIRMap missedIR;
   std::string outPath;
 };
 
@@ -179,15 +200,39 @@ void AOTCoverage::NoteICRequestZoneHit(uint32_t shapeHash) {
   std::lock_guard<std::mutex> lock(s->mu);
   s->icZoneHits++;
   (void)s->shapesOther.put(shapeHash);
+  auto p = s->otherShapeAttaches.lookupForAdd(shapeHash);
+  if (p) {
+    p->value()++;
+  } else {
+    (void)s->otherShapeAttaches.add(p, shapeHash, uint64_t(1));
+  }
 }
 
-void AOTCoverage::NoteICRequestCompiled(uint32_t shapeHash) {
+void AOTCoverage::NoteICRequestCompiled(uint32_t shapeHash, uint8_t cacheKind,
+                                        const uint8_t* cacheIR,
+                                        uint32_t cacheIRLen) {
   State* s = CoverageState();
   if (!s) return;
 
   std::lock_guard<std::mutex> lock(s->mu);
   s->icCompiles++;
   (void)s->shapesOther.put(shapeHash);
+  {
+    auto p = s->otherShapeAttaches.lookupForAdd(shapeHash);
+    if (p) {
+      p->value()++;
+    } else {
+      (void)s->otherShapeAttaches.add(p, shapeHash, uint64_t(1));
+    }
+  }
+
+  if (!cacheIR || cacheIRLen == 0) return;
+  auto p = s->missedIR.lookupForAdd(shapeHash);
+  if (p) return;  // first sighting wins; subsequent misses on same shape are identical
+  MissedShapeIR entry;
+  entry.cacheKind = cacheKind;
+  entry.cacheIR.assign(cacheIR, cacheIR + cacheIRLen);
+  (void)s->missedIR.add(p, shapeHash, std::move(entry));
 }
 
 namespace {
@@ -252,6 +297,39 @@ void WriteJson(State* s) {
 
   WriteShapeSet(w, "ic_shapes_aot", s->shapesAOT);
   WriteShapeSet(w, "ic_shapes_other", s->shapesOther);
+
+  // Per-missed-shape attach-request count. Reducer folds these into the
+  // per-body summary so misses can be ranked by how heavily they were
+  // requested vs. how many stub bodies they represent.
+  w.StartArrayProperty("ic_shapes_other_attaches");
+  for (auto r = s->otherShapeAttaches.iter(); !r.done(); r.next()) {
+    w.StartObjectElement(mozilla::JSONWriter::SingleLineStyle);
+    w.IntProperty("shape_hash", int64_t(r.get().key()));
+    w.IntProperty("attach_count", int64_t(r.get().value()));
+    w.EndObject();
+  }
+  w.EndArray();
+
+  // Per-missed-shape CacheIR snapshot: hex-encoded byte stream plus the
+  // cache kind. Reducer groups these by opcode-sequence to answer "which
+  // stub bodies are missing from the corpus?".
+  w.StartArrayProperty("ic_shapes_other_ir");
+  for (auto r = s->missedIR.iter(); !r.done(); r.next()) {
+    w.StartObjectElement(mozilla::JSONWriter::SingleLineStyle);
+    w.IntProperty("shape_hash", int64_t(r.get().key()));
+    w.IntProperty("cache_kind", int64_t(r.get().value().cacheKind));
+    const auto& bytes = r.get().value().cacheIR;
+    std::string hex;
+    hex.reserve(bytes.size() * 2);
+    static const char kHex[] = "0123456789abcdef";
+    for (uint8_t b : bytes) {
+      hex.push_back(kHex[(b >> 4) & 0xF]);
+      hex.push_back(kHex[b & 0xF]);
+    }
+    w.StringProperty("ir_hex", mozilla::MakeStringSpan(hex.c_str()));
+    w.EndObject();
+  }
+  w.EndArray();
 
   w.End();
   fclose(f);

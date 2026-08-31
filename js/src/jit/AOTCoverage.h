@@ -48,7 +48,10 @@ class AOTImage;
 //
 // Shapes are identified by a content hash over the CacheIR bytes, which is
 // free of addresses and therefore comparable across processes. The reducer
-// unions the per-process shape sets before taking the ratio.
+// unions the per-process shape sets before taking the ratio. For the
+// compiled-outcome bucket we additionally snapshot the CacheIR bytes of
+// each missed shape on first sighting, so the reducer can dedupe missed
+// shapes by opcode sequence and print which stub body the corpus lacked.
 //
 // Activation is gated on the JS_AOT_COVERAGE_OUT env var at init time. When
 // unset every hook is one relaxed atomic load returning false.
@@ -71,7 +74,12 @@ class AOTCoverage {
 
   static void NoteICRequestAOTHit(JitCode* code, uint32_t shapeHash);
   static void NoteICRequestZoneHit(uint32_t shapeHash);
-  static void NoteICRequestCompiled(uint32_t shapeHash);
+  // The CacheIR byte span is copied on first observation of a shape so the
+  // reducer can identify which stub body was missing from the corpus. A
+  // null/zero-length span is tolerated (the shape hash is still counted).
+  static void NoteICRequestCompiled(uint32_t shapeHash, uint8_t cacheKind,
+                                    const uint8_t* cacheIR,
+                                    uint32_t cacheIRLen);
 
   static void FlushAndWrite();
 };
