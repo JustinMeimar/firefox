@@ -947,13 +947,11 @@ bool BaselineCodeGen<Handler>::emitStackCheck() {
     Register scratch = R1.scratchReg();
     masm.moveStackPtrTo(scratch);
     subtractScriptSlotsSize(scratch, R2.scratchReg());
-    masm.branchPtr(Assembler::BelowOrEqual,
-                   AbsoluteAddress(runtime->addressOfJitStackLimit()), scratch,
-                   &skipCall);
+    masm.branchMirroredJitStackLimit(Assembler::BelowOrEqual, scratch,
+                                     R0.scratchReg(), &skipCall);
   } else {
-    masm.branchStackPtrRhs(Assembler::BelowOrEqual,
-                           AbsoluteAddress(runtime->addressOfJitStackLimit()),
-                           &skipCall);
+    masm.branchStackPtrRhsMirroredJitStackLimit(
+        Assembler::BelowOrEqual, R1.scratchReg(), &skipCall);
   }
 
   prepareVMCall();
@@ -1651,9 +1649,8 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
   frame.syncStack(0);
 
   Label done;
-  masm.branch32(Assembler::Equal,
-                AbsoluteAddress(runtime->addressOfInterruptBits()), Imm32(0),
-                &done);
+  masm.branchMirroredInterruptBits(Assembler::Equal, Imm32(0), R0.scratchReg(),
+                                   &done);
 
   prepareVMCall();
 

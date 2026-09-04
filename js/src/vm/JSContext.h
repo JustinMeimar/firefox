@@ -934,6 +934,12 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   bool handleInterrupt();
   bool handleInterruptNoCallbacks();
 
+#ifdef ENABLE_JS_AOT
+  // Copies the current interrupt state into the mirrored indirection table
+  // slots polled by generated code. Must be called after every mutation.
+  void mirrorAOTInterruptState();
+#endif
+
   MOZ_ALWAYS_INLINE bool hasAnyPendingInterrupt() const {
     static_assert(sizeof(interruptBits_) == sizeof(uint32_t),
                   "Assumed by JIT callers");

@@ -450,6 +450,17 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void emitAOTCopyFrameTableBaseFromCaller(Register scratch);
 #endif
 
+  // Hot path polls of runtime state. AOT builds read a mirrored copy of the
+  // value instead of the address, so these opt out of the transparent rewrite.
+  // The scratch register takes the table base, clobbered in AOT builds only.
+  void branchMirroredInterruptBits(Condition cond, Imm32 rhs, Register scratch,
+                                   Label* label);
+  void branchMirroredJitStackLimit(Condition cond, Register rhs,
+                                   Register scratch, Label* label);
+  void branchStackPtrRhsMirroredJitStackLimit(Condition cond, Register scratch,
+                                              Label* label);
+  void branchMirroredNoMarkingBarrier(Label* label);
+
   uint32_t callVMWrapper(VMFunctionId id, Register scratch);
   void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
                                const Label& handler);
@@ -5362,16 +5373,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   template <typename T>
   void guardedCallPreBarrier(const T& address, MIRType type) {
     Label done;
-#ifdef ENABLE_JS_AOT
-    if (isAOT()) {
-      // AOT code does not embed a realm, so load the zone from the current
-      // execution context at runtime.
-      branchTestNeedsMarkingBarrierAnyZone(Assembler::Zero, &done, ScratchReg);
-    } else
-#endif
-    {
-      branchTestNeedsMarkingBarrier(Assembler::Zero, &done);
-    }
+    branchMirroredNoMarkingBarrier(&done);
     unguardedCallPreBarrier(address, type);
     bind(&done);
   }

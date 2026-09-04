@@ -11,6 +11,7 @@
 #include "gc/FinalizationObservers.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
+#include "jit/JitRuntime.h"
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTInstaller.h"
 #endif
@@ -241,7 +242,24 @@ void Zone::setNeedsMarkingBarrier(GCRuntime* gc, bool needs) {
     }
   }
 
+#ifdef ENABLE_JS_AOT
+  // The mirrored count may over-approximate but must never read zero while
+  // any zone requires a barrier, so increment before setting the flag and
+  // decrement after clearing it.
+  bool prev = !!needsMarkingBarrier_;
+  jit::JitRuntime* jrt = runtimeFromMainThread()->jitRuntime();
+  if (jrt && needs && !prev) {
+    jrt->updateAOTPreBarrierZoneCount(1);
+  }
+#endif
+
   needsMarkingBarrier_ = newState;
+
+#ifdef ENABLE_JS_AOT
+  if (jrt && !needs && prev) {
+    jrt->updateAOTPreBarrierZoneCount(-1);
+  }
+#endif
 }
 
 void Zone::changeGCState(GCRuntime* gc, GCState prev, GCState next) {

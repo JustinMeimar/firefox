@@ -367,6 +367,14 @@ class JitRuntime {
   }
   [[nodiscard]] bool populateAOTIndirectionTable(JSContext* cx);
 
+  // Main thread only; tracks how many zones currently require a marking
+  // barrier so generated code can skip the precise per-zone test.
+  void updateAOTPreBarrierZoneCount(int32_t delta) {
+    uintptr_t count = aotIndirectionTable_.get(AOTSlot::PreBarrierZoneCount);
+    MOZ_ASSERT_IF(delta < 0, count > 0);
+    aotIndirectionTable_.set(AOTSlot::PreBarrierZoneCount, count + delta);
+  }
+
   // Creates an entry trampoline that initializes the indirection table before
   // entering static code.
   JitCode* generateAOTPreambleTrampoline(JSContext* cx, void* target,
