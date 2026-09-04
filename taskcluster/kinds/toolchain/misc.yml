@@ -374,6 +374,42 @@ linux64-custom-car:
         ]
         toolchain-artifact: public/build/car_linux.tar.zst
 
+linux64-custom-car-no-pgo:
+    description: "Custom chromium-as-release build for Linux without PGO or LTO"
+    worker-type: b-linux-docker-xlarge-amd
+    attributes:
+        cached_task: false
+    treeherder:
+        symbol: TL(custom-car-no-pgo)
+    worker:
+        docker-image: {in-tree: custom-car-linux}
+        max-run-time: 25000
+    use-python: "3.11"
+    run-on-projects: []
+    run:
+        script: build-custom-car.sh
+        arguments: [
+            car_linux_no_pgo.tar.zst,
+            blink_symbol_level=0,
+            chrome_pgo_phase=0,
+            dcheck_always_on=false,
+            enable_nacl=false,
+            enable_resource_allowlist_generation=false,
+            is_chrome_branded=false,
+            is_clang=true,
+            is_component_build=false,
+            is_cfi=false,
+            is_debug=false,
+            is_official_build=true,
+            symbol_level=0,
+            target_cpu="x64",
+            use_thin_lto=false,
+            v8_enable_builtins_optimization=false,
+            use_v8_context_snapshot=false,
+            v8_symbol_level=0
+        ]
+        toolchain-artifact: public/build/car_linux_no_pgo.tar.zst
+
 win64-custom-car:
     description: "Custom chromium-as-release build for Windows"
     attributes:
