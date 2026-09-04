@@ -2128,7 +2128,8 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
         for (uint32_t i = 0; i < writer.numStubFields(); i++) {
           md.fieldTypes.infallibleAppend(uint8_t(writer.stubFieldType(i)));
         }
-        if (!rec->recordICStub(cx, dumpCode, md)) {
+        if (!rec->recordICStub(cx, dumpCode, md,
+                               dumpComp.masmForAOT().aotLinkSites())) {
           return false;
         }
       }

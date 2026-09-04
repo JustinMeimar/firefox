@@ -16,7 +16,7 @@ using namespace js::jit;
 
 #ifdef ENABLE_JS_AOT
 
-void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
+void MacroAssembler::emitAOTLoadTableBase(Register dest) {
   // Load the indirection table address from the stub frame when one is active.
   // Otherwise load it from the baseline frame.
   if (inAOTStubFrame_) {
@@ -28,8 +28,61 @@ void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
         Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()),
         dest);
   }
+}
+
+void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
+  emitAOTLoadTableBase(dest);
   int32_t slotOff = int32_t(AOTIndirectionTable::offsetOfSlot(slot));
   MacroAssemblerSpecific::loadPtr(Address(dest, slotOff), dest);
+}
+
+void MacroAssembler::emitAOTSlotCall(AOTSlot slot, Register scratch) {
+#  if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
+  emitAOTLoadTableBase(scratch);
+  call(Address(scratch, int32_t(AOTIndirectionTable::offsetOfSlot(slot))));
+#  else
+  emitAOTSlotLoad(slot, scratch);
+  call(scratch);
+#  endif
+}
+
+void MacroAssembler::emitAOTSlotJump(AOTSlot slot, Register scratch) {
+#  if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
+  emitAOTLoadTableBase(scratch);
+  MacroAssemblerSpecific::jump(
+      Address(scratch, int32_t(AOTIndirectionTable::offsetOfSlot(slot))));
+#  else
+  emitAOTSlotLoad(slot, scratch);
+  MacroAssemblerSpecific::jump(scratch);
+#  endif
+}
+
+// The encoders return the offset just past the instruction, so its
+// displacement occupies the four bytes before that.
+static uint32_t DisplacementOffset(CodeOffset afterInstruction) {
+  MOZ_ASSERT(afterInstruction.offset() >= sizeof(int32_t));
+  return uint32_t(afterInstruction.offset()) - sizeof(int32_t);
+}
+
+void MacroAssembler::emitAOTLinkAddress(AOTSlot slot, Register dest) {
+  MOZ_ASSERT(IsAOTLinkSlot(slot));
+  CodeOffset off = Assembler::leaRipRelative(dest);
+  propagateOOM(aotLinkSites_.append(
+      AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
+}
+
+void MacroAssembler::emitAOTLinkCall(AOTSlot slot) {
+  MOZ_ASSERT(IsAOTLinkSlot(slot));
+  CodeOffset off = Assembler::callWithPatch();
+  propagateOOM(aotLinkSites_.append(
+      AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
+}
+
+void MacroAssembler::emitAOTLinkLoad(AOTSlot slot, Register dest) {
+  MOZ_ASSERT(IsAOTLinkSlot(slot));
+  CodeOffset off = Assembler::loadRipRelativeInt64(dest);
+  propagateOOM(aotLinkSites_.append(
+      AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
 }
 
 static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
@@ -52,8 +105,7 @@ static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
 void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
   MOZ_ASSERT(isAOT());
   MOZ_ASSERT(scratch != PreBarrierReg);
-  emitAOTSlotLoad(PreBarrierSlotForMIRType(type), scratch);
-  call(scratch);
+  emitAOTSlotCall(PreBarrierSlotForMIRType(type), scratch);
 }
 
 void MacroAssembler::loadZoneForAOT(Register dest) {

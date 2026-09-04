@@ -2748,9 +2748,20 @@ void MacroAssembler::loadCurrentRealm(Register dest) {
   loadPtr(Address(dest, 0), dest);
 }
 
-void MacroAssembler::loadVMWrapper(VMFunctionId id, Register dest) {
+uint32_t MacroAssembler::callVMWrapper(VMFunctionId id, Register scratch) {
+#ifdef ENABLE_JS_AOT
+  if (MOZ_UNLIKELY(isAOT())) {
+    AOTSlot slot = AOTSlotForVMWrapper(uint32_t(id));
+    MOZ_ASSERT(aotTable().get(slot) ==
+               uintptr_t(runtime()->jitRuntime()->getVMWrapper(id).value));
+    AutoProfilerCallInstrumentation profiler(*this);
+    emitAOTSlotCall(slot, scratch);
+    return currentOffset();
+  }
+#endif
   TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
-  movePtr(ImmPtr(ptr.value), dest);
+  movePtr(ImmPtr(ptr.value), scratch);
+  return callJit(scratch);
 }
 
 void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset, size_t index,

@@ -19,6 +19,8 @@
 #  include "jit/x64/Assembler-x64.h"
 #endif
 
+#include "jit/AOTABIFns-inl.h"
+
 namespace js::jit {
 
 const char* AOTSlotName(AOTSlot slot) {
@@ -27,7 +29,9 @@ const char* AOTSlotName(AOTSlot slot) {
   case AOTSlot::name:       \
     return #name;
 #define AOT_ATOM_SLOT AOT_SLOT
+#define AOT_LINK_SLOT AOT_SLOT
 #include "jit/AOTSlots.tbl"
+#undef AOT_LINK_SLOT
 #undef AOT_ATOM_SLOT
 #undef AOT_SLOT
     default:
@@ -42,6 +46,20 @@ const char* AOTSlotName(AOTSlot slot) {
     return "ABIFn";
   }
   return "Unknown";
+}
+
+bool IsAOTLinkSlot(AOTSlot slot) {
+  if (IsNamedAOTLinkSlot(slot)) {
+    return true;
+  }
+#ifdef JS_CODEGEN_X64
+  uint32_t s = uint32_t(slot);
+  if (s >= uint32_t(AOTSlot::ABIFn_Begin) && s < uint32_t(AOTSlot::ABIFn_End)) {
+    uint32_t idx = s - uint32_t(AOTSlot::ABIFn_Begin);
+    return idx < kAOTABIFnCount && kAOTABIFnLinkable[idx];
+  }
+#endif
+  return false;
 }
 
 mozilla::Maybe<AOTSlot> AOTIndirectionTable::findSlot(uintptr_t value) const {
@@ -62,12 +80,14 @@ mozilla::Maybe<AOTSlot> AOTIndirectionTable::findAtomSlot(
     return mozilla::Nothing();
   }
 #define AOT_SLOT(name, ...)
+#define AOT_LINK_SLOT(name, ...)
 #define AOT_ATOM_SLOT(name, ...)                  \
   if (slots_[uint32_t(AOTSlot::name)] == value) { \
     return mozilla::Some(AOTSlot::name);          \
   }
 #include "jit/AOTSlots.tbl"
 #undef AOT_ATOM_SLOT
+#undef AOT_LINK_SLOT
 #undef AOT_SLOT
   return mozilla::Nothing();
 }

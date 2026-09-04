@@ -7,6 +7,7 @@
 
 #include "mozilla/MacroForEach.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Span.h"
 #include "mozilla/Variant.h"
 
 #if defined(JS_CODEGEN_X86)
@@ -360,6 +361,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 #ifdef ENABLE_JS_AOT
   AOTIndirectionTable* aotTable_ = nullptr;
   bool inAOTStubFrame_ = false;
+  Vector<AOTLinkSite, 0, SystemAllocPolicy> aotLinkSites_;
 #endif
 
   // Labels for handling exceptions and failures.
@@ -411,7 +413,27 @@ class MacroAssembler : public MacroAssemblerSpecific {
     void operator=(const AutoInAOTStubFrame&) = delete;
   };
 
+  void emitAOTLoadTableBase(Register dest);
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
+
+  // Transfer control through a slot. Where the architecture has a memory
+  // operand form the slot read folds into the branch, so only the table base
+  // load remains. The scratch register holds that base and is clobbered.
+  void emitAOTSlotCall(AOTSlot slot, Register scratch);
+  void emitAOTSlotJump(AOTSlot slot, Register scratch);
+
+  // Reach a link slot with a rip relative instruction whose displacement is
+  // left zero and recorded as a link site. The next build's static linker
+  // supplies the displacement, so generated code skips the table load. Only
+  // valid for slots IsAOTLinkSlot accepts.
+  void emitAOTLinkAddress(AOTSlot slot, Register dest);
+  void emitAOTLinkLoad(AOTSlot slot, Register dest);
+  void emitAOTLinkCall(AOTSlot slot);
+
+  mozilla::Span<const AOTLinkSite> aotLinkSites() const {
+    return {aotLinkSites_.begin(), aotLinkSites_.length()};
+  }
+
   void loadZoneForAOT(Register dest);
   void callPreBarrierAOT(MIRType type, Register scratch);
   void emitAOTDispatch(Register opcodeReg, Register tableReg);
@@ -428,7 +450,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void emitAOTCopyFrameTableBaseFromCaller(Register scratch);
 #endif
 
-  void loadVMWrapper(VMFunctionId id, Register dest);
+  uint32_t callVMWrapper(VMFunctionId id, Register scratch);
   void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
                                const Label& handler);
 
