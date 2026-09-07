@@ -530,6 +530,13 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     return Method_CantCompile;
   }
 
+#ifdef ENABLE_JS_AOT
+  if (JitOptions.aotOnly && !JitOptions.useAOTBaseline) {
+    script->disableBaselineCompile();
+    return Method_CantCompile;
+  }
+#endif
+
   // This check is needed in the following corner case. Consider a function h,
   //
   //   function h(x) {
@@ -600,7 +607,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
-  if (JitOptions.useAOTImage) {
+  if (JitOptions.useAOTBaseline) {
     // Debuggee scripts skip AOT install because runtime trap edits would make
     // a static copy stale. Enforcement still applies below so debuggees never
     // escape to runtime codegen under --aot-only or --aot-enforce.
@@ -615,10 +622,10 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     if (JitOptions.aotEnforce) {
       MOZ_CRASH("AOT baseline function miss under --aot-enforce");
     }
-    if (JitOptions.aotOnly) {
-      script->disableBaselineCompile();
-      return Method_CantCompile;
-    }
+  }
+  if (JitOptions.aotOnly) {
+    script->disableBaselineCompile();
+    return Method_CantCompile;
   }
 #endif
 

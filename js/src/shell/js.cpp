@@ -13092,9 +13092,14 @@ bool InitOptionParser(OptionParser& op) {
           "file per artifact. Implies --aot-dump-blinterp and "
           "--aot-dump-baseline.") ||
       !op.addBoolOption('\0', "aot",
-                        "Load AOT artifacts from the embedded image "
+                        "Load all AOT artifacts from the embedded image "
                         "at startup. Falls back to runtime codegen on "
                         "any load failure.") ||
+      !op.addBoolOption('\0', "aot-ic",
+                        "Load the AOT Baseline Interpreter and IC stubs.") ||
+      !op.addBoolOption('\0', "aot-bl",
+                        "Load the AOT Baseline Interpreter and Baseline "
+                        "functions.") ||
       !op.addBoolOption('\0', "aot-enforce",
                         "With --aot: crash on any AOT lookup miss "
                         "instead of falling back to codegen.") ||
@@ -13106,8 +13111,9 @@ bool InitOptionParser(OptionParser& op) {
                         "Honor AOT artifacts when they hit; on any miss "
                         "stay in the baseline interpreter (scripts) or the "
                         "shared IC fallback stub (ICs), never generating "
-                        "baseline JIT code or IC stubs at runtime. Implies "
-                        "--aot and forces Ion off. Mutually exclusive with "
+                        "baseline JIT code or IC stubs at runtime. Defaults "
+                        "to --aot when no artifact classes are selected and "
+                        "forces Ion off. Mutually exclusive with "
                         "--aot-enforce.") ||
       !op.addBoolOption('\0', "aot-record-self-hosted",
                         "With --aot-record=<dir>: iterate every "
@@ -14216,8 +14222,18 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (const char* dir = op.getStringOption("aot-record")) {
     jit::JitOptions.aotRecordDir = dir;
   }
-  if (op.getBoolOption("aot")) {
+  bool useAOT = op.getBoolOption("aot");
+  bool useAOTIC = op.getBoolOption("aot-ic");
+  bool useAOTBaseline = op.getBoolOption("aot-bl");
+  bool aotOnly = op.getBoolOption("aot-only");
+  if (useAOT || (aotOnly && !useAOTIC && !useAOTBaseline)) {
+    useAOTIC = true;
+    useAOTBaseline = true;
+  }
+  if (useAOTIC || useAOTBaseline) {
     jit::JitOptions.useAOTImage = true;
+    jit::JitOptions.useAOTIC = useAOTIC;
+    jit::JitOptions.useAOTBaseline = useAOTBaseline;
   }
   if (op.getBoolOption("aot-enforce")) {
     jit::JitOptions.aotEnforce = true;
@@ -14225,7 +14241,7 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("aot-loose-fingerprint")) {
     jit::JitOptions.aotLooseFingerprint = true;
   }
-  if (op.getBoolOption("aot-only")) {
+  if (aotOnly) {
     if (jit::JitOptions.aotEnforce) {
       fprintf(stderr, "--aot-only and --aot-enforce are mutually exclusive\n");
       return false;

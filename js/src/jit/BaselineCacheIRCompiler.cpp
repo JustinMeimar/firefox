@@ -2049,7 +2049,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   code = nullptr;
 
 #ifdef ENABLE_JS_AOT
-  if (JitOptions.useAOTImage) {
+  if (JitOptions.useAOTIC) {
     JitZone* atomsJitZone = cx->runtime()->atomsZone()->jitZone();
     MOZ_ASSERT(atomsJitZone);
 

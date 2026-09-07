@@ -536,7 +536,7 @@ js::jit::JitZone* Zone::createJitZone(JSContext* cx) {
 #ifdef ENABLE_JS_AOT
   // Static inline cache stubs belong to the atoms zone. Install them when that
   // zone first has JIT state.
-  if (isAtomsZone() && jit::JitOptions.useAOTImage) {
+  if (isAtomsZone() && jit::JitOptions.useAOTIC) {
     (void)jit::TryLoadAOTICStubs(cx, jitZone.get());
     if (cx->isExceptionPending()) {
       return nullptr;

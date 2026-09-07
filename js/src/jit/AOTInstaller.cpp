@@ -77,8 +77,8 @@ static bool IsAOTImageCompatible(const AOTImage* image) {
             recorded.baselineJit, current.baselineJit,
             recorded.enableICFramePointers, current.enableICFramePointers,
             recorded.baselineJitWarmUpThreshold,
-            current.baselineJitWarmUpThreshold,
-            recorded.baselineQueueCapacity, current.baselineQueueCapacity,
+            current.baselineJitWarmUpThreshold, recorded.baselineQueueCapacity,
+            current.baselineQueueCapacity,
             recorded.trialInliningWarmUpThreshold,
             current.trialInliningWarmUpThreshold);
   }
@@ -216,10 +216,7 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
 // Finds the matching baseline function artifact and installs its static code.
 // On failure the script remains unchanged.
 bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
-  if (!JitOptions.useAOTImage) {
-    return false;
-  }
-  if (JitOptions.aotSkipBaselineFn) {
+  if (!JitOptions.useAOTBaseline) {
     return false;
   }
 
@@ -343,7 +340,7 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
 // IC stubs
 
 bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
-  if (!JitOptions.useAOTImage) {
+  if (!JitOptions.useAOTIC) {
     return false;
   }
 

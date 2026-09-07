@@ -147,6 +147,9 @@ struct DefaultJitOptions {
   // missing, stale, or invalid, generate code at runtime.
   bool useAOTImage;
 
+  bool useAOTIC;
+  bool useAOTBaseline;
+
   // Treat any lookup miss as fatal when strict AOT mode is enabled. This
   // ensures CI uses only loaded artifacts.
   bool aotEnforce;
@@ -155,17 +158,12 @@ struct DefaultJitOptions {
   // codegen.
   bool aotLooseFingerprint;
 
-  // Honor AOT artifacts when they hit; on any miss stay in the tier that
-  // requires no per-script or per-IC codegen (baseline interpreter for
-  // scripts, shared IC fallback stub for ICs). Implies useAOTImage and
-  // forces ion=false.
+  // Honor selected AOT artifacts when they hit; on any miss stay in the tier
+  // that requires no per-script or per-IC codegen (baseline interpreter for
+  // scripts, shared IC fallback stub for ICs). Forces ion=false.
   bool aotOnly;
 
-  // Skip AOT attach for Baseline function artifacts even when the image
-  // contains them. The Baseline Interpreter and IC corpus continue to load;
-  // functions that would have received an AOT Baseline body fall back to the
-  // Baseline Interpreter. Used to isolate the perf contribution of AOT
-  // self-hosted (and any other) Baseline functions from the IC corpus.
+  // Legacy inverse of useAOTBaseline.
   bool aotSkipBaselineFn;
 
   bool shouldCaptureAOTInterpreter() const {
