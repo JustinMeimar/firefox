@@ -283,6 +283,8 @@ if CONFIG["ENABLE_JS_AOT"]:
         inputs=["AOTImageSchema.yaml"],
     )
 
+PYTHON_UNITTEST_MANIFESTS += ["aot/tests/python.toml"]
+
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
 GeneratedFile(
     "ABIFunctionTypeGenerated.h",

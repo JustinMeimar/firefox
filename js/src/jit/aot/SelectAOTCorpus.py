@@ -14,9 +14,7 @@ full.
 The budgeting policy here is intentionally simple: the paper's
 frequency-weighted knapsack (Algorithm 1 in the FrostMonkey draft) is
 future work and lives at js/src/jit/SelectAOTCorpus.py in the
-aggregate diff; the version here is a size-only fallback so
-`mach jit-aot build` has a deterministic prune step even without
-profile input.
+aggregate diff; the version here is a standalone size-only fallback.
 """
 
 import argparse
