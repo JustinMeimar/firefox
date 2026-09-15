@@ -7,8 +7,10 @@ import importlib.util
 import logging
 import os
 import shutil
+import struct
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 from mach.decorators import Command, CommandArgument, SubCommand
@@ -23,6 +25,12 @@ Blob = PACKER.Blob
 COMMAND = "ambermonkey"
 CONFIGURATION_KIND = 3
 CONFIGURATION_FIELDS_SIZE = 20
+KIND_NAMES = {
+    0: "BaselineInterpreter",
+    1: "BaselineFunction",
+    2: "InlineCacheStub",
+    3: "Configuration",
+}
 
 
 class AmberMonkeyError(Exception):
@@ -147,6 +155,121 @@ def _corpus_hash(corpus, paths):
         digest.update(len(data).to_bytes(8, "little"))
         digest.update(data)
     return digest.hexdigest()
+
+
+def _read_image(path):
+    path = _resolve_path(path)
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise AmberMonkeyError(f"Could not read AOT image {path}: {exc}") from exc
+    if len(data) < PACKER.HEADER_SIZE:
+        raise AmberMonkeyError(f"AOT image is truncated: {path}")
+    header = struct.unpack_from(PACKER.HEADER_FMT, data)
+    (
+        magic,
+        version,
+        _reserved,
+        count,
+        fingerprint_offset,
+        fingerprint_size,
+        directory_offset,
+        text_offset,
+        text_size,
+        image_size,
+    ) = header
+    if magic != PACKER.IMAGE_MAGIC or version != PACKER.IMAGE_VERSION:
+        raise AmberMonkeyError(
+            f"Unsupported AOT image header in {path}: magic={magic:#x}, version={version}"
+        )
+    directory_end = directory_offset + count * PACKER.DIR_ENTRY_SIZE
+    if (
+        image_size != len(data)
+        or fingerprint_size != PACKER.FINGERPRINT_SIZE
+        or fingerprint_offset + fingerprint_size > len(data)
+        or directory_end > text_offset
+        or text_offset + text_size > len(data)
+    ):
+        raise AmberMonkeyError(f"Malformed AOT image layout in {path}")
+
+    entries = []
+    for index in range(count):
+        entry = struct.unpack_from(
+            PACKER.DIR_ENTRY_FMT,
+            data,
+            directory_offset + index * PACKER.DIR_ENTRY_SIZE,
+        )
+        kind, probe, identity, code_offset, code_size, data_offset, fields, arrays = (
+            entry
+        )
+        if (
+            data_offset + fields + arrays > text_offset
+            or text_offset + code_offset + code_size > len(data)
+        ):
+            raise AmberMonkeyError(f"Malformed AOT image entry {index} in {path}")
+        entries.append({
+            "kind": kind,
+            "probe": probe,
+            "identity": identity.hex(),
+            "fields": fields,
+            "arrays": arrays,
+            "text_offset": code_offset,
+            "text_size": code_size,
+        })
+    return {
+        "path": path,
+        "hash": hashlib.sha256(data).hexdigest(),
+        "version": version,
+        "fingerprint": data[
+            fingerprint_offset : fingerprint_offset + fingerprint_size
+        ].hex(),
+        "image_size": image_size,
+        "text_offset": text_offset,
+        "text_size": text_size,
+        "entries": entries,
+    }
+
+
+def _format_image_preview(image, limit):
+    totals = Counter()
+    for entry in image["entries"]:
+        totals[(entry["kind"], "count")] += 1
+        for field in ("fields", "arrays", "text_size"):
+            totals[(entry["kind"], field)] += entry[field]
+
+    lines = [
+        f"Image:       {image['path']}",
+        f"Image hash:  {image['hash']}",
+        f"Format:      AOTI v{image['version']}",
+        f"Fingerprint: {image['fingerprint']}",
+        f"Entries:     {len(image['entries'])}",
+        f"Image size:  {image['image_size']:,} bytes",
+        f"Text:        {image['text_size']:,} bytes at offset {image['text_offset']:,}",
+        "",
+        "Kind                         Count  Fields (bytes)  Arrays (bytes)    Text (bytes)",
+    ]
+    for kind in sorted({entry["kind"] for entry in image["entries"]}):
+        name = KIND_NAMES.get(kind, f"Unknown({kind})")
+        lines.append(
+            f"{name:<28} {totals[(kind, 'count')]:>5} "
+            f"{totals[(kind, 'fields')]:>14,} {totals[(kind, 'arrays')]:>14,} "
+            f"{totals[(kind, 'text_size')]:>15,}"
+        )
+    if limit:
+        lines.extend([
+            "",
+            f"First {min(limit, len(image['entries']))} entries:",
+            "#    Kind                   Probe       Identity      Fields (B)  Arrays (B)  Text offset / size (bytes)",
+        ])
+        for index, entry in enumerate(image["entries"][:limit]):
+            name = KIND_NAMES.get(entry["kind"], f"Unknown({entry['kind']})")
+            lines.append(
+                f"{index:<4} {name:<22} {entry['probe']:#010x} "
+                f"{entry['identity'][:12]} {entry['fields']:>10,} "
+                f"{entry['arrays']:>10,} {entry['text_offset']:>11,} / "
+                f"{entry['text_size']:,}"
+            )
+    return "\n".join(lines)
 
 
 def _clean_environment():
@@ -296,7 +419,7 @@ def ambermonkey(command_context):
         logging.INFO,
         COMMAND,
         {},
-        "Usage: mach ambermonkey {record,pack,relink,build-image,verify}",
+        "Usage: mach ambermonkey {record,pack,show-image,relink,build-image,verify}",
     )
     return 0
 
@@ -363,6 +486,34 @@ def ambermonkey_pack(command_context, corpus):
     try:
         result = _pack(command_context, corpus)
         _print_summary(command_context, result)
+        return 0
+    except (AmberMonkeyError, OSError) as exc:
+        return _log_error(command_context, exc)
+
+
+@SubCommand(
+    "ambermonkey",
+    "show-image",
+    description="Preview the contents of a packed AOT image.",
+)
+@CommandArgument(
+    "--image",
+    default=None,
+    help="Image to inspect (default: the selected objdir's AOTImage.inc).",
+)
+@CommandArgument(
+    "--limit",
+    type=int,
+    default=12,
+    help="Maximum directory entries to show; use 0 for totals only.",
+)
+def ambermonkey_show_image(command_context, image=None, limit=12):
+    try:
+        if limit < 0:
+            raise AmberMonkeyError("--limit must be zero or greater.")
+        path = _resolve_path(image) if image else _paths(command_context)["image"]
+        preview = _format_image_preview(_read_image(path), limit)
+        command_context.log(logging.INFO, COMMAND, {}, preview)
         return 0
     except (AmberMonkeyError, OSError) as exc:
         return _log_error(command_context, exc)

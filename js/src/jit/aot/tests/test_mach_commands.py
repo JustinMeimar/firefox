@@ -107,6 +107,9 @@ def test_pack_is_deterministic(tmp_path):
     assert outputs[0][1].read_bytes() == outputs[1][1].read_bytes()
     image_hash = hashlib.sha256(outputs[0][0].read_bytes()).hexdigest()
     assert image_hash in outputs[0][1].read_text()
+    image = mach_commands._read_image(outputs[0][0])
+    assert image["hash"] == image_hash
+    assert [entry["kind"] for entry in image["entries"]] == [3, 0]
 
 
 if __name__ == "__main__":
