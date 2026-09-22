@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "gc/GCMarker.h"
+#include "jit/BaselineCacheTrace.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/BytecodeAnalysis.h"
@@ -658,6 +659,7 @@ void JitScript::setBaselineScriptImpl(JSScript* script,
 void JitScript::setBaselineScriptImpl(JS::GCContext* gcx, JSScript* script,
                                       BaselineScript* baselineScript) {
   if (hasBaselineScript()) {
+    TraceBaselineDiscard(script, this->baselineScript());
     gcx->removeCellMemory(script, baselineScript_->allocBytes(),
                           MemoryUse::BaselineScript);
     baselineScript_.set(script->zone(), nullptr);

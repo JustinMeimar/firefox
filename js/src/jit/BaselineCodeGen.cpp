@@ -7,6 +7,7 @@
 #include "mozilla/Casting.h"
 
 #include "gc/GC.h"
+#include "jit/BaselineCacheTrace.h"
 #include "jit/BaselineCompileQueue.h"
 #include "jit/BaselineCompileTask.h"
 #include "jit/BaselineIC.h"
@@ -259,6 +260,7 @@ bool BaselineCompiler::PrepareToCompile(JSContext* cx, Handle<JSScript*> script,
 
 MethodStatus BaselineCompiler::compile(JSContext* cx) {
   Rooted<JSScript*> script(cx, handler.script());
+  int64_t startTime = JS_SHOULD_LOG(baselineCache, Debug) ? PRMJ_Now() : 0;
 
   JitSpew(JitSpew_Codegen, "# Emitting baseline code for script %s:%u:%u",
           script->filename(), script->lineno(),
@@ -269,7 +271,9 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
 
   MOZ_ASSERT(!script->hasBaselineScript());
 
-  if (!compileImpl()) {
+  bool compiled = compileImpl();
+  TraceBaselineCompile(script, "main", startTime, compiled);
+  if (!compiled) {
     ReportOutOfMemory(cx);
     return Method_Error;
   }
@@ -320,6 +324,7 @@ bool BaselineCompiler::compileImpl() {
 
 bool BaselineCompiler::finishCompile(JSContext* cx) {
   Rooted<JSScript*> script(cx, handler.script());
+  int64_t startTime = JS_SHOULD_LOG(baselineCache, Debug) ? PRMJ_Now() : 0;
   bool isRealmIndependentJitCodeShared =
       JS::Prefs::experimental_self_hosted_cache() && script->selfHosted();
 
@@ -429,6 +434,10 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
   script->jitScript()->setIonThreshold(handler.baseWarmUpThreshold());
 
   script->jitScript()->setBaselineScript(script, baselineScript.release());
+
+  int64_t installTime = JS_SHOULD_LOG(baselineCache, Debug) ? PRMJ_Now() : 0;
+  TraceBaselineInstall(script, script->baselineScript(), startTime,
+                       installTime);
 
   perfSpewer_.saveProfile(cx, script, code);
 

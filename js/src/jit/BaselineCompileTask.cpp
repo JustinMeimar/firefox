@@ -3,9 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jit/BaselineCompileTask.h"
+#include "jit/BaselineCacheTrace.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitScript.h"
 #include "vm/HelperThreadState.h"
+#include "vm/Logging.h"
+#include "vm/Time.h"
 
 #include "vm/JSScript-inl.h"
 #include "vm/Realm-inl.h"
@@ -77,7 +80,10 @@ void BaselineCompileTask::runTask() {
   }
 
   for (auto* snapshot : snapshots_) {
-    if (!snapshot->compileOffThread(*temp, realm_)) {
+    int64_t startTime = JS_SHOULD_LOG(baselineCache, Debug) ? PRMJ_Now() : 0;
+    bool success = snapshot->compileOffThread(*temp, realm_);
+    TraceBaselineCompile(snapshot->script(), "offthread", startTime, success);
+    if (!success) {
       failed_ = true;
       return;
     }

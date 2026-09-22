@@ -18,6 +18,7 @@ UNIFIED_SOURCES += [
     "Bailouts.cpp",
     "BaselineBailouts.cpp",
     "BaselineCacheIRCompiler.cpp",
+    "BaselineCacheTrace.cpp",
     "BaselineCodeGen.cpp",
     "BaselineCompileTask.cpp",
     "BaselineDebugModeOSR.cpp",

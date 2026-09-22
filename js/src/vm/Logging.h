@@ -98,6 +98,7 @@ class LogModule {
   _(startup, "Engine startup logging")                     \
   _(teleporting, "Shape Teleporting")                      \
   _(selfHosted, "Self-hosted script logging")              \
+  _(baselineCache, "Baseline cache simulation trace")      \
   _(gc, "The garbage collector")                           \
   _(mtq, "MicroTask queue")                                \
   JITSPEW_CHANNEL_LIST(_) /* A module for each JitSpew channel. */
