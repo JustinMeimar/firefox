@@ -485,6 +485,10 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
             script->filename() ? script->filename() : "<null>",
             unsigned(script->lineno()), size_t(dumpMasm.instructionsSize()));
     if (AOTArtifactRecorder* rec = cx->runtime()->jitRuntime()->aotRecorder()) {
+      mozilla::Maybe<AutoAllocInAtomsZone> allocInAtomsZone;
+      if (JS::Prefs::experimental_self_hosted_cache() && script->selfHosted()) {
+        allocInAtomsZone.emplace(cx);
+      }
       Linker linker(dumpMasm);
       JitCode* dumpCode = linker.newCode(cx, CodeKind::Baseline);
       if (!dumpCode) {

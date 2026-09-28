@@ -13,8 +13,8 @@
 
 #  include <cerrno>
 #  include <cstdio>
+#  include <cstdlib>
 #  include <cstring>
-#  include <fcntl.h>
 #  include <sys/stat.h>
 #  include <sys/types.h>
 #  include <unistd.h>
@@ -90,18 +90,19 @@ bool AOTArtifactRecorder::wasSeen(const uint8_t identityHash[20]) {
 bool AOTArtifactRecorder::writeBlobFile(
     JSContext* cx, const std::string& path, const AOTBlobWriter& blob,
     mozilla::Span<const AOTLinkSite> sites) {
-  // Artifact names encode identity, so the first successful writer owns the
-  // file and concurrent recorders can safely ignore duplicates.
-  int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0644);
+  std::string temporaryPath = path + ".tmp.XXXXXX";
+  int fd = mkstemp(temporaryPath.data());
   if (fd < 0) {
-    if (errno == EEXIST) {
-      return true;
-    }
     JitSpew(JitSpew_BaselineAOT, "AOT record open failed: %s: %s", path.c_str(),
             strerror(errno));
     return false;
   }
-  auto closeGuard = mozilla::MakeScopeExit([&] { close(fd); });
+  auto cleanup = mozilla::MakeScopeExit([&] {
+    if (fd >= 0) {
+      close(fd);
+    }
+    unlink(temporaryPath.c_str());
+  });
 
   AOTBlobFileHeader hdr = {};
   hdr.magic = BlobFileMagic;
@@ -119,10 +120,10 @@ bool AOTArtifactRecorder::writeBlobFile(
     const uint8_t* cur = static_cast<const uint8_t*>(p);
     while (n) {
       ssize_t rc = write(fd, cur, n);
-      if (rc < 0) {
-        if (errno == EINTR) continue;
+      if (rc <= 0) {
+        if (rc < 0 && errno == EINTR) continue;
         JitSpew(JitSpew_BaselineAOT, "AOT record write failed: %s: %s",
-                path.c_str(), strerror(errno));
+                path.c_str(), rc == 0 ? "zero-length write" : strerror(errno));
         return false;
       }
       cur += rc;
@@ -131,11 +132,28 @@ bool AOTArtifactRecorder::writeBlobFile(
     return true;
   };
 
-  return writeBytes(&hdr, sizeof(hdr)) &&
-         writeBytes(blob.fields().data(), blob.fields().size()) &&
-         writeBytes(blob.arrays().data(), blob.arrays().size()) &&
-         writeBytes(blob.code().data(), blob.code().size()) &&
-         writeBytes(sites.data(), hdr.linkSitesSize);
+  if (!writeBytes(&hdr, sizeof(hdr)) ||
+      !writeBytes(blob.fields().data(), blob.fields().size()) ||
+      !writeBytes(blob.arrays().data(), blob.arrays().size()) ||
+      !writeBytes(blob.code().data(), blob.code().size()) ||
+      !writeBytes(sites.data(), hdr.linkSitesSize)) {
+    return false;
+  }
+  int rc = close(fd);
+  fd = -1;
+  if (rc != 0) {
+    JitSpew(JitSpew_BaselineAOT, "AOT record close failed: %s: %s", path.c_str(),
+            strerror(errno));
+    return false;
+  }
+
+  // Publish complete artifacts without replacing a concurrent writer's file.
+  if (link(temporaryPath.c_str(), path.c_str()) != 0 && errno != EEXIST) {
+    JitSpew(JitSpew_BaselineAOT, "AOT record link failed: %s: %s", path.c_str(),
+            strerror(errno));
+    return false;
+  }
+  return true;
 }
 
 bool AOTArtifactRecorder::recordInterpreter(
