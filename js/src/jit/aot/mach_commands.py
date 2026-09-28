@@ -7,7 +7,6 @@ import importlib.util
 import logging
 import os
 import shutil
-import struct
 import sys
 from collections import Counter
 from pathlib import Path
@@ -18,16 +17,15 @@ from mach.registrar import Registrar
 PACKER_PATH = Path(__file__).with_name("PackAOTImage.py")
 PACKER_SPEC = importlib.util.spec_from_file_location("ambermonkey_packer", PACKER_PATH)
 PACKER = importlib.util.module_from_spec(PACKER_SPEC)
-PACKER_SPEC.loader.exec_module(PACKER)
+sys.path.insert(0, str(PACKER_PATH.parent))
+try:
+    PACKER_SPEC.loader.exec_module(PACKER)
+finally:
+    sys.path.pop(0)
 Blob = PACKER.Blob
 
 
 COMMAND = "ambermonkey"
-KIND_NAMES = {
-    0: "BaselineInterpreter",
-    1: "BaselineFunction",
-    2: "InlineCacheStub",
-}
 
 
 class AmberMonkeyError(Exception):
@@ -55,6 +53,7 @@ def _paths(command_context):
     image_dir = objdir / "js" / "src" / "jit" / "aot"
     return {
         "objdir": objdir,
+        "format": image_dir / "AOTImageFormat.inc",
         "aot_srcdir": aot_srcdir,
         "identities": image_dir / "build-identities",
         "pack": aot_srcdir / "PackAOTImage.py",
@@ -99,13 +98,13 @@ def _validate_build(command_context, paths):
         )
 
 
-def _load_corpus(corpus):
+def _load_corpus(corpus, format):
     corpus = _resolve_path(corpus)
     if not corpus.is_dir():
         raise AmberMonkeyError(f"Corpus directory does not exist: {corpus}")
     paths = sorted(corpus.glob("*.aotb"), key=lambda path: path.name)
     try:
-        blobs = [Blob(path) for path in paths]
+        blobs = [Blob(path, format) for path in paths]
     except (OSError, ValueError) as exc:
         raise AmberMonkeyError(f"Invalid corpus {corpus}: {exc}") from exc
     return corpus, blobs
@@ -123,35 +122,32 @@ def _corpus_hash(corpus, paths):
     return digest.hexdigest()
 
 
-def _read_image(path):
+def _read_image(path, format):
     path = _resolve_path(path)
     try:
         data = path.read_bytes()
     except OSError as exc:
         raise AmberMonkeyError(f"Could not read AOT image {path}: {exc}") from exc
-    if len(data) < PACKER.HEADER_SIZE:
+    if len(data) < format.header.size:
         raise AmberMonkeyError(f"AOT image is truncated: {path}")
-    header = struct.unpack_from(PACKER.HEADER_FMT, data)
-    (
-        magic,
-        version,
-        _reserved,
-        count,
-        build_identity_offset,
-        build_identity_size,
-        directory_offset,
-        text_offset,
-        text_size,
-        image_size,
-    ) = header
-    if magic != PACKER.IMAGE_MAGIC or version != PACKER.IMAGE_VERSION:
+    header = format.header.unpack_from(data)
+    magic = header["magic"]
+    version = header["version"]
+    count = header["blobCount"]
+    build_identity_offset = header["buildIdentityOffset"]
+    build_identity_size = header["buildIdentitySize"]
+    directory_offset = header["directoryOffset"]
+    text_offset = header["textOffset"]
+    text_size = header["textSize"]
+    image_size = header["imageSize"]
+    if magic != format.IMAGE_MAGIC or version != format.IMAGE_VERSION:
         raise AmberMonkeyError(
             f"Unsupported AOT image header in {path}: magic={magic:#x}, version={version}"
         )
-    directory_end = directory_offset + count * PACKER.DIR_ENTRY_SIZE
+    directory_end = directory_offset + count * format.directory_entry.size
     if (
         image_size != len(data)
-        or build_identity_size != PACKER.BUILD_IDENTITY_SIZE
+        or build_identity_size != format.BUILD_IDENTITY_SIZE
         or build_identity_offset + build_identity_size > len(data)
         or directory_end > text_offset
         or text_offset + text_size > len(data)
@@ -160,14 +156,13 @@ def _read_image(path):
 
     entries = []
     for index in range(count):
-        entry = struct.unpack_from(
-            PACKER.DIR_ENTRY_FMT,
-            data,
-            directory_offset + index * PACKER.DIR_ENTRY_SIZE,
+        entry = format.directory_entry.unpack_from(
+            data, directory_offset + index * format.directory_entry.size
         )
-        kind, probe, identity, code_offset, code_size, data_offset, fields, arrays, key = (
-            entry
-        )
+        kind, probe, identity = entry["kind"], entry["probeHash"], entry["identityHash"]
+        code_offset, code_size = entry["textOffset"], entry["textSize"]
+        data_offset = entry["dataOffset"]
+        fields, arrays, key = entry["fieldsSize"], entry["arraysSize"], entry["keySize"]
         if (
             data_offset + key + fields + arrays > text_offset
             or text_offset + code_offset + code_size > len(data)
@@ -185,6 +180,7 @@ def _read_image(path):
         })
     return {
         "path": path,
+        "kind_names": format.kind_names,
         "hash": hashlib.sha256(data).hexdigest(),
         "version": version,
         "build_identity": data[
@@ -216,7 +212,7 @@ def _format_image_preview(image, limit):
         "Kind                         Count  Fields (bytes)  Arrays (bytes)    Text (bytes)",
     ]
     for kind in sorted({entry["kind"] for entry in image["entries"]}):
-        name = KIND_NAMES.get(kind, f"Unknown({kind})")
+        name = image["kind_names"].get(kind, f"Unknown({kind})")
         lines.append(
             f"{name:<28} {totals[(kind, 'count')]:>5} "
             f"{totals[(kind, 'fields')]:>14,} {totals[(kind, 'arrays')]:>14,} "
@@ -229,7 +225,7 @@ def _format_image_preview(image, limit):
             "#    Kind                   Probe       Identity      Fields (B)  Arrays (B)  Text offset / size (bytes)",
         ])
         for index, entry in enumerate(image["entries"][:limit]):
-            name = KIND_NAMES.get(entry["kind"], f"Unknown({entry['kind']})")
+            name = image["kind_names"].get(entry["kind"], f"Unknown({entry['kind']})")
             lines.append(
                 f"{index:<4} {name:<22} {entry['probe']:#010x} "
                 f"{entry['identity'][:12]} {entry['fields']:>10,} "
@@ -268,6 +264,8 @@ def _pack_argv(paths, corpus):
     return [
         sys.executable,
         str(paths["pack"]),
+        "--format",
+        str(paths["format"]),
         *(arg for path in identities for arg in ("--build-identity", str(path))),
         "--relocs",
         str(paths["relocs"]),
@@ -284,7 +282,7 @@ def _log_error(command_context, message):
 def _pack(command_context, corpus):
     paths = _paths(command_context)
     _validate_build(command_context, paths)
-    corpus, blobs = _load_corpus(corpus)
+    corpus, blobs = _load_corpus(corpus, PACKER.AOTImageFormat.load(paths["format"]))
     paths["image"].parent.mkdir(parents=True, exist_ok=True)
     rc = command_context.run_process(
         _pack_argv(paths, corpus), pass_thru=True, ensure_exit_code=False
@@ -386,7 +384,7 @@ def ambermonkey_record(command_context, corpus, workload=None):
         )
         if rc:
             return rc
-        corpus, blobs = _load_corpus(corpus)
+        corpus, blobs = _load_corpus(corpus, PACKER.AOTImageFormat.load(paths["format"]))
         command_context.log(
             logging.INFO,
             COMMAND,
@@ -436,8 +434,10 @@ def ambermonkey_show_image(command_context, image=None, limit=12):
     try:
         if limit < 0:
             raise AmberMonkeyError("--limit must be zero or greater.")
-        path = _resolve_path(image) if image else _paths(command_context)["image"]
-        preview = _format_image_preview(_read_image(path), limit)
+        paths = _paths(command_context)
+        path = _resolve_path(image) if image else paths["image"]
+        format = PACKER.AOTImageFormat.load(paths["format"])
+        preview = _format_image_preview(_read_image(path, format), limit)
         command_context.log(logging.INFO, COMMAND, {}, preview)
         return 0
     except (AmberMonkeyError, OSError) as exc:

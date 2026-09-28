@@ -7,6 +7,10 @@
 #ifndef jit_AOT_h
 #define jit_AOT_h
 
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTImageFormatGenerated.h"
+#endif
+
 #include "mozilla/Assertions.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Maybe.h"
@@ -156,16 +160,6 @@ constexpr mozilla::HashNumber AOTSlotTableHash() {
 }
 
 const char* AOTSlotName(AOTSlot slot);
-
-// A four byte rip relative displacement inside recorded code that the next
-// build's static linker fills in from the slot's symbol. The displacement is
-// left zero at capture time; the recorded bytes are never executed.
-struct AOTLinkSite {
-  uint32_t codeOffset;
-  uint32_t slot;
-};
-
-static_assert(sizeof(AOTLinkSite) == 8, "AOTLinkSite is written to .aotb");
 
 class AOTIndirectionTable {
  public:

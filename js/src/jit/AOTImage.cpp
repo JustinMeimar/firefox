@@ -81,9 +81,8 @@ mozilla::Maybe<AOTImage> AOTImage::fromBytes(
                        uint64_t(h->blobCount) * sizeof(image::DirectoryEntry);
   for (uint32_t i = 0; i < h->blobCount; i++) {
     const auto& entry = img.directory()[i];
-    if (entry.kind > uint32_t(AOTBlobKind::InlineCacheStub) ||
-        entry.keySize % 4 || entry.dataOffset % image::Alignment ||
-        entry.dataOffset < dataStart ||
+    if (entry.kind >= AOTBlobKindCount || entry.keySize % 4 ||
+        entry.dataOffset % image::Alignment || entry.dataOffset < dataStart ||
         uint64_t(entry.dataOffset) + entry.keySize + entry.fieldsSize +
                 entry.arraysSize >
             h->textOffset ||
@@ -142,7 +141,7 @@ static bool ComputeLayout(
     e.fieldsSize = uint32_t(b.fields().size());
     e.arraysSize = uint32_t(b.arrays().size());
     e.textSize = uint32_t(b.code().size());
-    textCursor = AlignUp(textCursor, image::Alignment);
+    textCursor = AlignUp(textCursor, image::CodeAlignment);
     e.textOffset = textCursor;
     cursor = AlignUp(cursor + e.keySize + e.fieldsSize + e.arraysSize,
                      image::Alignment);

@@ -23,21 +23,12 @@ import sys
 from pathlib import Path
 
 from PackAOTImage import Blob
+from AOTImageFormat import AOTImageFormat
 
-# Keep these values synchronized with the artifact kind definitions.
-KIND_BASELINE_INTERPRETER = 0
-KIND_BASELINE_FUNCTION = 1
-KIND_INLINE_CACHE_STUB = 2
-
-KIND_NAME = {
-    KIND_BASELINE_INTERPRETER: "interp",
-    KIND_BASELINE_FUNCTION: "blfun",
-    KIND_INLINE_CACHE_STUB: "ic",
-}
-
-
-
-def prune(record_dir, out_dir, budgets):
+def prune(record_dir, out_dir, budgets, format):
+    interpreter = next(kind for kind, name in format.kind_names.items()
+                       if name == "BaselineInterpreter")
+    names = {kind: blob["prefix"] for kind, blob in enumerate(format.blobs)}
     record_dir = Path(record_dir)
     out_dir = Path(out_dir)
     if out_dir.exists():
@@ -46,7 +37,7 @@ def prune(record_dir, out_dir, budgets):
 
     blobs = []
     for p in sorted(record_dir.glob("*.aotb")):
-        blob = Blob(p)
+        blob = Blob(p, format)
         blobs.append((blob.kind, blob.code_size, p))
 
     kept = 0
@@ -54,18 +45,18 @@ def prune(record_dir, out_dir, budgets):
     per_kind_used = {}
     # Interpreter blob is always kept.
     for kind, code_size, p in blobs:
-        if kind == KIND_BASELINE_INTERPRETER:
+        if kind == interpreter:
             shutil.copy(p, out_dir / p.name)
             kept += 1
     # Everything else: sort by ascending code size within a kind.
     by_kind = {}
     for kind, code_size, p in blobs:
-        if kind == KIND_BASELINE_INTERPRETER:
+        if kind == interpreter:
             continue
         by_kind.setdefault(kind, []).append((code_size, p))
     for kind, items in by_kind.items():
         items.sort(key=lambda x: x[0])
-        limit = budgets.get(KIND_NAME.get(kind, ""), None)
+        limit = budgets.get(names.get(kind, ""), None)
         used = 0
         for code_size, p in items:
             if limit is not None and used + code_size > limit:
@@ -74,13 +65,14 @@ def prune(record_dir, out_dir, budgets):
             shutil.copy(p, out_dir / p.name)
             used += code_size
             kept += 1
-        per_kind_used[KIND_NAME.get(kind, str(kind))] = used
+        per_kind_used[names.get(kind, str(kind))] = used
 
     print(f"kept={kept} dropped={dropped} bytes_per_kind={per_kind_used}")
 
 
 def main(argv):
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--format", required=True, help="Build-generated AOTImageFormat.inc")
     p.add_argument("record_dir", help="input directory of .aotb files")
     p.add_argument("out_dir", help="output directory for kept .aotb files")
     p.add_argument(
@@ -103,6 +95,7 @@ def main(argv):
             "blfun": args.blfun_budget,
             "ic": args.ic_budget,
         },
+        AOTImageFormat.load(args.format),
     )
 
 

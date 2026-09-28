@@ -13,15 +13,131 @@
 # member of the hand written metadata type. Fixed fields use unsigned integer
 # types; arrays name their C++ element type.
 #
-# Everything else is derived. A blob's kind identifier is its position in this
-# file and must agree with the runtime enumeration. Each array contributes a
-# u32 element count, appended to the fixed fields in array order. Alignment
+# A blob's kind identifier is its position in the blobs mapping. Each array
+# contributes a u32 element count, appended to the fixed fields. Alignment
 # padding is inserted so that the serialized form has no implicit padding.
 #
 # Increment the image format version whenever the schema changes.
 
+format:
+  image_magic: 0x49544F41
+  image_version: 4
+  blob_file_magic: 0x42544F41
+  blob_file_version: 3
+  build_identity_size: 32
+  alignment: 16
+  text_alignment: 4096
+  code_alignment: 16
+  link_site_width: 4
+
+records:
+  Header:
+    - u32: magic
+    - u16: version
+    - u16: reserved
+    - u32: blobCount
+    - u32: buildIdentityOffset
+    - u32: buildIdentitySize
+    - u32: directoryOffset
+    - u32: textOffset
+    - u32: textSize
+    - u32: imageSize
+  DirectoryEntry:
+    - u32: kind
+    - u32: probeHash
+    - bytes20: identityHash
+    - u32: textOffset
+    - u32: textSize
+    - u32: dataOffset
+    - u32: fieldsSize
+    - u32: arraysSize
+    - u32: keySize
+  AOTBlobFileHeader:
+    - u32: magic
+    - u16: version
+    - u16: reserved
+    - u32: kind
+    - u32: probeHash
+    - bytes20: identityHash
+    - u32: fieldsSize
+    - u32: arraysSize
+    - u32: codeSize
+    - u32: linkSitesSize
+    - u32: slotTableHash
+    - u32: keySize
+    - bytes32: buildIdentity
+  AOTLinkSite:
+    - u32: codeOffset
+    - u32: slot
+
+array_types:
+  uint8_t: {size: 1, alignment: 1}
+  uint32_t: {size: 4, alignment: 4}
+  js::jit::BaselineInterpreterMetadata::ICReturnOffset: {size: 8, alignment: 4}
+  js::jit::RetAddrEntry: {size: 8, alignment: 4}
+  js::jit::BaselineScript::OSREntry: {size: 8, alignment: 4}
+  js::jit::BaselineScript::DebugTrapEntry: {size: 8, alignment: 4}
+  js::jit::ResumeOffsetEntry: {size: 8, alignment: 4}
+
+contexts:
+  common:
+    - {type: u32, name: kind, value: uint32_t(kind)}
+    - {type: u32, name: cpuFeatures, value: 'wasm::ObservedCPUFeatures()'}
+    - {type: bool, name: spectreIndexMasking, option: spectreIndexMasking}
+    - {type: bool, name: spectreObjectMitigations, option: spectreObjectMitigations}
+    - {type: bool, name: spectreStringMitigations, option: spectreStringMitigations}
+    - {type: bool, name: lessDebugCode, option: lessDebugCode}
+    - {type: bool, name: profiling, value: 'kind == AOTBlobKind::BaselineFunction && profiling'}
+  baseline:
+    - {type: bool, name: disableInlining, option: disableInlining}
+    - {type: u32, name: trialInliningWarmUpThreshold, option: trialInliningWarmUpThreshold}
+  interpreter:
+    - {type: bool, name: baselineJit, option: baselineJit}
+    - {type: bool, name: baselineBatching, option: baselineBatching}
+    - {type: u32, name: baselineJitWarmUpThreshold, option: baselineJitWarmUpThreshold}
+    - {type: u32, name: baselineQueueCapacity, option: baselineQueueCapacity}
+  function:
+    - {type: u32, name: ionMaxScriptSizeMainThread, option: ionMaxScriptSizeMainThread}
+    - {type: u32, name: ionMaxLocalsAndArgsMainThread, option: ionMaxLocalsAndArgsMainThread}
+    - {type: bool, name: eagerIonCompilation, value: options.eagerIonCompilation()}
+  ic:
+    - {type: bool, name: enableICFramePointers, option: enableICFramePointers}
+    - {type: bool, name: fullDebugChecks, option: fullDebugChecks}
+
+inputs:
+  BaselineFunction:
+    writer: WriteAOTBaselineInputs
+    parameters: 'JSScript* script, uint32_t baseWarmUpThreshold, bool ionCompileable, bool debugInstrumentation'
+    fields:
+      - {type: u32, name: baseWarmUpThreshold, value: baseWarmUpThreshold}
+      - {type: bool, name: ionCompileable, value: ionCompileable}
+      - {type: bool, name: debugInstrumentation, value: debugInstrumentation}
+      - {type: u32, name: immutableFlags, value: script->immutableFlags().toRaw()}
+      - {type: u32, name: functionFlags, value: 'script->function() ? script->function()->flags().toRaw() : 0'}
+      - {type: u32, name: nargs, value: 'script->function() ? script->function()->nargs() : 0'}
+      - {type: u32, name: nfixed, value: script->nfixed()}
+      - {type: u32, name: nslots, value: script->nslots()}
+      - {type: u32, name: numICEntries, value: script->numICEntries()}
+      - {type: u32, name: scopeKind, value: uint32_t(script->outermostScope()->kind())}
+      - {type: bool, name: hasNonSyntacticScope, value: script->hasNonSyntacticScope()}
+      - {type: bool, name: isFunction, value: '!!script->function()'}
+      - {type: bool, name: needsArgsObj, value: script->needsArgsObj()}
+      - {type: bool, name: argsObjAliasesFormals, value: script->argsObjAliasesFormals()}
+      - {type: u32_array, name: gcThingKinds, value: script->gcthings(), element: uint32_t(value.kind())}
+      - {type: bytes, name: immutableScriptData, value: script->immutableScriptData()->immutableData()}
+  InlineCacheStub:
+    writer: WriteAOTICInputs
+    parameters: 'const AOTICStubMetadata& md'
+    fields:
+      - {type: u32, name: cacheKind, value: md.cacheKind, metadata: cacheKind}
+      - {type: u32, name: stubDataOffset, value: md.stubDataOffset, metadata: stubDataOffset}
+      - {type: bytes, name: cacheIRCode, value: 'mozilla::Span(md.cacheIRCode.begin(), md.cacheIRCode.length())', metadata: cacheIRCode}
+      - {type: bytes, name: fieldTypes, value: 'mozilla::Span(md.fieldTypes.begin(), md.fieldTypes.length())', metadata: fieldTypes}
+
 blobs:
   BaselineInterpreter:
+    prefix: interp
+    contexts: [common, baseline, interpreter]
     doc: "Baseline interpreter variant."
     metadata_type: "js::jit::BaselineInterpreterMetadata"
     fields:
@@ -41,10 +157,12 @@ blobs:
       - js::jit::BaselineInterpreterMetadata::ICReturnOffset: icReturnOffsets
 
   BaselineFunction:
+    prefix: blfun
+    contexts: [common, baseline, function]
     doc: |
       Per-JSScript baseline JIT code plus the metadata needed to
       reconstruct a BaselineScript on load. Compilation inputs are
-      serialized separately by AOTCompilationKey.cpp.
+      serialized by the generated compilation-key writers.
     metadata_type: "js::jit::BaselineScriptMetadata"
     fields:
       - u32: warmUpCheckPrologueOffset
@@ -60,6 +178,8 @@ blobs:
       - js::jit::ResumeOffsetEntry: resumeOffsetEntries
 
   InlineCacheStub:
+    prefix: ic
+    contexts: [common, ic]
     doc: |
       One AOT-compiled CacheIR stub. On load the CacheIR bytes plus
       the trailing field-type table are used to reconstruct a

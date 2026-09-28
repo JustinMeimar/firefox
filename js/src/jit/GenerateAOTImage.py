@@ -6,10 +6,10 @@
 # artifact kind declared by the image schema.
 
 import io
+import json
+import struct
 
-import buildconfig
 import yaml
-from mozbuild.preprocessor import Preprocessor
 
 HEADER_TEMPLATE = """\
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -32,12 +32,17 @@ COUNT_TYPE = ("uint32_t", 4)
 
 
 def load_yaml(yaml_path):
+    import buildconfig
+    from mozbuild.preprocessor import Preprocessor
+
     pp = Preprocessor()
     pp.context.update(buildconfig.defines["ALLDEFINES"])
     pp.out = io.StringIO()
     pp.do_filter("substitution")
     pp.do_include(yaml_path)
-    return yaml.safe_load(pp.out.getvalue())
+    schema = yaml.safe_load(pp.out.getvalue())
+    validate_schema(schema)
+    return schema
 
 
 def split_declaration(entry, context):
@@ -211,20 +216,6 @@ def emit_blob(kind_id, blob):
     return "\n".join(out)
 
 
-# Ensures the declaration order here matches the runtime enumeration so a
-# rename or reorder causes a compile error.
-def emit_kind_assertions(blobs):
-    lines = []
-    for kind_id, blob in enumerate(blobs):
-        lines.append(
-            "static_assert(uint32_t(AOTBlobKind::%s) == %d," % (blob["kind"], kind_id)
-        )
-        lines.append(
-            '              "AOTImageSchema.yaml kind drift for %s");' % blob["kind"]
-        )
-    return emit_lines(lines)
-
-
 def main(c_out, yaml_path):
     schema = load_yaml(yaml_path)
     blobs = [
@@ -242,7 +233,7 @@ def main(c_out, yaml_path):
         "",
         "namespace js::jit {",
         "",
-        emit_kind_assertions(blobs),
+        emit_array_assertions(schema),
     ]
     for kind_id, blob in enumerate(blobs):
         body.append(emit_blob(kind_id, blob))
@@ -255,3 +246,220 @@ def main(c_out, yaml_path):
             "contents": "\n".join(body),
         }
     )
+
+
+WIRE_TYPES = {
+    "u8": ("uint8_t", "B"),
+    "u16": ("uint16_t", "H"),
+    "u32": ("uint32_t", "I"),
+    "bytes20": ("uint8_t", "20s"),
+    "bytes32": ("uint8_t", "32s"),
+}
+
+
+def record_format(fields):
+    return "<" + "".join(
+        WIRE_TYPES[split_declaration(field, "record")[0]][1] for field in fields
+    )
+
+
+def context_fields(schema, blob):
+    return [
+        field for group in blob["contexts"] for field in schema["contexts"][group]
+    ]
+
+
+def key_fields(schema, kind, blob):
+    return context_fields(schema, blob) + schema["inputs"].get(kind, {}).get("fields", [])
+
+
+def validate_schema(schema):
+    for kind, blob in schema["blobs"].items():
+        parsed = parse_blob(kind, blob)
+        fields = key_fields(schema, kind, blob)
+        if len({field["name"] for field in fields}) != len(fields):
+            raise ValueError(f"duplicate key field in {kind}")
+        members = {field["name"] for field in parsed["fields"] + parsed["arrays"]}
+        for field in fields:
+            if field["type"] not in ("bool", "u32", "bytes", "u32_array"):
+                raise ValueError(f"unknown key type in {kind}: {field['type']}")
+            if ("option" in field) == ("value" in field):
+                raise ValueError(f"key field {field['name']} needs one source")
+            if "metadata" in field and field["metadata"] not in members:
+                raise ValueError(f"unknown metadata member {field['metadata']}")
+        widths = [parsed["size"], 4]
+        for array in parsed["arrays"]:
+            layout = schema["array_types"][array["element"]]
+            if any(width % layout["alignment"] for width in widths):
+                raise ValueError(f"array {array['name']} requires wire padding")
+            widths.append(layout["size"])
+
+
+def describe_schema(schema):
+    description = {
+        "constants": {k.upper(): v for k, v in schema["format"].items()},
+        "records": {},
+        "blobs": [],
+    }
+    for name, fields in schema["records"].items():
+        description["records"][name] = {
+            "format": record_format(fields),
+            "names": [split_declaration(field, name)[1] for field in fields],
+        }
+    for kind, source in schema["blobs"].items():
+        blob = parse_blob(kind, source)
+        fmt = "<"
+        for member in blob["members"]:
+            if "padding" in member:
+                fmt += str(member["padding"]) + "x"
+            else:
+                fmt += {1: "B", 2: "H", 4: "I"}[member["size"]]
+        arrays = [
+            {"name": array["name"], **schema["array_types"][array["element"]]}
+            for array in blob["arrays"]
+        ]
+        description["blobs"].append({
+            "name": kind,
+            "prefix": source["prefix"],
+            "format": fmt,
+            "fields": [field["name"] for field in blob["fields"]],
+            "arrays": arrays,
+            "key": [
+                {k: field[k] for k in ("name", "type", "metadata") if k in field}
+                for field in key_fields(schema, kind, source)
+            ],
+        })
+    return description
+
+
+def generate_descriptor(output, yaml_path):
+    json.dump(describe_schema(load_yaml(yaml_path)), output, indent=2)
+    output.write("\n")
+
+
+def emit_array_assertions(schema):
+    lines = []
+    for name, layout in schema["array_types"].items():
+        lines += [
+            f"static_assert(sizeof({name}) == {layout['size']});",
+            f"static_assert(alignof({name}) == {layout['alignment']});",
+            f"static_assert(std::is_trivially_copyable_v<{name}>);",
+            f"static_assert(std::has_unique_object_representations_v<{name}>);",
+        ]
+    return emit_lines(lines)
+
+
+def generate_format_header(output, yaml_path):
+    schema = load_yaml(yaml_path)
+    constants = schema["format"]
+    lines = [
+        "#include <cstddef>",
+        "#include <cstdint>",
+        '#include "mozilla/Assertions.h"',
+        "namespace js::jit {",
+        "enum class AOTBlobKind : uint32_t {",
+    ]
+    lines += [f"  {name} = {i}," for i, name in enumerate(schema["blobs"])]
+    lines += [
+        "};",
+        f"inline constexpr uint32_t AOTBlobKindCount = {len(schema['blobs'])};",
+        "inline const char* AOTArtifactPrefix(AOTBlobKind kind) {",
+        "  switch (kind) {",
+    ]
+    for name, blob in schema["blobs"].items():
+        lines.append(f'    case AOTBlobKind::{name}: return "{blob["prefix"]}";')
+    lines += ["  }", '  MOZ_CRASH("Invalid AOT artifact kind");', "}"]
+    lines += [
+        f"inline constexpr uint32_t BlobFileMagic = {constants['blob_file_magic']};",
+        f"inline constexpr uint16_t BlobFileVersion = {constants['blob_file_version']};",
+        "namespace image {",
+    ]
+    for cpp, name in [
+        ("Magic", "image_magic"),
+        ("Version", "image_version"),
+        ("BuildIdentitySize", "build_identity_size"),
+        ("Alignment", "alignment"),
+        ("TextAlignment", "text_alignment"),
+        ("CodeAlignment", "code_alignment"),
+    ]:
+        lines.append(f"inline constexpr uint32_t {cpp} = {constants[name]};")
+    lines.append("}  // namespace image")
+    for name, fields in schema["records"].items():
+        in_image = name in ("Header", "DirectoryEntry")
+        if in_image:
+            lines.append("namespace image {")
+        lines.append(f"struct {name} {{")
+        offset = 0
+        offsets = []
+        for field in fields:
+            kind, member = split_declaration(field, name)
+            cpp, fmt = WIRE_TYPES[kind]
+            size = struct.calcsize("<" + fmt)
+            suffix = f"[{size}]" if fmt.endswith("s") else ""
+            lines.append(f"  {cpp} {member}{suffix};")
+            offsets.append(f"static_assert(offsetof({name}, {member}) == {offset});")
+            offset += size
+        lines += ["};", f"static_assert(sizeof({name}) == {offset});", *offsets]
+        if in_image:
+            lines.append("}  // namespace image")
+    lines.append("}  // namespace js::jit")
+    output.write(
+        HEADER_TEMPLATE % {
+            "includeguard": "jit_AOTImageFormatGenerated_h",
+            "contents": emit_lines(lines),
+        }
+    )
+
+
+def generate_keys(output, yaml_path):
+    schema = load_yaml(yaml_path)
+    lines = [
+        "namespace js::jit {",
+        "void WriteAOTContext(AOTCompilationKey& key, AOTBlobKind kind,",
+        "                     const DefaultJitOptions& options, bool profiling) {",
+        "  switch (kind) {",
+    ]
+    for kind, blob in schema["blobs"].items():
+        lines.append(f"    case AOTBlobKind::{kind}:")
+        for field in context_fields(schema, blob):
+            value = "options." + field["option"] if "option" in field else field["value"]
+            lines.append(f"      key.scalar({value});")
+        lines.append("      return;")
+    lines += [
+        "  }",
+        '  MOZ_CRASH("Invalid AOT artifact kind");',
+        "}",
+        "uint32_t AOTICContext() {",
+    ]
+    fields = [
+        field for field in context_fields(schema, schema["blobs"]["InlineCacheStub"])
+        if "option" in field
+    ]
+    if len(fields) > 32 or any(field["type"] != "bool" for field in fields):
+        raise ValueError("IC option encoding requires at most 32 booleans")
+    bits = " |\n         ".join(
+        f"uint32_t(JitOptions.{field['option']}) << {i}"
+        for i, field in enumerate(fields)
+    )
+    lines += [f"  return {bits};", "}"]
+    for source in schema["inputs"].values():
+        name = source["writer"]
+        lines.append(f"void {name}(AOTCompilationKey& key, {source['parameters']}) {{")
+        for field in source["fields"]:
+            value = field["value"]
+            if field["type"] == "u32_array":
+                lines += [
+                    "  {",
+                    f"    auto values = {value};",
+                    "    key.scalar(uint32_t(values.size()));",
+                    "    for (const auto& value : values) {",
+                    f"      key.scalar({field['element']});",
+                    "    }",
+                    "  }",
+                ]
+            else:
+                method = "bytes" if field["type"] == "bytes" else "scalar"
+                lines.append(f"  key.{method}({value});")
+        lines.append("}")
+    lines.append("}  // namespace js::jit")
+    output.write("// Generated by GenerateAOTImage.py. Do not edit.\n" + emit_lines(lines))

@@ -18,6 +18,8 @@
 #  include <ostream>
 #  include <type_traits>
 
+#  include "jit/AOTImageFormatGenerated.h"
+
 #  include "js/AllocPolicy.h"
 #  include "js/Vector.h"
 
@@ -55,67 +57,6 @@ class AOTImage;
 class AOTBlobReader;
 class AOTBlobWriter;
 class AOTImageBuilder;
-
-// Artifact kinds are defined by the image schema. Adding a kind requires
-// updating the enumeration and image format version.
-enum class AOTBlobKind : uint32_t {
-  BaselineInterpreter = 0,
-  BaselineFunction = 1,
-  InlineCacheStub = 2,
-};
-
-namespace image {
-
-// "AOTI" in little-endian.
-inline constexpr uint32_t Magic = 0x49544F41;
-
-// Increment the image format version whenever the layout, schema, or
-// compilation-key inputs change.
-inline constexpr uint16_t Version = 4;
-
-// The build identity identifies the native link inputs.
-inline constexpr uint32_t BuildIdentitySize = 32;
-
-// Align directory metadata to a cache line boundary.
-inline constexpr uint32_t Alignment = 16;
-
-// Align generated code to a page boundary so its protection can change without
-// affecting image metadata.
-inline constexpr uint32_t TextAlignment = 4096;
-
-struct Header {
-  uint32_t magic;
-  uint16_t version;
-  uint16_t reserved;
-  uint32_t blobCount;
-  uint32_t buildIdentityOffset;
-  uint32_t buildIdentitySize;
-  uint32_t directoryOffset;
-  uint32_t textOffset;
-  uint32_t textSize;
-  uint32_t imageSize;
-};
-
-static_assert(sizeof(Header) == 36,
-              "image::Header wire size; edit image::Version on change");
-
-struct DirectoryEntry {
-  uint32_t kind;
-  // Shared-script-data hash for fast rejection during Baseline lookup.
-  uint32_t probeHash;
-  uint8_t identityHash[20];
-  uint32_t textOffset;
-  uint32_t textSize;
-  uint32_t dataOffset;
-  uint32_t fieldsSize;
-  uint32_t arraysSize;
-  uint32_t keySize;
-};
-
-static_assert(sizeof(DirectoryEntry) == 52,
-              "image::DirectoryEntry wire size; edit image::Version on change");
-
-}  // namespace image
 
 // Reads the serialized fields and arrays for one artifact in order.
 class AOTBlobReader {
@@ -281,35 +222,6 @@ class AOTImage {
   const uint8_t* base_;
   size_t size_;
 };
-
-// Defines the intermediate format for one recorded artifact. Each file contains
-// a fixed header followed by fields, arrays, code, and link sites in image
-// directory order. Both the recorder and packer use this format. Link sites
-// stop at the packer, which turns them into relocations the static linker has
-// already applied by the time the runtime sees the image bytes.
-struct AOTBlobFileHeader {
-  uint32_t magic;
-  uint16_t version;
-  uint16_t reserved;
-  uint32_t kind;
-  uint32_t probeHash;
-  uint8_t identityHash[20];
-  uint32_t fieldsSize;
-  uint32_t arraysSize;
-  uint32_t codeSize;
-  uint32_t linkSitesSize;
-  // Identifies the slot numbering the link sites were recorded against.
-  uint32_t slotTableHash;
-  uint32_t keySize;
-  uint8_t buildIdentity[image::BuildIdentitySize];
-};
-
-static_assert(sizeof(AOTBlobFileHeader) == 92,
-              "AOTBlobFileHeader wire size; edit BlobFileVersion on change");
-
-// "AOTB" in little-endian.
-inline constexpr uint32_t BlobFileMagic = 0x42544F41;
-inline constexpr uint16_t BlobFileVersion = 3;
 
 // Builds an image in memory from recorded artifacts using a supplied
 // buildIdentity.

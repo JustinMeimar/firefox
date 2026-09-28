@@ -7,6 +7,13 @@ FINAL_LIBRARY = "js"
 include("../../js-config.mozbuild")
 include("../../js-cxxflags.mozbuild")
 
+GeneratedFile(
+    "AOTImageFormat.inc",
+    script="../GenerateAOTImage.py",
+    entry_point="generate_descriptor",
+    inputs=["../AOTImageSchema.yaml"],
+)
+
 # The shim needs the image and its relocation list sitting next to it at
 # compile time. Using a .inc suffix (rather than .bin) puts these
 # GeneratedFiles in mozbuild's pre-compile tier, so they exist before the shim
@@ -15,14 +22,14 @@ GeneratedFile(
     "AOTImage.inc",
     script="GenerateEmptyAOTImage.py",
     entry_point="main",
-    inputs=[],
+    inputs=["!AOTImageFormat.inc"],
 )
 
 GeneratedFile(
     "AOTImageRelocs.inc",
     script="GenerateEmptyAOTImage.py",
     entry_point="main_relocs",
-    inputs=[],
+    inputs=["!AOTImageFormat.inc"],
 )
 
 SOURCES += [

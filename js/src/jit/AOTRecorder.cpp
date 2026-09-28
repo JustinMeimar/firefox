@@ -193,6 +193,28 @@ bool AOTArtifactRecorder::writeBlobFile(
   return true;
 }
 
+template <typename Metadata>
+bool AOTArtifactRecorder::record(JSContext* cx, JitCode* code, AOTBlobKind kind,
+                                 mozilla::Span<const uint8_t> key,
+                                 uint32_t probeHash, const Metadata& md,
+                                 bool (*encode)(AOTBlobWriter&,
+                                                const Metadata&),
+                                 mozilla::Span<const AOTLinkSite> sites) {
+  mozilla::SHA1Sum::Hash identity;
+  HashKey(key, identity);
+  AOTBlobWriter blob(kind, probeHash, identity);
+  if (!blob.writeKey(key) || !encode(blob, md) ||
+      !blob.writeCode(code->raw(), code->instructionsSize())) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  char idHex[2 * sizeof(identity) + 1];
+  HexEncode(identity, sizeof(identity), idHex);
+  std::string path =
+      directory_ + "/" + AOTArtifactPrefix(kind) + "-" + idHex + ".aotb";
+  return writeBlobFile(cx, path, blob, sites);
+}
+
 bool AOTArtifactRecorder::recordInterpreter(
     JSContext* cx, JitCode* code, const BaselineInterpreterMetadata& md,
     mozilla::Span<const AOTLinkSite> sites) {
@@ -203,38 +225,16 @@ bool AOTArtifactRecorder::recordInterpreter(
     ReportOutOfMemory(cx);
     return false;
   }
-  mozilla::SHA1Sum::Hash identity;
-  HashKey(key.data(), identity);
-  AOTBlobWriter blob(AOTBlobKind::BaselineInterpreter, 0, identity);
-  if (!blob.writeKey(key.data()) || !EncodeBlob_BaselineInterpreter(blob, md) ||
-      !blob.writeCode(code->raw(), code->instructionsSize())) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  char idHex[41];
-  HexEncode(identity, sizeof(identity), idHex);
-  std::string path = directory_ + "/interp-" + idHex + ".aotb";
-  return writeBlobFile(cx, path, blob, sites);
+  return record(cx, code, AOTBlobKind::BaselineInterpreter, key.data(), 0, md,
+                EncodeBlob_BaselineInterpreter, sites);
 }
 
 bool AOTArtifactRecorder::recordBaselineFunction(
     JSContext* cx, JitCode* code, mozilla::Span<const uint8_t> key,
     uint32_t probeHash, const BaselineScriptMetadata& md,
     mozilla::Span<const AOTLinkSite> sites) {
-  mozilla::SHA1Sum::Hash identityHash;
-  HashKey(key, identityHash);
-  AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash, identityHash);
-  if (!blob.writeKey(key) || !EncodeBlob_BaselineFunction(blob, md) ||
-      !blob.writeCode(code->raw(), code->instructionsSize())) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  char idHex[41];
-  HexEncode(identityHash, 20, idHex);
-  std::string path = directory_ + "/blfun-" + idHex + ".aotb";
-  return writeBlobFile(cx, path, blob, sites);
+  return record(cx, code, AOTBlobKind::BaselineFunction, key, probeHash, md,
+                EncodeBlob_BaselineFunction, sites);
 }
 
 bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
@@ -334,19 +334,8 @@ bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
     ReportOutOfMemory(cx);
     return false;
   }
-  mozilla::SHA1Sum::Hash hash;
-  HashKey(key.data(), hash);
-  AOTBlobWriter blob(AOTBlobKind::InlineCacheStub, 0, hash);
-  if (!blob.writeKey(key.data()) || !EncodeBlob_InlineCacheStub(blob, md) ||
-      !blob.writeCode(code->raw(), code->instructionsSize())) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  char idHex[41];
-  HexEncode(hash, sizeof(hash), idHex);
-  std::string path = directory_ + "/ic-" + idHex + ".aotb";
-  return writeBlobFile(cx, path, blob, sites);
+  return record(cx, code, AOTBlobKind::InlineCacheStub, key.data(), 0, md,
+                EncodeBlob_InlineCacheStub, sites);
 }
 
 }  // namespace js::jit

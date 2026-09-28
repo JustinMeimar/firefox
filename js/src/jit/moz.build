@@ -282,6 +282,17 @@ if CONFIG["ENABLE_JS_AOT"]:
         inputs=["AOTImageSchema.yaml"],
     )
 
+    for output, entry_point in [
+        ("AOTImageFormatGenerated.h", "generate_format_header"),
+        ("AOTCompilationKeyGenerated.inc", "generate_keys"),
+    ]:
+        GeneratedFile(
+            output,
+            script="GenerateAOTImage.py",
+            entry_point=entry_point,
+            inputs=["AOTImageSchema.yaml"],
+        )
+
 PYTHON_UNITTEST_MANIFESTS += ["aot/tests/python.toml"]
 
 # Generate jit/ABIFunctionTypeGenerated.h from jit/ABIFunctionType.yaml
