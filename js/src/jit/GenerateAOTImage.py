@@ -196,7 +196,7 @@ def emit_decode(blob):
             "    if (!md->%s.append(src.data(), src.size())) return false;" % a["path"]
         )
         lines.append("  }")
-    lines.append("  return true;")
+    lines.append("  return reader.arraysComplete();")
     lines.append("}")
     return emit_lines(lines)
 

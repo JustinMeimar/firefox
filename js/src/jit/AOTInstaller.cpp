@@ -8,11 +8,14 @@
 
 #  include "jit/AOTInstaller.h"
 
-#  include "mozilla/SHA1.h"
+#  include "mozilla/ScopeExit.h"
 
 #  include <cstring>
 
 #  include "jit/AOT.h"
+#  include "jit/AOTCompilationKey.h"
+#  include "jit/Ion.h"
+#  include "jit/IonOptimizationLevels.h"
 #  include "jit/AOTImage.h"
 #  include "jit/AOTImageGenerated.h"
 #  include "jit/AutoWritableJitCode.h"
@@ -31,7 +34,6 @@
 #  include "vm/GeckoProfiler.h"
 #  include "vm/JSContext.h"
 #  include "vm/JSScript.h"
-#  include "vm/Scope.h"
 #  include "vm/SharedStencil.h"
 
 #  include "jit/JitScript-inl.h"
@@ -39,104 +41,8 @@
 
 namespace js::jit {
 
-static bool IsAOTImageCompatible(const AOTImage* image) {
-  auto readerOpt = image->findUnique(AOTBlobKind::Configuration);
-  if (readerOpt.isNothing()) {
-    MOZ_CRASH("AOT image lacks configuration metadata");
-  }
-  AOTBlobReader reader = readerOpt.ref();
-  AOTConfigurationMetadata recorded;
-  if (!DecodeBlob_Configuration(reader, &recorded)) {
-    MOZ_CRASH("AOT image configuration decode failed");
-  }
-  AOTConfigurationMetadata current = CurrentAOTConfiguration();
-  if (recorded == current) {
-    return true;
-  }
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr,
-            "AOT image configuration mismatch:\n"
-            "  field                          recorded  current\n"
-            "  disableInlining                %8u  %8u\n"
-            "  spectreIndexMasking            %8u  %8u\n"
-            "  spectreObjectMitigations       %8u  %8u\n"
-            "  spectreStringMitigations       %8u  %8u\n"
-            "  baselineBatching               %8u  %8u\n"
-            "  baselineJit                    %8u  %8u\n"
-            "  enableICFramePointers          %8u  %8u\n"
-            "  baselineJitWarmUpThreshold     %8u  %8u\n"
-            "  baselineQueueCapacity          %8u  %8u\n"
-            "  trialInliningWarmUpThreshold   %8u  %8u\n",
-            recorded.disableInlining, current.disableInlining,
-            recorded.spectreIndexMasking, current.spectreIndexMasking,
-            recorded.spectreObjectMitigations, current.spectreObjectMitigations,
-            recorded.spectreStringMitigations, current.spectreStringMitigations,
-            recorded.baselineBatching, current.baselineBatching,
-            recorded.baselineJit, current.baselineJit,
-            recorded.enableICFramePointers, current.enableICFramePointers,
-            recorded.baselineJitWarmUpThreshold,
-            current.baselineJitWarmUpThreshold, recorded.baselineQueueCapacity,
-            current.baselineQueueCapacity,
-            recorded.trialInliningWarmUpThreshold,
-            current.trialInliningWarmUpThreshold);
-  }
-  if (!JitOptions.aotLooseFingerprint) {
-    MOZ_CRASH("AOT image configuration mismatch");
-  }
-  return false;
-}
-
-// Identity
-
 uint32_t ComputeBaselineProbeHash(JSScript* script) {
   return uint32_t(script->sharedData()->hash());
-}
-
-void ComputeBaselineIdentityHash(JSScript* script,
-                                 mozilla::SHA1Sum::Hash& out) {
-  mozilla::SHA1Sum sha;
-  auto u = [&](const void* p, size_t n) { sha.update(p, uint32_t(n)); };
-
-  uint32_t immFlags = script->immutableFlags().toRaw();
-  uint32_t funFlags =
-      script->function() ? uint32_t(script->function()->flags().toRaw()) : 0u;
-  uint16_t nargs =
-      script->function() ? uint16_t(script->function()->nargs()) : uint16_t(0);
-  uint16_t nfixed = uint16_t(script->nfixed());
-  uint32_t nslots = uint32_t(script->nslots());
-  uint32_t numICEntries = uint32_t(script->numICEntries());
-  uint8_t scopeKind = uint8_t(script->outermostScope()->kind());
-  uint8_t hasNonSyntactic = script->hasNonSyntacticScope() ? 1 : 0;
-  uint8_t isFunction = script->function() ? 1 : 0;
-
-  u(&immFlags, sizeof(immFlags));
-  u(&funFlags, sizeof(funFlags));
-  u(&nargs, sizeof(nargs));
-  u(&nfixed, sizeof(nfixed));
-  u(&nslots, sizeof(nslots));
-  u(&numICEntries, sizeof(numICEntries));
-  u(&scopeKind, sizeof(scopeKind));
-  u(&hasNonSyntactic, sizeof(hasNonSyntactic));
-  u(&isFunction, sizeof(isFunction));
-
-  // Length-prefix the gcthing kinds so the tail of variable-length
-  // bytecode does not alias.
-  auto gcThings = script->gcthings();
-  uint32_t gcThingCount = uint32_t(gcThings.size());
-  u(&gcThingCount, sizeof(gcThingCount));
-  for (const auto& gct : gcThings) {
-    uint8_t k = uint8_t(gct.kind());
-    u(&k, 1);
-  }
-
-  auto immData = script->immutableScriptData()->immutableData();
-  if (!immData.empty()) {
-    u(immData.data(), immData.size());
-  }
-
-  sha.finish(out);
 }
 
 // Baseline interpreter
@@ -146,21 +52,25 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
 
   const AOTImage* image = AOTImage::embedded();
   if (!image) {
-    MOZ_CRASH("AOT image not embedded");
-  }
-  if (!IsAOTImageCompatible(image)) {
     return false;
   }
-
-  auto readerOpt = image->findUnique(AOTBlobKind::BaselineInterpreter);
-  if (readerOpt.isNothing()) {
-    MOZ_CRASH("AOT image missing baseline interpreter blob");
+  mozilla::Maybe<AOTBlobReader> readerOpt;
+  for (uint32_t i = 0; i < image->blobCount(); i++) {
+    auto candidate = image->blobAt(i);
+    if (candidate.kind() != AOTBlobKind::BaselineInterpreter) continue;
+    AOTCompilationKey key(candidate.key());
+    WriteAOTContext(key, candidate.kind(), JitOptions,
+                    cx->runtime()->geckoProfiler().enabled());
+    if (key.complete()) {
+      readerOpt.emplace(candidate);
+      break;
+    }
   }
-
+  if (!readerOpt) return false;
   AOTBlobReader reader = readerOpt.ref();
   BaselineInterpreterMetadata md;
   if (!DecodeBlob_BaselineInterpreter(reader, &md)) {
-    MOZ_CRASH("AOT baseline interpreter decode failed");
+    return false;
   }
 
   auto code = reader.code();
@@ -177,10 +87,6 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
   if (!trampoline) {
     return false;
   }
-  jrt->aotInterpPreambleTrampoline_ = trampoline;
-
-  interp.init(jitCode, std::move(md));
-
   // Register the static interpreter code with the profiler and enable its
   // instrumentation.
   {
@@ -197,6 +103,9 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
     }
     jitCode->setHasBytecodeMap();
   }
+
+  jrt->aotInterpPreambleTrampoline_ = trampoline;
+  interp.init(jitCode, std::move(md));
 
   if (cx->runtime()->geckoProfiler().enabled()) {
     interp.toggleProfilerInstrumentation(true);
@@ -221,18 +130,30 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   }
 
   const AOTImage* image = AOTImage::embedded();
-  if (!image || !IsAOTImageCompatible(image)) {
+  if (!image) {
     return false;
   }
 
   uint32_t probe = ComputeBaselineProbeHash(script);
-  mozilla::SHA1Sum::Hash liveHash;
-  ComputeBaselineIdentityHash(script, liveHash);
-  mozilla::Maybe<AOTBlobReader> readerOpt =
-      image->findByIdentity(AOTBlobKind::BaselineFunction, probe, liveHash);
-  if (readerOpt.isNothing()) {
-    return false;
+  uint32_t warmUpThreshold =
+      OptimizationInfo::baseWarmUpThresholdForScript(cx, script);
+  bool ionCompileable = IsIonEnabled(cx) && CanIonCompileScript(cx, script);
+  mozilla::Maybe<AOTBlobReader> readerOpt;
+  for (uint32_t i = 0; i < image->blobCount(); i++) {
+    auto candidate = image->blobAt(i);
+    if (candidate.kind() != AOTBlobKind::BaselineFunction ||
+        candidate.entry()->probeHash != probe)
+      continue;
+    AOTCompilationKey key(candidate.key());
+    WriteAOTContext(key, candidate.kind(), JitOptions,
+                    cx->runtime()->geckoProfiler().enabled());
+    WriteAOTBaselineInputs(key, script, warmUpThreshold, ionCompileable, false);
+    if (key.complete()) {
+      readerOpt.emplace(candidate);
+      break;
+    }
   }
+  if (!readerOpt) return false;
 
   // The script may not have its baseline metadata initialized when AOT
   // installation begins. Initialize it before installing the compiled code.
@@ -281,6 +202,8 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
     return false;
   }
 
+  auto destroy = mozilla::MakeScopeExit(
+      [&] { BaselineScript::Destroy(cx->gcContext(), bs); });
   bs->setMethod(jitCode);
   bs->setAOTPreambleTrampoline(trampoline);
   if (!md.retAddrEntries.empty()) {
@@ -297,10 +220,6 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   if (md.flags & BaselineScript::HAS_DEBUG_INSTRUMENTATION) {
     bs->setHasDebugInstrumentation();
   }
-
-  script->jitScript()->setBaselineScript(script, bs);
-
-  FinalizeInstalledBaselineScript(script);
 
   // Register the static baseline code with the profiler so stack walkers can
   // associate return addresses with the script.
@@ -329,6 +248,14 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
     bs->toggleProfilerInstrumentation(true);
   }
 
+  if (md.disableIon) script->disableIon();
+  if (md.uninlineable) script->setUninlineable();
+  script->jitScript()->setRanBytecodeAnalysis();
+  script->jitScript()->setIonThreshold(warmUpThreshold);
+  script->jitScript()->setBaselineScript(script, bs);
+  destroy.release();
+  FinalizeInstalledBaselineScript(script);
+
   JitSpew(JitSpew_BaselineAOT,
           "installed baseline function from AOT image: %s:%u bytes=%zu",
           script->filename() ? script->filename() : "<null>",
@@ -344,7 +271,7 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
   }
 
   const AOTImage* image = AOTImage::embedded();
-  if (!image || !IsAOTImageCompatible(image)) {
+  if (!image) {
     return false;
   }
 
@@ -365,6 +292,11 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
       JitSpew(JitSpew_BaselineAOT, "AOT IC stub decode failed at index %u", i);
       continue;
     }
+
+    AOTCompilationKey keyInputs(reader.key());
+    WriteAOTContext(keyInputs, reader.kind(), JitOptions, false);
+    WriteAOTICInputs(keyInputs, md);
+    if (!keyInputs.complete()) continue;
 
     CacheIRStubInfo* stubInfo = CacheIRStubInfo::NewFromSerialized(
         CacheKind(md.cacheKind), ICStubEngine::Baseline, md.makesGCCalls != 0,

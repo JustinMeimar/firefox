@@ -2056,6 +2056,16 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     JitCode* candidate =
         atomsJitZone->getBaselineCacheIRStubCode(lookup, &stubInfo);
     bool hit = candidate && candidate->isStaticCode();
+    if (hit) {
+      hit = stubInfo->stubDataSize() == writer.stubDataSize();
+      for (uint32_t i = 0; hit && i < writer.numStubFields(); i++) {
+        hit = stubInfo->fieldType(i) == writer.stubFieldType(i);
+      }
+      if (hit) {
+        hit = stubInfo->fieldType(writer.numStubFields()) ==
+              StubField::Type::Limit;
+      }
+    }
     code = hit ? candidate : nullptr;
     if (!hit) {
       stubInfo = nullptr;
@@ -2098,14 +2108,11 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     if (JitOptions.shouldCaptureAOTBaseline()) {
       TempAllocator dumpTemp(&cx->tempLifoAlloc());
       BaselineCacheIRCompiler dumpComp(cx, dumpTemp, writer, StubDataOffset);
+      AutoAOTCodegen aotScope(dumpComp.masmForAOT(), cx);
       if (!dumpComp.init(kind)) {
         return false;
       }
-      JitCode* dumpCode = nullptr;
-      {
-        AutoAOTCodegen aotScope(dumpComp.masmForAOT(), cx);
-        dumpCode = dumpComp.compile();
-      }
+      JitCode* dumpCode = dumpComp.compile();
       if (!dumpCode) {
         return false;
       }
@@ -2184,24 +2191,6 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   }
   MOZ_ASSERT_IF(IsBaselineInterpreterEnabled(), code);
   MOZ_ASSERT(stubInfo);
-  // Assert that the StubInfo recomputing its stub-data size exactly
-  // matches the writer's stub-data size, but only if we're not
-  // loading an AOT IC -- otherwise, trust the recomputation from
-  // field types.
-  //
-  // Why ignore if AOT? Because the AOT corpus might have been dumped
-  // on a machine with a different word size than our machine (e.g.,
-  // 64 to 32 bits). The field types are serialized and deserialized,
-  // and they are authoritative; the CacheIRWriter's stubDataSize is
-  // computed during build and used only for this assert, so it is
-  // strictly a redundant check.
-  //
-  // (This cross-machine movement of the corpus is acceptable/correct
-  // because the CacheIR itself, and our encoding of it in the corpus
-  // source code, is platform-independent. The worst that happens is
-  // that some platforms may not generate all possible ICs for another
-  // platform (e.g. due to limited registers on x86-32) but it is always
-  // fine not to have an IC preloaded in the corpus.
   MOZ_ASSERT(stubInfo->stubDataSize() == writer.stubDataSize());
 
   return true;

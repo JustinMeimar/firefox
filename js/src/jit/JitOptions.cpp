@@ -207,7 +207,6 @@ DefaultJitOptions::DefaultJitOptions() {
     useAOTBaseline = true;
   }
   SET_DEFAULT(aotEnforce, false);
-  SET_DEFAULT(aotLooseFingerprint, false);
   SET_DEFAULT(aotOnly, false);
   if (aotOnly) {
     if (!useAOTImage && !hasExplicitAOTComponents) {
@@ -333,7 +332,8 @@ DefaultJitOptions::DefaultJitOptions() {
 #ifdef ENABLE_JS_AOT
   // Match browser prefs so AOT artifacts recorded under browser defaults load
   // in the shell without --spectre-mitigations=on. These three are baked into
-  // blinterp/baseline/IC bytes and are part of the AOT fingerprint.
+  // blinterp/baseline/IC bytes and are part of each artifact's compilation
+  // context.
   SET_DEFAULT(spectreIndexMasking, true);
   SET_DEFAULT(spectreObjectMitigations, true);
   SET_DEFAULT(spectreStringMitigations, true);

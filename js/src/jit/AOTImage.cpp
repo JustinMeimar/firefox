@@ -10,7 +10,6 @@
 
 #  include <cstring>
 
-#  include "jit/JitOptions.h"
 #  include "jit/JitSpewer.h"
 
 // Symbols exported by the image shim, which embeds either a recorded image or
@@ -18,9 +17,14 @@
 extern "C" {
 extern const uint8_t aot_image_start[];
 extern const uint8_t aot_image_end[];
+extern const uint8_t aot_build_identity[32];
 }
 
 namespace js::jit {
+
+mozilla::Span<const uint8_t> CurrentAOTBuildIdentity() {
+  return aot_build_identity;
+}
 
 const AOTImage* AOTImage::embedded() {
   static const AOTImage* cached = nullptr;
@@ -39,6 +43,11 @@ const AOTImage* AOTImage::embedded() {
     return nullptr;
   }
 
+  if (img->blobCount() &&
+      memcmp(img->buildIdentity().data(), aot_build_identity,
+             image::BuildIdentitySize) != 0) {
+    return nullptr;
+  }
   static AOTImage sImage = img.value();
   cached = &sImage;
   return cached;
@@ -46,7 +55,8 @@ const AOTImage* AOTImage::embedded() {
 
 mozilla::Maybe<AOTImage> AOTImage::fromBytes(
     mozilla::Span<const uint8_t> bytes) {
-  if (bytes.size() < sizeof(image::Header)) {
+  if (bytes.size() < sizeof(image::Header) ||
+      uintptr_t(bytes.data()) % alignof(image::Header)) {
     return mozilla::Nothing();
   }
   AOTImage img(bytes);
@@ -54,38 +64,35 @@ mozilla::Maybe<AOTImage> AOTImage::fromBytes(
   if (h->magic != image::Magic || h->version != image::Version) {
     return mozilla::Nothing();
   }
-  if (h->imageSize > bytes.size()) {
+  if (h->reserved || h->imageSize > bytes.size() ||
+      h->buildIdentityOffset != sizeof(image::Header) ||
+      h->buildIdentitySize != image::BuildIdentitySize ||
+      uint64_t(h->buildIdentityOffset) + h->buildIdentitySize >
+          h->directoryOffset ||
+      h->directoryOffset % image::Alignment ||
+      uint64_t(h->directoryOffset) +
+              uint64_t(h->blobCount) * sizeof(image::DirectoryEntry) >
+          h->textOffset ||
+      h->textOffset % image::TextAlignment ||
+      uint64_t(h->textOffset) + h->textSize != h->imageSize) {
     return mozilla::Nothing();
   }
+  uint64_t dataStart = uint64_t(h->directoryOffset) +
+                       uint64_t(h->blobCount) * sizeof(image::DirectoryEntry);
+  for (uint32_t i = 0; i < h->blobCount; i++) {
+    const auto& entry = img.directory()[i];
+    if (entry.kind > uint32_t(AOTBlobKind::InlineCacheStub) ||
+        entry.keySize % 4 || entry.dataOffset % image::Alignment ||
+        entry.dataOffset < dataStart ||
+        uint64_t(entry.dataOffset) + entry.keySize + entry.fieldsSize +
+                entry.arraysSize >
+            h->textOffset ||
+        entry.textOffset % image::Alignment ||
+        uint64_t(entry.textOffset) + entry.textSize > h->textSize) {
+      return mozilla::Nothing();
+    }
+  }
   return mozilla::Some(img);
-}
-
-mozilla::Maybe<AOTBlobReader> AOTImage::findUnique(AOTBlobKind kind) const {
-  const auto* dir = directory();
-  const uint8_t* textBase = base_ + header()->textOffset;
-  for (uint32_t i = 0; i < blobCount(); i++) {
-    if (AOTBlobKind(dir[i].kind) == kind) {
-      return mozilla::Some(AOTBlobReader(&dir[i], base_, textBase));
-    }
-  }
-  return mozilla::Nothing();
-}
-
-mozilla::Maybe<AOTBlobReader> AOTImage::findByIdentity(
-    AOTBlobKind kind, uint32_t probeHash, const uint8_t* identityHash) const {
-  const auto* dir = directory();
-  const uint8_t* textBase = base_ + header()->textOffset;
-  for (uint32_t i = 0; i < blobCount(); i++) {
-    const auto& e = dir[i];
-    if (AOTBlobKind(e.kind) != kind) continue;
-    if (probeHash && e.probeHash != probeHash) continue;
-    if (identityHash &&
-        memcmp(e.identityHash, identityHash, sizeof(e.identityHash)) != 0) {
-      continue;
-    }
-    return mozilla::Some(AOTBlobReader(&e, base_, textBase));
-  }
-  return mozilla::Nothing();
 }
 
 static uint32_t AlignUp(uint32_t v, uint32_t a) {
@@ -96,7 +103,7 @@ static uint32_t AlignUp(uint32_t v, uint32_t a) {
 // separate allows stream and buffer output to share the calculation.
 namespace {
 struct ImageLayout {
-  uint32_t fingerprintOffset;
+  uint32_t buildIdentityOffset;
   uint32_t directoryOffset;
   uint32_t dataStart;
   Vector<image::DirectoryEntry, 0, SystemAllocPolicy> entries;
@@ -110,9 +117,10 @@ struct ImageLayout {
 static bool ComputeLayout(
     const Vector<AOTBlobWriter, 0, SystemAllocPolicy>& blobs,
     ImageLayout& out) {
-  out.fingerprintOffset = sizeof(image::Header);
-  uint32_t afterFingerprint = out.fingerprintOffset + image::FingerprintSize;
-  out.directoryOffset = AlignUp(afterFingerprint, image::Alignment);
+  out.buildIdentityOffset = sizeof(image::Header);
+  uint32_t afterBuildIdentity =
+      out.buildIdentityOffset + image::BuildIdentitySize;
+  out.directoryOffset = AlignUp(afterBuildIdentity, image::Alignment);
 
   uint32_t cursor =
       out.directoryOffset +
@@ -130,11 +138,14 @@ static bool ComputeLayout(
     e.probeHash = b.probeHash();
     memcpy(e.identityHash, b.identityHash(), sizeof(e.identityHash));
     e.dataOffset = cursor;
+    e.keySize = uint32_t(b.key().size());
     e.fieldsSize = uint32_t(b.fields().size());
     e.arraysSize = uint32_t(b.arrays().size());
     e.textSize = uint32_t(b.code().size());
+    textCursor = AlignUp(textCursor, image::Alignment);
     e.textOffset = textCursor;
-    cursor = AlignUp(cursor + e.fieldsSize + e.arraysSize, image::Alignment);
+    cursor = AlignUp(cursor + e.keySize + e.fieldsSize + e.arraysSize,
+                     image::Alignment);
     textCursor += e.textSize;
     out.entries.infallibleAppend(e);
   }
@@ -152,8 +163,8 @@ static void WriteHeader(uint8_t* dst, const ImageLayout& layout,
   h.version = image::Version;
   h.reserved = 0;
   h.blobCount = blobCount;
-  h.fingerprintOffset = layout.fingerprintOffset;
-  h.fingerprintSize = image::FingerprintSize;
+  h.buildIdentityOffset = layout.buildIdentityOffset;
+  h.buildIdentitySize = image::BuildIdentitySize;
   h.directoryOffset = layout.directoryOffset;
   h.textOffset = layout.textOffset;
   h.textSize = layout.textSize;
@@ -162,7 +173,7 @@ static void WriteHeader(uint8_t* dst, const ImageLayout& layout,
 }
 
 bool AOTImageBuilder::finalize(Vector<uint8_t, 0, SystemAllocPolicy>& out,
-                               const uint8_t* fingerprint) {
+                               const uint8_t* buildIdentity) {
   ImageLayout layout;
   if (!ComputeLayout(blobs_, layout)) return false;
   if (!out.resizeUninitialized(layout.imageSize)) return false;
@@ -170,17 +181,21 @@ bool AOTImageBuilder::finalize(Vector<uint8_t, 0, SystemAllocPolicy>& out,
 
   uint8_t* base = out.begin();
   WriteHeader(base, layout, uint32_t(blobs_.length()));
-  memcpy(base + layout.fingerprintOffset, fingerprint, image::FingerprintSize);
+  memcpy(base + layout.buildIdentityOffset, buildIdentity,
+         image::BuildIdentitySize);
   memcpy(base + layout.directoryOffset, layout.entries.begin(),
          layout.entries.length() * sizeof(image::DirectoryEntry));
   for (size_t i = 0; i < blobs_.length(); i++) {
     const auto& b = blobs_[i];
     const auto& e = layout.entries[i];
+    if (e.keySize) {
+      memcpy(base + e.dataOffset, b.key().data(), e.keySize);
+    }
     if (e.fieldsSize) {
-      memcpy(base + e.dataOffset, b.fields().data(), e.fieldsSize);
+      memcpy(base + e.dataOffset + e.keySize, b.fields().data(), e.fieldsSize);
     }
     if (e.arraysSize) {
-      memcpy(base + e.dataOffset + e.fieldsSize, b.arrays().data(),
+      memcpy(base + e.dataOffset + e.keySize + e.fieldsSize, b.arrays().data(),
              e.arraysSize);
     }
     if (e.textSize) {
@@ -191,27 +206,13 @@ bool AOTImageBuilder::finalize(Vector<uint8_t, 0, SystemAllocPolicy>& out,
   return true;
 }
 
-bool AOTImageBuilder::finalize(std::ostream& out, const uint8_t* fingerprint) {
+bool AOTImageBuilder::finalize(std::ostream& out,
+                               const uint8_t* buildIdentity) {
   Vector<uint8_t, 0, SystemAllocPolicy> buffer;
-  if (!finalize(buffer, fingerprint)) return false;
+  if (!finalize(buffer, buildIdentity)) return false;
   out.write(reinterpret_cast<const char*>(buffer.begin()),
             std::streamsize(buffer.length()));
   return bool(out);
-}
-
-AOTConfigurationMetadata CurrentAOTConfiguration() {
-  return {
-      .disableInlining = JitOptions.disableInlining,
-      .spectreIndexMasking = JitOptions.spectreIndexMasking,
-      .spectreObjectMitigations = JitOptions.spectreObjectMitigations,
-      .spectreStringMitigations = JitOptions.spectreStringMitigations,
-      .baselineBatching = JitOptions.baselineBatching,
-      .baselineJit = JitOptions.baselineJit,
-      .enableICFramePointers = JitOptions.enableICFramePointers,
-      .baselineJitWarmUpThreshold = JitOptions.baselineJitWarmUpThreshold,
-      .baselineQueueCapacity = JitOptions.baselineQueueCapacity,
-      .trialInliningWarmUpThreshold = JitOptions.trialInliningWarmUpThreshold,
-  };
 }
 
 }  // namespace js::jit

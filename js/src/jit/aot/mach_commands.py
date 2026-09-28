@@ -9,7 +9,6 @@ import os
 import shutil
 import struct
 import sys
-import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -24,13 +23,10 @@ Blob = PACKER.Blob
 
 
 COMMAND = "ambermonkey"
-CONFIGURATION_KIND = 3
-CONFIGURATION_FIELDS_SIZE = 20
 KIND_NAMES = {
     0: "BaselineInterpreter",
     1: "BaselineFunction",
     2: "InlineCacheStub",
-    3: "Configuration",
 }
 
 
@@ -60,7 +56,7 @@ def _paths(command_context):
     return {
         "objdir": objdir,
         "aot_srcdir": aot_srcdir,
-        "schema": topsrcdir / "js" / "src" / "jit" / "AOTImageSchema.yaml",
+        "identities": image_dir / "build-identities",
         "pack": aot_srcdir / "PackAOTImage.py",
         "image": image_dir / "AOTImage.inc",
         "relocs": image_dir / "AOTImageRelocs.inc",
@@ -108,44 +104,11 @@ def _load_corpus(corpus):
     if not corpus.is_dir():
         raise AmberMonkeyError(f"Corpus directory does not exist: {corpus}")
     paths = sorted(corpus.glob("*.aotb"), key=lambda path: path.name)
-    if not paths:
-        raise AmberMonkeyError(f"Corpus contains no .aotb files: {corpus}")
     try:
         blobs = [Blob(path) for path in paths]
     except (OSError, ValueError) as exc:
         raise AmberMonkeyError(f"Invalid corpus {corpus}: {exc}") from exc
-    configurations = [blob for blob in blobs if blob.kind == CONFIGURATION_KIND]
-    configuration_path = corpus / "configuration.aotb"
-    if not configuration_path.is_file():
-        raise AmberMonkeyError(
-            f"Corpus is missing {configuration_path.name}; record it with "
-            "`./mach ambermonkey record`."
-        )
-    if len(configurations) != 1 or Path(configurations[0].source) != configuration_path:
-        raise AmberMonkeyError(
-            "Corpus must contain exactly one Configuration blob named "
-            "configuration.aotb."
-        )
-    configuration = configurations[0]
-    if (
-        configuration.identity_hash != bytes(20)
-        or configuration.fields_size != CONFIGURATION_FIELDS_SIZE
-        or configuration.arrays_size
-        or configuration.code_size
-        or configuration.link_sites
-    ):
-        raise AmberMonkeyError(
-            f"Malformed configuration metadata in {configuration_path}; "
-            "record the corpus again."
-        )
-    slot_hash = configuration.slot_table_hash
-    incompatible = [blob.source for blob in blobs if blob.slot_table_hash != slot_hash]
-    if incompatible:
-        raise AmberMonkeyError(
-            f"{incompatible[0]} has a different AOT link-table fingerprint; "
-            "the corpus combines artifacts from incompatible builds."
-        )
-    return corpus, blobs, configuration
+    return corpus, blobs
 
 
 def _corpus_hash(corpus, paths):
@@ -174,8 +137,8 @@ def _read_image(path):
         version,
         _reserved,
         count,
-        fingerprint_offset,
-        fingerprint_size,
+        build_identity_offset,
+        build_identity_size,
         directory_offset,
         text_offset,
         text_size,
@@ -188,8 +151,8 @@ def _read_image(path):
     directory_end = directory_offset + count * PACKER.DIR_ENTRY_SIZE
     if (
         image_size != len(data)
-        or fingerprint_size != PACKER.FINGERPRINT_SIZE
-        or fingerprint_offset + fingerprint_size > len(data)
+        or build_identity_size != PACKER.BUILD_IDENTITY_SIZE
+        or build_identity_offset + build_identity_size > len(data)
         or directory_end > text_offset
         or text_offset + text_size > len(data)
     ):
@@ -202,11 +165,11 @@ def _read_image(path):
             data,
             directory_offset + index * PACKER.DIR_ENTRY_SIZE,
         )
-        kind, probe, identity, code_offset, code_size, data_offset, fields, arrays = (
+        kind, probe, identity, code_offset, code_size, data_offset, fields, arrays, key = (
             entry
         )
         if (
-            data_offset + fields + arrays > text_offset
+            data_offset + key + fields + arrays > text_offset
             or text_offset + code_offset + code_size > len(data)
         ):
             raise AmberMonkeyError(f"Malformed AOT image entry {index} in {path}")
@@ -214,6 +177,7 @@ def _read_image(path):
             "kind": kind,
             "probe": probe,
             "identity": identity.hex(),
+            "key": key,
             "fields": fields,
             "arrays": arrays,
             "text_offset": code_offset,
@@ -223,8 +187,8 @@ def _read_image(path):
         "path": path,
         "hash": hashlib.sha256(data).hexdigest(),
         "version": version,
-        "fingerprint": data[
-            fingerprint_offset : fingerprint_offset + fingerprint_size
+        "build_identity": data[
+            build_identity_offset : build_identity_offset + build_identity_size
         ].hex(),
         "image_size": image_size,
         "text_offset": text_offset,
@@ -244,7 +208,7 @@ def _format_image_preview(image, limit):
         f"Image:       {image['path']}",
         f"Image hash:  {image['hash']}",
         f"Format:      AOTI v{image['version']}",
-        f"Fingerprint: {image['fingerprint']}",
+        f"Build identity: {image['build_identity']}",
         f"Entries:     {len(image['entries'])}",
         f"Image size:  {image['image_size']:,} bytes",
         f"Text:        {image['text_size']:,} bytes at offset {image['text_offset']:,}",
@@ -297,56 +261,19 @@ def _record_argv(shell, corpus, workload=None):
     return argv
 
 
-def _configuration_argv(shell, corpus):
-    return [str(shell), f"--aot-record={corpus}", "--no-ion", "-e", "quit(0);"]
-
-
 def _pack_argv(paths, corpus):
+    identities = sorted(paths["identities"].glob("*.bin"))
+    if not identities:
+        raise AmberMonkeyError("No native build identity found; rebuild stage 1 first.")
     return [
         sys.executable,
         str(paths["pack"]),
-        "--schema",
-        str(paths["schema"]),
+        *(arg for path in identities for arg in ("--build-identity", str(path))),
         "--relocs",
         str(paths["relocs"]),
         str(corpus),
         str(paths["image"]),
     ]
-
-
-def _validate_configuration(command_context, paths, recorded):
-    if not paths["shell"].is_file():
-        return
-    validation_root = paths["objdir"] / "ambermonkey"
-    validation_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="validate-", dir=validation_root) as tmp:
-        rc = command_context.run_process(
-            _configuration_argv(paths["shell"], Path(tmp)),
-            explicit_env=_clean_environment(),
-            pass_thru=True,
-            ensure_exit_code=False,
-        )
-        if rc:
-            raise AmberMonkeyError(
-                f"Could not read the stage-1 AOT configuration (js exited {rc})."
-            )
-        try:
-            current = Blob(Path(tmp) / "configuration.aotb")
-        except (OSError, ValueError) as exc:
-            raise AmberMonkeyError(
-                "The stage-1 shell did not produce valid AOT configuration metadata."
-            ) from exc
-    if current.slot_table_hash != recorded.slot_table_hash:
-        raise AmberMonkeyError(
-            "Corpus AOT link-table fingerprint is stale or belongs to another "
-            f"build ({recorded.slot_table_hash:#010x} != "
-            f"{current.slot_table_hash:#010x}); record the corpus again."
-        )
-    if current.fields != recorded.fields or current.arrays != recorded.arrays:
-        raise AmberMonkeyError(
-            "configuration.aotb is incompatible with the configured stage-1 "
-            "shell; record the corpus again with this build."
-        )
 
 
 def _log_error(command_context, message):
@@ -357,8 +284,7 @@ def _log_error(command_context, message):
 def _pack(command_context, corpus):
     paths = _paths(command_context)
     _validate_build(command_context, paths)
-    corpus, blobs, configuration = _load_corpus(corpus)
-    _validate_configuration(command_context, paths, configuration)
+    corpus, blobs = _load_corpus(corpus)
     paths["image"].parent.mkdir(parents=True, exist_ok=True)
     rc = command_context.run_process(
         _pack_argv(paths, corpus), pass_thru=True, ensure_exit_code=False
@@ -433,7 +359,7 @@ def ambermonkey(command_context):
     description="Record an AOT corpus with the stage-1 shell.",
 )
 @CommandArgument(
-    "--corpus", required=True, help="Empty directory to receive recorded .aotb files."
+    "--corpus", required=True, help="Directory to receive recorded .aotb files."
 )
 @CommandArgument(
     "--workload", "-w", default=None, help="Optional JS workload to record."
@@ -448,10 +374,6 @@ def ambermonkey_record(command_context, corpus, workload=None):
                 "select an AOT-enabled JS-shell objdir."
             )
         corpus = _resolve_path(corpus)
-        if corpus.exists() and any(corpus.iterdir()):
-            raise AmberMonkeyError(
-                f"Refusing to record into non-empty directory {corpus}; choose a new corpus path."
-            )
         corpus.mkdir(parents=True, exist_ok=True)
         workload = _resolve_path(workload) if workload else None
         if workload and not workload.is_file():
@@ -464,7 +386,7 @@ def ambermonkey_record(command_context, corpus, workload=None):
         )
         if rc:
             return rc
-        corpus, blobs, _ = _load_corpus(corpus)
+        corpus, blobs = _load_corpus(corpus)
         command_context.log(
             logging.INFO,
             COMMAND,

@@ -505,6 +505,7 @@ struct BaselineInterpreterMetadata {
   struct ICReturnOffset {
     uint32_t offset;
     JSOp op;
+    uint8_t padding[3] = {};
     ICReturnOffset(uint32_t offset, JSOp op) : offset(offset), op(op) {}
   };
   using ICReturnOffsetVector = Vector<ICReturnOffset, 0, SystemAllocPolicy>;
@@ -554,6 +555,8 @@ struct BaselineScriptMetadata {
   uint32_t profilerEnterToggleOffset = 0;
   uint32_t profilerExitToggleOffset = 0;
   uint8_t flags = 0;
+  uint8_t disableIon = 0;
+  uint8_t uninlineable = 0;
 
   // Stores entry tables copied from the compiler. Resume offsets are serialized
   // as bytecode and native offset pairs, then converted back to absolute code

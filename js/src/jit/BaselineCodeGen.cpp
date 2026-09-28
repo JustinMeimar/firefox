@@ -298,6 +298,8 @@ bool BaselineCompiler::extractAOTMetadata(BaselineScriptMetadata& md) {
   md.flags = compileDebugInstrumentation()
                  ? uint8_t(BaselineScript::HAS_DEBUG_INSTRUMENTATION)
                  : uint8_t(0);
+  md.disableIon = handler.analysis().isIonDisabled();
+  md.uninlineable = handler.analysis().isInliningDisabled();
   // The compiler and serialized metadata use vectors with different inline
   // capacities, so copy the entries instead of moving them.
   auto copyInto = [](auto& dst, const auto& src) {
@@ -7505,6 +7507,10 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
             .codeCoverageOffsets = std::move(handler.codeCoverageOffsets()),
             .icReturnOffsets = std::move(handler.icReturnOffsets()),
             .callVMOffsets = handler.callVMOffsets()});
+  }
+
+  if (masm.isAOT()) {
+    return true;
   }
 
   if (cx->runtime()->geckoProfiler().enabled()) {

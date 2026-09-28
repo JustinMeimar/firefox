@@ -16,6 +16,7 @@
 #include "gc/PublicIterators.h"
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTInstaller.h"
+#  include "jit/AOTCompilationKey.h"
 #  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/AutoWritableJitCode.h"
@@ -470,6 +471,16 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       dumpMasm.enableProfilingInstrumentation();
     }
     AutoAOTCodegen aotScope(dumpMasm, cx);
+    AOTCompilationKey key;
+    WriteAOTContext(key, AOTBlobKind::BaselineFunction, JitOptions,
+                    cx->runtime()->geckoProfiler().enabled());
+    WriteAOTBaselineInputs(key, script, snapshot.baseWarmUpThreshold(),
+                           snapshot.isIonCompileable(),
+                           snapshot.compileDebugInstrumentation());
+    if (!key.complete()) {
+      ReportOutOfMemory(cx);
+      return Method_Error;
+    }
     BaselineCompiler dumpCompiler(dumpTemp, CompileRuntime::get(cx->runtime()),
                                   dumpMasm, &snapshot);
     if (!dumpCompiler.init()) {
@@ -498,9 +509,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       if (!dumpCompiler.extractAOTMetadata(dumpMd)) {
         return Method_Error;
       }
-      mozilla::SHA1Sum::Hash identity;
-      ComputeBaselineIdentityHash(script, identity);
-      if (!rec->recordBaselineFunction(cx, dumpCode, identity,
+      if (!rec->recordBaselineFunction(cx, dumpCode, key.data(),
                                        ComputeBaselineProbeHash(script), dumpMd,
                                        dumpMasm.aotLinkSites())) {
         return Method_Error;
@@ -615,7 +624,8 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     // Debuggee scripts skip AOT install because runtime trap edits would make
     // a static copy stale. Enforcement still applies below so debuggees never
     // escape to runtime codegen under --aot-only or --aot-enforce.
-    if (!script->isDebuggee()) {
+    if (!script->isDebuggee() &&
+        !options.hasFlag(BaselineOption::ForceDebugInstrumentation)) {
       if (TryInstallAOTBaselineScript(cx, script)) {
         return Method_Compiled;
       }

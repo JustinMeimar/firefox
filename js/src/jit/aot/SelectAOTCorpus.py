@@ -19,14 +19,10 @@ aggregate diff; the version here is a standalone size-only fallback.
 
 import argparse
 import shutil
-import struct
 import sys
 from pathlib import Path
 
-# Keep these values synchronized with the binary artifact header.
-BLOB_FILE_MAGIC = 0x42544F41  # "AOTB"
-BLOB_FILE_FMT = "<IHHII20sIII"
-BLOB_FILE_HEADER_SIZE = struct.calcsize(BLOB_FILE_FMT)
+from PackAOTImage import Blob
 
 # Keep these values synchronized with the artifact kind definitions.
 KIND_BASELINE_INTERPRETER = 0
@@ -40,18 +36,6 @@ KIND_NAME = {
 }
 
 
-def _read_header(path):
-    with open(path, "rb") as f:
-        buf = f.read(BLOB_FILE_HEADER_SIZE)
-    if len(buf) < BLOB_FILE_HEADER_SIZE:
-        raise ValueError(f"{path}: truncated header")
-    (magic, version, _r, kind, _probe, _id, fields, arrays, code) = struct.unpack(
-        BLOB_FILE_FMT, buf
-    )
-    if magic != BLOB_FILE_MAGIC:
-        raise ValueError(f"{path}: bad magic {magic:#x}")
-    return kind, code
-
 
 def prune(record_dir, out_dir, budgets):
     record_dir = Path(record_dir)
@@ -62,8 +46,8 @@ def prune(record_dir, out_dir, budgets):
 
     blobs = []
     for p in sorted(record_dir.glob("*.aotb")):
-        kind, code_size = _read_header(p)
-        blobs.append((kind, code_size, p))
+        blob = Blob(p)
+        blobs.append((blob.kind, blob.code_size, p))
 
     kept = 0
     dropped = 0

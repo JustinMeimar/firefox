@@ -1533,11 +1533,17 @@ HashNumber CacheIRStubKey::hash(const CacheIRStubKey::Lookup& l) {
   HashNumber hash = mozilla::HashBytes(l.code, l.length);
   hash = mozilla::AddToHash(hash, uint32_t(l.kind));
   hash = mozilla::AddToHash(hash, uint32_t(l.engine));
+#ifdef ENABLE_JS_AOT
+  hash = mozilla::AddToHash(hash, l.context);
+#endif
   return hash;
 }
 
 bool CacheIRStubKey::match(const CacheIRStubKey& entry,
                            const CacheIRStubKey::Lookup& l) {
+#ifdef ENABLE_JS_AOT
+  if (entry.context != l.context) return false;
+#endif
   if (entry.stubInfo->kind() != l.kind) {
     return false;
   }

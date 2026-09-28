@@ -10,7 +10,6 @@
 #ifdef ENABLE_JS_AOT
 
 #  include "mozilla/Assertions.h"
-#  include "mozilla/DebugOnly.h"
 #  include "mozilla/Maybe.h"
 #  include "mozilla/Span.h"
 
@@ -28,17 +27,17 @@ namespace js::jit {
 // =================
 //
 // An AOT image is a flat binary produced at build time and mapped when the
-// process starts. It contains a header, a fingerprint, an artifact directory,
-// serialized metadata, padding, and a page aligned code segment.
+// process starts. It contains a header, a build identity, an artifact
+// directory, serialized metadata, padding, and a page aligned code segment.
 //
 //   +---------------------------------------------------+
-//   | AOTImageHeader     (fixed layout, HeaderSize)    |
+//   | AOTImageHeader     (fixed layout, HeaderSize)     |
 //   +---------------------------------------------------+
-//   | Fingerprint bytes  (header.fingerprintSize)       |
+//   | BuildIdentity bytes  (header.buildIdentitySize)   |
 //   +---------------------------------------------------+
 //   | AOTBlobDirectoryEntry[header.blobCount]           |
 //   +---------------------------------------------------+
-//   | Per-blob { fields POD, arrays } sections          |
+//   | Per-blob { key, fields POD, arrays } sections     |
 //   +---------------------------------------------------+
 //   | [padding to page alignment]                       |
 //   +---------------------------------------------------+
@@ -49,7 +48,7 @@ namespace js::jit {
 // object. A shared schema defines the serialized layout used by readers and
 // writers.
 //
-// The loader validates the header and fingerprint before exposing artifacts.
+// The loader validates the header and build identity before exposing artifacts.
 // The builder emits a finalized image from recorded artifacts.
 
 class AOTImage;
@@ -63,7 +62,6 @@ enum class AOTBlobKind : uint32_t {
   BaselineInterpreter = 0,
   BaselineFunction = 1,
   InlineCacheStub = 2,
-  Configuration = 3,
 };
 
 namespace image {
@@ -72,12 +70,11 @@ namespace image {
 inline constexpr uint32_t Magic = 0x49544F41;
 
 // Increment the image format version whenever the layout, schema, or
-// fingerprint inputs change.
-inline constexpr uint16_t Version = 3;
+// compilation-key inputs change.
+inline constexpr uint16_t Version = 4;
 
-// The fingerprint covers all engine inputs that affect generated code and is
-// checked when an image is loaded.
-inline constexpr uint32_t FingerprintSize = 20;
+// The build identity identifies the native link inputs.
+inline constexpr uint32_t BuildIdentitySize = 32;
 
 // Align directory metadata to a cache line boundary.
 inline constexpr uint32_t Alignment = 16;
@@ -91,8 +88,8 @@ struct Header {
   uint16_t version;
   uint16_t reserved;
   uint32_t blobCount;
-  uint32_t fingerprintOffset;
-  uint32_t fingerprintSize;
+  uint32_t buildIdentityOffset;
+  uint32_t buildIdentitySize;
   uint32_t directoryOffset;
   uint32_t textOffset;
   uint32_t textSize;
@@ -104,8 +101,7 @@ static_assert(sizeof(Header) == 36,
 
 struct DirectoryEntry {
   uint32_t kind;
-  // Stores a short prefix of the identity hash for fast rejection during
-  // baseline artifact lookup. Other artifact kinds store zero.
+  // Shared-script-data hash for fast rejection during Baseline lookup.
   uint32_t probeHash;
   uint8_t identityHash[20];
   uint32_t textOffset;
@@ -113,9 +109,10 @@ struct DirectoryEntry {
   uint32_t dataOffset;
   uint32_t fieldsSize;
   uint32_t arraysSize;
+  uint32_t keySize;
 };
 
-static_assert(sizeof(DirectoryEntry) == 48,
+static_assert(sizeof(DirectoryEntry) == 52,
               "image::DirectoryEntry wire size; edit image::Version on change");
 
 }  // namespace image
@@ -127,10 +124,13 @@ class AOTBlobReader {
                 const uint8_t* textBase)
       : entry_(entry),
         code_(textBase + entry->textOffset, entry->textSize),
-        fields_(imageBase + entry->dataOffset),
-        arraysCursor_(imageBase + entry->dataOffset + entry->fieldsSize),
+        key_(imageBase + entry->dataOffset, entry->keySize),
+        fields_(imageBase + entry->dataOffset + entry->keySize),
+        arraysCursor_(fields_ + entry->fieldsSize),
         arraysEnd_(arraysCursor_ + entry->arraysSize) {}
 
+  mozilla::Span<const uint8_t> key() const { return key_; }
+  bool arraysComplete() const { return valid_ && arraysCursor_ == arraysEnd_; }
   AOTBlobKind kind() const { return AOTBlobKind(entry_->kind); }
   const image::DirectoryEntry* entry() const { return entry_; }
   uint32_t fieldsSize() const { return entry_->fieldsSize; }
@@ -156,7 +156,10 @@ class AOTBlobReader {
     if (count == 0) {
       return {};
     }
-    MOZ_ASSERT(arraysCursor_ + count * sizeof(T) <= arraysEnd_);
+    if (count > size_t(arraysEnd_ - arraysCursor_) / sizeof(T)) {
+      valid_ = false;
+      return {};
+    }
     auto span = mozilla::Span(reinterpret_cast<const T*>(arraysCursor_), count);
     arraysCursor_ += count * sizeof(T);
     return span;
@@ -165,9 +168,11 @@ class AOTBlobReader {
  private:
   const image::DirectoryEntry* entry_;
   mozilla::Span<const uint8_t> code_;
+  mozilla::Span<const uint8_t> key_;
   const uint8_t* fields_;
   const uint8_t* arraysCursor_;
-  mozilla::DebugOnly<const uint8_t*> arraysEnd_;
+  const uint8_t* arraysEnd_;
+  bool valid_ = true;
 };
 
 // Collects one artifact's code, fixed fields, and array data before adding it
@@ -188,6 +193,12 @@ class AOTBlobWriter {
   uint32_t probeHash() const { return probeHash_; }
   const uint8_t* identityHash() const { return identityHash_; }
 
+  mozilla::Span<const uint8_t> key() const {
+    return {key_.begin(), key_.length()};
+  }
+  [[nodiscard]] bool writeKey(mozilla::Span<const uint8_t> key) {
+    return key_.append(key.data(), key.size());
+  }
   mozilla::Span<const uint8_t> code() const {
     return {code_.begin(), code_.length()};
   }
@@ -224,6 +235,7 @@ class AOTBlobWriter {
   AOTBlobKind kind_;
   uint32_t probeHash_;
   uint8_t identityHash_[20];
+  Vector<uint8_t, 0, SystemAllocPolicy> key_;
   Vector<uint8_t, 0, SystemAllocPolicy> code_;
   Vector<uint8_t, 0, SystemAllocPolicy> fields_;
   Vector<uint8_t, 0, SystemAllocPolicy> arrays_;
@@ -242,8 +254,8 @@ class AOTImage {
   const image::Header* header() const {
     return reinterpret_cast<const image::Header*>(base_);
   }
-  mozilla::Span<const uint8_t> fingerprint() const {
-    return {base_ + header()->fingerprintOffset, header()->fingerprintSize};
+  mozilla::Span<const uint8_t> buildIdentity() const {
+    return {base_ + header()->buildIdentityOffset, header()->buildIdentitySize};
   }
   mozilla::Span<const uint8_t> text() const {
     return {base_ + header()->textOffset, header()->textSize};
@@ -261,13 +273,6 @@ class AOTImage {
         base_ + header()->directoryOffset);
   }
 
-  // Finds the only artifact of a requested kind.
-  mozilla::Maybe<AOTBlobReader> findUnique(AOTBlobKind kind) const;
-
-  // Finds an artifact by kind and identity hash. A zero probe value disables
-  // the fast rejection step.
-  mozilla::Maybe<AOTBlobReader> findByIdentity(
-      AOTBlobKind kind, uint32_t probeHash, const uint8_t* identityHash) const;
 
  private:
   explicit AOTImage(mozilla::Span<const uint8_t> bytes)
@@ -295,17 +300,19 @@ struct AOTBlobFileHeader {
   uint32_t linkSitesSize;
   // Identifies the slot numbering the link sites were recorded against.
   uint32_t slotTableHash;
+  uint32_t keySize;
+  uint8_t buildIdentity[image::BuildIdentitySize];
 };
 
-static_assert(sizeof(AOTBlobFileHeader) == 56,
+static_assert(sizeof(AOTBlobFileHeader) == 92,
               "AOTBlobFileHeader wire size; edit BlobFileVersion on change");
 
 // "AOTB" in little-endian.
 inline constexpr uint32_t BlobFileMagic = 0x42544F41;
-inline constexpr uint16_t BlobFileVersion = 2;
+inline constexpr uint16_t BlobFileVersion = 3;
 
 // Builds an image in memory from recorded artifacts using a supplied
-// fingerprint.
+// buildIdentity.
 class AOTImageBuilder {
  public:
   [[nodiscard]] bool addBlob(AOTBlobWriter&& blob) {
@@ -314,12 +321,12 @@ class AOTImageBuilder {
 
   uint32_t blobCount() const { return blobs_.length(); }
 
-  // Writes a finalized image. The fingerprint must have the expected length.
-  [[nodiscard]] bool finalize(std::ostream& out, const uint8_t* fingerprint);
+  // Writes a finalized image. The buildIdentity must have the expected length.
+  [[nodiscard]] bool finalize(std::ostream& out, const uint8_t* buildIdentity);
 
   // Collects a finalized image in memory for tests.
   [[nodiscard]] bool finalize(Vector<uint8_t, 0, SystemAllocPolicy>& out,
-                              const uint8_t* fingerprint);
+                              const uint8_t* buildIdentity);
 
  private:
   Vector<AOTBlobWriter, 0, SystemAllocPolicy> blobs_;
@@ -337,22 +344,7 @@ struct AOTICStubMetadata {
   Vector<uint8_t, 0, SystemAllocPolicy> fieldTypes;
 };
 
-struct AOTConfigurationMetadata {
-  uint8_t disableInlining = 0;
-  uint8_t spectreIndexMasking = 0;
-  uint8_t spectreObjectMitigations = 0;
-  uint8_t spectreStringMitigations = 0;
-  uint8_t baselineBatching = 0;
-  uint8_t baselineJit = 0;
-  uint8_t enableICFramePointers = 0;
-  uint32_t baselineJitWarmUpThreshold = 0;
-  uint32_t baselineQueueCapacity = 0;
-  uint32_t trialInliningWarmUpThreshold = 0;
-
-  bool operator==(const AOTConfigurationMetadata& other) const = default;
-};
-
-AOTConfigurationMetadata CurrentAOTConfiguration();
+mozilla::Span<const uint8_t> CurrentAOTBuildIdentity();
 
 }  // namespace js::jit
 

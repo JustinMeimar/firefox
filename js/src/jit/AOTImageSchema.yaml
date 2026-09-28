@@ -22,7 +22,7 @@
 
 blobs:
   BaselineInterpreter:
-    doc: "Singleton baseline interpreter blob."
+    doc: "Baseline interpreter variant."
     metadata_type: "js::jit::BaselineInterpreterMetadata"
     fields:
       - u32: interpretOpOffset
@@ -43,14 +43,16 @@ blobs:
   BaselineFunction:
     doc: |
       Per-JSScript baseline JIT code plus the metadata needed to
-      reconstruct a BaselineScript on load. Identity is by SHA-1 over
-      the JSScript state the compiler reads (see AOTRecorder.cpp).
+      reconstruct a BaselineScript on load. Compilation inputs are
+      serialized separately by AOTCompilationKey.cpp.
     metadata_type: "js::jit::BaselineScriptMetadata"
     fields:
       - u32: warmUpCheckPrologueOffset
       - u32: profilerEnterToggleOffset
       - u32: profilerExitToggleOffset
       - u8: flags
+      - u8: disableIon
+      - u8: uninlineable
     arrays:
       - js::jit::RetAddrEntry: retAddrEntries
       - js::jit::BaselineScript::OSREntry: osrEntries
@@ -72,18 +74,3 @@ blobs:
     arrays:
       - uint8_t: cacheIRCode
       - uint8_t: fieldTypes
-
-  Configuration:
-    doc: "Code-generation options shared by all blobs in the image."
-    metadata_type: "js::jit::AOTConfigurationMetadata"
-    fields:
-      - u8: disableInlining
-      - u8: spectreIndexMasking
-      - u8: spectreObjectMitigations
-      - u8: spectreStringMitigations
-      - u8: baselineBatching
-      - u8: baselineJit
-      - u8: enableICFramePointers
-      - u32: baselineJitWarmUpThreshold
-      - u32: baselineQueueCapacity
-      - u32: trialInliningWarmUpThreshold

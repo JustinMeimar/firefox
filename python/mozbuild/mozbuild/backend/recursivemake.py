@@ -1559,6 +1559,48 @@ class RecursiveMakeBackend(MakeBackend):
     def _process_linked_libraries(self, obj, backend_file):
         objs, shared_libs, os_libs, static_libs = self._expand_libs(obj)
 
+        if any(mozpath.basename(o) == "AOTImageIncbin.o" for o in objs) and (
+            isinstance(obj, (Program, SharedLibrary))
+            or isinstance(obj, StaticLibrary) and obj.no_expand_lib
+        ):
+            stem = "AOTBuildIdentity_" + obj.name.replace(".", "_")
+            identity_obj = mozpath.join(obj.objdir, stem + ".o")
+            inputs = [o for o in objs if mozpath.basename(o) != "AOTImageIncbin.o"]
+            inputs.extend(
+                lib.import_path.full_path for lib in chain(static_libs, shared_libs)
+            )
+            inputs.extend(
+                mozpath.join(self.environment.topsrcdir, "js/src/jit", name)
+                for name in (
+                    "aot/AOTImageIncbin.cpp",
+                    "aot/GenerateAOTBuildIdentity.py",
+                    "AOTLinkSyms-inl.h",
+                    "AOTABIFns-inl.h",
+                    "AOTABIFns.tbl",
+                    "AOTSlots.tbl",
+                )
+            )
+            inputs.extend(
+                mozpath.join(mozpath.dirname(o), "backend.mk")
+                for o in objs if mozpath.basename(o) == "AOTImageIncbin.o"
+            )
+            inputs.append(mozpath.join(obj.objdir, "backend.mk"))
+            manifest = stem + ".inputs"
+            with self._write_file(mozpath.join(obj.objdir, manifest)) as output:
+                output.write("\n".join(sorted(inputs)) + "\n")
+            script = "$(topsrcdir)/js/src/jit/aot/GenerateAOTBuildIdentity.py"
+            destination = (
+                "$(DEPTH)/js/src/jit/aot/build-identities/"
+                + obj.relobjdir.replace("/", "_") + "_" + stem + ".bin"
+            )
+            deps = " ".join(os.path.relpath(p, obj.objdir) for p in inputs)
+            backend_file.write(f"{stem}.o: {manifest} {script} {deps}\n")
+            backend_file.write(
+                f"\t$(PYTHON3) {script} {manifest} {stem}.cpp {destination} '$(AR)'\n"
+                f"\t$(CCC) $(OUTOPTION)$@ -c $(COMPILE_CXXFLAGS) {stem}.cpp\n"
+            )
+            objs = list(objs) + [identity_obj]
+
         obj_target = obj.name
         if isinstance(obj, (Program, SharedLibrary)):
             obj_target = self._pretty_path(obj.output_path, backend_file)

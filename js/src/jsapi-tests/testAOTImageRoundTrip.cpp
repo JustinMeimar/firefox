@@ -52,19 +52,18 @@ BEGIN_TEST(testAOTImageRoundTrip_BaselineInterpreter) {
   AOTImageBuilder builder;
   CHECK(builder.addBlob(std::move(blob)));
 
-  uint8_t fingerprint[js::jit::image::FingerprintSize] = {};
-  for (uint8_t& b : fingerprint) b = 0xab;
+  uint8_t buildIdentity[js::jit::image::BuildIdentitySize] = {};
+  for (uint8_t& b : buildIdentity) b = 0xab;
 
   Vector<uint8_t, 0, SystemAllocPolicy> bytes;
-  CHECK(builder.finalize(bytes, fingerprint));
+  CHECK(builder.finalize(bytes, buildIdentity));
 
   mozilla::Maybe<AOTImage> img =
       AOTImage::fromBytes({bytes.begin(), bytes.length()});
   CHECK(img.isSome());
   CHECK_EQUAL(img->blobCount(), 1u);
 
-  mozilla::Maybe<AOTBlobReader> reader =
-      img->findUnique(AOTBlobKind::BaselineInterpreter);
+  mozilla::Maybe<AOTBlobReader> reader = mozilla::Some(img->blobAt(0));
   CHECK(reader.isSome());
   CHECK_EQUAL(reader->code().size(), sizeof(code));
   CHECK(memcmp(reader->code().data(), code, sizeof(code)) == 0);
@@ -107,8 +106,8 @@ BEGIN_TEST(testAOTImageRoundTrip_BaselineInterpreter) {
     CHECK(dst.icReturnOffsets[i].op == src.icReturnOffsets[i].op);
   }
 
-  CHECK(memcmp(img->fingerprint().data(), fingerprint,
-               js::jit::image::FingerprintSize) == 0);
+  CHECK(memcmp(img->buildIdentity().data(), buildIdentity,
+               js::jit::image::BuildIdentitySize) == 0);
 
   return true;
 }

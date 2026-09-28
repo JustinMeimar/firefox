@@ -11,8 +11,8 @@ import sys
 
 # Keep these constants synchronized with the image format.
 IMAGE_MAGIC = 0x49544F41  # "AOTI"
-IMAGE_VERSION = 3
-FINGERPRINT_SIZE = 20
+IMAGE_VERSION = 4
+BUILD_IDENTITY_SIZE = 32
 ALIGNMENT = 16
 TEXT_ALIGNMENT = 4096
 HEADER_FMT = "<IHHIIIIIII"
@@ -25,8 +25,8 @@ def align_up(v, a):
 
 
 def empty_image():
-    fingerprint_offset = HEADER_SIZE
-    directory_offset = align_up(fingerprint_offset + FINGERPRINT_SIZE, ALIGNMENT)
+    build_identity_offset = HEADER_SIZE
+    directory_offset = align_up(build_identity_offset + BUILD_IDENTITY_SIZE, ALIGNMENT)
     data_end = directory_offset  # no entries, no data
     text_offset = align_up(data_end, TEXT_ALIGNMENT)
     text_size = 0
@@ -41,14 +41,14 @@ def empty_image():
         IMAGE_VERSION,
         0,
         0,  # blobCount
-        fingerprint_offset,
-        FINGERPRINT_SIZE,
+        build_identity_offset,
+        BUILD_IDENTITY_SIZE,
         directory_offset,
         text_offset,
         text_size,
         image_size,
     )
-    # A zero fingerprint marks an empty image.
+    # A zero build_identity marks an empty image.
     return bytes(buf)
 
 

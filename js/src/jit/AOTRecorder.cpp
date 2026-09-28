@@ -11,6 +11,7 @@
 #  include "mozilla/ScopeExit.h"
 #  include "mozilla/SHA1.h"
 
+#  include <algorithm>
 #  include <cerrno>
 #  include <cstdio>
 #  include <cstdlib>
@@ -22,6 +23,7 @@
 #  include "frontend/CompilationStencil.h"
 #  include "gc/Zone.h"
 #  include "jit/AOTImageGenerated.h"
+#  include "jit/AOTCompilationKey.h"
 #  include "jit/BaselineJIT.h"
 #  include "jit/CacheIR.h"
 #  include "jit/JitCode.h"
@@ -31,6 +33,8 @@
 #  include "jit/JitSpewer.h"
 #  include "jit/JitZone.h"
 #  include "js/AOTRecording.h"
+#  include "js/ErrorReport.h"
+#  include "vm/GeckoProfiler.h"
 #  include "vm/JSAtomUtils.h"
 #  include "vm/JSContext.h"
 #  include "vm/JSFunction.h"
@@ -54,10 +58,11 @@ static void HexEncode(const uint8_t* bytes, size_t len, char* out) {
   out[2 * len] = '\0';
 }
 
-static uint64_t Prefix64(const uint8_t* bytes) {
-  uint64_t v;
-  memcpy(&v, bytes, sizeof(v));
-  return v;
+static void HashKey(mozilla::Span<const uint8_t> key,
+                    mozilla::SHA1Sum::Hash& hash) {
+  mozilla::SHA1Sum sha;
+  sha.update(key.data(), key.size());
+  sha.finish(hash);
 }
 
 // AOTArtifactRecorder
@@ -65,36 +70,28 @@ static uint64_t Prefix64(const uint8_t* bytes) {
 bool AOTArtifactRecorder::init(JSContext* cx, const char* dir) {
   directory_.assign(dir);
   if (mkdir(directory_.c_str(), 0755) != 0 && errno != EEXIST) {
-    JitSpew(JitSpew_BaselineAOT, "AOT record dir mkdir failed: %s: %s",
-            directory_.c_str(), strerror(errno));
+    JS_ReportErrorASCII(cx, "AOT record dir mkdir failed: %s: %s",
+                        directory_.c_str(), strerror(errno));
     return false;
   }
-  AOTBlobWriter blob(AOTBlobKind::Configuration, /* probeHash = */ 0,
-                     /* identityHash = */ nullptr);
-  if (!EncodeBlob_Configuration(blob, CurrentAOTConfiguration())) {
-    return false;
-  }
-  return writeBlobFile(cx, directory_ + "/configuration.aotb", blob, {});
-}
-
-bool AOTArtifactRecorder::wasSeen(const uint8_t identityHash[20]) {
-  uint64_t key = Prefix64(identityHash);
-  auto p = seen_.lookupForAdd(key);
-  if (p) {
-    return true;
-  }
-  (void)seen_.add(p, key);
-  return false;
+  return true;
 }
 
 bool AOTArtifactRecorder::writeBlobFile(
     JSContext* cx, const std::string& path, const AOTBlobWriter& blob,
     mozilla::Span<const AOTLinkSite> sites) {
+  if (blob.key().size() > UINT32_MAX || blob.fields().size() > UINT32_MAX ||
+      blob.arrays().size() > UINT32_MAX || blob.code().size() > UINT32_MAX ||
+      sites.size() > UINT32_MAX / sizeof(AOTLinkSite)) {
+    JS_ReportErrorASCII(cx, "AOT artifact exceeds format limits: %s",
+                        path.c_str());
+    return false;
+  }
   std::string temporaryPath = path + ".tmp.XXXXXX";
   int fd = mkstemp(temporaryPath.data());
   if (fd < 0) {
-    JitSpew(JitSpew_BaselineAOT, "AOT record open failed: %s: %s", path.c_str(),
-            strerror(errno));
+    JS_ReportErrorASCII(cx, "AOT record open failed: %s: %s", path.c_str(),
+                        strerror(errno));
     return false;
   }
   auto cleanup = mozilla::MakeScopeExit([&] {
@@ -115,6 +112,9 @@ bool AOTArtifactRecorder::writeBlobFile(
   hdr.codeSize = uint32_t(blob.code().size());
   hdr.linkSitesSize = uint32_t(sites.size() * sizeof(AOTLinkSite));
   hdr.slotTableHash = AOTImageLinkHash();
+  hdr.keySize = uint32_t(blob.key().size());
+  memcpy(hdr.buildIdentity, CurrentAOTBuildIdentity().data(),
+         sizeof(hdr.buildIdentity));
 
   auto writeBytes = [&](const void* p, size_t n) -> bool {
     const uint8_t* cur = static_cast<const uint8_t*>(p);
@@ -122,8 +122,8 @@ bool AOTArtifactRecorder::writeBlobFile(
       ssize_t rc = write(fd, cur, n);
       if (rc <= 0) {
         if (rc < 0 && errno == EINTR) continue;
-        JitSpew(JitSpew_BaselineAOT, "AOT record write failed: %s: %s",
-                path.c_str(), rc == 0 ? "zero-length write" : strerror(errno));
+        JS_ReportErrorASCII(cx, "AOT record write failed: %s: %s", path.c_str(),
+                            rc == 0 ? "zero-length write" : strerror(errno));
         return false;
       }
       cur += rc;
@@ -133,6 +133,7 @@ bool AOTArtifactRecorder::writeBlobFile(
   };
 
   if (!writeBytes(&hdr, sizeof(hdr)) ||
+      !writeBytes(blob.key().data(), blob.key().size()) ||
       !writeBytes(blob.fields().data(), blob.fields().size()) ||
       !writeBytes(blob.arrays().data(), blob.arrays().size()) ||
       !writeBytes(blob.code().data(), blob.code().size()) ||
@@ -142,15 +143,51 @@ bool AOTArtifactRecorder::writeBlobFile(
   int rc = close(fd);
   fd = -1;
   if (rc != 0) {
-    JitSpew(JitSpew_BaselineAOT, "AOT record close failed: %s: %s", path.c_str(),
-            strerror(errno));
+    JS_ReportErrorASCII(cx, "AOT record close failed: %s: %s", path.c_str(),
+                        strerror(errno));
     return false;
   }
 
   // Publish complete artifacts without replacing a concurrent writer's file.
-  if (link(temporaryPath.c_str(), path.c_str()) != 0 && errno != EEXIST) {
-    JitSpew(JitSpew_BaselineAOT, "AOT record link failed: %s: %s", path.c_str(),
-            strerror(errno));
+  if (link(temporaryPath.c_str(), path.c_str()) == 0) {
+    return true;
+  }
+  if (errno != EEXIST) {
+    JS_ReportErrorASCII(cx, "AOT record link failed: %s: %s", path.c_str(),
+                        strerror(errno));
+    return false;
+  }
+
+  FILE* existing = fopen(path.c_str(), "rb");
+  if (!existing) {
+    JS_ReportErrorASCII(cx, "Cannot read existing AOT artifact %s: %s",
+                        path.c_str(), strerror(errno));
+    return false;
+  }
+  auto closeExisting = mozilla::MakeScopeExit([&] { fclose(existing); });
+  auto matches = [&](const void* data, size_t length) {
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    uint8_t buffer[4096];
+    while (length) {
+      size_t count = std::min(length, sizeof(buffer));
+      if (fread(buffer, 1, count, existing) != count ||
+          memcmp(buffer, bytes, count) != 0) {
+        return false;
+      }
+      bytes += count;
+      length -= count;
+    }
+    return true;
+  };
+  if (!matches(&hdr, sizeof(hdr)) ||
+      !matches(blob.key().data(), blob.key().size()) ||
+      !matches(blob.fields().data(), blob.fields().size()) ||
+      !matches(blob.arrays().data(), blob.arrays().size()) ||
+      !matches(blob.code().data(), blob.code().size()) ||
+      !matches(sites.data(), hdr.linkSitesSize) || fgetc(existing) != EOF ||
+      ferror(existing)) {
+    JS_ReportErrorASCII(cx, "Conflicting or incomplete AOT artifact: %s",
+                        path.c_str());
     return false;
   }
   return true;
@@ -159,27 +196,43 @@ bool AOTArtifactRecorder::writeBlobFile(
 bool AOTArtifactRecorder::recordInterpreter(
     JSContext* cx, JitCode* code, const BaselineInterpreterMetadata& md,
     mozilla::Span<const AOTLinkSite> sites) {
-  AOTBlobWriter blob(AOTBlobKind::BaselineInterpreter, /* probeHash = */ 0,
-                     /* identityHash = */ nullptr);
-  if (!EncodeBlob_BaselineInterpreter(blob, md)) return false;
-  if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
+  AOTCompilationKey key;
+  WriteAOTContext(key, AOTBlobKind::BaselineInterpreter, JitOptions,
+                  cx->runtime()->geckoProfiler().enabled());
+  if (!key.complete()) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  mozilla::SHA1Sum::Hash identity;
+  HashKey(key.data(), identity);
+  AOTBlobWriter blob(AOTBlobKind::BaselineInterpreter, 0, identity);
+  if (!blob.writeKey(key.data()) || !EncodeBlob_BaselineInterpreter(blob, md) ||
+      !blob.writeCode(code->raw(), code->instructionsSize())) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
 
-  std::string path = directory_ + "/interp.aotb";
+  char idHex[41];
+  HexEncode(identity, sizeof(identity), idHex);
+  std::string path = directory_ + "/interp-" + idHex + ".aotb";
   return writeBlobFile(cx, path, blob, sites);
 }
 
 bool AOTArtifactRecorder::recordBaselineFunction(
-    JSContext* cx, JitCode* code, const uint8_t identityHash[20],
+    JSContext* cx, JitCode* code, mozilla::Span<const uint8_t> key,
     uint32_t probeHash, const BaselineScriptMetadata& md,
     mozilla::Span<const AOTLinkSite> sites) {
-  if (wasSeen(identityHash)) return true;
-
+  mozilla::SHA1Sum::Hash identityHash;
+  HashKey(key, identityHash);
   AOTBlobWriter blob(AOTBlobKind::BaselineFunction, probeHash, identityHash);
-  if (!EncodeBlob_BaselineFunction(blob, md)) return false;
-  if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
+  if (!blob.writeKey(key) || !EncodeBlob_BaselineFunction(blob, md) ||
+      !blob.writeCode(code->raw(), code->instructionsSize())) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
 
   char idHex[41];
-  HexEncode(identityHash, 8, idHex);
+  HexEncode(identityHash, 20, idHex);
   std::string path = directory_ + "/blfun-" + idHex + ".aotb";
   return writeBlobFile(cx, path, blob, sites);
 }
@@ -254,6 +307,9 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
 
     BaselineOptions options({BaselineOption::ForceMainThreadCompilation});
     MethodStatus status = BaselineCompile(cx, script, options);
+    if (status == Method_Error) {
+      return false;
+    }
     if (status != Method_Compiled) {
       (*skippedOut)++;
       cx->clearPendingException();
@@ -270,30 +326,25 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
 bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
                                        const AOTICStubMetadata& md,
                                        mozilla::Span<const AOTLinkSite> sites) {
-  // Hash the inputs that determine generated stub code. Equal identities are
-  // safe to deduplicate by file name.
-  mozilla::SHA1Sum sha;
-  sha.update(&md.cacheKind, sizeof(md.cacheKind));
-  if (!md.cacheIRCode.empty()) {
-    sha.update(md.cacheIRCode.begin(), md.cacheIRCode.length());
-  }
-  if (!md.fieldTypes.empty()) {
-    sha.update(md.fieldTypes.begin(), md.fieldTypes.length());
+  AOTCompilationKey key;
+  WriteAOTContext(key, AOTBlobKind::InlineCacheStub, JitOptions,
+                  cx->runtime()->geckoProfiler().enabled());
+  WriteAOTICInputs(key, md);
+  if (!key.complete()) {
+    ReportOutOfMemory(cx);
+    return false;
   }
   mozilla::SHA1Sum::Hash hash;
-  sha.finish(hash);
-
-  static_assert(sizeof(hash) == 20,
-                "SHA1 hash width mirrors AOTBlobFileHeader::identityHash");
-
-  if (wasSeen(hash)) return true;
-
-  AOTBlobWriter blob(AOTBlobKind::InlineCacheStub, /* probeHash = */ 0, hash);
-  if (!EncodeBlob_InlineCacheStub(blob, md)) return false;
-  if (!blob.writeCode(code->raw(), code->instructionsSize())) return false;
+  HashKey(key.data(), hash);
+  AOTBlobWriter blob(AOTBlobKind::InlineCacheStub, 0, hash);
+  if (!blob.writeKey(key.data()) || !EncodeBlob_InlineCacheStub(blob, md) ||
+      !blob.writeCode(code->raw(), code->instructionsSize())) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
 
   char idHex[41];
-  HexEncode(hash, 8, idHex);
+  HexEncode(hash, sizeof(hash), idHex);
   std::string path = directory_ + "/ic-" + idHex + ".aotb";
   return writeBlobFile(cx, path, blob, sites);
 }

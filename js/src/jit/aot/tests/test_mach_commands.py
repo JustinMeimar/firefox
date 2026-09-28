@@ -20,40 +20,46 @@ import mach_commands
 from PackAOTImage import BLOB_FILE_FMT, BLOB_FILE_MAGIC, BLOB_FILE_VERSION, pack
 
 
-def write_blob(path, kind, slot_hash=0x12345678, fields=b"", code=b""):
-    identity = (
-        bytes(20) if kind == mach_commands.CONFIGURATION_KIND else bytes([kind]) * 20
-    )
+BUILD_IDENTITY = bytes(range(32))
+
+
+def write_blob(path, kind, slot_hash=0x12345678, code=b"code", variant=0,
+               identity=BUILD_IDENTITY):
+    words = [kind, 0, 0, 0, 0, 0, 0]
+    if kind == 0:
+        words += [0, variant, 0, 0, 0, 0]
+    elif kind == 1:
+        words += [0, variant] + [0] * 19
+    else:
+        words += [0, 0, 0, 0, 0, 0]
+    key = struct.pack("<" + "I" * len(words), *words)
+    fields = bytes({0: 52, 1: 32, 2: 12}[kind])
     header = struct.pack(
-        BLOB_FILE_FMT,
-        BLOB_FILE_MAGIC,
-        BLOB_FILE_VERSION,
-        0,
-        kind,
-        0,
-        identity,
-        len(fields),
-        0,
-        len(code),
-        0,
-        slot_hash,
+        BLOB_FILE_FMT, BLOB_FILE_MAGIC, BLOB_FILE_VERSION, 0, kind, 0,
+        hashlib.sha1(key).digest(), len(fields), 0, len(code), 0, slot_hash,
+        len(key), identity,
     )
-    path.write_bytes(header + fields + code)
+    path.write_bytes(header + key + fields + code)
 
 
 def corpus(tmp_path):
     path = tmp_path / "corpus"
     path.mkdir()
-    write_blob(path / "configuration.aotb", 3, fields=bytes(20))
-    write_blob(path / "interp.aotb", 0, fields=b"fields", code=b"code")
+    write_blob(path / "interp.aotb", 0)
+    return path
+
+
+def identity_file(tmp_path):
+    path = tmp_path / "identity.bin"
+    path.write_bytes(BUILD_IDENTITY)
     return path
 
 
 def test_rejects_incompatible_corpus(tmp_path):
     path = corpus(tmp_path)
-    write_blob(path / "other.aotb", 1, slot_hash=0x87654321)
-    with pytest.raises(mach_commands.AmberMonkeyError, match="fingerprint"):
-        mach_commands._load_corpus(path)
+    write_blob(path / "other.aotb", 1, identity=bytes([42]) * 32)
+    with pytest.raises(ValueError, match="mixed build identities"):
+        pack(path, [identity_file(tmp_path)], tmp_path / "image", tmp_path / "relocs")
 
 
 def test_command_construction(tmp_path):
@@ -72,14 +78,16 @@ def test_command_construction(tmp_path):
 
     paths = {
         "pack": AOT_DIR / "PackAOTImage.py",
-        "schema": tmp_path / "schema.yaml",
+        "identities": tmp_path / "identities",
         "relocs": tmp_path / "AOTImageRelocs.inc",
         "image": tmp_path / "AOTImage.inc",
     }
+    paths["identities"].mkdir()
+    identity = identity_file(paths["identities"])
     assert mach_commands._pack_argv(paths, path)[1:] == [
         str(paths["pack"]),
-        "--schema",
-        str(paths["schema"]),
+        "--build-identity",
+        str(identity),
         "--relocs",
         str(paths["relocs"]),
         str(path),
@@ -97,11 +105,10 @@ def test_command_construction(tmp_path):
 
 def test_pack_is_deterministic(tmp_path):
     path = corpus(tmp_path)
-    schema = tmp_path / "schema.yaml"
-    schema.write_text("schema\n")
+    identity = identity_file(tmp_path)
     outputs = [(tmp_path / f"image-{i}", tmp_path / f"relocs-{i}") for i in range(2)]
     for image, relocs in outputs:
-        pack(path, schema, image, relocs)
+        pack(path, [identity], image, relocs)
 
     assert outputs[0][0].read_bytes() == outputs[1][0].read_bytes()
     assert outputs[0][1].read_bytes() == outputs[1][1].read_bytes()
@@ -109,7 +116,7 @@ def test_pack_is_deterministic(tmp_path):
     assert image_hash in outputs[0][1].read_text()
     image = mach_commands._read_image(outputs[0][0])
     assert image["hash"] == image_hash
-    assert [entry["kind"] for entry in image["entries"]] == [3, 0]
+    assert [entry["kind"] for entry in image["entries"]] == [0]
 
 
 if __name__ == "__main__":
