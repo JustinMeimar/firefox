@@ -4,10 +4,6 @@
 
 #include "jit/BaselineCodeGen.h"
 
-#ifdef ENABLE_JS_AOT
-#  include "jit/AOTTiming.h"
-#endif
-
 #include "mozilla/Casting.h"
 
 #include "gc/GC.h"
@@ -263,9 +259,6 @@ bool BaselineCompiler::PrepareToCompile(JSContext* cx, Handle<JSScript*> script,
 }
 
 MethodStatus BaselineCompiler::compile(JSContext* cx) {
-#ifdef ENABLE_JS_AOT
-  AutoAOTTimer timer(AOTTimingPhase::BaselineCompile);
-#endif
   Rooted<JSScript*> script(cx, handler.script());
 
   JitSpew(JitSpew_Codegen, "# Emitting baseline code for script %s:%u:%u",
@@ -290,9 +283,6 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
 }
 
 MethodStatus BaselineCompiler::compileOffThread() {
-#ifdef ENABLE_JS_AOT
-  AutoAOTTimer timer(AOTTimingPhase::BaselineCompile);
-#endif
   handler.setCompilingOffThread();
   if (!compileImpl()) {
     return Method_Error;

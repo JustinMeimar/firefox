@@ -13,10 +13,8 @@
 #  include <cstring>
 
 #  include "jit/AOT.h"
-#  include "jit/AOTCoverage.h"
 #  include "jit/AOTImage.h"
 #  include "jit/AOTImageGenerated.h"
-#  include "jit/AOTTiming.h"
 #  include "jit/AutoWritableJitCode.h"
 #  include "jit/BaselineCodeGen.h"
 #  include "jit/BaselineIC.h"
@@ -153,7 +151,6 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
   if (!IsAOTImageCompatible(image)) {
     return false;
   }
-  AutoAOTTimer timer(AOTTimingPhase::InterpreterInstall);
 
   auto readerOpt = image->findUnique(AOTBlobKind::BaselineInterpreter);
   if (readerOpt.isNothing()) {
@@ -161,8 +158,6 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
   }
 
   AOTBlobReader reader = readerOpt.ref();
-  uint64_t interpMetadataBytes =
-      uint64_t(reader.entry()->fieldsSize) + reader.entry()->arraysSize;
   BaselineInterpreterMetadata md;
   if (!DecodeBlob_BaselineInterpreter(reader, &md)) {
     MOZ_CRASH("AOT baseline interpreter decode failed");
@@ -210,9 +205,6 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
     interp.toggleCodeCoverageInstrumentationUnchecked(true);
   }
 
-  AOTTiming::AddCounter(AOTTimingCounter::InterpreterImageBytes,
-                        interpMetadataBytes + code.size());
-
   JitSpew(JitSpew_BaselineAOT,
           "installed baseline interpreter from AOT image: bytes=%zu",
           size_t(code.size()));
@@ -241,7 +233,6 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   if (readerOpt.isNothing()) {
     return false;
   }
-  AutoAOTTimer installTimer(AOTTimingPhase::BaselineInstall);
 
   // The script may not have its baseline metadata initialized when AOT
   // installation begins. Initialize it before installing the compiled code.
@@ -257,8 +248,6 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   }
 
   AOTBlobReader reader = readerOpt.ref();
-  uint64_t baselineMetadataBytes =
-      uint64_t(reader.entry()->fieldsSize) + reader.entry()->arraysSize;
   BaselineScriptMetadata md;
   if (!DecodeBlob_BaselineFunction(reader, &md)) {
     JitSpew(JitSpew_BaselineAOT,
@@ -313,12 +302,6 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
 
   FinalizeInstalledBaselineScript(script);
 
-  AOTCoverage::EnsureInit(image);
-  if (AOTCoverage::IsEnabled()) {
-    uint32_t blobIdx = uint32_t(reader.entry() - image->directory());
-    AOTCoverage::NoteBaselineInstalled(blobIdx, script->selfHosted());
-  }
-
   // Register the static baseline code with the profiler so stack walkers can
   // associate return addresses with the script.
   JitcodeGlobalTable* globalTable =
@@ -346,9 +329,6 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
     bs->toggleProfilerInstrumentation(true);
   }
 
-  AOTTiming::AddCounter(AOTTimingCounter::BaselineImageBytes,
-                        baselineMetadataBytes + code.size());
-
   JitSpew(JitSpew_BaselineAOT,
           "installed baseline function from AOT image: %s:%u bytes=%zu",
           script->filename() ? script->filename() : "<null>",
@@ -367,8 +347,6 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
   if (!image || !IsAOTImageCompatible(image)) {
     return false;
   }
-
-  AOTCoverage::EnsureInit(image);
 
   uint32_t loaded = 0;
   uint32_t attempted = 0;
@@ -428,9 +406,6 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
         return false;
       }
       continue;
-    }
-    if (AOTCoverage::IsEnabled()) {
-      AOTCoverage::NoteICStubLoaded(jitCode, i);
     }
     loaded++;
   }

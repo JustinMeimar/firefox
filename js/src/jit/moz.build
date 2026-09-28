@@ -269,12 +269,10 @@ if CONFIG["ENABLE_JS_AOT"]:
 
     SOURCES += [
         "AOT.cpp",
-        "AOTCoverage.cpp",
         "AOTImage.cpp",
         "AOTInstaller.cpp",
         "AOTMacroAssembler.cpp",
         "AOTRecorder.cpp",
-        "AOTTiming.cpp",
     ]
 
     GeneratedFile(

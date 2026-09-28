@@ -15,9 +15,7 @@
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #ifdef ENABLE_JS_AOT
-#  include "jit/AOTCoverage.h"
 #  include "jit/AOTInstaller.h"
-#  include "jit/AOTTiming.h"
 #  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/AutoWritableJitCode.h"
@@ -628,9 +626,6 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   if (JitOptions.aotOnly) {
     script->disableBaselineCompile();
     return Method_CantCompile;
-  }
-  if (JitOptions.useAOTBaseline && AOTCoverage::IsEnabled()) {
-    AOTCoverage::NoteBaselineCompiled();
   }
 #endif
 
@@ -1470,9 +1465,6 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
     TempAllocator temp(&cx->tempLifoAlloc());
     StackMacroAssembler masm(cx, temp);
     BaselineInterpreterGenerator generator(cx, temp, masm);
-#ifdef ENABLE_JS_AOT
-    AutoAOTTimer timer(AOTTimingPhase::InterpreterGenerate);
-#endif
     return generator.generate(cx, interpreter);
   }
 

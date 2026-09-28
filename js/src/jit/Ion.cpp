@@ -77,7 +77,6 @@
 #  include "builtin/Math.h"
 #  include "builtin/WeakMapObject.h"
 #  include "builtin/WeakSetObject.h"
-#  include "jit/AOTTiming.h"
 #  include "js/Wrapper.h"
 #  include "proxy/DeadObjectProxy.h"
 #  include "proxy/DOMProxy.h"
