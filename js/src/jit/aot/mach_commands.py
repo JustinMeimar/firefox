@@ -14,6 +14,7 @@ from collections import Counter
 from pathlib import Path
 
 from mach.decorators import Command, CommandArgument, SubCommand
+from mach.registrar import Registrar
 
 PACKER_PATH = Path(__file__).with_name("PackAOTImage.py")
 PACKER_SPEC = importlib.util.spec_from_file_location("ambermonkey_packer", PACKER_PATH)
@@ -79,13 +80,15 @@ def _validate_build(command_context, paths):
         enabled = command_context.substs.get("ENABLE_JS_AOT")
     except Exception as exc:
         raise AmberMonkeyError(
-            f"No configured build found at {paths['objdir']}; run ./mach configure "
-            "with --enable-aot and build the empty-image stage 1."
+            f"No configured build found at {paths['objdir']}. "
+            "Set MOZCONFIG to the config used for your AOT build, "
+            "or configure and build with --enable-aot."
         ) from exc
     if not enabled:
         raise AmberMonkeyError(
-            f"The build at {paths['objdir']} is not AOT-enabled; add "
-            "--enable-aot to its configure options and rebuild."
+            f"The selected build at {paths['objdir']} is not AOT-enabled. "
+            "Set MOZCONFIG to the config used for your AOT build, "
+            "or add --enable-aot to this build's config and rebuild."
         )
     missing = [
         path
@@ -415,12 +418,12 @@ def _bundle(paths, executables, output_dir):
     description="Record, pack, relink, and verify AmberMonkey AOT images.",
 )
 def ambermonkey(command_context):
-    command_context.log(
-        logging.INFO,
-        COMMAND,
-        {},
-        "Usage: mach ambermonkey {record,pack,show-image,relink,build-image,verify}",
-    )
+    print("Usage: ./mach ambermonkey <command> [options]\n")
+    subcommands = Registrar.command_handlers[COMMAND].subcommand_handlers
+    for name, handler in sorted(subcommands.items()):
+        print(f"  {name:12} {handler.description}")
+    print("\nSet MOZCONFIG to the config used for your AOT build.")
+    print("\nRun ./mach ambermonkey <command> --help for options.")
     return 0
 
 
