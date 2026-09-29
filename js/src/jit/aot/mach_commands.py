@@ -24,7 +24,6 @@ try:
     PACKER_SPEC.loader.exec_module(PACKER)
 finally:
     sys.path.pop(0)
-Blob = PACKER.Blob
 
 
 COMMAND = "ambermonkey"
@@ -49,16 +48,12 @@ def _executable_path(objdir, name):
 
 
 def _paths(command_context):
-    topsrcdir = Path(command_context.topsrcdir)
     objdir = Path(command_context.topobjdir)
-    aot_srcdir = topsrcdir / "js" / "src" / "jit" / "aot"
     image_dir = objdir / "js" / "src" / "jit" / "aot"
     return {
         "objdir": objdir,
         "format": image_dir / "AOTImageFormat.inc",
-        "aot_srcdir": aot_srcdir,
         "identities": image_dir / "build-identities",
-        "pack": aot_srcdir / "PackAOTImage.py",
         "image": image_dir / "AOTImage.inc",
         "relocs": image_dir / "AOTImageRelocs.inc",
         "shell": _executable_path(objdir, "js"),
@@ -102,11 +97,8 @@ def _validate_build(command_context, paths):
 
 def _load_corpus(corpus, format):
     corpus = _resolve_path(corpus)
-    if not corpus.is_dir():
-        raise AmberMonkeyError(f"Corpus directory does not exist: {corpus}")
-    paths = sorted(corpus.glob("*.aotb"), key=lambda path: path.name)
     try:
-        blobs = [Blob(path, format) for path in paths]
+        blobs = list(PACKER.iter_corpus(corpus, format))
     except (OSError, ValueError) as exc:
         raise AmberMonkeyError(f"Invalid corpus {corpus}: {exc}") from exc
     return corpus, blobs
@@ -259,23 +251,6 @@ def _record_argv(shell, corpus, workload=None):
     return argv
 
 
-def _pack_argv(paths, corpus):
-    identities = sorted(paths["identities"].glob("*.bin"))
-    if not identities:
-        raise AmberMonkeyError("No native build identity found; rebuild stage 1 first.")
-    return [
-        sys.executable,
-        str(paths["pack"]),
-        "--format",
-        str(paths["format"]),
-        *(arg for path in identities for arg in ("--build-identity", str(path))),
-        "--relocs",
-        str(paths["relocs"]),
-        str(corpus),
-        str(paths["image"]),
-    ]
-
-
 def _log_error(command_context, message):
     command_context.log(logging.ERROR, COMMAND, {}, str(message))
     return 1
@@ -284,13 +259,15 @@ def _log_error(command_context, message):
 def _pack(command_context, corpus):
     paths = _paths(command_context)
     _validate_build(command_context, paths)
-    corpus, blobs = _load_corpus(corpus, PACKER.AOTImageFormat.load(paths["format"]))
-    paths["image"].parent.mkdir(parents=True, exist_ok=True)
-    rc = command_context.run_process(
-        _pack_argv(paths, corpus), pass_thru=True, ensure_exit_code=False
+    format = PACKER.AOTImageFormat.load(paths["format"])
+    corpus, blobs = _load_corpus(corpus, format)
+    PACKER.pack(
+        blobs,
+        sorted(paths["identities"].glob("*.bin")),
+        paths["image"],
+        paths["relocs"],
+        format,
     )
-    if rc:
-        raise AmberMonkeyError(f"PackAOTImage.py exited with status {rc}.")
     return {
         "paths": paths,
         "corpus": corpus,
@@ -419,7 +396,7 @@ def ambermonkey_record(command_context, corpus, workload=None):
             f"Corpus hash: {_corpus_hash(corpus, [Path(blob.source) for blob in blobs])}",
         )
         return 0
-    except (AmberMonkeyError, OSError) as exc:
+    except (AmberMonkeyError, OSError, ValueError) as exc:
         return _log_error(command_context, exc)
 
 
@@ -436,7 +413,7 @@ def ambermonkey_pack(command_context, corpus):
         result = _pack(command_context, corpus)
         _print_summary(command_context, result)
         return 0
-    except (AmberMonkeyError, OSError) as exc:
+    except (AmberMonkeyError, OSError, ValueError) as exc:
         return _log_error(command_context, exc)
 
 
@@ -466,7 +443,7 @@ def ambermonkey_show_image(command_context, image=None, limit=12):
         preview = _format_image_preview(_read_image(path, format), limit)
         command_context.log(logging.INFO, COMMAND, {}, preview)
         return 0
-    except (AmberMonkeyError, OSError) as exc:
+    except (AmberMonkeyError, OSError, ValueError) as exc:
         return _log_error(command_context, exc)
 
 
@@ -484,7 +461,7 @@ def ambermonkey_relink(command_context):
                 "No packed objdir image found; run `./mach ambermonkey pack --corpus PATH` first."
             )
         return _relink(command_context)
-    except (AmberMonkeyError, OSError) as exc:
+    except (AmberMonkeyError, OSError, ValueError) as exc:
         return _log_error(command_context, exc)
 
 
@@ -523,7 +500,7 @@ def ambermonkey_build_image(command_context, corpus, output_dir=None):
             )
         _print_summary(command_context, result, executables)
         return 0
-    except (AmberMonkeyError, OSError) as exc:
+    except (AmberMonkeyError, OSError, ValueError) as exc:
         return _log_error(command_context, exc)
 
 
@@ -575,5 +552,5 @@ def ambermonkey_test(command_context):
                 env=_clean_environment(),
             )
         return 0
-    except (AmberMonkeyError, OSError) as exc:
+    except (AmberMonkeyError, OSError, ValueError) as exc:
         return _log_error(command_context, exc)

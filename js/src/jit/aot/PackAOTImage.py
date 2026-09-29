@@ -6,11 +6,11 @@
 # Combines recorded artifacts into one image.
 
 import argparse
-import glob
 import hashlib
 import os
 import struct
 import sys
+from pathlib import Path
 
 from AOTImageFormat import AOTImageFormat, align_up
 
@@ -92,8 +92,8 @@ class Blob:
             previous = offset
 
 
-def emit_relocs(path, buf, sites, slot_table_hash, format):
-    """Writes the interleaved chunk and site list the image shim expands.
+def encode_relocs(buf, sites, slot_table_hash, format):
+    """Encodes the interleaved chunk and site list the image shim expands.
 
     A site replaces four image bytes with a displacement the static linker
     computes, so the shim embeds the image as the runs of bytes between sites
@@ -119,16 +119,19 @@ def emit_relocs(path, buf, sites, slot_table_hash, format):
     if cursor < len(buf):
         lines.append(f"AOT_IMAGE_CHUNK({cursor}, {len(buf) - cursor})")
 
-    with open(path, "wb") as f:
-        f.write("\n".join(lines).encode() + b"\n")
+    return "\n".join(lines).encode() + b"\n"
 
 
-def pack(record_dir, build_identities, out_path, relocs_path, format):
-    paths = sorted(glob.glob(os.path.join(record_dir, "*.aotb")))
-    if not paths:
-        print(f"warning: no .aotb files in {record_dir}", file=sys.stderr)
-    blobs = [Blob(p, format) for p in paths]
+def iter_corpus(record_dir, format):
+    record_dir = Path(record_dir)
+    if not record_dir.is_dir():
+        raise ValueError(f"Corpus directory does not exist: {record_dir}")
+    return (Blob(path, format) for path in sorted(record_dir.glob("*.aotb")))
 
+
+def pack(blobs, build_identities, out_path, relocs_path, format):
+    if not blobs:
+        print("warning: no .aotb files in corpus", file=sys.stderr)
     identities = []
     for path in build_identities:
         with open(path, "rb") as stream:
@@ -163,6 +166,19 @@ def pack(record_dir, build_identities, out_path, relocs_path, format):
                 f"({b.slot_table_hash:#x} vs {slot_table_hash:#x})"
             )
 
+    buf, sites = build_image(blobs, build_identity, format)
+    Path(relocs_path).write_bytes(encode_relocs(buf, sites, slot_table_hash, format))
+    Path(out_path).write_bytes(buf)
+
+    text_size = format.header.unpack_from(buf)["textSize"]
+    print(
+        f"packed {len(blobs)} blob(s) into {out_path} "
+        f"({len(buf)} bytes, text {text_size} bytes, {len(sites)} link site(s))"
+    )
+
+
+def build_image(blobs, build_identity, format):
+    assert len(build_identity) == format.BUILD_IDENTITY_SIZE
     build_identity_offset = format.header.size
     directory_offset = align_up(build_identity_offset + format.BUILD_IDENTITY_SIZE, format.ALIGNMENT)
     data_start = align_up(directory_offset + format.directory_entry.size * len(blobs), format.ALIGNMENT)
@@ -223,21 +239,9 @@ def pack(record_dir, build_identities, out_path, relocs_path, format):
         buf[p + e["fieldsSize"] : p + e["fieldsSize"] + e["arraysSize"]] = b.arrays
         t = text_offset + e["textOffset"]
         buf[t : t + e["textSize"]] = b.code
-        for code_offset, slot in b.link_sites:
-            if code_offset + format.LINK_SITE_WIDTH > b.code_size:
-                raise ValueError(f"{b.source}: link site at {code_offset} is past code")
-            sites.append((t + code_offset, slot))
+        sites.extend((t + offset, slot) for offset, slot in b.link_sites)
 
-    sites.sort()
-    emit_relocs(relocs_path, buf, sites, slot_table_hash, format)
-
-    with open(out_path, "wb") as f:
-        f.write(buf)
-
-    print(
-        f"packed {len(blobs)} blob(s) into {out_path} "
-        f"({image_size} bytes, text {text_size} bytes, {len(sites)} link site(s))"
-    )
+    return buf, sorted(sites)
 
 
 def main(argv):
@@ -258,9 +262,13 @@ def main(argv):
     relocs = args.relocs or os.path.join(
         os.path.dirname(args.out), "AOTImageRelocs.inc"
     )
+    format = AOTImageFormat.load(args.format)
     pack(
-        args.record_dir, args.build_identity, args.out, relocs,
-        AOTImageFormat.load(args.format),
+        list(iter_corpus(args.record_dir, format)),
+        args.build_identity,
+        args.out,
+        relocs,
+        format,
     )
 
 

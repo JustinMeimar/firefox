@@ -10,62 +10,54 @@ kind, and greedily keeps blobs in ascending code-size order until the
 per-kind budget is exhausted. Kept blobs are copied to the output
 directory unchanged. Kinds without an explicit budget are copied in
 full.
-
-The budgeting policy here is intentionally simple: the paper's
-frequency-weighted knapsack (Algorithm 1 in the FrostMonkey draft) is
-future work and lives at js/src/jit/SelectAOTCorpus.py in the
-aggregate diff; the version here is a standalone size-only fallback.
 """
 
 import argparse
 import shutil
 import sys
+from itertools import groupby
 from pathlib import Path
 
-from PackAOTImage import Blob
 from AOTImageFormat import AOTImageFormat
+from PackAOTImage import iter_corpus
+
 
 def prune(record_dir, out_dir, budgets, format):
-    interpreter = next(kind for kind, name in format.kind_names.items()
-                       if name == "BaselineInterpreter")
-    names = {kind: blob["prefix"] for kind, blob in enumerate(format.blobs)}
     record_dir = Path(record_dir)
     out_dir = Path(out_dir)
+    source, destination = record_dir.resolve(), out_dir.resolve()
+    if (
+        source == destination
+        or source in destination.parents
+        or destination in source.parents
+    ):
+        raise ValueError("Input and output corpus directories must not overlap")
+    blobs = sorted(
+        (blob.kind, blob.code_size, blob.source)
+        for blob in iter_corpus(record_dir, format)
+    )
+
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
 
-    blobs = []
-    for p in sorted(record_dir.glob("*.aotb")):
-        blob = Blob(p, format)
-        blobs.append((blob.kind, blob.code_size, p))
-
     kept = 0
     dropped = 0
     per_kind_used = {}
-    # Interpreter blob is always kept.
-    for kind, code_size, p in blobs:
-        if kind == interpreter:
-            shutil.copy(p, out_dir / p.name)
-            kept += 1
-    # Everything else: sort by ascending code size within a kind.
-    by_kind = {}
-    for kind, code_size, p in blobs:
-        if kind == interpreter:
-            continue
-        by_kind.setdefault(kind, []).append((code_size, p))
-    for kind, items in by_kind.items():
-        items.sort(key=lambda x: x[0])
-        limit = budgets.get(names.get(kind, ""), None)
+    for kind, items in groupby(blobs, key=lambda blob: blob[0]):
+        name = format.blobs[kind]["prefix"]
+        interpreter = format.kind_names[kind] == "BaselineInterpreter"
+        limit = None if interpreter else budgets.get(name)
         used = 0
-        for code_size, p in items:
+        for _, code_size, path in items:
             if limit is not None and used + code_size > limit:
                 dropped += 1
                 continue
-            shutil.copy(p, out_dir / p.name)
+            shutil.copy(path, out_dir / path.name)
             used += code_size
             kept += 1
-        per_kind_used[names.get(kind, str(kind))] = used
+        if not interpreter:
+            per_kind_used[name] = used
 
     print(f"kept={kept} dropped={dropped} bytes_per_kind={per_kind_used}")
 

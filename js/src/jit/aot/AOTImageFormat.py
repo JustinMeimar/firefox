@@ -16,16 +16,12 @@ class WireRecord:
         self.names = description["names"]
         self.size = self.layout.size
 
-    def pack(self, **values):
+    def pack_into(self, buffer, offset, **values):
         if values.keys() != set(self.names):
             raise ValueError("wire record fields differ from schema")
-        return self.layout.pack(*(values[name] for name in self.names))
-
-    def pack_into(self, buffer, offset, **values):
-        data = self.pack(**values)
         if offset < 0 or offset + self.size > len(buffer):
             raise ValueError("wire record exceeds output buffer")
-        buffer[offset : offset + self.size] = data
+        self.layout.pack_into(buffer, offset, *(values[name] for name in self.names))
 
     def unpack_from(self, buffer, offset=0):
         return dict(zip(self.names, self.layout.unpack_from(buffer, offset)))

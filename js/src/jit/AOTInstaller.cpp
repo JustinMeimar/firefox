@@ -10,8 +10,6 @@
 
 #  include "mozilla/ScopeExit.h"
 
-#  include <cstring>
-
 #  include "jit/AOT.h"
 #  include "jit/AOTCompilationKey.h"
 #  include "jit/AOTImage.h"
@@ -45,35 +43,41 @@ uint32_t ComputeBaselineProbeHash(JSScript* script) {
   return uint32_t(script->sharedData()->hash());
 }
 
-// Baseline interpreter
-
-bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
-  MOZ_ASSERT(cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineInterpreter));
-
+template <typename Matches>
+static mozilla::Maybe<AOTBlobReader> FindAOTArtifact(AOTBlobKind kind,
+                                                     Matches matches) {
   const AOTImage* image = AOTImage::embedded();
-  if (!image) {
-    return false;
-  }
-  mozilla::Maybe<AOTBlobReader> readerOpt;
-  for (uint32_t i = 0; i < image->blobCount(); i++) {
-    auto candidate = image->blobAt(i);
-    if (candidate.kind() != AOTBlobKind::BaselineInterpreter) continue;
-    AOTCompilationKey key(candidate.key());
-    WriteAOTContext(key, candidate.kind(), JitOptions,
-                    cx->runtime()->geckoProfiler().enabled());
-    if (key.complete()) {
-      readerOpt.emplace(candidate);
-      break;
+  if (image) {
+    for (uint32_t i = 0; i < image->blobCount(); i++) {
+      auto candidate = image->blobAt(i);
+      if (candidate.kind() == kind && matches(candidate)) {
+        return mozilla::Some(candidate);
+      }
     }
   }
-  if (!readerOpt) return false;
-  AOTBlobReader reader = readerOpt.ref();
+  return mozilla::Nothing();
+}
+
+bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
+  MOZ_ASSERT(cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(
+      AOTBlobKind::BaselineInterpreter));
+
+  auto reader = FindAOTArtifact(
+      AOTBlobKind::BaselineInterpreter, [&](const AOTBlobReader& candidate) {
+        AOTCompilationKey key(candidate.key());
+        WriteAOTContext(key, candidate.kind(), JitOptions,
+                        cx->runtime()->geckoProfiler().enabled());
+        return key.complete();
+      });
+  if (!reader) {
+    return false;
+  }
   BaselineInterpreterMetadata md;
-  if (!DecodeBlob_BaselineInterpreter(reader, &md)) {
+  if (!DecodeBlob_BaselineInterpreter(*reader, &md)) {
     return false;
   }
 
-  auto code = reader.code();
+  auto code = reader->code();
   uint8_t* codeStart = const_cast<uint8_t*>(code.data());
   JitCode* jitCode =
       JitCode::NewStatic(cx, codeStart, uint32_t(code.size()), CodeKind::Other);
@@ -120,17 +124,11 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
   return true;
 }
 
-// Baseline JIT function
-
 // Finds the matching baseline function artifact and installs its static code.
 // On failure the script remains unchanged.
 bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
-  if (!cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineFunction)) {
-    return false;
-  }
-
-  const AOTImage* image = AOTImage::embedded();
-  if (!image) {
+  if (!cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(
+          AOTBlobKind::BaselineFunction)) {
     return false;
   }
 
@@ -138,22 +136,21 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   uint32_t warmUpThreshold =
       OptimizationInfo::baseWarmUpThresholdForScript(cx, script);
   bool ionCompileable = IsIonEnabled(cx) && CanIonCompileScript(cx, script);
-  mozilla::Maybe<AOTBlobReader> readerOpt;
-  for (uint32_t i = 0; i < image->blobCount(); i++) {
-    auto candidate = image->blobAt(i);
-    if (candidate.kind() != AOTBlobKind::BaselineFunction ||
-        candidate.entry()->probeHash != probe)
-      continue;
-    AOTCompilationKey key(candidate.key());
-    WriteAOTContext(key, candidate.kind(), JitOptions,
-                    cx->runtime()->geckoProfiler().enabled());
-    WriteAOTBaselineInputs(key, script, warmUpThreshold, ionCompileable, false);
-    if (key.complete()) {
-      readerOpt.emplace(candidate);
-      break;
-    }
+  auto reader = FindAOTArtifact(
+      AOTBlobKind::BaselineFunction, [&](const AOTBlobReader& candidate) {
+        if (candidate.entry()->probeHash != probe) {
+          return false;
+        }
+        AOTCompilationKey key(candidate.key());
+        WriteAOTContext(key, candidate.kind(), JitOptions,
+                        cx->runtime()->geckoProfiler().enabled());
+        WriteAOTBaselineInputs(key, script, warmUpThreshold, ionCompileable,
+                               false);
+        return key.complete();
+      });
+  if (!reader) {
+    return false;
   }
-  if (!readerOpt) return false;
 
   // The script may not have its baseline metadata initialized when AOT
   // installation begins. Initialize it before installing the compiled code.
@@ -168,9 +165,8 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
     return false;
   }
 
-  AOTBlobReader reader = readerOpt.ref();
   BaselineScriptMetadata md;
-  if (!DecodeBlob_BaselineFunction(reader, &md)) {
+  if (!DecodeBlob_BaselineFunction(*reader, &md)) {
     JitSpew(JitSpew_BaselineAOT,
             "AOT baseline function decode failed for %s:%u",
             script->filename() ? script->filename() : "<null>",
@@ -178,7 +174,7 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
     return false;
   }
 
-  auto code = reader.code();
+  auto code = reader->code();
   uint8_t* codeStart = const_cast<uint8_t*>(code.data());
   JitCode* jitCode = JitCode::NewStatic(cx, codeStart, uint32_t(code.size()),
                                         CodeKind::Baseline);
@@ -248,8 +244,12 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
     bs->toggleProfilerInstrumentation(true);
   }
 
-  if (md.disableIon) script->disableIon();
-  if (md.uninlineable) script->setUninlineable();
+  if (md.disableIon) {
+    script->disableIon();
+  }
+  if (md.uninlineable) {
+    script->setUninlineable();
+  }
   script->jitScript()->setRanBytecodeAnalysis();
   script->jitScript()->setIonThreshold(warmUpThreshold);
   script->jitScript()->setBaselineScript(script, bs);
@@ -266,7 +266,8 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
 // IC stubs
 
 bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
-  if (!cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::InlineCacheStub)) {
+  if (!cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(
+          AOTBlobKind::InlineCacheStub)) {
     return false;
   }
 
@@ -296,7 +297,9 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
     AOTCompilationKey keyInputs(reader.key());
     WriteAOTContext(keyInputs, reader.kind(), JitOptions, false);
     WriteAOTICInputs(keyInputs, md);
-    if (!keyInputs.complete()) continue;
+    if (!keyInputs.complete()) {
+      continue;
+    }
 
     CacheIRStubInfo* stubInfo = CacheIRStubInfo::NewFromSerialized(
         CacheKind(md.cacheKind), ICStubEngine::Baseline, md.makesGCCalls != 0,
@@ -309,6 +312,7 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
       continue;
     }
 
+    CacheIRStubKey key(stubInfo);
     CacheIRStubKey::Lookup lookup(CacheKind(md.cacheKind),
                                   ICStubEngine::Baseline, stubInfo->code(),
                                   stubInfo->codeLength());
@@ -316,7 +320,6 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
     CacheIRStubInfo* existing = nullptr;
     if (jitZone->getBaselineCacheIRStubCode(lookup, &existing)) {
       // Ignore an AOT stub when equivalent runtime code already exists.
-      js_free(stubInfo);
       continue;
     }
 
@@ -325,12 +328,10 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
         JitCode::NewStatic(cx, const_cast<uint8_t*>(codeSpan.data()),
                            uint32_t(codeSpan.size()), CodeKind::Baseline);
     if (!jitCode) {
-      js_free(stubInfo);
       return false;
     }
     jitCode->setLocalTracingSlots(md.localTracingSlots);
 
-    CacheIRStubKey key(stubInfo);
     if (!jitZone->putBaselineCacheIRStubCode(lookup, key, jitCode)) {
       // The cache takes ownership only after a successful insertion. The
       // temporary key retains ownership on failure.
