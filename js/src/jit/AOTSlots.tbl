@@ -124,3 +124,6 @@ AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_Float64,       &TypedArrayObject::
 AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_Uint8Clamped,  &TypedArrayObject::resizableClasses[Scalar::Uint8Clamped])
 AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_BigInt64,      &TypedArrayObject::resizableClasses[Scalar::BigInt64])
 AOT_LINK_SLOT(Ptr_TypedArrayClasses_Resizable_Float16,       &TypedArrayObject::resizableClasses[Scalar::Float16])
+
+AOT_SLOT(TrialInliningWarmUpThreshold, &JitOptions.trialInliningWarmUpThreshold)
+AOT_SLOT(BaselineJitWarmUpThreshold, &JitOptions.baselineJitWarmUpThreshold)

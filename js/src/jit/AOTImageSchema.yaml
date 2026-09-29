@@ -21,9 +21,9 @@
 
 format:
   image_magic: 0x49544F41
-  image_version: 4
+  image_version: 5
   blob_file_magic: 0x42544F41
-  blob_file_version: 3
+  blob_file_version: 4
   build_identity_size: 32
   alignment: 16
   text_alignment: 4096
@@ -81,58 +81,52 @@ array_types:
 
 contexts:
   common:
-    - {type: u32, name: kind, value: uint32_t(kind)}
-    - {type: u32, name: cpuFeatures, value: 'wasm::ObservedCPUFeatures()'}
-    - {type: bool, name: spectreIndexMasking, option: spectreIndexMasking}
-    - {type: bool, name: spectreObjectMitigations, option: spectreObjectMitigations}
-    - {type: bool, name: spectreStringMitigations, option: spectreStringMitigations}
-    - {type: bool, name: lessDebugCode, option: lessDebugCode}
-    - {type: bool, name: profiling, value: 'kind == AOTBlobKind::BaselineFunction && profiling'}
+    - {type: u32, name: kind}
+    - {type: u32, name: cpuFeatures}
+    - {type: bool, name: spectreIndexMasking}
+    - {type: bool, name: spectreObjectMitigations}
+    - {type: bool, name: spectreStringMitigations}
+    - {type: bool, name: lessDebugCode}
+    - {type: bool, name: profiling}
   baseline:
-    - {type: bool, name: disableInlining, option: disableInlining}
-    - {type: u32, name: trialInliningWarmUpThreshold, option: trialInliningWarmUpThreshold}
+    - {type: bool, name: disableInlining}
   interpreter:
-    - {type: bool, name: baselineJit, option: baselineJit}
-    - {type: bool, name: baselineBatching, option: baselineBatching}
-    - {type: u32, name: baselineJitWarmUpThreshold, option: baselineJitWarmUpThreshold}
-    - {type: u32, name: baselineQueueCapacity, option: baselineQueueCapacity}
+    - {type: bool, name: baselineJit}
+    - {type: bool, name: baselineBatching}
+    - {type: u32, name: baselineQueueCapacity}
   function:
-    - {type: u32, name: ionMaxScriptSizeMainThread, option: ionMaxScriptSizeMainThread}
-    - {type: u32, name: ionMaxLocalsAndArgsMainThread, option: ionMaxLocalsAndArgsMainThread}
-    - {type: bool, name: eagerIonCompilation, value: options.eagerIonCompilation()}
+    - {type: u32, name: ionMaxScriptSizeMainThread}
+    - {type: u32, name: ionMaxLocalsAndArgsMainThread}
+    - {type: bool, name: eagerIonCompilation}
   ic:
-    - {type: bool, name: enableICFramePointers, option: enableICFramePointers}
-    - {type: bool, name: fullDebugChecks, option: fullDebugChecks}
+    - {type: bool, name: enableICFramePointers}
+    - {type: bool, name: fullDebugChecks}
 
 inputs:
   BaselineFunction:
-    writer: WriteAOTBaselineInputs
-    parameters: 'JSScript* script, uint32_t baseWarmUpThreshold, bool ionCompileable, bool debugInstrumentation'
     fields:
-      - {type: u32, name: baseWarmUpThreshold, value: baseWarmUpThreshold}
-      - {type: bool, name: ionCompileable, value: ionCompileable}
-      - {type: bool, name: debugInstrumentation, value: debugInstrumentation}
-      - {type: u32, name: immutableFlags, value: script->immutableFlags().toRaw()}
-      - {type: u32, name: functionFlags, value: 'script->function() ? script->function()->flags().toRaw() : 0'}
-      - {type: u32, name: nargs, value: 'script->function() ? script->function()->nargs() : 0'}
-      - {type: u32, name: nfixed, value: script->nfixed()}
-      - {type: u32, name: nslots, value: script->nslots()}
-      - {type: u32, name: numICEntries, value: script->numICEntries()}
-      - {type: u32, name: scopeKind, value: uint32_t(script->outermostScope()->kind())}
-      - {type: bool, name: hasNonSyntacticScope, value: script->hasNonSyntacticScope()}
-      - {type: bool, name: isFunction, value: '!!script->function()'}
-      - {type: bool, name: needsArgsObj, value: script->needsArgsObj()}
-      - {type: bool, name: argsObjAliasesFormals, value: script->argsObjAliasesFormals()}
-      - {type: u32_array, name: gcThingKinds, value: script->gcthings(), element: uint32_t(value.kind())}
-      - {type: bytes, name: immutableScriptData, value: script->immutableScriptData()->immutableData()}
+      - {type: u32, name: baseWarmUpThreshold}
+      - {type: bool, name: ionCompileable}
+      - {type: bool, name: debugInstrumentation}
+      - {type: u32, name: immutableFlags}
+      - {type: u32, name: functionFlags}
+      - {type: u32, name: nargs}
+      - {type: u32, name: nfixed}
+      - {type: u32, name: nslots}
+      - {type: u32, name: numICEntries}
+      - {type: u32, name: scopeKind}
+      - {type: bool, name: hasNonSyntacticScope}
+      - {type: bool, name: isFunction}
+      - {type: bool, name: needsArgsObj}
+      - {type: bool, name: argsObjAliasesFormals}
+      - {type: u32_array, name: gcThingKinds}
+      - {type: bytes, name: immutableScriptData}
   InlineCacheStub:
-    writer: WriteAOTICInputs
-    parameters: 'const AOTICStubMetadata& md'
     fields:
-      - {type: u32, name: cacheKind, value: md.cacheKind, metadata: cacheKind}
-      - {type: u32, name: stubDataOffset, value: md.stubDataOffset, metadata: stubDataOffset}
-      - {type: bytes, name: cacheIRCode, value: 'mozilla::Span(md.cacheIRCode.begin(), md.cacheIRCode.length())', metadata: cacheIRCode}
-      - {type: bytes, name: fieldTypes, value: 'mozilla::Span(md.fieldTypes.begin(), md.fieldTypes.length())', metadata: fieldTypes}
+      - {type: u32, name: cacheKind, metadata: cacheKind}
+      - {type: u32, name: stubDataOffset, metadata: stubDataOffset}
+      - {type: bytes, name: cacheIRCode, metadata: cacheIRCode}
+      - {type: bytes, name: fieldTypes, metadata: fieldTypes}
 
 blobs:
   BaselineInterpreter:
@@ -162,7 +156,7 @@ blobs:
     doc: |
       Per-JSScript baseline JIT code plus the metadata needed to
       reconstruct a BaselineScript on load. Compilation inputs are
-      serialized by the generated compilation-key writers.
+      serialized by the compilation-key writers.
     metadata_type: "js::jit::BaselineScriptMetadata"
     fields:
       - u32: warmUpCheckPrologueOffset

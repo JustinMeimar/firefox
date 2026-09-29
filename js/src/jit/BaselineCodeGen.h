@@ -201,6 +201,9 @@ class BaselineCodeGen {
   [[nodiscard]] bool emitNextIC();
   [[nodiscard]] bool emitInterruptCheck();
   [[nodiscard]] bool emitWarmUpCounterIncrement();
+  void branchWarmUpThreshold(Assembler::Condition cond, Register count,
+                             const uint32_t& threshold, Register scratch,
+                             Label* label, bool doubled = false);
 
 #define EMIT_OP(op, ...) bool emit_##op();
   FOR_EACH_OPCODE(EMIT_OP)

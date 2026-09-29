@@ -1669,6 +1669,26 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
   return true;
 }
 
+template <typename Handler>
+void BaselineCodeGen<Handler>::branchWarmUpThreshold(
+    Assembler::Condition cond, Register count, const uint32_t& threshold,
+    Register scratch, Label* label, bool doubled) {
+#ifdef ENABLE_JS_AOT
+  if (masm.isAOT()) {
+    MOZ_ASSERT(count != scratch);
+    masm.emitAOTSlotLoad(masm.aotTable().findSlotOrCrash(uintptr_t(&threshold)),
+                         scratch);
+    masm.load32(Address(scratch, 0), scratch);
+    if (doubled) {
+      masm.add32(scratch, scratch);
+    }
+    masm.branch32(cond, count, scratch, label);
+    return;
+  }
+#endif
+  masm.branch32(cond, count, Imm32(doubled ? threshold * 2 : threshold), label);
+}
+
 template <>
 bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
   frame.assertSyncedStack();
@@ -1711,9 +1731,9 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     // higher tier whenever we are higher than a given warmup count,
     // trial inlining triggers once when reaching the threshold.
     Label noTrialInlining;
-    masm.branch32(Assembler::NotEqual, countReg,
-                  Imm32(JitOptions.trialInliningWarmUpThreshold),
-                  &noTrialInlining);
+    branchWarmUpThreshold(Assembler::NotEqual, countReg,
+                          JitOptions.trialInliningWarmUpThreshold,
+                          R1.scratchReg(), &noTrialInlining);
     prepareVMCall();
 
     masm.PushBaselineFramePtr(FramePointer, R1.scratchReg());
@@ -1883,9 +1903,9 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
     // higher tier whenever we are higher than a given warmup count,
     // trial inlining triggers once when reaching the threshold.
     Label noTrialInlining;
-    masm.branch32(Assembler::NotEqual, countReg,
-                  Imm32(JitOptions.trialInliningWarmUpThreshold),
-                  &noTrialInlining);
+    branchWarmUpThreshold(Assembler::NotEqual, countReg,
+                          JitOptions.trialInliningWarmUpThreshold,
+                          R1.scratchReg(), &noTrialInlining);
     prepareVMCall();
 
     masm.PushBaselineFramePtr(FramePointer, R1.scratchReg());
@@ -1907,8 +1927,9 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
     Address baselineScriptAddr(scriptReg, JitScript::offsetOfBaselineScript());
 
     // If the script is not warm enough to compile, we're done.
-    masm.branch32(Assembler::BelowOrEqual, countReg,
-                  Imm32(JitOptions.baselineJitWarmUpThreshold), &done);
+    branchWarmUpThreshold(Assembler::BelowOrEqual, countReg,
+                          JitOptions.baselineJitWarmUpThreshold, scratch,
+                          &done);
 
     // Decide what to do based on the state of the baseline script field.
     Label notSpecial;
@@ -1920,12 +1941,12 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
     // compiling. If it's queued and the warmup count is high enough,
     // trigger a batch compilation with whatever is currently queued.
     // Otherwise, we're done.
-    uint32_t eagerWarmUpThreshold = JitOptions.baselineJitWarmUpThreshold * 2;
     masm.branchPtr(Assembler::NotEqual, scratch,
                    ImmPtr(BaselineQueuedScriptPtr), &done);
 
-    masm.branch32(Assembler::Below, countReg, Imm32(eagerWarmUpThreshold),
-                  &done);
+    branchWarmUpThreshold(Assembler::Below, countReg,
+                          JitOptions.baselineJitWarmUpThreshold, scratch, &done,
+                          true);
 
     masm.jump(&compileBatch);
 
@@ -2010,8 +2031,9 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
   // If the script is warm enough for Baseline compilation, call into the VM to
   // compile it.
   Label done;
-  masm.branch32(Assembler::BelowOrEqual, countReg,
-                Imm32(JitOptions.baselineJitWarmUpThreshold), &done);
+  branchWarmUpThreshold(Assembler::BelowOrEqual, countReg,
+                        JitOptions.baselineJitWarmUpThreshold, R1.scratchReg(),
+                        &done);
 
   masm.branchTestPtr(Assembler::NonZero,
                      Address(scriptReg, JitScript::offsetOfBaselineScript()),

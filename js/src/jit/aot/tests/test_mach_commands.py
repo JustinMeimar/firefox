@@ -35,9 +35,9 @@ def write_blob(
 ):
     words = [kind, 0, 0, 0, 0, 0, 0]
     if kind == 0:
-        words += [0, variant, 0, 0, 0, 0]
+        words += [0, variant, 0, 0]
     elif kind == 1:
-        words += [0, variant] + [0] * 19
+        words += [0, variant] + [0] * 18
     else:
         words += [0, 0, 0, 0, 0, 0]
     key = struct.pack("<" + "I" * len(words), *words)
