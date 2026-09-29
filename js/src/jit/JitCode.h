@@ -211,10 +211,8 @@ class Concrete<js::jit::JitCode> : TracerConcrete<js::jit::JitCode> {
 
   Size size(mozilla::MallocSizeOf mallocSizeOf) const override {
     Size size = js::gc::Arena::thingSize(get().asTenured().getAllocKind());
-    if (!get().isStaticCode()) {
-      size += get().bufferSize();
-      size += get().headerSize();
-    }
+    size += get().bufferSize();
+    size += get().headerSize();
     return size;
   }
 

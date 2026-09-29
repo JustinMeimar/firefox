@@ -13,7 +13,6 @@
 
 #  include <stdint.h>
 
-#  include "jit/ABIFunctionList.h"
 #  include "jit/AOT.h"
 
 namespace js::jit {

@@ -86,8 +86,11 @@ BaselineCompilerHandler::BaselineCompilerHandler(MacroAssembler& masm,
       icEntryIndex_(0),
       baseWarmUpThreshold_(snapshot->baseWarmUpThreshold()),
       compileDebugInstrumentation_(snapshot->compileDebugInstrumentation()),
-      ionCompileable_(snapshot->isIonCompileable()),
-      isAOT_(masm.isAOT()) {
+      ionCompileable_(snapshot->isIonCompileable())
+#ifdef ENABLE_JS_AOT
+      , isAOT_(masm.isAOT())
+#endif
+{
 }
 
 BaselineInterpreterHandler::BaselineInterpreterHandler(MacroAssembler& masm)
@@ -2113,10 +2116,17 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   // jump. Starts off initially disabled.
   Label noInstrument;
   CodeOffset toggleOffset = masm.toggledJump(&noInstrument);
-  Register ptrReg = R1.scratchReg();
-  masm.movePtr(ImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value),
-               ptrReg);
-  masm.jump(ptrReg);
+#ifdef ENABLE_JS_AOT
+  if (masm.isAOT()) {
+    Register ptrReg = R1.scratchReg();
+    masm.movePtr(ImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value),
+                 ptrReg);
+    masm.jump(ptrReg);
+  } else
+#endif
+  {
+    masm.profilerExitFrame();
+  }
   masm.bind(&noInstrument);
 
   // Store the start offset in the appropriate location.
@@ -7363,9 +7373,16 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
     debugTrapHandlerOffset_ = masm.currentOffset();
     JitCode* handlerCode = runtime->jitRuntime()->debugTrapHandler(
         DebugTrapHandlerKind::Interpreter);
-    Register ptrReg = R1.scratchReg();
-    masm.movePtr(ImmPtr(handlerCode->raw()), ptrReg);
-    masm.jump(ptrReg);
+#ifdef ENABLE_JS_AOT
+    if (masm.isAOT()) {
+      Register ptrReg = R1.scratchReg();
+      masm.movePtr(ImmPtr(handlerCode->raw()), ptrReg);
+      masm.jump(ptrReg);
+    } else
+#endif
+    {
+      masm.jump(handlerCode);
+    }
   }
 
   // Emit the table. Entry size shrinks to int32 in AOT mode because the

@@ -91,6 +91,7 @@ struct RuntimeFuses {
     MOZ_CRASH("Fuse Not Found");
   }
 
+#ifdef ENABLE_JS_AOT
   static constexpr size_t offsetOfFuseByIndex(FuseIndex index) {
     switch (index) {
 #define FUSE(Name, LowerName) \
@@ -103,6 +104,8 @@ struct RuntimeFuses {
     }
     MOZ_CRASH("Fuse Not Found");
   }
+
+#endif
 
   static int32_t fuseOffsets[];
   static const char* fuseNames[];

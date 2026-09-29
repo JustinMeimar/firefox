@@ -346,6 +346,8 @@ struct BranchWasmRefIsSubtypeRegisters {
 // The public entrypoint for emitting assembly. Note that a MacroAssembler can
 // use cx->lifoAlloc, so take care not to interleave masm use with other
 // lifoAlloc use if one will be destroyed before the other.
+extern const double MathRandomScaleInv;
+
 class MacroAssembler : public MacroAssemblerSpecific {
  private:
   // Information about the current JSRuntime. This is nullptr only for Wasm
@@ -5210,7 +5212,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
                     Label* notSameDigit);
 
   void loadJSContext(Register dest);
-  void loadCurrentRealm(Register dest);
 
   void loadGlobalObjectData(Register dest);
 

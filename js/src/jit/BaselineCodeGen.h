@@ -334,7 +334,9 @@ class BaselineCompilerHandler {
 
   bool compilingOffThread_ = false;
 
+#ifdef ENABLE_JS_AOT
   bool isAOT_ = false;
+#endif
 
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
 
@@ -432,8 +434,13 @@ class BaselineCompilerHandler {
     // AOT code generation must produce code that can be reused by any
     // compatible script in any realm. The same requirement applies to self
     // hosted scripts.
-    return isAOT_ || (JS::Prefs::experimental_self_hosted_cache() &&
-                      script()->selfHosted());
+#ifdef ENABLE_JS_AOT
+    if (isAOT_) {
+      return true;
+    }
+#endif
+    return JS::Prefs::experimental_self_hosted_cache() &&
+           script()->selfHosted();
   }
 
   bool needsProfilerCallSiteInstrumentation() const { return true; }

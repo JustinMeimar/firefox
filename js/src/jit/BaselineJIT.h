@@ -546,6 +546,7 @@ struct BaselineInterpreterMetadata {
   CallVMOffsets callVMOffsets;
 };
 
+#ifdef ENABLE_JS_AOT
 // Holds the offsets and entry metadata for a compiled baseline function. The
 // recorder serializes this data and the installer uses it to rebuild the
 // script.
@@ -566,6 +567,8 @@ struct BaselineScriptMetadata {
   Vector<BaselineScript::DebugTrapEntry, 0, SystemAllocPolicy> debugTrapEntries;
   ResumeOffsetEntryVector resumeOffsetEntries;
 };
+
+#endif
 
 // Class storing the generated Baseline Interpreter code for the runtime.
 class BaselineInterpreter {

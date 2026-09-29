@@ -237,10 +237,12 @@ class FreeLists {
     return &freeLists_[thingKind];
   }
 
+#ifdef ENABLE_JS_AOT
   static constexpr size_t offsetOfFreeList(AllocKind thingKind) {
     return offsetof(FreeLists, freeLists_) +
            size_t(thingKind) * sizeof(FreeSpan*);
   }
+#endif
 };
 
 class ArenaLists {
@@ -288,11 +290,13 @@ class ArenaLists {
     return freeLists_.refNoCheck().addressOfFreeList(thingKind);
   }
 
+#ifdef ENABLE_JS_AOT
   static size_t offsetOfFreeList(AllocKind thingKind) {
     return offsetof(ArenaLists, freeLists_) +
            decltype(freeLists_)::offsetOfValue() +
            FreeLists::offsetOfFreeList(thingKind);
   }
+#endif
 
   inline Arena* getFirstArena(AllocKind thingKind) const;
   inline Arena* getFirstCollectingArena(AllocKind thingKind) const;

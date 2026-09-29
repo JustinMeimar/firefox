@@ -72,7 +72,7 @@ using mozilla::CheckedInt;
 
 static constexpr int MathRandomMantissaBits =
     mozilla::FloatingPoint<double>::kExponentShift + 1;
-const double js::jit::MathRandomScaleInv =
+extern const double js::jit::MathRandomScaleInv =
     double(1) / (1ULL << MathRandomMantissaBits);
 
 TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
@@ -390,8 +390,15 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   // Load the first and last offsets of the zone's free list for |allocKind|.
   // If there is no room remaining in the span, fall back to get the next one.
   auto loadFreeList = [this, allocKind](Register target) {
-    loadZoneBase(target);
-    loadPtr(Address(target, Zone::offsetOfFreeList(allocKind)), target);
+#ifdef ENABLE_JS_AOT
+    if (isAOT()) {
+      loadZoneForAOT(target);
+      loadPtr(Address(target, Zone::offsetOfFreeList(allocKind)), target);
+      return;
+    }
+#endif
+    loadPtr(AbsoluteAddress(realm()->zone()->addressOfFreeList(allocKind)),
+            target);
   };
 
   loadFreeList(temp);
@@ -718,7 +725,9 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
 
       if (traceKind != JS::TraceKind::Object ||
           runtime()->geckoProfiler().enabled()) {
-        // Update the catch-all allocation site (drives nursery-alloc counts).
+        // Update the catch all allocation site, which his is used to calculate
+        // nursery allocation counts so we can determine whether to disable
+        // nursery allocation of strings and bigints.
         uint32_t* countAddress = site->nurseryAllocCountAddress();
         CheckedInt<int32_t> counterOffset =
             (CheckedInt<uintptr_t>(uintptr_t(countAddress)) -
@@ -773,15 +782,21 @@ void MacroAssembler::updateAllocSite(Register temp, Register result,
            Address(site, gc::AllocSite::offsetOfNurseryAllocCount()),
            Imm32(js::gc::NormalSiteAttentionThreshold), &done);
 
-  void* allocSitesAddr = zone ? zone->addressOfNurseryAllocatedSites()
-                              : runtime()->addressOfNurseryAllocatedSites();
-  movePtr(ImmPtr(allocSitesAddr), temp);
-  push(result);
-  loadPtr(Address(temp, 0), result);
-  storePtr(result,
-           Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
-  storePtr(site, Address(temp, 0));
-  pop(result);
+#ifdef ENABLE_JS_AOT
+  if (!zone) {
+    movePtr(ImmPtr(runtime()->addressOfNurseryAllocatedSites()), temp);
+    push(result);
+    loadPtr(Address(temp, 0), result);
+    storePtr(result, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
+    storePtr(site, Address(temp, 0));
+    pop(result);
+    bind(&done);
+    return;
+  }
+#endif
+  loadPtr(AbsoluteAddress(zone->addressOfNurseryAllocatedSites()), temp);
+  storePtr(temp, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
+  storePtr(site, AbsoluteAddress(zone->addressOfNurseryAllocatedSites()));
 
   bind(&done);
 }
@@ -834,19 +849,44 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
                                      const LiveRegisterSet& liveRegs) {
   Label done, abiCall;
 
-  loadZoneBase(scratch2);
-  loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappersCount()),
-          scratchSuccess);
-  branchPtr(Assembler::Equal,
-            Address(scratch2, Zone::offsetOfPreservedWrappersCapacity()),
-            scratchSuccess, &abiCall);
-  loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappers()), scratch2);
+#ifdef ENABLE_JS_AOT
+  if (isAOT()) {
+    loadZoneBase(scratch2);
+    loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappersCount()),
+            scratchSuccess);
+    branchPtr(Assembler::Equal,
+              Address(scratch2, Zone::offsetOfPreservedWrappersCapacity()),
+              scratchSuccess, &abiCall);
+    loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappers()), scratch2);
+  } else
+#endif
+  {
+    CompileZone* zone = realm()->zone();
+  
+    loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCount()),
+            scratchSuccess);
+    branchPtr(Assembler::Equal,
+              AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCapacity()),
+              scratchSuccess, &abiCall);
+    loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappers()),
+            scratch2);
+  }
 
   storePtr(wrapper, BaseIndex(scratch2, scratchSuccess, ScalePointer));
   addPtr(Imm32(1), scratchSuccess);
-  loadZoneBase(scratch2);
-  storePtr(scratchSuccess,
-           Address(scratch2, Zone::offsetOfPreservedWrappersCount()));
+#ifdef ENABLE_JS_AOT
+  if (isAOT()) {
+    loadZoneBase(scratch2);
+    storePtr(scratchSuccess,
+             Address(scratch2, Zone::offsetOfPreservedWrappersCount()));
+  } else
+#endif
+  {
+    CompileZone* zone = realm()->zone();
+    storePtr(scratchSuccess,
+             AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCount()));
+  }
+
   move32(Imm32(1), scratchSuccess);
 
   jump(&done);
@@ -2743,11 +2783,6 @@ static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
           JSContext::offsetOfRealm());
 }
 
-void MacroAssembler::loadCurrentRealm(Register dest) {
-  movePtr(ImmPtr(ContextRealmPtr(runtime())), dest);
-  loadPtr(Address(dest, 0), dest);
-}
-
 uint32_t MacroAssembler::callVMWrapper(VMFunctionId id, Register scratch) {
 #ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
@@ -2759,9 +2794,7 @@ uint32_t MacroAssembler::callVMWrapper(VMFunctionId id, Register scratch) {
     return currentOffset();
   }
 #endif
-  TrampolinePtr ptr = runtime()->jitRuntime()->getVMWrapper(id);
-  movePtr(ImmPtr(ptr.value), scratch);
-  return callJit(scratch);
+  return callJit(runtime()->jitRuntime()->getVMWrapper(id));
 }
 
 void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset, size_t index,
@@ -2783,7 +2816,7 @@ void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset, size_t index,
 }
 
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-  loadCurrentRealm(dest);
+  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
@@ -2793,7 +2826,7 @@ void MacroAssembler::switchToRealm(Register realm) {
 }
 
 void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
-  loadCurrentRealm(dest);
+  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
   loadPtr(Address(dest, RealmFuses::offsetOfFuseWordRelativeToRealm(index)),
           dest);
 }
@@ -2859,7 +2892,7 @@ void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
 
 template <typename ValueType>
 void MacroAssembler::storeLocalAllocSite(ValueType value, Register scratch) {
-  loadCurrentRealm(scratch);
+  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), scratch);
   storePtr(value, Address(scratch, JS::Realm::offsetOfLocalAllocSite()));
 }
 
@@ -2972,9 +3005,18 @@ void MacroAssembler::tryFastAtomize(Register str, Register scratch,
   jump(&done);
   bind(&notAtomRef);
 
-  movePtr(ImmPtr(runtime()->addressOfStringToAtomCache()), scratch);
-  computeEffectiveAddress(
-      Address(scratch, StringToAtomCache::offsetOfLastLookups()), scratch);
+#ifdef ENABLE_JS_AOT
+  if (isAOT()) {
+    movePtr(ImmPtr(runtime()->addressOfStringToAtomCache()), scratch);
+    computeEffectiveAddress(
+        Address(scratch, StringToAtomCache::offsetOfLastLookups()), scratch);
+  } else
+#endif
+  {
+    uintptr_t cachePtr = uintptr_t(runtime()->addressOfStringToAtomCache());
+    void* offset = (void*)(cachePtr + StringToAtomCache::offsetOfLastLookups());
+    movePtr(ImmPtr(offset), scratch);
+  }
 
   static_assert(StringToAtomCache::NumLastLookups == 2);
   size_t stringOffset = StringToAtomCache::LastLookup::offsetOfString();
@@ -4005,7 +4047,7 @@ void MacroAssembler::loadJitActivation(Register dest) {
 }
 
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
-  loadCurrentRealm(dest);
+  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
   computeEffectiveAddress(Address(dest, Realm::offsetOfBaselineCompileQueue()),
                           dest);
 }

@@ -7,7 +7,9 @@
 
 #include "mozilla/Maybe.h"
 
-#include <string>
+#ifdef ENABLE_JS_AOT
+#  include <string>
+#endif
 
 #include "jit/IonTypes.h"
 #include "js/TypeDecls.h"

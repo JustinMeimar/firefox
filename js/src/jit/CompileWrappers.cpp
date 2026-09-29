@@ -98,6 +98,7 @@ const void* CompileRuntime::addressOfLastBufferedWholeCell() {
   return runtime()->gc.addressOfLastBufferedWholeCell();
 }
 
+#ifdef ENABLE_JS_AOT
 void* CompileRuntime::addressOfNurseryPosition() {
   return runtime()->gc.addressOfNurseryPosition();
 }
@@ -105,6 +106,8 @@ void* CompileRuntime::addressOfNurseryPosition() {
 void* CompileRuntime::addressOfNurseryAllocatedSites() {
   return runtime()->gc.addressOfNurseryAllocatedSites();
 }
+
+#endif
 
 const void* CompileRuntime::addressOfRuntimeFuse(
     RuntimeFuses::FuseIndex index) {

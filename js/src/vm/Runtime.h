@@ -1117,11 +1117,14 @@ struct JSRuntime {
  public:
   js::MainThreadData<js::RuntimeFuses> runtimeFuses;
 
+#ifdef ENABLE_JS_AOT
   static size_t offsetOfRuntimeFuse(js::RuntimeFuses::FuseIndex index) {
     return offsetof(JSRuntime, runtimeFuses) +
            decltype(runtimeFuses)::offsetOfValue() +
            js::RuntimeFuses::offsetOfFuseByIndex(index);
   }
+#endif
+
 };
 
 namespace js {

@@ -9,7 +9,6 @@
 
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTImageFormatGenerated.h"
-#endif
 
 #include "mozilla/Assertions.h"
 #include "mozilla/HashFunctions.h"
@@ -20,7 +19,6 @@
 
 #include "jstypes.h"
 
-#include "jit/ABIFunctionList.h"
 #include "jit/Registers.h"
 #include "js/experimental/TypedData.h"  // JS_FOR_EACH_TYPED_ARRAY
 
@@ -29,8 +27,6 @@ struct JS_PUBLIC_API JSContext;
 namespace js::jit {
 
 class JitCode;
-
-extern const double MathRandomScaleInv;
 
 // [SMDOC] AOT JIT Code
 //
@@ -210,5 +206,11 @@ class AOTIndirectionTable {
                                                   Register passReg);
 
 }  // namespace js::jit
+
+#else
+namespace js::jit {
+class AOTIndirectionTable;
+}
+#endif  // ENABLE_JS_AOT
 
 #endif  // jit_AOT_h

@@ -48,10 +48,6 @@ module.exports = logTest(
         // Wait up to 30s for the UI to fully intialize. In particular, for the
         // status button to be ready.
         await commands.js.runAndWait(`
-          globalThis.addEventListener("JetStreamDone", event => {
-            document.documentElement.dataset.raptorJetStreamResult =
-              JSON.stringify(event.detail);
-          }, { once: true });
           return new Promise(resolve => {
             let tries = 0;
             // 300 * 100ms = 30 seconds
@@ -87,10 +83,12 @@ module.exports = logTest(
           await commands.wait.byTime(wait_time);
 
           data_exists = await commands.js.run(`
-            const result =
-              document.documentElement.dataset.raptorJetStreamResult;
-            return result ? JSON.parse(result) : null;
-          `);
+            return new Promise(resolve => {
+                globalThis.addEventListener("JetStreamDone", (event) => {
+                    resolve(event.detail);
+                }, { once: true });
+            });
+        `);
         }
 
         if (expose_profiler === "true") {

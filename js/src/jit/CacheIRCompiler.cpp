@@ -8468,18 +8468,39 @@ bool CacheIRCompiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
                     &isUndefined);
 
   masm.bind(&isCallable);
-  masm.movePtr(ImmGCPtr(cx_->names().function), scratch);
-  masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
+#ifdef ENABLE_JS_AOT
+  if (masm.isAOT()) {
+    masm.movePtr(ImmGCPtr(cx_->names().function), scratch);
+    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
+  } else
+#endif
+  {
+    masm.moveValue(StringValue(cx_->names().function), output.valueReg());
+  }
   masm.jump(&done);
 
   masm.bind(&isUndefined);
-  masm.movePtr(ImmGCPtr(cx_->names().undefined), scratch);
-  masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
+#ifdef ENABLE_JS_AOT
+  if (masm.isAOT()) {
+    masm.movePtr(ImmGCPtr(cx_->names().undefined), scratch);
+    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
+  } else
+#endif
+  {
+    masm.moveValue(StringValue(cx_->names().undefined), output.valueReg());
+  }
   masm.jump(&done);
 
   masm.bind(&isObject);
-  masm.movePtr(ImmGCPtr(cx_->names().object), scratch);
-  masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
+#ifdef ENABLE_JS_AOT
+  if (masm.isAOT()) {
+    masm.movePtr(ImmGCPtr(cx_->names().object), scratch);
+    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
+  } else
+#endif
+  {
+    masm.moveValue(StringValue(cx_->names().object), output.valueReg());
+  }
   masm.jump(&done);
 
   {
@@ -10360,9 +10381,16 @@ bool CacheIRCompiler::emitConcatStringsResult(StringOperandId lhsId,
     // code in CallRegExpStub.
     Label vmCall;
     Register temp = CallTempReg2;
-    masm.loadJSContext(temp);
-    masm.loadPtr(Address(temp, JSContext::offsetOfZone()), temp);
-    masm.loadPtr(Address(temp, Zone::offsetOfJitZone()), temp);
+#ifdef ENABLE_JS_AOT
+    if (masm.isAOT()) {
+      masm.loadJSContext(temp);
+      masm.loadPtr(Address(temp, JSContext::offsetOfZone()), temp);
+      masm.loadPtr(Address(temp, Zone::offsetOfJitZone()), temp);
+    } else
+#endif
+    {
+      masm.movePtr(ImmPtr(cx_->zone()->jitZone()), temp);
+    }
     masm.loadPtr(Address(temp, JitZone::offsetOfStringConcatStub()), temp);
     masm.branchTestPtr(Assembler::Zero, temp, temp, &vmCall);
     masm.call(Address(temp, JitCode::offsetOfCode()));

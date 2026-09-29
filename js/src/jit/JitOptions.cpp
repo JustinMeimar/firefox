@@ -47,8 +47,7 @@ T overrideDefault(const char* param, T dflt) {
       return false;
     }
     Warn(param, str);
-  } else if constexpr (std::is_same_v<T, const char*>) {
-    return str;
+
   } else {
     Maybe<int> value = ParseInt(str);
     if (value.isSome()) {

@@ -913,6 +913,7 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
 
   bool allocNurseryGetterSetters() const { return allocNurseryGetterSetters_; }
 
+#ifdef ENABLE_JS_AOT
   static constexpr size_t offsetOfUnknownAllocSite(JS::TraceKind kind) {
     return offsetof(Zone, pretenuring.unknownAllocSites[size_t(kind)]);
   }
@@ -933,6 +934,8 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   static constexpr size_t offsetOfPreservedWrappersCapacity() {
     return offsetof(Zone, preservedWrappersCapacity_);
   }
+
+#endif
 
   js::gc::Heap minHeapToTenure(JS::TraceKind kind) const {
     switch (kind) {

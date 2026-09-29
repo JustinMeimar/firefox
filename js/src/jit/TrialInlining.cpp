@@ -165,8 +165,8 @@ bool TrialInliner::replaceICStub(ICEntry& entry, ICFallbackStub* fallback,
     return false;
   }
 
-  // We failed to attach a new IC stub due to CacheIR size limits. Disable
-  // trial inlining for this location and return true.
+  // We failed to attach a new IC stub due to CacheIR size limits. Disable trial
+  // inlining for this location and return true.
   MOZ_ASSERT(result == ICAttachResult::TooLarge);
   fallback->setTrialInliningState(TrialInliningState::Failure);
   return true;
