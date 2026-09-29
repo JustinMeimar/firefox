@@ -624,10 +624,6 @@ class BaselineInterpreter {
 [[nodiscard]] bool GenerateBaselineInterpreter(
     JSContext* cx, BaselineInterpreter& interpreter);
 
-#ifdef ENABLE_JS_AOT
-[[nodiscard]] bool CaptureAOTBaselineInterpreter(
-    JSContext* cx, const BaselineInterpreter& interpreter);
-#endif
 
 inline bool IsBaselineJitEnabled(JSContext* cx) {
   if (MOZ_UNLIKELY(!IsBaselineInterpreterEnabled())) {

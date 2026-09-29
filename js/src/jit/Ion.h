@@ -19,6 +19,9 @@
 #include "jit/IonTypes.h"
 #include "jit/JitContext.h"
 #include "jit/JitOptions.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/JitRuntime.h"
+#endif
 #include "js/Principals.h"
 #include "js/TypeDecls.h"
 #include "vm/BytecodeUtil.h"
@@ -124,6 +127,12 @@ void ForbidCompilation(JSContext* cx, JSScript* script);
 size_t SizeOfIonData(JSScript* script, mozilla::MallocSizeOf mallocSizeOf);
 
 inline bool IsIonEnabled(JSContext* cx) {
+#ifdef ENABLE_JS_AOT
+  if (cx->runtime()->jitRuntime() &&
+      !cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation()) {
+    return false;
+  }
+#endif
   if (MOZ_UNLIKELY(!IsBaselineJitEnabled(cx) || cx->options().disableIon())) {
     return false;
   }

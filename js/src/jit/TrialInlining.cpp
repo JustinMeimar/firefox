@@ -16,6 +16,7 @@
 #include "jit/CacheIRWriter.h"
 #include "jit/InlineScriptTree.h"
 #include "jit/Ion.h"  // TooManyFormalArguments
+#include "jit/JitRuntime.h"
 #include "jit/StubFolding.h"
 
 #include "vm/BytecodeLocation-inl.h"
@@ -30,7 +31,7 @@ bool DoTrialInlining(JSContext* cx, BaselineFrame* frame) {
   // aotOnly forces ion=false, so trial inlining's Inlined marker is never
   // consumed by Warp. Skip the VM call outright rather than paying for IR
   // generation and a discard-then-reattach whose result nobody reads.
-  if (JitOptions.aotOnly) {
+  if (!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation()) {
     return true;
   }
 #endif

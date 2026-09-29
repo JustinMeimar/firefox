@@ -773,11 +773,12 @@ class MOZ_RAII CacheIRCompiler {
 
   CacheIRCompiler(JSContext* cx, TempAllocator& alloc,
                   const CacheIRWriter& writer, uint32_t stubDataOffset,
-                  Mode mode, StubFieldPolicy policy)
+                  Mode mode, StubFieldPolicy policy,
+                  AOTIndirectionTable* aotTable = nullptr)
       : enteredStubFrame_(false),
         cx_(cx),
         writer_(writer),
-        masm(cx, alloc),
+        masm(cx, alloc, aotTable),
         allocator(writer_),
         liveFloatRegs_(FloatRegisterSet::All()),
         mode_(mode),
@@ -1035,7 +1036,7 @@ class MOZ_RAII AutoOutputRegister {
 class MOZ_RAII AutoStubFrame {
   BaselineCacheIRCompiler& compiler;
 #ifdef ENABLE_JS_AOT
-  mozilla::Maybe<MacroAssembler::AutoInAOTStubFrame> aotScope_;
+  mozilla::Maybe<MacroAssembler::AutoAOTTableFrame> aotScope_;
 #endif
 #ifdef DEBUG
   uint32_t framePushedAtEnterStubFrame_;

@@ -246,7 +246,7 @@ bool JitRuntime::ensureAOTRecorder(JSContext* cx) {
   if (!rec) {
     return false;
   }
-  if (!rec->init(cx, JitOptions.aotRecordDir.c_str())) {
+  if (!rec->init(cx, aotPolicy().recordDirectory())) {
     return false;
   }
   aotRecorder_ = std::move(rec);
@@ -256,6 +256,14 @@ bool JitRuntime::ensureAOTRecorder(JSContext* cx) {
 
 bool JitRuntime::initialize(JSContext* cx) {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
+
+#ifdef ENABLE_JS_AOT
+  auto policy = cx->make_unique<AOTPolicy>();
+  if (!policy || !policy->init(cx, JitOptions)) {
+    return false;
+  }
+  aotPolicy_.writeRef().reset(policy.release());
+#endif
 
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
@@ -290,15 +298,15 @@ bool JitRuntime::initialize(JSContext* cx) {
       interpreterStub().value;
 
 #ifdef ENABLE_JS_AOT
-  if (JitOptions.isAOTLoadOrCaptureEnabled() &&
+  if (aotPolicy().enabled() &&
       IsBaselineInterpreterEnabled()) {
-    if (!JitOptions.aotRecordDir.empty() && !ensureAOTRecorder(cx)) {
+    if (aotPolicy().recordDirectory() && !ensureAOTRecorder(cx)) {
       return false;
     }
     if (!populateAOTIndirectionTable(cx)) {
       return false;
     }
-    if (!CaptureAOTBaselineInterpreter(cx, baselineInterpreter_)) {
+    if (!captureAOTBaselineInterpreter(cx)) {
       return false;
     }
   }

@@ -17,7 +17,6 @@
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTCompilationKey.h"
 #  include "jit/AOTInstaller.h"
-#  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineCodeGen.h"
@@ -416,7 +415,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
 #ifdef ENABLE_JS_AOT
   // Run capture on the main thread because background baseline compilation does
   // not perform AOT capture.
-  if (JitOptions.shouldCaptureAOTBaseline()) {
+  if (cx->runtime()->jitRuntime()->aotPolicy().shouldCapture(AOTBlobKind::BaselineFunction)) {
     forceMainThread = true;
   }
 #endif
@@ -464,9 +463,10 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
 #ifdef ENABLE_JS_AOT
   // Compile once in capture mode to validate pointer indirection and optionally
   // record the artifact. Compile again to produce code for the current runtime.
-  if (JitOptions.shouldCaptureAOTBaseline()) {
+  if (cx->runtime()->jitRuntime()->aotPolicy().shouldCapture(AOTBlobKind::BaselineFunction)) {
     TempAllocator dumpTemp(&cx->tempLifoAlloc());
-    StackMacroAssembler dumpMasm(cx, dumpTemp);
+    StackMacroAssembler dumpMasm(
+        cx, dumpTemp, &cx->runtime()->jitRuntime()->aotIndirectionTable());
     // Even disabled debugger traps embed runtime addresses. Capture the
     // shareable code while compiling the debug variant for this runtime.
     BaselineSnapshot aotSnapshot(script, globalLexical, globalThis,
@@ -474,7 +474,6 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
     if (cx->runtime()->geckoProfiler().enabled()) {
       dumpMasm.enableProfilingInstrumentation();
     }
-    AutoAOTCodegen aotScope(dumpMasm, cx);
     AOTCompilationKey key;
     WriteAOTContext(key, AOTBlobKind::BaselineFunction, JitOptions,
                     cx->runtime()->geckoProfiler().enabled());
@@ -549,7 +548,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
-  if (JitOptions.aotOnly && !JitOptions.useAOTBaseline) {
+  if (!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation() && !cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineFunction)) {
     script->disableBaselineCompile();
     return Method_CantCompile;
   }
@@ -625,7 +624,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
 #ifdef ENABLE_JS_AOT
-  if (JitOptions.useAOTBaseline) {
+  if (cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineFunction)) {
     // Debuggee scripts skip AOT install because runtime trap edits would make
     // a static copy stale. Enforcement still applies below so debuggees never
     // escape to runtime codegen under --aot-only or --aot-enforce.
@@ -638,11 +637,11 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
         return Method_Error;
       }
     }
-    if (JitOptions.aotEnforce) {
+    if ((cx->runtime()->jitRuntime()->aotPolicy().missBehavior(AOTBlobKind::BaselineFunction) == AOTMissBehavior::Fail)) {
       MOZ_CRASH("AOT baseline function miss under --aot-enforce");
     }
   }
-  if (JitOptions.aotOnly) {
+  if (!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation()) {
     script->disableBaselineCompile();
     return Method_CantCompile;
   }
@@ -1467,14 +1466,14 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
 #ifdef ENABLE_JS_AOT
-    if (JitOptions.useAOTImage &&
+    if (cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineInterpreter) &&
         InstallAOTBaselineInterpreter(cx, interpreter)) {
       return true;
     }
     if (cx->isExceptionPending()) {
       return false;
     }
-    if (JitOptions.aotOnly) {
+    if (!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation()) {
       JitSpew(JitSpew_BaselineAOT,
               "AOT blinterp install failed under --aot-only; "
               "falling back to runtime codegen for the interpreter blob");
@@ -1491,18 +1490,19 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
 }
 
 #ifdef ENABLE_JS_AOT
-bool jit::CaptureAOTBaselineInterpreter(
-    JSContext* cx, const BaselineInterpreter& interpreter) {
-  if (!IsBaselineInterpreterEnabled() || interpreter.code()->isStaticCode() ||
-      !JitOptions.shouldCaptureAOTInterpreter()) {
+bool JitRuntime::captureAOTBaselineInterpreter(JSContext* cx) {
+  if (!IsBaselineInterpreterEnabled() || baselineInterpreter_.code()->isStaticCode() ||
+      !aotPolicy().shouldCapture(AOTBlobKind::BaselineInterpreter) ||
+      interpreterCaptureState_ != AOTCaptureState::Pending) {
     return true;
   }
 
-  auto clearDumpFlag =
-      mozilla::MakeScopeExit([] { JitOptions.dumpAOTBlinterp = false; });
+  interpreterCaptureState_ = AOTCaptureState::Active;
+  auto resetCapture = mozilla::MakeScopeExit([&] {
+    interpreterCaptureState_ = AOTCaptureState::Pending;
+  });
   TempAllocator temp(&cx->tempLifoAlloc());
-  StackMacroAssembler masm(cx, temp);
-  AutoAOTCodegen aot(masm, cx);
+  StackMacroAssembler masm(cx, temp, &aotIndirectionTable());
   BaselineInterpreterGenerator generator(cx, temp, masm);
   BaselineInterpreter capturedInterpreter;
   if (!generator.generate(cx, capturedInterpreter)) {
@@ -1518,6 +1518,8 @@ bool jit::CaptureAOTBaselineInterpreter(
       return false;
     }
   }
+  interpreterCaptureState_ = AOTCaptureState::Complete;
+  resetCapture.release();
   return true;
 }
 #endif

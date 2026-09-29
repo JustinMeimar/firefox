@@ -10,7 +10,6 @@
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTImage.h"
 #  include "jit/AOTRecorder.h"
-#  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/CacheIR.h"
 #include "jit/CacheIRSpewer.h"
@@ -95,9 +94,10 @@ BaseValueIndex CacheRegisterAllocator::addressOf(MacroAssembler& masm,
 BaselineCacheIRCompiler::BaselineCacheIRCompiler(JSContext* cx,
                                                  TempAllocator& alloc,
                                                  const CacheIRWriter& writer,
-                                                 uint32_t stubDataOffset)
+                                                 uint32_t stubDataOffset,
+                                                 AOTIndirectionTable* aotTable)
     : CacheIRCompiler(cx, alloc, writer, stubDataOffset, Mode::Baseline,
-                      StubFieldPolicy::Address),
+                      StubFieldPolicy::Address, aotTable),
       makesGCCalls_(false) {}
 
 // AutoStubFrame methods
@@ -126,7 +126,7 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
   MOZ_ASSERT(!compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = true;
 #ifdef ENABLE_JS_AOT
-  aotScope_.emplace(masm);
+  aotScope_.emplace(masm, FrameType::BaselineStub);
 #endif
 
   // All current uses of this are to call VM functions that can GC.
@@ -135,15 +135,15 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
 void AutoStubFrame::leave(MacroAssembler& masm) {
   MOZ_ASSERT(compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = false;
-#ifdef ENABLE_JS_AOT
-  aotScope_.reset();
-#endif
 
 #ifdef DEBUG
   masm.setFramePushed(framePushedAtEnterStubFrame_);
 #endif
 
   EmitBaselineLeaveStubFrame(masm);
+#ifdef ENABLE_JS_AOT
+  aotScope_.reset();
+#endif
   if (JitOptions.enableICFramePointers) {
     // We will pop the frame pointer when we return,
     // so we have to push it again now.
@@ -1914,6 +1914,9 @@ bool BaselineCacheIRCompiler::emitLoadDOMExpandoValueGuardGeneration(
 }
 
 bool BaselineCacheIRCompiler::init(CacheKind kind) {
+#ifdef ENABLE_JS_AOT
+  masm.setAOTTableFrame(FrameType::BaselineJS);
+#endif
   if (!allocator.init()) {
     return false;
   }
@@ -2049,7 +2052,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   code = nullptr;
 
 #ifdef ENABLE_JS_AOT
-  if (JitOptions.useAOTIC) {
+  if (cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::InlineCacheStub)) {
     JitZone* atomsJitZone = cx->runtime()->atomsZone()->jitZone();
     MOZ_ASSERT(atomsJitZone);
 
@@ -2073,7 +2076,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
 
     if (hit) {
       MOZ_RELEASE_ASSERT(stubInfo);
-    } else if (JitOptions.aotEnforce) {
+    } else if ((cx->runtime()->jitRuntime()->aotPolicy().missBehavior(AOTBlobKind::InlineCacheStub) == AOTMissBehavior::Fail)) {
       MOZ_CRASH_UNSAFE_PRINTF("AOT IC miss: kind=%s hash=%u",
                               CacheKindNames[uint8_t(kind)],
                               unsigned(CacheIRStubKey::hash(lookup)));
@@ -2086,7 +2089,7 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
   }
 
 #ifdef ENABLE_JS_AOT
-  if (!code && JitOptions.aotOnly) {
+  if (!code && !cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation()) {
     stubInfo = nullptr;
     return true;
   }
@@ -2105,10 +2108,10 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     // A throwaway AOT compilation validates that every pointer can be
     // represented indirectly. Recording mode saves the captured bytes.
     // Validation mode discards them.
-    if (JitOptions.shouldCaptureAOTBaseline()) {
+    if (cx->runtime()->jitRuntime()->aotPolicy().shouldCapture(AOTBlobKind::InlineCacheStub)) {
       TempAllocator dumpTemp(&cx->tempLifoAlloc());
-      BaselineCacheIRCompiler dumpComp(cx, dumpTemp, writer, StubDataOffset);
-      AutoAOTCodegen aotScope(dumpComp.masmForAOT(), cx);
+      BaselineCacheIRCompiler dumpComp(cx, dumpTemp, writer, StubDataOffset,
+          &cx->runtime()->jitRuntime()->aotIndirectionTable());
       if (!dumpComp.init(kind)) {
         return false;
       }
@@ -2241,7 +2244,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
 
 #ifdef ENABLE_JS_AOT
   if (!code) {
-    MOZ_ASSERT(JitOptions.aotOnly);
+    MOZ_ASSERT(!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation());
     MOZ_ASSERT(!stubInfo);
     return ICAttachResult::AOTMissSkipped;
   }

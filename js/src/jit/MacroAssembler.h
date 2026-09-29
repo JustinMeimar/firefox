@@ -359,8 +359,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   CompileRealm* maybeRealm_ = nullptr;
 
 #ifdef ENABLE_JS_AOT
-  AOTIndirectionTable* aotTable_ = nullptr;
-  bool inAOTStubFrame_ = false;
+  AOTIndirectionTable* const aotTable_;
+  // Frame addressed by FramePointer for AOT table loads in this emission region.
+  mozilla::Maybe<FrameType> aotTableFrame_;
+  mozilla::Maybe<FrameType> aotFailureFrame_;
   Vector<AOTLinkSite, 0, SystemAllocPolicy> aotLinkSites_;
 #endif
 
@@ -371,7 +373,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Constructor is protected. Use one of the derived classes!
   explicit MacroAssembler(TempAllocator& alloc,
                           CompileRuntime* maybeRuntime = nullptr,
-                          CompileRealm* maybeRealm = nullptr);
+                          CompileRealm* maybeRealm = nullptr,
+                          AOTIndirectionTable* aotTable = nullptr);
 
  public:
   bool isAOT() const {
@@ -388,29 +391,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
     return *aotTable_;
   }
 
-  void setAOTTable(AOTIndirectionTable* table) {
-    MOZ_ASSERT((aotTable_ == nullptr) != (table == nullptr),
-               "AOT table must be installed and uninstalled in balanced pairs");
-    if (table) {
-      MOZ_ASSERT(currentOffset() == 0,
-                 "AOT scope must be installed before any code is emitted");
-      maybeRealm_ = nullptr;
-    }
-    aotTable_ = table;
-  }
+  void setAOTTableFrame(FrameType type);
 
-  class MOZ_RAII AutoInAOTStubFrame {
+  class MOZ_RAII AutoAOTTableFrame {
     MacroAssembler& masm_;
-    bool prev_;
+    mozilla::Maybe<FrameType> prev_;
 
    public:
-    explicit AutoInAOTStubFrame(MacroAssembler& masm)
-        : masm_(masm), prev_(masm.inAOTStubFrame_) {
-      masm.inAOTStubFrame_ = true;
+    AutoAOTTableFrame(MacroAssembler& masm, FrameType type)
+        : masm_(masm), prev_(masm.aotTableFrame_) {
+      masm.setAOTTableFrame(type);
     }
-    ~AutoInAOTStubFrame() { masm_.inAOTStubFrame_ = prev_; }
-    AutoInAOTStubFrame(const AutoInAOTStubFrame&) = delete;
-    void operator=(const AutoInAOTStubFrame&) = delete;
+    ~AutoAOTTableFrame() { masm_.aotTableFrame_ = prev_; }
+    AutoAOTTableFrame(const AutoAOTTableFrame&) = delete;
+    void operator=(const AutoAOTTableFrame&) = delete;
   };
 
   void emitAOTLoadTableBase(Register dest);
@@ -6174,10 +6168,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
  public:
   Label* exceptionLabel() {
     // Exceptions are currently handled the same way as sequential failures.
-    return &failureLabel_;
+    return failureLabel();
   }
 
-  Label* failureLabel() { return &failureLabel_; }
+  Label* failureLabel() {
+#ifdef ENABLE_JS_AOT
+    if (isAOT()) {
+      MOZ_RELEASE_ASSERT(aotTableFrame_);
+      MOZ_RELEASE_ASSERT(!aotFailureFrame_ ||
+                         *aotFailureFrame_ == *aotTableFrame_);
+      aotFailureFrame_ = aotTableFrame_;
+    }
+#endif
+    return &failureLabel_;
+  }
 
   void finish();
   void link(JitCode* code);
@@ -6306,7 +6310,8 @@ class MOZ_RAII StackMacroAssembler : public MacroAssembler {
   JS::AutoCheckCannotGC nogc;
 
  public:
-  StackMacroAssembler(JSContext* cx, TempAllocator& alloc);
+  StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
+                      AOTIndirectionTable* aotTable = nullptr);
 };
 
 // WasmMacroAssembler does not contain GC pointers, so it doesn't need the no-GC

@@ -153,8 +153,8 @@ struct DefaultJitOptions {
   // missing, stale, or invalid, generate code at runtime.
   bool useAOTImage;
 
-  bool useAOTIC;
-  bool useAOTBaseline;
+  mozilla::Maybe<bool> useAOTIC;
+  mozilla::Maybe<bool> useAOTBaseline;
 
   // Treat any lookup miss as fatal when strict AOT mode is enabled. This
   // ensures CI uses only loaded artifacts.
@@ -168,16 +168,6 @@ struct DefaultJitOptions {
   // Legacy inverse of useAOTBaseline.
   bool aotSkipBaselineFn;
 
-  bool shouldCaptureAOTInterpreter() const {
-    return dumpAOTBlinterp || !aotRecordDir.empty();
-  }
-  bool shouldCaptureAOTBaseline() const {
-    return dumpAOTBaseline || !aotRecordDir.empty();
-  }
-  bool isAOTLoadOrCaptureEnabled() const {
-    return useAOTImage || shouldCaptureAOTInterpreter() ||
-           shouldCaptureAOTBaseline();
-  }
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

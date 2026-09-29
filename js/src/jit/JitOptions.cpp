@@ -197,35 +197,19 @@ DefaultJitOptions::DefaultJitOptions() {
 #ifdef ENABLE_JS_AOT
   SET_DEFAULT(dumpAOTBlinterp, false);
   SET_DEFAULT(dumpAOTBaseline, false);
-  bool hasExplicitAOTComponents =
-      getenv("JIT_OPTION_useAOTIC") || getenv("JIT_OPTION_useAOTBaseline");
   SET_DEFAULT(useAOTImage, false);
-  SET_DEFAULT(useAOTIC, false);
-  SET_DEFAULT(useAOTBaseline, false);
-  if (useAOTImage) {
-    useAOTIC = true;
-    useAOTBaseline = true;
+  if (getenv("JIT_OPTION_useAOTIC")) {
+    useAOTIC = mozilla::Some(overrideDefault("JIT_OPTION_useAOTIC", false));
+  }
+  if (getenv("JIT_OPTION_useAOTBaseline")) {
+    useAOTBaseline = mozilla::Some(overrideDefault("JIT_OPTION_useAOTBaseline", false));
   }
   SET_DEFAULT(aotEnforce, false);
   SET_DEFAULT(aotOnly, false);
-  if (aotOnly) {
-    if (!useAOTImage && !hasExplicitAOTComponents) {
-      useAOTIC = true;
-      useAOTBaseline = true;
-    }
-    useAOTImage = true;
-    ion = false;
-  }
   if (const char* dir = getenv("JIT_OPTION_aotRecordDir")) {
     aotRecordDir = dir;
   }
   SET_DEFAULT(aotSkipBaselineFn, false);
-  if (aotSkipBaselineFn) {
-    useAOTBaseline = false;
-  }
-  if (useAOTIC || useAOTBaseline) {
-    useAOTImage = true;
-  }
   SET_DEFAULT(aotRecordSelfHosted, false);
   if (const char* value = getenv("JIT_OPTION_aotRecordSelfHosted")) {
     aotRecordSelfHosted = *value && strcmp(value, "0") != 0;

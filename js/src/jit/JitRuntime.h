@@ -18,6 +18,7 @@
 #include "jit/ABIFunctions.h"
 #include "jit/AOT.h"
 #ifdef ENABLE_JS_AOT
+#  include "jit/AOTPolicy.h"
 #  include "jit/AOTRecorder.h"
 #endif
 #include "jit/BaselineICList.h"
@@ -238,6 +239,9 @@ class JitRuntime {
 
 #ifdef ENABLE_JS_AOT
   AOTIndirectionTable aotIndirectionTable_;
+  WriteOnceData<UniquePtr<const AOTPolicy>> aotPolicy_;
+  enum class AOTCaptureState { Pending, Active, Complete };
+  MainThreadData<AOTCaptureState> interpreterCaptureState_{AOTCaptureState::Pending};
 
  public:
   // Keeps one entry trampoline for each AOT target alive through garbage
@@ -274,6 +278,9 @@ class JitRuntime {
   // instrumentation enabled.
   HashSet<uint8_t*, mozilla::DefaultHasher<uint8_t*>, SystemAllocPolicy>
       staticCodeProfilerOn_;
+
+  const AOTPolicy& aotPolicy() const { return *aotPolicy_.ref(); }
+  [[nodiscard]] bool captureAOTBaselineInterpreter(JSContext* cx);
 
   AOTArtifactRecorder* aotRecorder() const { return aotRecorder_.get(); }
   [[nodiscard]] bool ensureAOTRecorder(JSContext* cx);

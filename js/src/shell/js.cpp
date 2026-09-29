@@ -14226,30 +14226,24 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (const char* dir = op.getStringOption("aot-record")) {
     jit::JitOptions.aotRecordDir = dir;
   }
-  bool useAOT = op.getBoolOption("aot");
-  bool useAOTIC = op.getBoolOption("aot-ic");
-  bool useAOTBaseline = op.getBoolOption("aot-bl");
-  bool aotOnly = op.getBoolOption("aot-only");
-  if (useAOT || (aotOnly && !useAOTIC && !useAOTBaseline)) {
-    useAOTIC = true;
-    useAOTBaseline = true;
-  }
-  if (useAOTIC || useAOTBaseline) {
+  if (op.getBoolOption("aot")) {
     jit::JitOptions.useAOTImage = true;
-    jit::JitOptions.useAOTIC = useAOTIC;
-    jit::JitOptions.useAOTBaseline = useAOTBaseline;
+    jit::JitOptions.useAOTIC = mozilla::Some(true);
+    jit::JitOptions.useAOTBaseline = mozilla::Some(true);
+    jit::JitOptions.aotSkipBaselineFn = false;
+  }
+  if (op.getBoolOption("aot-ic")) {
+    jit::JitOptions.useAOTIC = mozilla::Some(true);
+  }
+  if (op.getBoolOption("aot-bl")) {
+    jit::JitOptions.useAOTBaseline = mozilla::Some(true);
+    jit::JitOptions.aotSkipBaselineFn = false;
   }
   if (op.getBoolOption("aot-enforce")) {
     jit::JitOptions.aotEnforce = true;
   }
-  if (aotOnly) {
-    if (jit::JitOptions.aotEnforce) {
-      fprintf(stderr, "--aot-only and --aot-enforce are mutually exclusive\n");
-      return false;
-    }
+  if (op.getBoolOption("aot-only")) {
     jit::JitOptions.aotOnly = true;
-    jit::JitOptions.useAOTImage = true;
-    jit::JitOptions.ion = false;
   }
 #endif
 

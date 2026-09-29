@@ -48,7 +48,7 @@ uint32_t ComputeBaselineProbeHash(JSScript* script) {
 // Baseline interpreter
 
 bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
-  MOZ_ASSERT(JitOptions.useAOTImage);
+  MOZ_ASSERT(cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineInterpreter));
 
   const AOTImage* image = AOTImage::embedded();
   if (!image) {
@@ -125,7 +125,7 @@ bool InstallAOTBaselineInterpreter(JSContext* cx, BaselineInterpreter& interp) {
 // Finds the matching baseline function artifact and installs its static code.
 // On failure the script remains unchanged.
 bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
-  if (!JitOptions.useAOTBaseline) {
+  if (!cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineFunction)) {
     return false;
   }
 
@@ -266,7 +266,7 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
 // IC stubs
 
 bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
-  if (!JitOptions.useAOTIC) {
+  if (!cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::InlineCacheStub)) {
     return false;
   }
 

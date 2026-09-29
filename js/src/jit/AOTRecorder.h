@@ -89,6 +89,7 @@ class AOTArtifactRecorder {
 
   std::string directory_;
   bool failed_ = false;
+  bool selfHostedComplete_ = false;
 };
 
 }  // namespace js::jit

@@ -16,10 +16,15 @@ using namespace js::jit;
 
 #ifdef ENABLE_JS_AOT
 
+void MacroAssembler::setAOTTableFrame(FrameType type) {
+  MOZ_RELEASE_ASSERT(type == FrameType::BaselineJS ||
+                     type == FrameType::BaselineStub);
+  aotTableFrame_ = mozilla::Some(type);
+}
+
 void MacroAssembler::emitAOTLoadTableBase(Register dest) {
-  // Load the indirection table address from the stub frame when one is active.
-  // Otherwise load it from the baseline frame.
-  if (inAOTStubFrame_) {
+  MOZ_RELEASE_ASSERT(aotTableFrame_);
+  if (*aotTableFrame_ == FrameType::BaselineStub) {
     MacroAssemblerSpecific::loadPtr(
         Address(FramePointer, BaselineStubFrameLayout::AOTTableOffsetFromFP),
         dest);
@@ -139,6 +144,7 @@ void MacroAssembler::emitAOTStoreFrameTableBase(Register passReg,
     // The entry preamble places the indirection table address in the register
     // used to initialize this frame.
     storePtr(passReg, dst);
+    setAOTTableFrame(FrameType::BaselineJS);
     return;
   }
   // All baseline frames store the indirection table address so static inline
@@ -149,6 +155,7 @@ void MacroAssembler::emitAOTStoreFrameTableBase(Register passReg,
 }
 
 void MacroAssembler::emitAOTCopyFrameTableBaseFromCaller(Register scratch) {
+  setAOTTableFrame(FrameType::BaselineJS);
   // When resuming a generator, copy the indirection table address from the
   // caller's saved baseline frame into the reconstructed frame.
   loadPtr(Address(FramePointer, 0), scratch);

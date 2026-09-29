@@ -186,7 +186,8 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
   friend class AutoStubFrame;
 
   BaselineCacheIRCompiler(JSContext* cx, TempAllocator& alloc,
-                          const CacheIRWriter& writer, uint32_t stubDataOffset);
+                          const CacheIRWriter& writer, uint32_t stubDataOffset,
+                          AOTIndirectionTable* aotTable = nullptr);
 
   [[nodiscard]] bool init(CacheKind kind);
 

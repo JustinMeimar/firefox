@@ -4738,11 +4738,10 @@ void MacroAssembler::finish() {
   if (failureLabel_.used()) {
     bind(&failureLabel_);
 #ifdef ENABLE_JS_AOT
-    // Failure joins from IC callsites, so the table base for slot loads
-    // lives in the stub frame slot rather than the baseline frame.
-    mozilla::Maybe<AutoInAOTStubFrame> aotScope;
+    mozilla::Maybe<AutoAOTTableFrame> aotScope;
     if (isAOT()) {
-      aotScope.emplace(*this);
+      MOZ_RELEASE_ASSERT(aotFailureFrame_);
+      aotScope.emplace(*this, *aotFailureFrame_);
     }
 #endif
     handleFailure();
@@ -4890,9 +4889,13 @@ void MacroAssembler::alignJitStackBasedOnNArgs(uint32_t argc,
 
 MacroAssembler::MacroAssembler(TempAllocator& alloc,
                                CompileRuntime* maybeRuntime,
-                               CompileRealm* maybeRealm)
+                               CompileRealm* maybeRealm,
+                               AOTIndirectionTable* aotTable)
     : maybeRuntime_(maybeRuntime),
-      maybeRealm_(maybeRealm),
+      maybeRealm_(aotTable ? nullptr : maybeRealm),
+#ifdef ENABLE_JS_AOT
+      aotTable_(aotTable),
+#endif
       framePushed_(0),
       abiArgs_(/* This will be overwritten for every ABI call, the initial value
                   doesn't matter */
@@ -4905,9 +4908,10 @@ MacroAssembler::MacroAssembler(TempAllocator& alloc,
   moveResolver_.setAllocator(alloc);
 }
 
-StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc)
+StackMacroAssembler::StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
+                                         AOTIndirectionTable* aotTable)
     : MacroAssembler(alloc, CompileRuntime::get(cx->runtime()),
-                     CompileRealm::get(cx->realm())) {}
+                     CompileRealm::get(cx->realm()), aotTable) {}
 
 OffThreadMacroAssembler::OffThreadMacroAssembler(TempAllocator& alloc,
                                                  CompileRealm* realm)

@@ -9,9 +9,11 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Maybe.h"
 
+#include "jit/AOTPolicy.h"
 #include "jit/JitContext.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
+#include "util/Text.h"
 #include "vm/JSContext.h"
 #include "vm/Runtime.h"
 
@@ -22,6 +24,46 @@
 #include "jit/AOTABIFns-inl.h"
 
 namespace js::jit {
+
+#ifdef ENABLE_JS_AOT
+bool AOTPolicy::init(JSContext* cx, const DefaultJitOptions& options) {
+  if (options.aotOnly && options.aotEnforce) {
+    JS_ReportErrorASCII(cx, "aot-only and aot-enforce are mutually exclusive");
+    return false;
+  }
+  bool defaultComponents = options.useAOTImage ||
+      (options.aotOnly && !options.useAOTIC && !options.useAOTBaseline);
+  if (options.useAOTIC.valueOr(defaultComponents)) {
+    load_ += AOTBlobKind::InlineCacheStub;
+  }
+  if (options.useAOTBaseline.valueOr(defaultComponents) &&
+      !options.aotSkipBaselineFn) {
+    load_ += AOTBlobKind::BaselineFunction;
+  }
+  if (options.useAOTImage || options.aotOnly || !load_.isEmpty()) {
+    load_ += AOTBlobKind::BaselineInterpreter;
+  }
+  missBehavior_ = options.aotOnly ? AOTMissBehavior::StayInTier
+                  : options.aotEnforce ? AOTMissBehavior::Fail
+                                       : AOTMissBehavior::Compile;
+  if (options.dumpAOTBlinterp || !options.aotRecordDir.empty()) {
+    capture_ += AOTBlobKind::BaselineInterpreter;
+  }
+  if (options.dumpAOTBaseline || !options.aotRecordDir.empty()) {
+    capture_ += AOTBlobKind::BaselineFunction;
+    capture_ += AOTBlobKind::InlineCacheStub;
+  }
+  if (!options.aotRecordDir.empty()) {
+    recordDirectory_ = DuplicateString(cx, options.aotRecordDir.c_str());
+    if (!recordDirectory_) {
+      return false;
+    }
+  }
+  recordSelfHosted_ = options.aotRecordSelfHosted;
+  return true;
+}
+#endif
+
 
 const char* AOTSlotName(AOTSlot slot) {
   switch (slot) {

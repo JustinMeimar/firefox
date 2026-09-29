@@ -214,6 +214,10 @@ bool AOTArtifactRecorder::record(JSContext* cx, JitCode* code, AOTBlobKind kind,
   std::string path =
       directory_ + "/" + AOTArtifactPrefix(kind) + "-" + idHex + ".aotb";
   writeBlobFile(path, blob, sites);
+  if (failed_) {
+    JS_ReportErrorASCII(cx, "AOT artifact publication failed");
+    return false;
+  }
   return true;
 }
 
@@ -244,6 +248,10 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
                                                          uint32_t* skippedOut) {
   *compiledOut = 0;
   *skippedOut = 0;
+
+  if (selfHostedComplete_) {
+    return true;
+  }
 
   if (!cx->runtime()->hasSelfHostStencil()) {
     JitSpew(JitSpew_BaselineAOT,
@@ -320,6 +328,7 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
     (*compiledOut)++;
   }
 
+  selfHostedComplete_ = true;
   JitSpew(JitSpew_BaselineAOT, "AOT self-hosted corpus: recorded=%u skipped=%u",
           *compiledOut, *skippedOut);
   return true;
@@ -342,11 +351,8 @@ bool AOTArtifactRecorder::recordICStub(JSContext* cx, JitCode* code,
 }  // namespace js::jit
 
 JS_PUBLIC_API bool JS::MaybeRecordAOTSelfHostedBaselineCorpus(JSContext* cx) {
-  if (!js::jit::JitOptions.aotRecordSelfHosted) {
-    return true;
-  }
   js::jit::JitRuntime* jrt = cx->runtime()->jitRuntime();
-  if (!jrt) {
+  if (!jrt || !jrt->aotPolicy().recordSelfHosted()) {
     return true;
   }
   js::jit::AOTArtifactRecorder* rec = jrt->aotRecorder();
