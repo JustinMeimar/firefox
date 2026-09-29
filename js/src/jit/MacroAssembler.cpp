@@ -4779,7 +4779,9 @@ MacroAssembler::AutoProfilerCallInstrumentation::
   masm.push(reg);
   masm.push(reg2);
 
-  CodeOffset label = masm.movWithPatch(ImmWord(uintptr_t(-1)), reg);
+  CodeOffset label = masm.isAOT()
+                         ? masm.moveNearAddressWithPatch(reg)
+                         : masm.movWithPatch(ImmWord(uintptr_t(-1)), reg);
   masm.loadJSContext(reg2);
   masm.loadPtr(Address(reg2, offsetof(JSContext, profilingActivation_)), reg2);
   masm.storePtr(reg,
@@ -4795,8 +4797,12 @@ void MacroAssembler::linkProfilerCallSites(JitCode* code) {
   for (size_t i = 0; i < profilerCallSites_.length(); i++) {
     CodeOffset offset = profilerCallSites_[i];
     CodeLocationLabel location(code, offset);
-    PatchDataWithValueCheck(location, ImmPtr(location.raw()),
-                            ImmPtr((void*)-1));
+    if (isAOT()) {
+      patchNearAddressMove(location, location);
+    } else {
+      PatchDataWithValueCheck(location, ImmPtr(location.raw()),
+                              ImmPtr((void*)-1));
+    }
   }
 }
 

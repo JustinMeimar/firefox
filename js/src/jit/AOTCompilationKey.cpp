@@ -48,6 +48,7 @@ void AOTCompilationKey::bytes(mozilla::Span<const uint8_t> value) {
 void WriteAOTContext(AOTCompilationKey& key, AOTBlobKind kind,
                      const DefaultJitOptions& options, bool profiling) {
   key.scalar(uint32_t(kind));
+  key.bytes(CurrentAOTBuildIdentity());
   key.scalar(wasm::ObservedCPUFeatures());
   key.scalar(options.spectreIndexMasking);
   key.scalar(options.spectreObjectMitigations);

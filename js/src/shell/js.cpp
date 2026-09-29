@@ -12419,6 +12419,14 @@ static int Shell(JSContext* cx, OptionParser* op) {
      */
     RunShellJobs(cx);
 
+#ifdef ENABLE_JS_AOT
+    if (auto* jrt = cx->runtime()->jitRuntime()) {
+      if (auto* rec = jrt->aotRecorder(); rec && rec->failed()) {
+        result = EXITCODE_RUNTIME_ERROR;
+      }
+    }
+#endif
+
     // Only if there's no other error, report unhandled rejections.
     if (!result && !sc->exitCode) {
       AutoReportException are(cx);

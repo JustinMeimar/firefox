@@ -53,6 +53,11 @@ const AOTImage* AOTImage::embedded() {
   return cached;
 }
 
+// NOTE(refactor): This is a super hacky, imperative hairball. Why does it need
+// to exist? It looks it's use is in AOTImage::embedded above, which has callers
+// for the AOT interp, ics and baseline fucntions. Why don't these three callers
+// use auto-generated C++ decoders? I thought that was the entire point of using
+// the YAML generation.
 mozilla::Maybe<AOTImage> AOTImage::fromBytes(
     mozilla::Span<const uint8_t> bytes) {
   if (bytes.size() < sizeof(image::Header) ||
@@ -94,6 +99,8 @@ mozilla::Maybe<AOTImage> AOTImage::fromBytes(
   return mozilla::Some(img);
 }
 
+//NOTE(refactor): I hate this. Seems terribly hacky and out of place. Find
+//a way to reuse existing infra.
 static uint32_t AlignUp(uint32_t v, uint32_t a) {
   return (v + (a - 1)) & ~(a - 1);
 }

@@ -85,6 +85,7 @@ array_types:
 
 common_key_fields:
   - u32: kind
+  - bytes: buildIdentity
   - u32: cpuFeatures
   - bool: spectreIndexMasking
   - bool: spectreObjectMitigations

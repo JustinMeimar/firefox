@@ -46,6 +46,7 @@ class AOTArtifactRecorder {
   [[nodiscard]] bool init(JSContext* cx, const char* dir);
 
   const std::string& directory() const { return directory_; }
+  bool failed() const { return failed_; }
 
   // Each record entry point takes the link sites the capturing assembler
   // collected. Their offsets are relative to the artifact's own code.
@@ -83,11 +84,11 @@ class AOTArtifactRecorder {
                             bool (*encode)(AOTBlobWriter&, const Metadata&),
                             mozilla::Span<const AOTLinkSite> sites);
 
-  [[nodiscard]] bool writeBlobFile(JSContext* cx, const std::string& path,
-                                   const AOTBlobWriter& blob,
-                                   mozilla::Span<const AOTLinkSite> sites);
+  void writeBlobFile(const std::string& path, const AOTBlobWriter& blob,
+                     mozilla::Span<const AOTLinkSite> sites);
 
   std::string directory_;
+  bool failed_ = false;
 };
 
 }  // namespace js::jit

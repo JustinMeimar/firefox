@@ -3977,7 +3977,12 @@ bool CacheIRCompiler::emitBigIntToIntPtr(BigIntOperandId inputId,
   return true;
 }
 
-static gc::Heap InitialBigIntHeap(JSContext* cx) {
+static gc::Heap InitialBigIntHeap(JSContext* cx, MacroAssembler& masm) {
+  // AOT IC stubs are shared across zones, but nursery BigInt allocation is
+  // zone-specific. Tenured allocation works in every zone.
+  if (masm.isAOT()) {
+    return gc::Heap::Tenured;
+  }
   JS::Zone* zone = cx->zone();
   return zone->allocNurseryBigInts() ? gc::Heap::Default : gc::Heap::Tenured;
 }
@@ -4029,7 +4034,7 @@ bool CacheIRCompiler::emitIntPtrToBigIntResult(IntPtrOperandId inputId) {
   save.takeUnchecked(output);
 
   // Allocate a new BigInt. The code after this must be infallible.
-  gc::Heap initialHeap = InitialBigIntHeap(cx_);
+  gc::Heap initialHeap = InitialBigIntHeap(cx_, masm);
   EmitAllocateBigInt(masm, scratch1, scratch2, save, initialHeap,
                      failure->label());
 
@@ -7829,7 +7834,7 @@ bool CacheIRCompiler::emitLoadTypedArrayElementResult(
     save.takeUnchecked(scratch2);
     save.takeUnchecked(output);
 
-    gc::Heap initialHeap = InitialBigIntHeap(cx_);
+    gc::Heap initialHeap = InitialBigIntHeap(cx_, masm);
     EmitAllocateBigInt(masm, *bigInt, scratch1, save, initialHeap,
                        failure->label());
   }
@@ -8089,7 +8094,7 @@ bool CacheIRCompiler::emitLoadDataViewValueResult(
       LiveRegisterSet save = liveVolatileRegs();
       save.takeUnchecked(bigInt);
       save.takeUnchecked(bigIntScratch);
-      gc::Heap initialHeap = InitialBigIntHeap(cx_);
+      gc::Heap initialHeap = InitialBigIntHeap(cx_, masm);
       EmitAllocateBigInt(masm, bigInt, bigIntScratch, save, initialHeap, &fail);
       masm.jump(&done);
 

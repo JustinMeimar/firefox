@@ -14,8 +14,6 @@
 
 #  include "jit/AOT.h"
 #  include "jit/AOTCompilationKey.h"
-#  include "jit/Ion.h"
-#  include "jit/IonOptimizationLevels.h"
 #  include "jit/AOTImage.h"
 #  include "jit/AOTImageGenerated.h"
 #  include "jit/AutoWritableJitCode.h"
@@ -23,6 +21,8 @@
 #  include "jit/BaselineIC.h"
 #  include "jit/BaselineJIT.h"
 #  include "jit/CacheIRCompiler.h"
+#  include "jit/Ion.h"
+#  include "jit/IonOptimizationLevels.h"
 #  include "jit/JitCode.h"
 #  include "jit/JitcodeMap.h"
 #  include "jit/JitOptions.h"

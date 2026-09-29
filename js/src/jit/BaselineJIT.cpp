@@ -15,8 +15,8 @@
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
 #ifdef ENABLE_JS_AOT
-#  include "jit/AOTInstaller.h"
 #  include "jit/AOTCompilationKey.h"
+#  include "jit/AOTInstaller.h"
 #  include "jit/AutoAOTCodegen.h"
 #endif
 #include "jit/AutoWritableJitCode.h"
@@ -467,6 +467,10 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   if (JitOptions.shouldCaptureAOTBaseline()) {
     TempAllocator dumpTemp(&cx->tempLifoAlloc());
     StackMacroAssembler dumpMasm(cx, dumpTemp);
+    // Even disabled debugger traps embed runtime addresses. Capture the
+    // shareable code while compiling the debug variant for this runtime.
+    BaselineSnapshot aotSnapshot(script, globalLexical, globalThis,
+                                 baseWarmUpThreshold, isIonCompileable, false);
     if (cx->runtime()->geckoProfiler().enabled()) {
       dumpMasm.enableProfilingInstrumentation();
     }
@@ -474,15 +478,15 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
     AOTCompilationKey key;
     WriteAOTContext(key, AOTBlobKind::BaselineFunction, JitOptions,
                     cx->runtime()->geckoProfiler().enabled());
-    WriteAOTBaselineInputs(key, script, snapshot.baseWarmUpThreshold(),
-                           snapshot.isIonCompileable(),
-                           snapshot.compileDebugInstrumentation());
+    WriteAOTBaselineInputs(key, script, aotSnapshot.baseWarmUpThreshold(),
+                           aotSnapshot.isIonCompileable(),
+                           aotSnapshot.compileDebugInstrumentation());
     if (!key.complete()) {
       ReportOutOfMemory(cx);
       return Method_Error;
     }
     BaselineCompiler dumpCompiler(dumpTemp, CompileRuntime::get(cx->runtime()),
-                                  dumpMasm, &snapshot);
+                                  dumpMasm, &aotSnapshot);
     if (!dumpCompiler.init()) {
       ReportOutOfMemory(cx);
       return Method_Error;
@@ -507,6 +511,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       }
       BaselineScriptMetadata dumpMd;
       if (!dumpCompiler.extractAOTMetadata(dumpMd)) {
+        ReportOutOfMemory(cx);
         return Method_Error;
       }
       if (!rec->recordBaselineFunction(cx, dumpCode, key.data(),

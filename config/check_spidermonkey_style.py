@@ -70,6 +70,7 @@ included_inclnames_to_ignore = set([
     "icu4x/SentenceSegmenter.hpp",  # ICU4X
     "icu4x/WordSegmenter.hpp",  # ICU4X
     "jit/ABIFunctionTypeGenerated.h",  # generated in $OBJDIR"
+    "jit/AOTImageFormatGenerated.h",  # generated in $OBJDIR
     "jit/AOTImageGenerated.h",  # generated in $OBJDIR
     "jit/aot/AOTImageRelocs.inc",  # generated in $OBJDIR
     "jit/AtomicOperationsGenerated.h",  # generated in $OBJDIR
