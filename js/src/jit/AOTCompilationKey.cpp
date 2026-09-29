@@ -4,6 +4,8 @@
 
 #include "jit/AOTCompilationKey.h"
 
+#include "mozilla/EndianUtils.h"
+
 #include "vm/JSScript.h"
 #include "vm/Scope.h"
 #include "wasm/WasmCompile.h"
@@ -29,8 +31,8 @@ void AOTCompilationKey::append(mozilla::Span<const uint8_t> value) {
 }
 
 void AOTCompilationKey::scalar(uint32_t value) {
-  uint8_t bytes[4] = {uint8_t(value), uint8_t(value >> 8), uint8_t(value >> 16),
-                      uint8_t(value >> 24)};
+  uint8_t bytes[sizeof(value)];
+  mozilla::LittleEndian::writeUint32(bytes, value);
   append(bytes);
 }
 

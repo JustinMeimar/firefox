@@ -27,37 +27,19 @@ mozilla::Span<const uint8_t> CurrentAOTBuildIdentity() {
 }
 
 const AOTImage* AOTImage::embedded() {
-  static const AOTImage* cached = nullptr;
-  static bool initialized = false;
-  if (initialized) {
-    return cached;
-  }
-  initialized = true;
-
-  size_t size = size_t(aot_image_end - aot_image_start);
-  auto img = fromBytes({aot_image_start, size});
-  if (img.isNothing()) {
-    JitSpew(JitSpew_BaselineAOT,
-            "AOT image absent or invalid (size=%zu); using runtime codegen",
-            size);
-    return nullptr;
-  }
-
-  if (img->blobCount() &&
-      memcmp(img->buildIdentity().data(), aot_build_identity,
-             image::BuildIdentitySize) != 0) {
-    return nullptr;
-  }
-  static AOTImage sImage = img.value();
-  cached = &sImage;
-  return cached;
+  static const auto image = [] {
+    size_t size = size_t(aot_image_end - aot_image_start);
+    auto image = fromBytes({aot_image_start, size});
+    if (!image) {
+      JitSpew(JitSpew_BaselineAOT,
+              "AOT image absent or invalid (size=%zu); using runtime codegen",
+              size);
+    }
+    return image;
+  }();
+  return image ? &image.ref() : nullptr;
 }
 
-// NOTE(refactor): This is a super hacky, imperative hairball. Why does it need
-// to exist? It looks it's use is in AOTImage::embedded above, which has callers
-// for the AOT interp, ics and baseline fucntions. Why don't these three callers
-// use auto-generated C++ decoders? I thought that was the entire point of using
-// the YAML generation.
 mozilla::Maybe<AOTImage> AOTImage::fromBytes(
     mozilla::Span<const uint8_t> bytes) {
   if (bytes.size() < sizeof(image::Header) ||
@@ -84,6 +66,10 @@ mozilla::Maybe<AOTImage> AOTImage::fromBytes(
   }
   uint64_t dataStart = uint64_t(h->directoryOffset) +
                        uint64_t(h->blobCount) * sizeof(image::DirectoryEntry);
+  if (h->blobCount && memcmp(img.buildIdentity().data(), aot_build_identity,
+                             image::BuildIdentitySize) != 0) {
+    return mozilla::Nothing();
+  }
   for (uint32_t i = 0; i < h->blobCount; i++) {
     const auto& entry = img.directory()[i];
     if (entry.kind >= AOTBlobKindCount || entry.keySize % 4 ||

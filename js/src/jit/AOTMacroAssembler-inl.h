@@ -7,26 +7,26 @@
 #ifndef jit_AOTMacroAssembler_inl_h
 #define jit_AOTMacroAssembler_inl_h
 
-#include "jit/CompileWrappers.h"
-#include "jit/MacroAssembler.h"
+#ifdef ENABLE_JS_AOT
+
+#  include "jit/CompileWrappers.h"
+#  include "jit/MacroAssembler.h"
 
 namespace js::jit {
-
-#ifdef ENABLE_JS_AOT
 
 // Values below this threshold represent sentinels rather than runtime
 // addresses, so encode them directly.
 static constexpr uintptr_t kAOTBakeableSentinelLimit = 16;
 
-#  define AOT_CRASH_ON_UNKNOWN_PTR(kind, val)                             \
-    do {                                                                  \
-      if ((val) >= kAOTBakeableSentinelLimit) {                           \
-        MOZ_CRASH_UNSAFE_PRINTF("AOT: no indirection slot for " kind      \
-                                " %p, add to the AOT indirection table.", \
-                                reinterpret_cast<void*>(val));            \
-      }                                                                   \
-    } while (0)
-#endif
+static inline void AssertAOTPointerIsBakeable(uintptr_t value,
+                                              const char* operation) {
+  if (value >= kAOTBakeableSentinelLimit) {
+    MOZ_CRASH_UNSAFE_PRINTF(
+        "AOT: no indirection slot for %s %p, "
+        "add to the AOT indirection table.",
+        operation, reinterpret_cast<void*>(value));
+  }
+}
 
 inline void MacroAssembler::loadRuntime(Register reg) {
   movePtr(ImmPtr(runtime()), reg);
@@ -37,25 +37,18 @@ inline void MacroAssembler::movePtr(TrampolinePtr ptr, Register dest) {
 }
 
 inline void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
-#ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
     uintptr_t val = uintptr_t(imm.value);
     if (auto slot = aotTable().findSlot(val)) {
-      if (IsAOTLinkSlot(*slot)) {
-        emitAOTLinkAddress(*slot, dest);
-      } else {
-        emitAOTSlotLoad(*slot, dest);
-      }
+      emitAOTAddress(*slot, dest);
       return;
     }
-    AOT_CRASH_ON_UNKNOWN_PTR("movePtr(ImmPtr)", val);
+    AssertAOTPointerIsBakeable(val, "movePtr(ImmPtr)");
   }
-#endif
   MacroAssemblerSpecific::movePtr(imm, dest);
 }
 
 inline void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
-#ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
     if (auto slot = aotTable().findAtomSlot(uintptr_t(imm.value))) {
       emitAOTSlotLoad(*slot, dest);
@@ -63,13 +56,11 @@ inline void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
     }
     // Other GC pointers retain their normal relocation behavior.
   }
-#endif
   MacroAssemblerSpecific::movePtr(imm, dest);
 }
 
-#ifndef JS_CODEGEN_RISCV64
+#  ifndef JS_CODEGEN_RISCV64
 inline void MacroAssembler::loadPtr(AbsoluteAddress addr, Register dest) {
-#  ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
     uintptr_t val = uintptr_t(addr.addr);
     if (auto slot = aotTable().findSlot(val)) {
@@ -81,57 +72,43 @@ inline void MacroAssembler::loadPtr(AbsoluteAddress addr, Register dest) {
       }
       return;
     }
-    AOT_CRASH_ON_UNKNOWN_PTR("loadPtr(AbsoluteAddress)", val);
+    AssertAOTPointerIsBakeable(val, "loadPtr(AbsoluteAddress)");
   }
-#  endif
   MacroAssemblerSpecific::loadPtr(addr, dest);
 }
-#endif
+#  endif
 
 inline void MacroAssembler::storePtr(ImmPtr imm, const Address& address) {
-#ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
     uintptr_t val = uintptr_t(imm.value);
     if (auto slot = aotTable().findSlot(val)) {
       ScratchRegisterScope scratch(*this);
-      if (IsAOTLinkSlot(*slot)) {
-        emitAOTLinkAddress(*slot, scratch);
-      } else {
-        emitAOTSlotLoad(*slot, scratch);
-      }
+      emitAOTAddress(*slot, scratch);
       MacroAssemblerSpecific::storePtr(scratch, address);
       return;
     }
-    AOT_CRASH_ON_UNKNOWN_PTR("storePtr(ImmPtr, Address)", val);
+    AssertAOTPointerIsBakeable(val, "storePtr(ImmPtr, Address)");
   }
-#endif
   MacroAssemblerSpecific::storePtr(imm, address);
 }
 
-#ifndef JS_CODEGEN_RISCV64
+#  ifndef JS_CODEGEN_RISCV64
 inline void MacroAssembler::storePtr(Register src, AbsoluteAddress address) {
-#  ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
     uintptr_t val = uintptr_t(address.addr);
     if (auto slot = aotTable().findSlot(val)) {
       ScratchRegisterScope scratch(*this);
-      if (IsAOTLinkSlot(*slot)) {
-        emitAOTLinkAddress(*slot, scratch);
-      } else {
-        emitAOTSlotLoad(*slot, scratch);
-      }
+      emitAOTAddress(*slot, scratch);
       MacroAssemblerSpecific::storePtr(src, Address(scratch, 0));
       return;
     }
-    AOT_CRASH_ON_UNKNOWN_PTR("storePtr(Register, AbsoluteAddress)", val);
+    AssertAOTPointerIsBakeable(val, "storePtr(Register, AbsoluteAddress)");
   }
-#  endif
   MacroAssemblerSpecific::storePtr(src, address);
 }
-#endif
+#  endif
 
 inline void MacroAssembler::jump(TrampolinePtr code) {
-#ifdef ENABLE_JS_AOT
   if (MOZ_UNLIKELY(isAOT())) {
     uintptr_t val = uintptr_t(code.value);
     if (auto slot = aotTable().findSlot(val)) {
@@ -139,16 +116,13 @@ inline void MacroAssembler::jump(TrampolinePtr code) {
       emitAOTSlotJump(*slot, scratch);
       return;
     }
-    AOT_CRASH_ON_UNKNOWN_PTR("jump(TrampolinePtr)", val);
+    AssertAOTPointerIsBakeable(val, "jump(TrampolinePtr)");
   }
-#endif
   MacroAssemblerSpecific::jump(code);
 }
 
-#ifdef ENABLE_JS_AOT
-#  undef AOT_CRASH_ON_UNKNOWN_PTR
-#endif
-
 }  // namespace js::jit
+
+#endif  // ENABLE_JS_AOT
 
 #endif  // jit_AOTMacroAssembler_inl_h

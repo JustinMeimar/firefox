@@ -50,6 +50,7 @@ class AOTArtifactRecorder {
 
   // Each record entry point takes the link sites the capturing assembler
   // collected. Their offsets are relative to the artifact's own code.
+  // Publication errors set failed(); allocation errors return false.
 
   // Interpreter variants are named from their compilation context.
   [[nodiscard]] bool recordInterpreter(JSContext* cx, JitCode* code,
@@ -83,9 +84,6 @@ class AOTArtifactRecorder {
                             uint32_t probeHash, const Metadata& md,
                             bool (*encode)(AOTBlobWriter&, const Metadata&),
                             mozilla::Span<const AOTLinkSite> sites);
-
-  void writeBlobFile(const std::string& path, const AOTBlobWriter& blob,
-                     mozilla::Span<const AOTLinkSite> sites);
 
   std::string directory_;
   bool failed_ = false;

@@ -8,8 +8,10 @@
 
 #  include "jit/AOTRecorder.h"
 
+#  include "mozilla/Result.h"
 #  include "mozilla/ScopeExit.h"
 #  include "mozilla/SHA1.h"
+#  include "mozilla/UniquePtrExtensions.h"
 
 #  include <algorithm>
 #  include <cerrno>
@@ -34,6 +36,8 @@
 #  include "jit/JitZone.h"
 #  include "js/AOTRecording.h"
 #  include "js/ErrorReport.h"
+#  include "js/Printer.h"
+#  include "js/Printf.h"
 #  include "vm/GeckoProfiler.h"
 #  include "vm/JSAtomUtils.h"
 #  include "vm/JSContext.h"
@@ -47,25 +51,79 @@
 
 namespace js::jit {
 
-// Filename helpers
+namespace {
 
-static void HexEncode(const uint8_t* bytes, size_t len, char* out) {
-  static const char Hex[] = "0123456789abcdef";
-  for (size_t i = 0; i < len; i++) {
-    out[2 * i] = Hex[bytes[i] >> 4];
-    out[2 * i + 1] = Hex[bytes[i] & 0x0f];
+using ArtifactParts = mozilla::Span<const mozilla::Span<const uint8_t>>;
+using UniqueFile = mozilla::UniquePtr<FILE, decltype(&fclose)>;
+
+struct ArtifactIOError {
+  const char* message;
+  int error = 0;
+};
+
+bool FileMatches(FILE* file, ArtifactParts parts) {
+  uint8_t buffer[4096];
+  for (auto part : parts) {
+    while (!part.empty()) {
+      size_t count = std::min(part.size(), sizeof(buffer));
+      if (fread(buffer, 1, count, file) != count ||
+          memcmp(buffer, part.data(), count) != 0) {
+        return false;
+      }
+      part = part.From(count);
+    }
   }
-  out[2 * len] = '\0';
+  return fgetc(file) == EOF && !ferror(file);
 }
 
-static void HashKey(mozilla::Span<const uint8_t> key,
-                    mozilla::SHA1Sum::Hash& hash) {
-  mozilla::SHA1Sum sha;
-  sha.update(key.data(), key.size());
-  sha.finish(hash);
+mozilla::Result<mozilla::Ok, ArtifactIOError> PublishArtifact(
+    const char* path, ArtifactParts parts) {
+  auto temporaryPath = JS_smprintf("%s.tmp.XXXXXX", path);
+  if (!temporaryPath) {
+    return mozilla::Err(
+        ArtifactIOError{"AOT temporary path allocation failed", ENOMEM});
+  }
+  mozilla::UniqueFileHandle fd(mkstemp(temporaryPath.get()));
+  if (!fd) {
+    return mozilla::Err(ArtifactIOError{"AOT record open failed", errno});
+  }
+  auto cleanup = mozilla::MakeScopeExit([&] { unlink(temporaryPath.get()); });
+  UniqueFile file(fdopen(fd.get(), "wb"), fclose);
+  if (!file) {
+    return mozilla::Err(ArtifactIOError{"AOT record fdopen failed", errno});
+  }
+  (void)fd.release();
+
+  for (auto part : parts) {
+    if (!part.empty() &&
+        fwrite(part.data(), 1, part.size(), file.get()) != part.size()) {
+      return mozilla::Err(ArtifactIOError{"AOT record write failed", errno});
+    }
+  }
+  if (fclose(file.release()) != 0) {
+    return mozilla::Err(ArtifactIOError{"AOT record close failed", errno});
+  }
+
+  // Publish complete artifacts without replacing a concurrent writer's file.
+  if (link(temporaryPath.get(), path) == 0) {
+    return mozilla::Ok();
+  }
+  if (errno != EEXIST) {
+    return mozilla::Err(ArtifactIOError{"AOT record link failed", errno});
+  }
+  UniqueFile existing(fopen(path, "rb"), fclose);
+  if (!existing) {
+    return mozilla::Err(
+        ArtifactIOError{"Cannot read existing AOT artifact", errno});
+  }
+  if (!FileMatches(existing.get(), parts)) {
+    return mozilla::Err(
+        ArtifactIOError{"Conflicting or incomplete AOT artifact"});
+  }
+  return mozilla::Ok();
 }
 
-// AOTArtifactRecorder
+}  // namespace
 
 bool AOTArtifactRecorder::init(JSContext* cx, const char* dir) {
   directory_.assign(dir);
@@ -77,121 +135,6 @@ bool AOTArtifactRecorder::init(JSContext* cx, const char* dir) {
   return true;
 }
 
-void AOTArtifactRecorder::writeBlobFile(
-    const std::string& path, const AOTBlobWriter& blob,
-    mozilla::Span<const AOTLinkSite> sites) {
-  if (failed_) {
-    return;
-  }
-  // IC attachment forbids exceptions, and debug OSR cannot report an error
-  // while rewriting the stack. The shell checks failed_ after execution.
-  auto reportError = [&](const char* message, int error = 0) {
-    failed_ = true;
-    if (error) {
-      fprintf(stderr, "%s: %s: %s\n", message, path.c_str(), strerror(error));
-    } else {
-      fprintf(stderr, "%s: %s\n", message, path.c_str());
-    }
-  };
-  if (blob.key().size() > UINT32_MAX || blob.fields().size() > UINT32_MAX ||
-      blob.arrays().size() > UINT32_MAX || blob.code().size() > UINT32_MAX ||
-      sites.size() > UINT32_MAX / sizeof(AOTLinkSite)) {
-    return reportError("AOT artifact exceeds format limits");
-  }
-  std::string temporaryPath = path + ".tmp.XXXXXX";
-  int fd = mkstemp(temporaryPath.data());
-  if (fd < 0) {
-    return reportError("AOT record open failed", errno);
-  }
-  auto cleanup = mozilla::MakeScopeExit([&] {
-    if (fd >= 0) {
-      close(fd);
-    }
-    unlink(temporaryPath.c_str());
-  });
-
-  AOTBlobFileHeader hdr = {};
-  hdr.magic = BlobFileMagic;
-  hdr.version = BlobFileVersion;
-  hdr.kind = uint32_t(blob.kind());
-  hdr.probeHash = blob.probeHash();
-  memcpy(hdr.identityHash, blob.identityHash(), sizeof(hdr.identityHash));
-  hdr.fieldsSize = uint32_t(blob.fields().size());
-  hdr.arraysSize = uint32_t(blob.arrays().size());
-  hdr.codeSize = uint32_t(blob.code().size());
-  hdr.linkSitesSize = uint32_t(sites.size() * sizeof(AOTLinkSite));
-  hdr.slotTableHash = AOTImageLinkHash();
-  hdr.keySize = uint32_t(blob.key().size());
-  memcpy(hdr.buildIdentity, CurrentAOTBuildIdentity().data(),
-         sizeof(hdr.buildIdentity));
-
-  auto writeBytes = [&](const void* p, size_t n) -> bool {
-    const uint8_t* cur = static_cast<const uint8_t*>(p);
-    while (n) {
-      ssize_t rc = write(fd, cur, n);
-      if (rc <= 0) {
-        if (rc < 0 && errno == EINTR) continue;
-        reportError("AOT record write failed", rc == 0 ? EIO : errno);
-        return false;
-      }
-      cur += rc;
-      n -= size_t(rc);
-    }
-    return true;
-  };
-
-  if (!writeBytes(&hdr, sizeof(hdr)) ||
-      !writeBytes(blob.key().data(), blob.key().size()) ||
-      !writeBytes(blob.fields().data(), blob.fields().size()) ||
-      !writeBytes(blob.arrays().data(), blob.arrays().size()) ||
-      !writeBytes(blob.code().data(), blob.code().size()) ||
-      !writeBytes(sites.data(), hdr.linkSitesSize)) {
-    return;
-  }
-  int rc = close(fd);
-  fd = -1;
-  if (rc != 0) {
-    return reportError("AOT record close failed", errno);
-  }
-
-  // Publish complete artifacts without replacing a concurrent writer's file.
-  if (link(temporaryPath.c_str(), path.c_str()) == 0) {
-    return;
-  }
-  if (errno != EEXIST) {
-    return reportError("AOT record link failed", errno);
-  }
-
-  FILE* existing = fopen(path.c_str(), "rb");
-  if (!existing) {
-    return reportError("Cannot read existing AOT artifact", errno);
-  }
-  auto closeExisting = mozilla::MakeScopeExit([&] { fclose(existing); });
-  auto matches = [&](const void* data, size_t length) {
-    const auto* bytes = static_cast<const uint8_t*>(data);
-    uint8_t buffer[4096];
-    while (length) {
-      size_t count = std::min(length, sizeof(buffer));
-      if (fread(buffer, 1, count, existing) != count ||
-          memcmp(buffer, bytes, count) != 0) {
-        return false;
-      }
-      bytes += count;
-      length -= count;
-    }
-    return true;
-  };
-  if (!matches(&hdr, sizeof(hdr)) ||
-      !matches(blob.key().data(), blob.key().size()) ||
-      !matches(blob.fields().data(), blob.fields().size()) ||
-      !matches(blob.arrays().data(), blob.arrays().size()) ||
-      !matches(blob.code().data(), blob.code().size()) ||
-      !matches(sites.data(), hdr.linkSitesSize) || fgetc(existing) != EOF ||
-      ferror(existing)) {
-    return reportError("Conflicting or incomplete AOT artifact");
-  }
-}
-
 template <typename Metadata>
 bool AOTArtifactRecorder::record(JSContext* cx, JitCode* code, AOTBlobKind kind,
                                  mozilla::Span<const uint8_t> key,
@@ -199,24 +142,74 @@ bool AOTArtifactRecorder::record(JSContext* cx, JitCode* code, AOTBlobKind kind,
                                  bool (*encode)(AOTBlobWriter&,
                                                 const Metadata&),
                                  mozilla::Span<const AOTLinkSite> sites) {
-  mozilla::SHA1Sum::Hash identity;
-  HashKey(key, identity);
-  AOTBlobWriter blob(kind, probeHash, identity);
-  if (!blob.writeKey(key) || !encode(blob, md) ||
-      !blob.writeCode(code->raw(), code->instructionsSize())) {
+  if (failed_) {
+    return true;
+  }
+  AOTBlobWriter blob;
+  if (!encode(blob, md)) {
     if (kind != AOTBlobKind::InlineCacheStub) {
       ReportOutOfMemory(cx);
     }
     return false;
   }
+
+  mozilla::SHA1Sum::Hash identity;
+  mozilla::SHA1Sum sha;
+  sha.update(key.data(), key.size());
+  sha.finish(identity);
   char idHex[2 * sizeof(identity) + 1];
-  HexEncode(identity, sizeof(identity), idHex);
-  std::string path =
-      directory_ + "/" + AOTArtifactPrefix(kind) + "-" + idHex + ".aotb";
-  writeBlobFile(path, blob, sites);
-  if (failed_) {
-    JS_ReportErrorASCII(cx, "AOT artifact publication failed");
+  FixedBufferPrinter printer(idHex, sizeof(idHex));
+  for (uint8_t byte : identity) {
+    printer.printf("%02x", unsigned(byte));
+  }
+  auto path = JS_smprintf("%s/%s-%s.aotb", directory_.c_str(),
+                          AOTArtifactPrefix(kind), idHex);
+  if (!path) {
+    if (kind != AOTBlobKind::InlineCacheStub) {
+      ReportOutOfMemory(cx);
+    }
     return false;
+  }
+
+  // IC attachment forbids exceptions, and debug OSR cannot report an error
+  // while rewriting the stack. The shell checks failed_ after execution.
+  auto reportPublicationError = [&](ArtifactIOError error) {
+    failed_ = true;
+    fprintf(stderr, "%s: %s%s%s\n", error.message, path.get(),
+            error.error ? ": " : "", error.error ? strerror(error.error) : "");
+  };
+  if (key.size() > UINT32_MAX || blob.fields().size() > UINT32_MAX ||
+      blob.arrays().size() > UINT32_MAX ||
+      sites.size() > UINT32_MAX / sizeof(AOTLinkSite)) {
+    reportPublicationError({"AOT artifact exceeds format limits"});
+    return true;
+  }
+
+  AOTBlobFileHeader hdr = {};
+  hdr.magic = BlobFileMagic;
+  hdr.version = BlobFileVersion;
+  hdr.kind = uint32_t(kind);
+  hdr.probeHash = probeHash;
+  memcpy(hdr.identityHash, identity, sizeof(hdr.identityHash));
+  hdr.fieldsSize = uint32_t(blob.fields().size());
+  hdr.arraysSize = uint32_t(blob.arrays().size());
+  hdr.codeSize = uint32_t(code->instructionsSize());
+  hdr.linkSitesSize = uint32_t(sites.size() * sizeof(AOTLinkSite));
+  hdr.slotTableHash = AOTImageLinkHash();
+  hdr.keySize = uint32_t(key.size());
+  memcpy(hdr.buildIdentity, CurrentAOTBuildIdentity().data(),
+         sizeof(hdr.buildIdentity));
+
+  const mozilla::Span<const uint8_t> parts[] = {
+      {reinterpret_cast<const uint8_t*>(&hdr), sizeof(hdr)},
+      key,
+      blob.fields(),
+      blob.arrays(),
+      {code->raw(), code->instructionsSize()},
+      {reinterpret_cast<const uint8_t*>(sites.data()), hdr.linkSitesSize}};
+  auto result = PublishArtifact(path.get(), parts);
+  if (result.isErr()) {
+    reportPublicationError(result.unwrapErr());
   }
   return true;
 }

@@ -409,6 +409,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void emitAOTLoadTableBase(Register dest);
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
+  void emitAOTAddress(AOTSlot slot, Register dest);
 
   // Transfer control through a slot. Where the architecture has a memory
   // operand form the slot read folds into the branch, so only the table base

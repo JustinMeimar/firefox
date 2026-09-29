@@ -41,6 +41,14 @@ void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
   MacroAssemblerSpecific::loadPtr(Address(dest, slotOff), dest);
 }
 
+void MacroAssembler::emitAOTAddress(AOTSlot slot, Register dest) {
+  if (IsAOTLinkSlot(slot)) {
+    emitAOTLinkAddress(slot, dest);
+  } else {
+    emitAOTSlotLoad(slot, dest);
+  }
+}
+
 void MacroAssembler::emitAOTSlotCall(AOTSlot slot, Register scratch) {
 #  if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
   emitAOTLoadTableBase(scratch);

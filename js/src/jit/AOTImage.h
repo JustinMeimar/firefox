@@ -18,7 +18,6 @@
 #  include <type_traits>
 
 #  include "jit/AOTImageFormatGenerated.h"
-
 #  include "js/AllocPolicy.h"
 #  include "js/Vector.h"
 
@@ -58,7 +57,8 @@ class AOTBlobWriter;
 
 // Reads the serialized fields and arrays for one artifact in order.
 class AOTBlobReader {
- public:
+  friend class AOTImage;
+
   AOTBlobReader(const image::DirectoryEntry* entry, const uint8_t* imageBase,
                 const uint8_t* textBase)
       : entry_(entry),
@@ -68,6 +68,7 @@ class AOTBlobReader {
         arraysCursor_(fields_ + entry->fieldsSize),
         arraysEnd_(arraysCursor_ + entry->arraysSize) {}
 
+ public:
   mozilla::Span<const uint8_t> key() const { return key_; }
   bool arraysComplete() const { return valid_ && arraysCursor_ == arraysEnd_; }
   AOTBlobKind kind() const { return AOTBlobKind(entry_->kind); }
@@ -114,42 +115,14 @@ class AOTBlobReader {
   bool valid_ = true;
 };
 
-// Collects one artifact's code, fixed fields, and array data before adding it
-// to the image.
+// Collects one artifact's serialized metadata.
 class AOTBlobWriter {
  public:
-  AOTBlobWriter(AOTBlobKind kind, uint32_t probeHash,
-                const uint8_t identityHash[20])
-      : kind_(kind), probeHash_(probeHash) {
-    if (identityHash) {
-      memcpy(identityHash_, identityHash, sizeof(identityHash_));
-    } else {
-      memset(identityHash_, 0, sizeof(identityHash_));
-    }
-  }
-
-  AOTBlobKind kind() const { return kind_; }
-  uint32_t probeHash() const { return probeHash_; }
-  const uint8_t* identityHash() const { return identityHash_; }
-
-  mozilla::Span<const uint8_t> key() const {
-    return {key_.begin(), key_.length()};
-  }
-  [[nodiscard]] bool writeKey(mozilla::Span<const uint8_t> key) {
-    return key_.append(key.data(), key.size());
-  }
-  mozilla::Span<const uint8_t> code() const {
-    return {code_.begin(), code_.length()};
-  }
   mozilla::Span<const uint8_t> fields() const {
     return {fields_.begin(), fields_.length()};
   }
   mozilla::Span<const uint8_t> arrays() const {
     return {arrays_.begin(), arrays_.length()};
-  }
-
-  [[nodiscard]] bool writeCode(const uint8_t* data, size_t len) {
-    return code_.append(data, len);
   }
 
   template <typename T>
@@ -171,11 +144,6 @@ class AOTBlobWriter {
   }
 
  private:
-  AOTBlobKind kind_;
-  uint32_t probeHash_;
-  uint8_t identityHash_[20];
-  Vector<uint8_t, 0, SystemAllocPolicy> key_;
-  Vector<uint8_t, 0, SystemAllocPolicy> code_;
   Vector<uint8_t, 0, SystemAllocPolicy> fields_;
   Vector<uint8_t, 0, SystemAllocPolicy> arrays_;
 };
@@ -186,8 +154,6 @@ class AOTImage {
   // No embedded image is available when the binary contains no linked image
   // symbols.
   static const AOTImage* embedded();
-
-  static mozilla::Maybe<AOTImage> fromBytes(mozilla::Span<const uint8_t> bytes);
 
   const image::Header* header() const {
     return reinterpret_cast<const image::Header*>(base_);
@@ -211,13 +177,12 @@ class AOTImage {
         base_ + header()->directoryOffset);
   }
 
-
  private:
-  explicit AOTImage(mozilla::Span<const uint8_t> bytes)
-      : base_(bytes.data()), size_(bytes.size()) {}
+  static mozilla::Maybe<AOTImage> fromBytes(mozilla::Span<const uint8_t> bytes);
+
+  explicit AOTImage(mozilla::Span<const uint8_t> bytes) : base_(bytes.data()) {}
 
   const uint8_t* base_;
-  size_t size_;
 };
 
 // Holds the runtime representation of a serialized inline cache stub. Encoding
