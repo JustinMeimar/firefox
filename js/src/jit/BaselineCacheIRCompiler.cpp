@@ -98,7 +98,13 @@ BaselineCacheIRCompiler::BaselineCacheIRCompiler(JSContext* cx,
                                                  AOTIndirectionTable* aotTable)
     : CacheIRCompiler(cx, alloc, writer, stubDataOffset, Mode::Baseline,
                       StubFieldPolicy::Address, aotTable),
-      makesGCCalls_(false) {}
+      makesGCCalls_(false)
+#ifdef ENABLE_JS_AOT
+      ,
+      aotFrame_(masm, FrameType::BaselineJS)
+#endif
+{
+}
 
 // AutoStubFrame methods
 AutoStubFrame::AutoStubFrame(BaselineCacheIRCompiler& compiler)
@@ -1914,9 +1920,6 @@ bool BaselineCacheIRCompiler::emitLoadDOMExpandoValueGuardGeneration(
 }
 
 bool BaselineCacheIRCompiler::init(CacheKind kind) {
-#ifdef ENABLE_JS_AOT
-  masm.setAOTTableFrame(FrameType::BaselineJS);
-#endif
   if (!allocator.init()) {
     return false;
   }

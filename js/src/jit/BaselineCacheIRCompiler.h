@@ -179,6 +179,9 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
                                       uint32_t nargsAndFlags);
 
   BaselineICPerfSpewer perfSpewer_;
+#ifdef ENABLE_JS_AOT
+  MacroAssembler::AutoAOTTableFrame aotFrame_;
+#endif
 
  public:
   BaselineICPerfSpewer& perfSpewer() { return perfSpewer_; }

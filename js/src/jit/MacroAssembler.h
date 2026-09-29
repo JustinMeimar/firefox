@@ -364,6 +364,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   mozilla::Maybe<FrameType> aotTableFrame_;
   mozilla::Maybe<FrameType> aotFailureFrame_;
   Vector<AOTLinkSite, 0, SystemAllocPolicy> aotLinkSites_;
+
+  void setAOTTableFrame(FrameType type);
 #endif
 
   // Labels for handling exceptions and failures.
@@ -390,8 +392,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
     MOZ_ASSERT(aotTable_);
     return *aotTable_;
   }
-
-  void setAOTTableFrame(FrameType type);
 
   class MOZ_RAII AutoAOTTableFrame {
     MacroAssembler& masm_;
