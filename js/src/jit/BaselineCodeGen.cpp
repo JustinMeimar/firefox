@@ -295,7 +295,8 @@ MethodStatus BaselineCompiler::compileOffThread() {
 }
 
 #ifdef ENABLE_JS_AOT
-bool BaselineCompiler::extractAOTMetadata(BaselineScriptMetadata& md) {
+BaselineScriptMetadata BaselineCompiler::extractAOTMetadata() {
+  BaselineScriptMetadata md;
   md.warmUpCheckPrologueOffset = warmUpCheckPrologueOffset_.offset();
   md.profilerEnterToggleOffset = profilerEnterFrameToggleOffset_.offset();
   md.profilerExitToggleOffset = profilerExitFrameToggleOffset_.offset();
@@ -304,15 +305,11 @@ bool BaselineCompiler::extractAOTMetadata(BaselineScriptMetadata& md) {
                  : uint8_t(0);
   md.disableIon = handler.analysis().isIonDisabled();
   md.uninlineable = handler.analysis().isInliningDisabled();
-  // The compiler and serialized metadata use vectors with different inline
-  // capacities, so copy the entries instead of moving them.
-  auto copyInto = [](auto& dst, const auto& src) {
-    return dst.append(src.begin(), src.end());
-  };
-  return copyInto(md.retAddrEntries, handler.retAddrEntries()) &&
-         copyInto(md.osrEntries, handler.osrEntries()) &&
-         copyInto(md.debugTrapEntries, debugTrapEntries_) &&
-         copyInto(md.resumeOffsetEntries, resumeOffsetEntries_);
+  md.retAddrEntries = handler.retAddrEntries();
+  md.osrEntries = handler.osrEntries();
+  md.debugTrapEntries = debugTrapEntries_;
+  md.resumeOffsetEntries = resumeOffsetEntries_;
+  return md;
 }
 #endif
 

@@ -78,12 +78,12 @@ class AOTArtifactRecorder {
                                                     uint32_t* skippedOut);
 
  private:
-  template <typename Metadata>
-  [[nodiscard]] bool record(JSContext* cx, JitCode* code, AOTBlobKind kind,
-                            mozilla::Span<const uint8_t> key,
-                            uint32_t probeHash, const Metadata& md,
-                            bool (*encode)(AOTBlobWriter&, const Metadata&),
-                            mozilla::Span<const AOTLinkSite> sites);
+  template <typename Metadata, typename Fields, size_t N>
+  [[nodiscard]] bool record(
+      JSContext* cx, JitCode* code, AOTBlobKind kind,
+      mozilla::Span<const uint8_t> key, uint32_t probeHash, const Metadata& md,
+      AOTEncodedMetadata<Fields, N> (*encode)(const Metadata&),
+      mozilla::Span<const AOTLinkSite> sites);
 
   std::string directory_;
   bool failed_ = false;

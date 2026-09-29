@@ -362,8 +362,8 @@ class alignas(uintptr_t) BaselineScript final
 
   // Copy resumeOffsets list from |script| and convert the pcOffsets
   // to native addresses in the Baseline code based on |entries|.
-  void computeResumeNativeOffsets(JSScript* script,
-                                  const ResumeOffsetEntryVector& entries);
+  void computeResumeNativeOffsets(
+      JSScript* script, mozilla::Span<const ResumeOffsetEntry> entries);
 
   // Return the bytecode offset for a given native code address. Be careful
   // when using this method: it's an approximation and not guaranteed to be the
@@ -547,9 +547,8 @@ struct BaselineInterpreterMetadata {
 };
 
 #ifdef ENABLE_JS_AOT
-// Holds the offsets and entry metadata for a compiled baseline function. The
-// recorder serializes this data and the installer uses it to rebuild the
-// script.
+// Borrows entry tables from the compiler during recording or the embedded image
+// during installation. The owner must outlive this view.
 struct BaselineScriptMetadata {
   // Direct mirror of BaselineScript's own header fields.
   uint32_t warmUpCheckPrologueOffset = 0;
@@ -559,13 +558,12 @@ struct BaselineScriptMetadata {
   uint8_t disableIon = 0;
   uint8_t uninlineable = 0;
 
-  // Stores entry tables copied from the compiler. Resume offsets are serialized
-  // as bytecode and native offset pairs, then converted back to absolute code
-  // addresses during installation.
-  Vector<RetAddrEntry, 0, SystemAllocPolicy> retAddrEntries;
-  Vector<BaselineScript::OSREntry, 0, SystemAllocPolicy> osrEntries;
-  Vector<BaselineScript::DebugTrapEntry, 0, SystemAllocPolicy> debugTrapEntries;
-  ResumeOffsetEntryVector resumeOffsetEntries;
+  // Resume offsets are serialized as bytecode and native offset pairs, then
+  // converted back to absolute code addresses during installation.
+  mozilla::Span<const RetAddrEntry> retAddrEntries;
+  mozilla::Span<const BaselineScript::OSREntry> osrEntries;
+  mozilla::Span<const BaselineScript::DebugTrapEntry> debugTrapEntries;
+  mozilla::Span<const ResumeOffsetEntry> resumeOffsetEntries;
 };
 
 #endif

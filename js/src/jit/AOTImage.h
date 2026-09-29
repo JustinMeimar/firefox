@@ -9,6 +9,7 @@
 
 #ifdef ENABLE_JS_AOT
 
+#  include "mozilla/Array.h"
 #  include "mozilla/Assertions.h"
 #  include "mozilla/Maybe.h"
 #  include "mozilla/Span.h"
@@ -53,7 +54,6 @@ namespace js::jit {
 
 class AOTImage;
 class AOTBlobReader;
-class AOTBlobWriter;
 
 // Reads the serialized fields and arrays for one artifact in order.
 class AOTBlobReader {
@@ -70,7 +70,7 @@ class AOTBlobReader {
 
  public:
   mozilla::Span<const uint8_t> key() const { return key_; }
-  bool arraysComplete() const { return valid_ && arraysCursor_ == arraysEnd_; }
+  bool arraysComplete() const { return arraysCursor_ == arraysEnd_; }
   AOTBlobKind kind() const { return AOTBlobKind(entry_->kind); }
   const image::DirectoryEntry* entry() const { return entry_; }
   uint32_t fieldsSize() const { return entry_->fieldsSize; }
@@ -90,19 +90,22 @@ class AOTBlobReader {
   }
 
   template <typename T>
-  mozilla::Span<const T> readArray(uint32_t count) {
+  [[nodiscard]] bool readArray(uint32_t count, mozilla::Span<const T>* out) {
     static_assert(std::is_trivially_copyable_v<T>,
                   "AOT array elements must be trivially copyable");
-    if (count == 0) {
-      return {};
-    }
     if (count > size_t(arraysEnd_ - arraysCursor_) / sizeof(T)) {
-      valid_ = false;
-      return {};
+      return false;
     }
-    auto span = mozilla::Span(reinterpret_cast<const T*>(arraysCursor_), count);
+    *out = {reinterpret_cast<const T*>(arraysCursor_), count};
     arraysCursor_ += count * sizeof(T);
-    return span;
+    return true;
+  }
+
+  template <typename T, size_t N, typename AllocPolicy>
+  [[nodiscard]] bool readArray(uint32_t count, Vector<T, N, AllocPolicy>* out) {
+    mozilla::Span<const T> values;
+    return readArray(count, &values) &&
+           out->append(values.data(), values.size());
   }
 
  private:
@@ -112,40 +115,14 @@ class AOTBlobReader {
   const uint8_t* fields_;
   const uint8_t* arraysCursor_;
   const uint8_t* arraysEnd_;
-  bool valid_ = true;
 };
 
-// Collects one artifact's serialized metadata.
-class AOTBlobWriter {
- public:
-  mozilla::Span<const uint8_t> fields() const {
-    return {fields_.begin(), fields_.length()};
-  }
-  mozilla::Span<const uint8_t> arrays() const {
-    return {arrays_.begin(), arrays_.length()};
-  }
-
-  template <typename T>
-  [[nodiscard]] bool writeFields(const T& f) {
-    static_assert(std::is_trivially_copyable_v<T>,
-                  "AOT fields POD must be trivially copyable");
-    return fields_.append(reinterpret_cast<const uint8_t*>(&f), sizeof(T));
-  }
-
-  template <typename T>
-  [[nodiscard]] bool writeArray(const T* data, size_t count) {
-    static_assert(std::is_trivially_copyable_v<T>,
-                  "AOT array elements must be trivially copyable");
-    if (count == 0) {
-      return true;
-    }
-    return arrays_.append(reinterpret_cast<const uint8_t*>(data),
-                          count * sizeof(T));
-  }
-
- private:
-  Vector<uint8_t, 0, SystemAllocPolicy> fields_;
-  Vector<uint8_t, 0, SystemAllocPolicy> arrays_;
+// Owns the wire fields and borrows arrays until synchronous publication
+// finishes.
+template <typename Fields, size_t N>
+struct AOTEncodedMetadata {
+  Fields fields;
+  mozilla::Array<mozilla::Span<const uint8_t>, N> arrays;
 };
 
 // Provides a read only view of an image embedded in the binary.
@@ -185,16 +162,15 @@ class AOTImage {
   const uint8_t* base_;
 };
 
-// Holds the runtime representation of a serialized inline cache stub. Encoding
-// copies the relevant stub metadata. Decoding reconstructs the metadata and
-// lookup key. This keeps inline cache types out of the schema generator.
+// Borrows CacheIR bytes and field types for recording or installation. The
+// compiler's buffers or embedded image must outlive this view.
 struct AOTICStubMetadata {
   uint8_t cacheKind = 0;
   uint8_t makesGCCalls = 0;
   uint8_t stubDataOffset = 0;
   uint8_t localTracingSlots = 0;
-  Vector<uint8_t, 0, SystemAllocPolicy> cacheIRCode;
-  Vector<uint8_t, 0, SystemAllocPolicy> fieldTypes;
+  mozilla::Span<const uint8_t> cacheIRCode;
+  mozilla::Span<const uint8_t> fieldTypes;
 };
 
 mozilla::Span<const uint8_t> CurrentAOTBuildIdentity();

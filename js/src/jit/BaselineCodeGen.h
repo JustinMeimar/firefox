@@ -492,7 +492,7 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
   // Copies the completed compiler metadata for AOT capture. The capture
   // compiler is discarded immediately afterward. Returns false if allocation
   // fails.
-  [[nodiscard]] bool extractAOTMetadata(BaselineScriptMetadata& md);
+  BaselineScriptMetadata extractAOTMetadata();
 #endif
 
  private:

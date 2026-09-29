@@ -191,8 +191,8 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
 
   BaselineScript* bs = BaselineScript::New(
       cx, md.warmUpCheckPrologueOffset, md.profilerEnterToggleOffset,
-      md.profilerExitToggleOffset, md.retAddrEntries.length(),
-      md.osrEntries.length(), md.debugTrapEntries.length(),
+      md.profilerExitToggleOffset, md.retAddrEntries.size(),
+      md.osrEntries.size(), md.debugTrapEntries.size(),
       script->resumeOffsets().size());
   if (!bs) {
     return false;
@@ -203,13 +203,13 @@ bool TryInstallAOTBaselineScript(JSContext* cx, JS::HandleScript script) {
   bs->setMethod(jitCode);
   bs->setAOTPreambleTrampoline(trampoline);
   if (!md.retAddrEntries.empty()) {
-    bs->copyRetAddrEntries(md.retAddrEntries.begin());
+    bs->copyRetAddrEntries(md.retAddrEntries.data());
   }
   if (!md.osrEntries.empty()) {
-    bs->copyOSREntries(md.osrEntries.begin());
+    bs->copyOSREntries(md.osrEntries.data());
   }
   if (!md.debugTrapEntries.empty()) {
-    bs->copyDebugTrapEntries(md.debugTrapEntries.begin());
+    bs->copyDebugTrapEntries(md.debugTrapEntries.data());
   }
   bs->computeResumeNativeOffsets(script, md.resumeOffsetEntries);
 
@@ -303,8 +303,8 @@ bool TryLoadAOTICStubs(JSContext* cx, JitZone* jitZone) {
 
     CacheIRStubInfo* stubInfo = CacheIRStubInfo::NewFromSerialized(
         CacheKind(md.cacheKind), ICStubEngine::Baseline, md.makesGCCalls != 0,
-        md.stubDataOffset, md.cacheIRCode.begin(), md.cacheIRCode.length(),
-        md.fieldTypes.begin(), md.fieldTypes.length());
+        md.stubDataOffset, md.cacheIRCode.data(), md.cacheIRCode.size(),
+        md.fieldTypes.data(), md.fieldTypes.size());
     if (!stubInfo) {
       if (cx->isExceptionPending()) {
         return false;

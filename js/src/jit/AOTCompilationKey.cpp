@@ -114,8 +114,8 @@ void WriteAOTBaselineInputs(AOTCompilationKey& key, JSScript* script,
 void WriteAOTICInputs(AOTCompilationKey& key, const AOTICStubMetadata& md) {
   key.scalar(md.cacheKind);
   key.scalar(md.stubDataOffset);
-  key.bytes(mozilla::Span(md.cacheIRCode.begin(), md.cacheIRCode.length()));
-  key.bytes(mozilla::Span(md.fieldTypes.begin(), md.fieldTypes.length()));
+  key.bytes(md.cacheIRCode);
+  key.bytes(md.fieldTypes);
 }
 
 }  // namespace js::jit

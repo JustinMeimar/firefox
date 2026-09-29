@@ -508,11 +508,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       if (!dumpCode) {
         return Method_Error;
       }
-      BaselineScriptMetadata dumpMd;
-      if (!dumpCompiler.extractAOTMetadata(dumpMd)) {
-        ReportOutOfMemory(cx);
-        return Method_Error;
-      }
+      BaselineScriptMetadata dumpMd = dumpCompiler.extractAOTMetadata();
       if (!rec->recordBaselineFunction(cx, dumpCode, key.data(),
                                        ComputeBaselineProbeHash(script), dumpMd,
                                        dumpMasm.aotLinkSites())) {
@@ -1127,14 +1123,12 @@ uint8_t* BaselineScript::nativeCodeForOSREntry(uint32_t pcOffset) {
 }
 
 void BaselineScript::computeResumeNativeOffsets(
-    JSScript* script, const ResumeOffsetEntryVector& entries) {
+    JSScript* script, mozilla::Span<const ResumeOffsetEntry> entries) {
   // Translate pcOffset to BaselineScript native address. This may return
   // nullptr if compiler decided code was unreachable.
   auto computeNative = [this, &entries](uint32_t pcOffset) -> uint8_t* {
-    mozilla::Span<const ResumeOffsetEntry> entriesSpan =
-        mozilla::Span(entries.begin(), entries.length());
     size_t mid;
-    if (!ComputeBinarySearchMid(entriesSpan, pcOffset, &mid)) {
+    if (!ComputeBinarySearchMid(entries, pcOffset, &mid)) {
       return nullptr;
     }
 

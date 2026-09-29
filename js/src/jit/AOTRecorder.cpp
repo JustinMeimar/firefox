@@ -135,22 +135,19 @@ bool AOTArtifactRecorder::init(JSContext* cx, const char* dir) {
   return true;
 }
 
-template <typename Metadata>
-bool AOTArtifactRecorder::record(JSContext* cx, JitCode* code, AOTBlobKind kind,
-                                 mozilla::Span<const uint8_t> key,
-                                 uint32_t probeHash, const Metadata& md,
-                                 bool (*encode)(AOTBlobWriter&,
-                                                const Metadata&),
-                                 mozilla::Span<const AOTLinkSite> sites) {
+template <typename Metadata, typename Fields, size_t N>
+bool AOTArtifactRecorder::record(
+    JSContext* cx, JitCode* code, AOTBlobKind kind,
+    mozilla::Span<const uint8_t> key, uint32_t probeHash, const Metadata& md,
+    AOTEncodedMetadata<Fields, N> (*encode)(const Metadata&),
+    mozilla::Span<const AOTLinkSite> sites) {
   if (failed_) {
     return true;
   }
-  AOTBlobWriter blob;
-  if (!encode(blob, md)) {
-    if (kind != AOTBlobKind::InlineCacheStub) {
-      ReportOutOfMemory(cx);
-    }
-    return false;
+  auto blob = encode(md);
+  size_t arraysSize = 0;
+  for (auto array : blob.arrays) {
+    arraysSize += array.size();
   }
 
   mozilla::SHA1Sum::Hash identity;
@@ -178,8 +175,7 @@ bool AOTArtifactRecorder::record(JSContext* cx, JitCode* code, AOTBlobKind kind,
     fprintf(stderr, "%s: %s%s%s\n", error.message, path.get(),
             error.error ? ": " : "", error.error ? strerror(error.error) : "");
   };
-  if (key.size() > UINT32_MAX || blob.fields().size() > UINT32_MAX ||
-      blob.arrays().size() > UINT32_MAX ||
+  if (key.size() > UINT32_MAX || arraysSize > UINT32_MAX ||
       sites.size() > UINT32_MAX / sizeof(AOTLinkSite)) {
     reportPublicationError({"AOT artifact exceeds format limits"});
     return true;
@@ -191,8 +187,8 @@ bool AOTArtifactRecorder::record(JSContext* cx, JitCode* code, AOTBlobKind kind,
   hdr.kind = uint32_t(kind);
   hdr.probeHash = probeHash;
   memcpy(hdr.identityHash, identity, sizeof(hdr.identityHash));
-  hdr.fieldsSize = uint32_t(blob.fields().size());
-  hdr.arraysSize = uint32_t(blob.arrays().size());
+  hdr.fieldsSize = sizeof(Fields);
+  hdr.arraysSize = uint32_t(arraysSize);
   hdr.codeSize = uint32_t(code->instructionsSize());
   hdr.linkSitesSize = uint32_t(sites.size() * sizeof(AOTLinkSite));
   hdr.slotTableHash = AOTImageLinkHash();
@@ -200,13 +196,14 @@ bool AOTArtifactRecorder::record(JSContext* cx, JitCode* code, AOTBlobKind kind,
   memcpy(hdr.buildIdentity, CurrentAOTBuildIdentity().data(),
          sizeof(hdr.buildIdentity));
 
-  const mozilla::Span<const uint8_t> parts[] = {
-      {reinterpret_cast<const uint8_t*>(&hdr), sizeof(hdr)},
-      key,
-      blob.fields(),
-      blob.arrays(),
-      {code->raw(), code->instructionsSize()},
-      {reinterpret_cast<const uint8_t*>(sites.data()), hdr.linkSitesSize}};
+  mozilla::Span<const uint8_t> parts[N + 5] = {
+      mozilla::AsBytes(mozilla::Span(&hdr, 1)), key,
+      mozilla::AsBytes(mozilla::Span(&blob.fields, 1))};
+  for (size_t i = 0; i < N; i++) {
+    parts[3 + i] = blob.arrays[i];
+  }
+  parts[N + 3] = {code->raw(), code->instructionsSize()};
+  parts[N + 4] = mozilla::AsBytes(sites);
   auto result = PublishArtifact(path.get(), parts);
   if (result.isErr()) {
     reportPublicationError(result.unwrapErr());

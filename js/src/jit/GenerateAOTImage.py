@@ -108,7 +108,8 @@ def parse_blob(kind, artifact):
         cpp_type, size = COUNT_TYPE
         fields.append({
             "name": a["name"] + "Count",
-            "path": a["path"] + ".length",
+            "path": a["path"],
+            "element": a["element"],
             "cpp_type": cpp_type,
             "size": size,
         })
@@ -157,26 +158,32 @@ def emit_fields_pod(blob):
 
 
 def metadata_expr(field):
-    if field["path"].endswith(".length"):
-        return "uint32_t(md.%s())" % field["path"]
+    if "element" in field:
+        return "uint32_t(mozilla::Span<const %s>(md.%s).size())" % (
+            field["element"],
+            field["path"],
+        )
     return "md.%s" % field["path"]
 
 
 def emit_encode(blob):
+    encoded_type = "AOTEncodedMetadata<%s, %d>" % (
+        blob["fields_type"],
+        len(blob["arrays"]),
+    )
     lines = [
-        "[[nodiscard]] inline bool EncodeBlob_%s(" % blob["kind"],
-        "    AOTBlobWriter& blob, const %s& md) {" % blob["metadata_type"],
-        "  %s f = {};" % blob["fields_type"],
+        "inline %s EncodeBlob_%s(" % (encoded_type, blob["kind"]),
+        "    const %s& md) {" % blob["metadata_type"],
+        "  %s blob = {};" % encoded_type,
     ]
     for f in blob["fields"]:
-        lines.append("  f.%s = %s;" % (f["name"], metadata_expr(f)))
-    lines.append("  if (!blob.writeFields(f)) return false;")
-    for a in blob["arrays"]:
+        lines.append("  blob.fields.%s = %s;" % (f["name"], metadata_expr(f)))
+    for i, a in enumerate(blob["arrays"]):
         lines.append(
-            "  if (!blob.writeArray<%s>(md.%s.begin(), md.%s.length())) "
-            "return false;" % (a["element"], a["path"], a["path"])
+            "  blob.arrays[%d] = mozilla::AsBytes(mozilla::Span<const %s>(md.%s));"
+            % (i, a["element"], a["path"])
         )
-    lines.append("  return true;")
+    lines.append("  return blob;")
     lines.append("}")
     return emit_lines(lines)
 
@@ -185,24 +192,21 @@ def emit_decode(blob):
     lines = [
         "[[nodiscard]] inline bool DecodeBlob_%s(" % blob["kind"],
         "    AOTBlobReader& reader, %s* md) {" % blob["metadata_type"],
-        "  if (reader.fieldsSize() != sizeof(%s)) return false;" % blob["fields_type"],
+        "  if (reader.fieldsSize() != sizeof(%s)) {" % blob["fields_type"],
+        "    return false;",
+        "  }",
         "  %s f = reader.readFields<%s>();"
         % (blob["fields_type"], blob["fields_type"]),
     ]
     for f in blob["fields"]:
-        if not f["path"].endswith(".length"):
+        if "element" not in f:
             lines.append("  md->%s = f.%s;" % (f["path"], f["name"]))
-    for a in blob["arrays"]:
-        lines.append("  {")
-        lines.append(
-            "    auto src = reader.readArray<%s>(f.%sCount);"
-            % (a["element"], a["name"])
-        )
-        lines.append(
-            "    if (!md->%s.append(src.data(), src.size())) return false;" % a["path"]
-        )
-        lines.append("  }")
-    lines.append("  return reader.arraysComplete();")
+    reads = [
+        "reader.readArray(f.%sCount, &md->%s)" % (a["name"], a["path"])
+        for a in blob["arrays"]
+    ]
+    reads.append("reader.arraysComplete()")
+    lines.append("  return " + " &&\n         ".join(reads) + ";")
     lines.append("}")
     return emit_lines(lines)
 
@@ -224,10 +228,10 @@ def main(c_out, yaml_path):
     ]
 
     body = [
+        '#include "mozilla/Span.h"',
+        "",
         "#include <cstdint>",
         "#include <type_traits>",
-        "",
-        '#include "mozilla/Span.h"',
         "",
         '#include "jit/AOTImage.h"',
         '#include "jit/BaselineJIT.h"',
@@ -355,9 +359,11 @@ def generate_format_header(output, yaml_path):
     schema = load_yaml(yaml_path)
     constants = schema["format"]
     lines = [
+        '#include "mozilla/Assertions.h"',
+        "",
         "#include <cstddef>",
         "#include <cstdint>",
-        '#include "mozilla/Assertions.h"',
+        "",
         "namespace js::jit {",
         "enum class AOTBlobKind : uint32_t {",
     ]

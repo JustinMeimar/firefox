@@ -2132,15 +2132,15 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
         md.makesGCCalls = dumpComp.makesGCCalls() ? 1 : 0;
         md.stubDataOffset = uint8_t(StubDataOffset);
         md.localTracingSlots = dumpCode->localTracingSlots();
-        if (!md.cacheIRCode.append(writer.codeStart(), writer.codeLength())) {
-          return false;
-        }
-        if (!md.fieldTypes.reserve(writer.numStubFields())) {
+        md.cacheIRCode = {writer.codeStart(), writer.codeLength()};
+        Vector<uint8_t, 0, SystemAllocPolicy> fieldTypes;
+        if (!fieldTypes.reserve(writer.numStubFields())) {
           return false;
         }
         for (uint32_t i = 0; i < writer.numStubFields(); i++) {
-          md.fieldTypes.infallibleAppend(uint8_t(writer.stubFieldType(i)));
+          fieldTypes.infallibleAppend(uint8_t(writer.stubFieldType(i)));
         }
+        md.fieldTypes = fieldTypes;
         if (!rec->recordICStub(cx, dumpCode, md,
                                dumpComp.masmForAOT().aotLinkSites())) {
           return false;
