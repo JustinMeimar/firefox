@@ -11,14 +11,14 @@
 #include "gc/FinalizationObservers.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
-#include "jit/JitRuntime.h"
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTInstaller.h"
+#  include "jit/JitOptions.h"
+#  include "jit/JitRuntime.h"
 #endif
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Invalidation.h"
-#include "jit/JitOptions.h"
 #include "jit/JitScript.h"
 #include "jit/JitZone.h"
 #include "vm/Runtime.h"

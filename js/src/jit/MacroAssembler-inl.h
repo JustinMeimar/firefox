@@ -47,7 +47,9 @@
 
 #include "wasm/WasmBuiltins.h"
 
-#include "jit/AOTMacroAssembler-inl.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTMacroAssembler-inl.h"
+#endif
 
 namespace js {
 namespace jit {

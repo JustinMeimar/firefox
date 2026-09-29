@@ -7,7 +7,9 @@
 #include <algorithm>
 
 #include "debugger/DebugAPI.h"
-#include "jit/JitRuntime.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/JitRuntime.h"
+#endif
 #include "vm/EnvironmentObject.h"
 #include "vm/JSContext.h"
 

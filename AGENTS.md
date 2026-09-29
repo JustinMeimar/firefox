@@ -45,6 +45,7 @@ You can find the review identifier by inspecting the commit log with:
 
 ## Code Style
 - Our style guide forbids the use of emoji.
+- Before finishing, check changed code against Firefox style guidelines, including SpiderMonkey's include order: module header, mozilla/, system, top-level, local, then inline headers.
 
 ## Workflow
 - You can run tests by using `./mach test --auto`. Once you are satisfied with the tests you run locally, use `mach try auto` to run tests in CI

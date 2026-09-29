@@ -1124,7 +1124,6 @@ struct JSRuntime {
            js::RuntimeFuses::offsetOfFuseByIndex(index);
   }
 #endif
-
 };
 
 namespace js {

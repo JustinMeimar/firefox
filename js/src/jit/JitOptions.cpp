@@ -47,7 +47,6 @@ T overrideDefault(const char* param, T dflt) {
       return false;
     }
     Warn(param, str);
-
   } else {
     Maybe<int> value = ParseInt(str);
     if (value.isSome()) {

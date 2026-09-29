@@ -7,7 +7,6 @@
 #include "mozilla/Maybe.h"
 
 #include "gc/GC.h"
-#include "gc/Zone.h"
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/BaselineIC.h"
 #include "jit/CacheIR.h"
@@ -15,12 +14,16 @@
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRSpewer.h"
 #include "jit/CacheIRWriter.h"
-#include "jit/JitRuntime.h"
 #include "jit/JitScript.h"
-#include "jit/JitZone.h"
 #include "jit/ShapeList.h"
-#include "vm/JSContext.h"
-#include "vm/Runtime.h"
+
+#ifdef ENABLE_JS_AOT
+#  include "gc/Zone.h"
+#  include "jit/JitRuntime.h"
+#  include "jit/JitZone.h"
+#  include "vm/JSContext.h"
+#  include "vm/Runtime.h"
+#endif
 
 #include "vm/List-inl.h"
 

@@ -15,7 +15,6 @@
 
 #  include <cstdint>
 #  include <cstring>
-#  include <ostream>
 #  include <type_traits>
 
 #  include "jit/AOTImageFormatGenerated.h"
@@ -56,7 +55,6 @@ namespace js::jit {
 class AOTImage;
 class AOTBlobReader;
 class AOTBlobWriter;
-class AOTImageBuilder;
 
 // Reads the serialized fields and arrays for one artifact in order.
 class AOTBlobReader {
@@ -182,8 +180,7 @@ class AOTBlobWriter {
   Vector<uint8_t, 0, SystemAllocPolicy> arrays_;
 };
 
-// Provides a read only view of an image embedded in the binary or supplied by a
-// test.
+// Provides a read only view of an image embedded in the binary.
 class AOTImage {
  public:
   // No embedded image is available when the binary contains no linked image
@@ -221,27 +218,6 @@ class AOTImage {
 
   const uint8_t* base_;
   size_t size_;
-};
-
-// Builds an image in memory from recorded artifacts using a supplied
-// buildIdentity.
-class AOTImageBuilder {
- public:
-  [[nodiscard]] bool addBlob(AOTBlobWriter&& blob) {
-    return blobs_.append(std::move(blob));
-  }
-
-  uint32_t blobCount() const { return blobs_.length(); }
-
-  // Writes a finalized image. The buildIdentity must have the expected length.
-  [[nodiscard]] bool finalize(std::ostream& out, const uint8_t* buildIdentity);
-
-  // Collects a finalized image in memory for tests.
-  [[nodiscard]] bool finalize(Vector<uint8_t, 0, SystemAllocPolicy>& out,
-                              const uint8_t* buildIdentity);
-
- private:
-  Vector<AOTBlobWriter, 0, SystemAllocPolicy> blobs_;
 };
 
 // Holds the runtime representation of a serialized inline cache stub. Encoding

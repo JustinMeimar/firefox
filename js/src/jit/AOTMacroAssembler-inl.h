@@ -32,14 +32,8 @@ inline void MacroAssembler::loadRuntime(Register reg) {
   movePtr(ImmPtr(runtime()), reg);
 }
 
-inline void MacroAssembler::loadZoneBase(Register dest) {
-#ifdef ENABLE_JS_AOT
-  if (isAOT()) {
-    loadZoneForAOT(dest);
-    return;
-  }
-#endif
-  MacroAssemblerSpecific::movePtr(ImmPtr(realm()->zone()->zone()), dest);
+inline void MacroAssembler::movePtr(TrampolinePtr ptr, Register dest) {
+  movePtr(ImmPtr(ptr.value), dest);
 }
 
 inline void MacroAssembler::movePtr(ImmPtr imm, Register dest) {

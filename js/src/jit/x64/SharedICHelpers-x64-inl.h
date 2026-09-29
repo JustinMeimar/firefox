@@ -20,9 +20,7 @@ inline void EmitBaselineTailCallVM(TrampolinePtr target, MacroAssembler& masm,
 
   // We can assume during this that R0 and R1 have been pushed.
   // Store frame size without VMFunction arguments for debug assertions.
-#  ifndef ENABLE_JS_AOT
   ScratchRegisterScope scratch(masm);
-#  endif
   masm.movq(FramePointer, scratch);
   masm.subq(StackPointer, scratch);
   masm.subq(Imm32(argSize), scratch);
@@ -42,10 +40,8 @@ inline void EmitBaselineCallVM(TrampolinePtr target, MacroAssembler& masm) {
   masm.call(target);
 }
 
-inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register aotScratch) {
-#ifdef ENABLE_JS_AOT
-  Register scratch = aotScratch;
-#endif
+inline void EmitBaselineEnterStubFrame(MacroAssembler& masm,
+                                       Register aotScratch) {
 #ifdef DEBUG
   // Compute frame size. Because the return address is still on the stack,
   // this is:
@@ -54,9 +50,7 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register aotScratch
   //   - StackPointer
   //   - sizeof(return address)
 
-#  ifndef ENABLE_JS_AOT
   ScratchRegisterScope scratch(masm);
-#  endif
   masm.movq(FramePointer, scratch);
   masm.subq(StackPointer, scratch);
   masm.subq(Imm32(sizeof(void*)), scratch);  // Return address.
@@ -78,7 +72,7 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register aotScratch
   // Stub entry copies it from the baseline frame into the stub frame.
   masm.loadPtr(
       Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()),
-      scratch);
+      aotScratch);
 #endif
 
   // Save old frame pointer, stack pointer and stub reg.
@@ -87,7 +81,7 @@ inline void EmitBaselineEnterStubFrame(MacroAssembler& masm, Register aotScratch
 
   masm.Push(ICStubReg);
 #ifdef ENABLE_JS_AOT
-  masm.Push(scratch);
+  masm.Push(aotScratch);
 #endif
 }
 

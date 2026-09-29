@@ -293,6 +293,7 @@ class BaselineCodeGen {
 };
 
 using RetAddrEntryVector = js::Vector<RetAddrEntry, 16, SystemAllocPolicy>;
+using AllocSiteIndexVector = js::Vector<uint32_t, 16, SystemAllocPolicy>;
 
 // Interface used by BaselineCodeGen for BaselineCompiler.
 class BaselineCompilerHandler {
@@ -304,6 +305,7 @@ class BaselineCompilerHandler {
 #endif
   FixedList<Label> labels_;
   RetAddrEntryVector retAddrEntries_;
+  AllocSiteIndexVector allocSiteIndices_;
 
   // Native code offsets for OSR at JSOp::LoopHead ops.
   using OSREntryVector =
@@ -333,6 +335,8 @@ class BaselineCompilerHandler {
   bool ionCompileable_;
 
   bool compilingOffThread_ = false;
+
+  bool needsEnvAllocSite_ = false;
 
 #ifdef ENABLE_JS_AOT
   bool isAOT_ = false;
@@ -422,13 +426,18 @@ class BaselineCompilerHandler {
 
   void maybeDisableIon();
 
+  [[nodiscard]] bool addAllocSiteIndex(uint32_t entryIndex) {
+    return allocSiteIndices_.append(entryIndex);
+  }
+  void createAllocSites();
+
   bool compilingOffThread() const { return compilingOffThread_; }
   void setCompilingOffThread() { compilingOffThread_ = true; }
 
-  // Always emit environment allocation site setup so captured code can be
-  // reused. Installation populates the site only for scripts that need
-  // environment objects.
-  bool usesEnvAllocSite() const { return true; }
+  bool addEnvAllocSite() {
+    needsEnvAllocSite_ = true;
+    return true;
+  }
 
   bool realmIndependentJitcode() const {
     // AOT code generation must produce code that can be reused by any
@@ -580,7 +589,7 @@ class BaselineInterpreterHandler {
   bool canHaveFixedSlots() const { return true; }
   JSObject* maybeGlobalLexicalEnvironment() const { return nullptr; }
 
-  bool usesEnvAllocSite() const { return false; }  // Not supported.
+  bool addEnvAllocSite() { return false; }  // Not supported.
 
   bool realmIndependentJitcode() const { return true; }
 
@@ -624,10 +633,12 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   void emitOutOfLineCodeCoverageInstrumentation();
 };
 
+#ifdef ENABLE_JS_AOT
 // After baseline code is compiled or installed, create allocation sites for its
 // inline cache entries and initialize the environment allocation site when
 // needed. This runs on the main thread and ignores allocation failure.
 void FinalizeInstalledBaselineScript(JSScript* script);
+#endif
 
 }  // namespace jit
 }  // namespace js

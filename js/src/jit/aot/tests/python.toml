@@ -1,4 +1,0 @@
-[DEFAULT]
-subsuite = "mozbuild"
-
-["test_mach_commands.py"]

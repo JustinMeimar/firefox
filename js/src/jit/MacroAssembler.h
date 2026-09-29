@@ -346,8 +346,6 @@ struct BranchWasmRefIsSubtypeRegisters {
 // The public entrypoint for emitting assembly. Note that a MacroAssembler can
 // use cx->lifoAlloc, so take care not to interleave masm use with other
 // lifoAlloc use if one will be destroyed before the other.
-extern const double MathRandomScaleInv;
-
 class MacroAssembler : public MacroAssemblerSpecific {
  private:
   // Information about the current JSRuntime. This is nullptr only for Wasm
@@ -6143,6 +6141,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   using MacroAssemblerSpecific::movePtr;
+#ifdef ENABLE_JS_AOT
   inline void movePtr(ImmPtr imm, Register dest);
   inline void movePtr(ImmGCPtr imm, Register dest);
 
@@ -6161,7 +6160,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void jump(TrampolinePtr code);
 
   inline void loadRuntime(Register reg);
-  inline void loadZoneBase(Register dest);
+  inline void movePtr(TrampolinePtr ptr, Register dest);
+#else
+  void movePtr(TrampolinePtr ptr, Register dest) {
+    movePtr(ImmPtr(ptr.value), dest);
+  }
+#endif
 
  private:
   void handleFailure();

@@ -88,7 +88,8 @@ BaselineCompilerHandler::BaselineCompilerHandler(MacroAssembler& masm,
       compileDebugInstrumentation_(snapshot->compileDebugInstrumentation()),
       ionCompileable_(snapshot->isIonCompileable())
 #ifdef ENABLE_JS_AOT
-      , isAOT_(masm.isAOT())
+      ,
+      isAOT_(masm.isAOT())
 #endif
 {
 }
@@ -408,7 +409,7 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
   handler.maybeDisableIon();
 
   // AllocSites must be allocated on the main thread.
-  FinalizeInstalledBaselineScript(handler.script());
+  handler.createAllocSites();
 
   // Always register a native => bytecode mapping entry, since profiler can be
   // turned on with baseline jitcode on stack, and baseline jitcode cannot be
@@ -761,6 +762,20 @@ static void CreateAllocSitesForICChain(JSScript* script, uint32_t entryIndex,
   }
 }
 
+void BaselineCompilerHandler::createAllocSites() {
+  ICScript* icScript = script()->jitScript()->icScript();
+  gc::AutoMarkingLock lock(script()->zone(), icScript->markingLock());
+
+  for (uint32_t allocSiteIndex : allocSiteIndices_) {
+    CreateAllocSitesForICChain(script(), allocSiteIndex, lock);
+  }
+
+  if (needsEnvAllocSite_) {
+    icScript->ensureEnvAllocSite(script(), lock);
+  }
+}
+
+#ifdef ENABLE_JS_AOT
 void FinalizeInstalledBaselineScript(JSScript* script) {
   JitScript* jitScript = script->jitScript();
   ICScript* icScript = jitScript->icScript();
@@ -778,6 +793,7 @@ void FinalizeInstalledBaselineScript(JSScript* script) {
     icScript->ensureEnvAllocSite(script, lock);
   }
 }
+#endif
 
 template <>
 bool BaselineCompilerCodeGen::emitNextIC() {
@@ -802,6 +818,11 @@ bool BaselineCompilerCodeGen::emitNextIC() {
 
   MOZ_ASSERT(stub->pcOffset() == pcOffset);
   MOZ_ASSERT(BytecodeOpHasIC(JSOp(*handler.pc())));
+
+  if (BytecodeOpCanHaveAllocSite(JSOp(*handler.pc())) &&
+      !handler.addAllocSiteIndex(entryIndex)) {
+    return false;
+  }
 
   // Load stub pointer into ICStubReg.
   masm.loadPtr(frame.addressOfICScript(), ICStubReg);
@@ -1546,7 +1567,7 @@ bool BaselineCompilerCodeGen::initEnvironmentChain() {
     masm.loadFunctionFromCalleeToken(frame.addressOfCalleeToken(), callee);
 
     AllocSiteInput site;
-    if (handler.usesEnvAllocSite()) {
+    if (handler.addEnvAllocSite()) {
       siteRegister = regs.takeAny();
       masm.loadPtr(frame.addressOfICScript(), temp);
       masm.loadPtr(Address(temp, ICScript::offsetOfEnvAllocSite()),
@@ -2119,8 +2140,9 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
 #ifdef ENABLE_JS_AOT
   if (masm.isAOT()) {
     Register ptrReg = R1.scratchReg();
-    masm.movePtr(ImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value),
-                 ptrReg);
+    masm.movePtr(
+        ImmPtr(runtime->jitRuntime()->getProfilerExitFrameTail().value),
+        ptrReg);
     masm.jump(ptrReg);
   } else
 #endif

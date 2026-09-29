@@ -8,25 +8,26 @@
 #define jit_AOT_h
 
 #ifdef ENABLE_JS_AOT
+#  include "mozilla/Assertions.h"
+#  include "mozilla/HashFunctions.h"
+#  include "mozilla/Maybe.h"
+
+#  include <cstdint>
+#  include <iterator>
+
+#  include "jstypes.h"
+
 #  include "jit/AOTImageFormatGenerated.h"
-
-#include "mozilla/Assertions.h"
-#include "mozilla/HashFunctions.h"
-#include "mozilla/Maybe.h"
-
-#include <cstdint>
-#include <iterator>
-
-#include "jstypes.h"
-
-#include "jit/Registers.h"
-#include "js/experimental/TypedData.h"  // JS_FOR_EACH_TYPED_ARRAY
+#  include "jit/Registers.h"
+#  include "js/experimental/TypedData.h"  // JS_FOR_EACH_TYPED_ARRAY
 
 struct JS_PUBLIC_API JSContext;
 
 namespace js::jit {
 
 class JitCode;
+
+extern const double MathRandomScaleInv;
 
 // [SMDOC] AOT JIT Code
 //
@@ -46,13 +47,13 @@ static constexpr uint32_t AOTMaxVMWrappers = 512;
 // this header. The array size fixes the ABIFn slot range and is the same
 // count the image shim's link table binds against.
 inline constexpr bool kAOTABIFnLinkable[] = {
-#define AOT_ABIFN(fp) true,
-#define AOT_ABIFN_NOLINK(fp) false,
-#define AOT_ABIFN_TYPED(fp, ...) true,
-#include "jit/AOTABIFns.tbl"
-#undef AOT_ABIFN_TYPED
-#undef AOT_ABIFN_NOLINK
-#undef AOT_ABIFN
+#  define AOT_ABIFN(fp) true,
+#  define AOT_ABIFN_NOLINK(fp) false,
+#  define AOT_ABIFN_TYPED(fp, ...) true,
+#  include "jit/AOTABIFns.tbl"
+#  undef AOT_ABIFN_TYPED
+#  undef AOT_ABIFN_NOLINK
+#  undef AOT_ABIFN
 };
 
 inline constexpr uint32_t kAOTABIFnCount = std::size(kAOTABIFnLinkable);
@@ -67,13 +68,13 @@ enum class AOTSlot : uint32_t {
   InterruptBitsValue,
   JitStackLimitValue,
 
-#define AOT_SLOT(name, ...) name,
-#define AOT_ATOM_SLOT AOT_SLOT
-#define AOT_LINK_SLOT AOT_SLOT
-#include "jit/AOTSlots.tbl"
-#undef AOT_LINK_SLOT
-#undef AOT_ATOM_SLOT
-#undef AOT_SLOT
+#  define AOT_SLOT(name, ...) name,
+#  define AOT_ATOM_SLOT AOT_SLOT
+#  define AOT_LINK_SLOT AOT_SLOT
+#  include "jit/AOTSlots.tbl"
+#  undef AOT_LINK_SLOT
+#  undef AOT_ATOM_SLOT
+#  undef AOT_SLOT
   NamedSlot_End,
   VMWrapper_Begin = NamedSlot_End,
   VMWrapper_End = VMWrapper_Begin + AOTMaxVMWrappers,
@@ -100,13 +101,13 @@ constexpr AOTSlot AOTSlotForABIFn(uint32_t idx) {
 
 constexpr bool IsNamedAOTLinkSlot(AOTSlot slot) {
   switch (slot) {
-#define AOT_SLOT(name, ...)
-#define AOT_ATOM_SLOT(name, ...)
-#define AOT_LINK_SLOT(name, ...) case AOTSlot::name:
-#include "jit/AOTSlots.tbl"
-#undef AOT_LINK_SLOT
-#undef AOT_ATOM_SLOT
-#undef AOT_SLOT
+#  define AOT_SLOT(name, ...)
+#  define AOT_ATOM_SLOT(name, ...)
+#  define AOT_LINK_SLOT(name, ...) case AOTSlot::name:
+#  include "jit/AOTSlots.tbl"
+#  undef AOT_LINK_SLOT
+#  undef AOT_ATOM_SLOT
+#  undef AOT_SLOT
     return true;
     default:
       return false;
@@ -128,13 +129,13 @@ bool IsAOTLinkSlot(AOTSlot slot);
 // renumbers everything after it without changing any name.
 constexpr mozilla::HashNumber AOTSlotTableHash() {
   const char* const names[] = {
-#define AOT_SLOT(name, ...) #name,
-#define AOT_ATOM_SLOT(name, ...) "@" #name,
-#define AOT_LINK_SLOT(name, ...) "&" #name,
-#include "jit/AOTSlots.tbl"
-#undef AOT_LINK_SLOT
-#undef AOT_ATOM_SLOT
-#undef AOT_SLOT
+#  define AOT_SLOT(name, ...) #name,
+#  define AOT_ATOM_SLOT(name, ...) "@" #name,
+#  define AOT_LINK_SLOT(name, ...) "&" #name,
+#  include "jit/AOTSlots.tbl"
+#  undef AOT_LINK_SLOT
+#  undef AOT_ATOM_SLOT
+#  undef AOT_SLOT
   };
   mozilla::HashNumber h = 0;
   for (const char* n : names) {

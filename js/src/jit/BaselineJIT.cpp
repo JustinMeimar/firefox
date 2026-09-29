@@ -17,6 +17,7 @@
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTCompilationKey.h"
 #  include "jit/AOTInstaller.h"
+#  include "jit/Linker.h"
 #endif
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineCodeGen.h"
@@ -29,7 +30,6 @@
 #include "jit/JitCommon.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
-#include "jit/Linker.h"
 #include "jit/MacroAssembler.h"
 #include "js/friend/StackLimits.h"  // js::AutoCheckRecursionLimit
 #include "vm/Interpreter.h"

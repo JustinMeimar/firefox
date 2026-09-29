@@ -356,8 +356,15 @@ void MacroAssembler::mulBy3(Register src, Register dest) {
 
 void MacroAssembler::mulDoublePtr(ImmPtr imm, Register temp,
                                   FloatRegister dest) {
-  movePtr(imm, temp);
-  vmulsd(Operand(temp, 0), dest, dest);
+#ifdef ENABLE_JS_AOT
+  if (isAOT()) {
+    movePtr(imm, temp);
+    vmulsd(Operand(temp, 0), dest, dest);
+    return;
+  }
+#endif
+  movq(imm, ScratchReg);
+  vmulsd(Operand(ScratchReg, 0), dest, dest);
 }
 
 void MacroAssembler::inc64(AbsoluteAddress dest) {
