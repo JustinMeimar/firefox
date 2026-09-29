@@ -84,14 +84,15 @@ def lay_out(fields):
     return members, offset
 
 
-def parse_blob(kind, blob):
+def parse_blob(kind, artifact):
+    metadata = artifact["metadata"]
     arrays = []
-    for entry in blob.get("arrays") or []:
+    for entry in metadata.get("arrays") or []:
         element, path = split_declaration(entry, "array in blob %s" % kind)
         arrays.append({"name": member_name(path), "path": path, "element": element})
 
     fields = []
-    for entry in blob.get("fields") or []:
+    for entry in metadata.get("fields") or []:
         type_name, path = split_declaration(entry, "field in blob %s" % kind)
         if type_name not in PRIMITIVES:
             raise ValueError("unknown field type %s in blob %s" % (type_name, kind))
@@ -119,8 +120,8 @@ def parse_blob(kind, blob):
 
     return {
         "kind": kind,
-        "doc": blob.get("doc"),
-        "metadata_type": blob["metadata_type"],
+        "doc": artifact.get("doc"),
+        "metadata_type": metadata["cpp_type"],
         "fields_type": "AOTFields_%s" % kind,
         "fields": fields,
         "arrays": arrays,
@@ -219,7 +220,7 @@ def emit_blob(kind_id, blob):
 def main(c_out, yaml_path):
     schema = load_yaml(yaml_path)
     blobs = [
-        parse_blob(kind, blob) for kind, blob in (schema.get("blobs") or {}).items()
+        parse_blob(kind, blob) for kind, blob in (schema.get("artifacts") or {}).items()
     ]
 
     body = [
@@ -263,20 +264,23 @@ def record_format(fields):
     )
 
 
-def context_fields(schema, blob):
-    return [
-        field for group in blob["contexts"] for field in schema["contexts"][group]
-    ]
-
-
-def key_fields(schema, kind, blob):
-    return context_fields(schema, blob) + schema["inputs"].get(kind, {}).get("fields", [])
+def key_fields(schema, artifact):
+    fields = []
+    for entry in schema["common_key_fields"] + artifact["compilation_key"]:
+        declaration = dict(entry)
+        metadata = declaration.pop("metadata", None)
+        type_name, name = split_declaration(declaration, "compilation key field")
+        field = {"type": type_name, "name": name}
+        if metadata is not None:
+            field["metadata"] = metadata
+        fields.append(field)
+    return fields
 
 
 def validate_schema(schema):
-    for kind, blob in schema["blobs"].items():
+    for kind, blob in schema["artifacts"].items():
         parsed = parse_blob(kind, blob)
-        fields = key_fields(schema, kind, blob)
+        fields = key_fields(schema, blob)
         if len({field["name"] for field in fields}) != len(fields):
             raise ValueError(f"duplicate key field in {kind}")
         members = {field["name"] for field in parsed["fields"] + parsed["arrays"]}
@@ -304,7 +308,7 @@ def describe_schema(schema):
             "format": record_format(fields),
             "names": [split_declaration(field, name)[1] for field in fields],
         }
-    for kind, source in schema["blobs"].items():
+    for kind, source in schema["artifacts"].items():
         blob = parse_blob(kind, source)
         fmt = "<"
         for member in blob["members"]:
@@ -318,13 +322,13 @@ def describe_schema(schema):
         ]
         description["blobs"].append({
             "name": kind,
-            "prefix": source["prefix"],
+            "prefix": source["filename_prefix"],
             "format": fmt,
             "fields": [field["name"] for field in blob["fields"]],
             "arrays": arrays,
             "key": [
                 {k: field[k] for k in ("name", "type", "metadata") if k in field}
-                for field in key_fields(schema, kind, source)
+                for field in key_fields(schema, source)
             ],
         })
     return description
@@ -357,15 +361,15 @@ def generate_format_header(output, yaml_path):
         "namespace js::jit {",
         "enum class AOTBlobKind : uint32_t {",
     ]
-    lines += [f"  {name} = {i}," for i, name in enumerate(schema["blobs"])]
+    lines += [f"  {name} = {i}," for i, name in enumerate(schema["artifacts"])]
     lines += [
         "};",
-        f"inline constexpr uint32_t AOTBlobKindCount = {len(schema['blobs'])};",
+        f"inline constexpr uint32_t AOTBlobKindCount = {len(schema['artifacts'])};",
         "inline const char* AOTArtifactPrefix(AOTBlobKind kind) {",
         "  switch (kind) {",
     ]
-    for name, blob in schema["blobs"].items():
-        lines.append(f'    case AOTBlobKind::{name}: return "{blob["prefix"]}";')
+    for name, blob in schema["artifacts"].items():
+        lines.append(f'    case AOTBlobKind::{name}: return "{blob["filename_prefix"]}";')
     lines += ["  }", '  MOZ_CRASH("Invalid AOT artifact kind");', "}"]
     lines += [
         f"inline constexpr uint32_t BlobFileMagic = {constants['blob_file_magic']};",

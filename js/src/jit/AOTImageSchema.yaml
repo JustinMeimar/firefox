@@ -8,16 +8,20 @@
 # generator uses it to create matching metadata structures and serialization
 # helpers. Readers and writers share the same schema.
 #
-# A blob declares its fixed fields and its trailing arrays. Both are written as
+# An artifact declares its compilation key and installation metadata. Metadata
+# declares fixed fields and trailing arrays. Both are written as
 # a single "type: member" pair, where member is the path to the corresponding
 # member of the hand written metadata type. Fixed fields use unsigned integer
 # types; arrays name their C++ element type.
 #
-# A blob's kind identifier is its position in the blobs mapping. Each array
+# An artifact's kind identifier is its position in the artifacts mapping. Each array
 # contributes a u32 element count, appended to the fixed fields. Alignment
 # padding is inserted so that the serialized form has no implicit padding.
 #
-# Increment the image format version whenever the schema changes.
+# Compilation keys begin with common_key_fields, followed by the artifact
+# compilation_key fields in declaration order.
+#
+# Increment the image format version whenever the binary layout changes.
 
 format:
   image_magic: 0x49544F41
@@ -79,112 +83,106 @@ array_types:
   js::jit::BaselineScript::DebugTrapEntry: {size: 8, alignment: 4}
   js::jit::ResumeOffsetEntry: {size: 8, alignment: 4}
 
-contexts:
-  common:
-    - {type: u32, name: kind}
-    - {type: u32, name: cpuFeatures}
-    - {type: bool, name: spectreIndexMasking}
-    - {type: bool, name: spectreObjectMitigations}
-    - {type: bool, name: spectreStringMitigations}
-    - {type: bool, name: lessDebugCode}
-    - {type: bool, name: profiling}
-  baseline:
-    - {type: bool, name: disableInlining}
-  interpreter:
-    - {type: bool, name: baselineJit}
-    - {type: bool, name: baselineBatching}
-    - {type: u32, name: baselineQueueCapacity}
-  function:
-    - {type: u32, name: ionMaxScriptSizeMainThread}
-    - {type: u32, name: ionMaxLocalsAndArgsMainThread}
-    - {type: bool, name: eagerIonCompilation}
-  ic:
-    - {type: bool, name: enableICFramePointers}
-    - {type: bool, name: fullDebugChecks}
+common_key_fields:
+  - u32: kind
+  - u32: cpuFeatures
+  - bool: spectreIndexMasking
+  - bool: spectreObjectMitigations
+  - bool: spectreStringMitigations
+  - bool: lessDebugCode
+  - bool: profiling
 
-inputs:
-  BaselineFunction:
-    fields:
-      - {type: u32, name: baseWarmUpThreshold}
-      - {type: bool, name: ionCompileable}
-      - {type: bool, name: debugInstrumentation}
-      - {type: u32, name: immutableFlags}
-      - {type: u32, name: functionFlags}
-      - {type: u32, name: nargs}
-      - {type: u32, name: nfixed}
-      - {type: u32, name: nslots}
-      - {type: u32, name: numICEntries}
-      - {type: u32, name: scopeKind}
-      - {type: bool, name: hasNonSyntacticScope}
-      - {type: bool, name: isFunction}
-      - {type: bool, name: needsArgsObj}
-      - {type: bool, name: argsObjAliasesFormals}
-      - {type: u32_array, name: gcThingKinds}
-      - {type: bytes, name: immutableScriptData}
-  InlineCacheStub:
-    fields:
-      - {type: u32, name: cacheKind, metadata: cacheKind}
-      - {type: u32, name: stubDataOffset, metadata: stubDataOffset}
-      - {type: bytes, name: cacheIRCode, metadata: cacheIRCode}
-      - {type: bytes, name: fieldTypes, metadata: fieldTypes}
-
-blobs:
+artifacts:
   BaselineInterpreter:
-    prefix: interp
-    contexts: [common, baseline, interpreter]
-    doc: "Baseline interpreter variant."
-    metadata_type: "js::jit::BaselineInterpreterMetadata"
-    fields:
-      - u32: interpretOpOffset
-      - u32: interpretOpNoDebugTrapOffset
-      - u32: bailoutPrologueOffset
-      - u32: profilerEnterToggleOffset
-      - u32: profilerExitToggleOffset
-      - u32: debugTrapHandlerOffset
-      - u32: callVMOffsets.debugPrologueOffset
-      - u32: callVMOffsets.debugEpilogueOffset
-      - u32: callVMOffsets.debugAfterYieldOffset
-    arrays:
-      - uint32_t: debugInstrumentationOffsets
-      - uint32_t: debugTrapOffsets
-      - uint32_t: codeCoverageOffsets
-      - js::jit::BaselineInterpreterMetadata::ICReturnOffset: icReturnOffsets
+    filename_prefix: interp
+    doc: |
+      Baseline interpreter variant.
+    compilation_key:
+      - bool: disableInlining
+      - bool: baselineJit
+      - bool: baselineBatching
+      - u32: baselineQueueCapacity
+    metadata:
+      cpp_type: "js::jit::BaselineInterpreterMetadata"
+      fields:
+        - u32: interpretOpOffset
+        - u32: interpretOpNoDebugTrapOffset
+        - u32: bailoutPrologueOffset
+        - u32: profilerEnterToggleOffset
+        - u32: profilerExitToggleOffset
+        - u32: debugTrapHandlerOffset
+        - u32: callVMOffsets.debugPrologueOffset
+        - u32: callVMOffsets.debugEpilogueOffset
+        - u32: callVMOffsets.debugAfterYieldOffset
+      arrays:
+        - uint32_t: debugInstrumentationOffsets
+        - uint32_t: debugTrapOffsets
+        - uint32_t: codeCoverageOffsets
+        - js::jit::BaselineInterpreterMetadata::ICReturnOffset: icReturnOffsets
 
   BaselineFunction:
-    prefix: blfun
-    contexts: [common, baseline, function]
+    filename_prefix: blfun
     doc: |
       Per-JSScript baseline JIT code plus the metadata needed to
       reconstruct a BaselineScript on load. Compilation inputs are
       serialized by the compilation-key writers.
-    metadata_type: "js::jit::BaselineScriptMetadata"
-    fields:
-      - u32: warmUpCheckPrologueOffset
-      - u32: profilerEnterToggleOffset
-      - u32: profilerExitToggleOffset
-      - u8: flags
-      - u8: disableIon
-      - u8: uninlineable
-    arrays:
-      - js::jit::RetAddrEntry: retAddrEntries
-      - js::jit::BaselineScript::OSREntry: osrEntries
-      - js::jit::BaselineScript::DebugTrapEntry: debugTrapEntries
-      - js::jit::ResumeOffsetEntry: resumeOffsetEntries
+    compilation_key:
+      - bool: disableInlining
+      - u32: ionMaxScriptSizeMainThread
+      - u32: ionMaxLocalsAndArgsMainThread
+      - bool: eagerIonCompilation
+      - u32: baseWarmUpThreshold
+      - bool: ionCompileable
+      - bool: debugInstrumentation
+      - u32: immutableFlags
+      - u32: functionFlags
+      - u32: nargs
+      - u32: nfixed
+      - u32: nslots
+      - u32: numICEntries
+      - u32: scopeKind
+      - bool: hasNonSyntacticScope
+      - bool: isFunction
+      - bool: needsArgsObj
+      - bool: argsObjAliasesFormals
+      - u32_array: gcThingKinds
+      - bytes: immutableScriptData
+    metadata:
+      cpp_type: "js::jit::BaselineScriptMetadata"
+      fields:
+        - u32: warmUpCheckPrologueOffset
+        - u32: profilerEnterToggleOffset
+        - u32: profilerExitToggleOffset
+        - u8: flags
+        - u8: disableIon
+        - u8: uninlineable
+      arrays:
+        - js::jit::RetAddrEntry: retAddrEntries
+        - js::jit::BaselineScript::OSREntry: osrEntries
+        - js::jit::BaselineScript::DebugTrapEntry: debugTrapEntries
+        - js::jit::ResumeOffsetEntry: resumeOffsetEntries
 
   InlineCacheStub:
-    prefix: ic
-    contexts: [common, ic]
+    filename_prefix: ic
     doc: |
       One AOT-compiled CacheIR stub. On load the CacheIR bytes plus
       the trailing field-type table are used to reconstruct a
       CacheIRStubInfo; the resulting CacheIRStubKey names the static
       text range in the per-zone stub map.
-    metadata_type: "js::jit::AOTICStubMetadata"
-    fields:
-      - u8: cacheKind
-      - u8: makesGCCalls
-      - u8: stubDataOffset
-      - u8: localTracingSlots
-    arrays:
-      - uint8_t: cacheIRCode
-      - uint8_t: fieldTypes
+    compilation_key:
+      - bool: enableICFramePointers
+      - bool: fullDebugChecks
+      - {u32: cacheKind, metadata: cacheKind}
+      - {u32: stubDataOffset, metadata: stubDataOffset}
+      - {bytes: cacheIRCode, metadata: cacheIRCode}
+      - {bytes: fieldTypes, metadata: fieldTypes}
+    metadata:
+      cpp_type: "js::jit::AOTICStubMetadata"
+      fields:
+        - u8: cacheKind
+        - u8: makesGCCalls
+        - u8: stubDataOffset
+        - u8: localTracingSlots
+      arrays:
+        - uint8_t: cacheIRCode
+        - uint8_t: fieldTypes
