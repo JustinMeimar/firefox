@@ -7,7 +7,9 @@ import importlib.util
 import logging
 import os
 import shutil
+import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -303,6 +305,30 @@ def _relink(command_context):
     )
 
 
+def _run_test_stage(command_context, label, argv, env=None):
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as output:
+        print(f" -- {label:<18}", end="", flush=True)
+        try:
+            result = subprocess.run(
+                argv,
+                cwd=command_context.topsrcdir,
+                env=env,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+        except OSError:
+            print(" FAILED")
+            raise
+        if result.returncode:
+            print(" FAILED")
+            output.seek(0)
+            raise AmberMonkeyError(
+                f"{label} exited with status {result.returncode}.\n{output.read()}"
+            )
+    print(" SUCCESS")
+
+
 def _print_summary(command_context, result, executables=None):
     paths = result["paths"]
     lines = [
@@ -339,7 +365,7 @@ def _bundle(paths, executables, output_dir):
 @Command(
     "ambermonkey",
     category="build",
-    description="Record, pack, relink, and verify AmberMonkey AOT images.",
+    description="Record, pack, relink, and test AmberMonkey AOT images.",
 )
 def ambermonkey(command_context):
     print("Usage: ./mach ambermonkey <command> [options]\n")
@@ -502,24 +528,52 @@ def ambermonkey_build_image(command_context, corpus, output_dir=None):
 
 
 @SubCommand(
-    "ambermonkey", "verify", description="Run jit-tests against the linked AOT image."
+    "ambermonkey", "test", description="Record jit-tests and test the linked AOT image."
 )
-def ambermonkey_verify(command_context):
+def ambermonkey_test(command_context):
     try:
         paths = _paths(command_context)
         _validate_build(command_context, paths)
         if not paths["shell"].is_file():
             raise AmberMonkeyError(
-                f"Verification requires a JS shell at {paths['shell']}; "
+                f"Testing requires a JS shell at {paths['shell']}; "
                 "select an AOT-enabled JS-shell objdir."
             )
-    except AmberMonkeyError as exc:
+        mach = [
+            sys.executable,
+            str(Path(command_context.topsrcdir) / "mach"),
+            "ambermonkey",
+        ]
+        jit_test = (
+            Path(command_context.topsrcdir) / "js" / "src" / "jit-test" / "jit_test.py"
+        )
+        with tempfile.TemporaryDirectory(prefix="ambermonkey-corpus-", dir="/tmp") as corpus:
+            _run_test_stage(
+                command_context,
+                "recording builtins",
+                mach + ["record", "--corpus", corpus],
+            )
+            _run_test_stage(
+                command_context,
+                "recording jit-tests",
+                [
+                    sys.executable,
+                    str(jit_test),
+                    f"--args=--aot-record={corpus} --no-ion",
+                    str(paths["shell"]),
+                ],
+                env=_clean_environment(),
+            )
+            _run_test_stage(
+                command_context, "packing image", mach + ["pack", "--corpus", corpus]
+            )
+            _run_test_stage(command_context, "relinking", mach + ["relink"])
+            _run_test_stage(
+                command_context,
+                "testing jit-tests",
+                [sys.executable, str(jit_test), "--args=--aot", str(paths["shell"])],
+                env=_clean_environment(),
+            )
+        return 0
+    except (AmberMonkeyError, OSError) as exc:
         return _log_error(command_context, exc)
-    jit_test = (
-        Path(command_context.topsrcdir) / "js" / "src" / "jit-test" / "jit_test.py"
-    )
-    return command_context.run_process(
-        [sys.executable, str(jit_test), "--args=--aot", str(paths["shell"])],
-        pass_thru=True,
-        ensure_exit_code=False,
-    )

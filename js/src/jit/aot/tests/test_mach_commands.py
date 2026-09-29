@@ -124,6 +124,42 @@ def test_command_construction(tmp_path):
     assert calls[0][1] == {"what": ["binaries"]}
 
 
+def test_test_command_runs_record_pack_relink_and_jit_tests(tmp_path, monkeypatch):
+    shell = tmp_path / "dist" / "bin" / "js"
+    shell.parent.mkdir(parents=True)
+    shell.touch()
+    context = SimpleNamespace(topsrcdir=str(tmp_path))
+    monkeypatch.setattr(mach_commands, "_paths", lambda _: {"shell": shell})
+    monkeypatch.setattr(mach_commands, "_validate_build", lambda *_: None)
+    calls = []
+
+    def run_stage(_, label, argv, env=None):
+        calls.append((label, argv, env))
+        if label == "recording builtins":
+            assert Path(argv[-1]).is_dir()
+            assert list(Path(argv[-1]).iterdir()) == []
+
+    monkeypatch.setattr(mach_commands, "_run_test_stage", run_stage)
+    assert mach_commands.ambermonkey_test(context) == 0
+    assert [label for label, _, _ in calls] == [
+        "recording builtins",
+        "recording jit-tests",
+        "packing image",
+        "relinking",
+        "testing jit-tests",
+    ]
+    corpus_path = calls[0][1][-1]
+    assert calls[0][1][-3:] == ["record", "--corpus", corpus_path]
+    assert calls[1][1][-2:] == [
+        f"--args=--aot-record={corpus_path} --no-ion",
+        str(shell),
+    ]
+    assert calls[2][1][-3:] == ["pack", "--corpus", corpus_path]
+    assert calls[3][1][-1] == "relink"
+    assert calls[4][1][-2:] == ["--args=--aot", str(shell)]
+    assert not Path(corpus_path).exists()
+
+
 def test_pack_is_deterministic(tmp_path):
     path = corpus(tmp_path)
     identity = identity_file(tmp_path)
