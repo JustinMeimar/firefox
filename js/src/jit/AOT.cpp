@@ -76,12 +76,6 @@ const char* AOTSlotName(AOTSlot slot) {
 #undef AOT_LINK_SLOT
 #undef AOT_ATOM_SLOT
 #undef AOT_SLOT
-    case AOTSlot::InterruptBitsValue:
-      return "InterruptBitsValue";
-    case AOTSlot::JitStackLimitValue:
-      return "JitStackLimitValue";
-    case AOTSlot::PreBarrierZoneCount:
-      return "PreBarrierZoneCount";
     default:
       break;
   }
@@ -114,8 +108,6 @@ mozilla::Maybe<AOTSlot> AOTIndirectionTable::findSlot(uintptr_t value) const {
   if (value == 0) {
     return mozilla::Nothing();
   }
-  // Mirror slots hold arbitrary values that could collide with a pointer
-  // being looked up, so they are excluded from the reverse search.
   for (uint32_t i = uint32_t(AOTSlot::NamedSlot_Begin);
        i < uint32_t(AOTSlot::Count); i++) {
     if (slots_[i] == value) {
