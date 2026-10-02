@@ -8,6 +8,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/ScopeExit.h"
 
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
@@ -51,6 +52,7 @@
 #include "jit/ScriptFromCalleeToken.h"
 #include "jit/SimpleAllocator.h"
 #include "jit/Sink.h"
+#include "jit/SpecializationTrace.h"
 #include "jit/TypeAnalysis.h"
 #include "jit/UnrollLoops.h"
 #include "jit/ValueNumbering.h"
@@ -328,7 +330,13 @@ void JitRuntime::freeIonOsrTempData() {
 
 static bool LinkCodeGen(JSContext* cx, CodeGenerator* codegen,
                         HandleScript script) {
-  if (!codegen->link(cx)) {
+  TraceSpecializationDependencies(&codegen->mirGen());
+  mozilla::TimeStamp start = mozilla::TimeStamp::Now();
+  bool linked = codegen->link(cx);
+  TraceSpecializationLink(script, &codegen->mirGen(),
+                          (mozilla::TimeStamp::Now() - start).ToMicroseconds(),
+                          linked);
+  if (!linked) {
     return false;
   }
 
@@ -1684,6 +1692,13 @@ CodeGenerator* CompileBackEnd(MIRGenerator* mir, WarpSnapshot* snapshot) {
   AutoEnterIonBackend enter;
   AutoSpewEndFunction spewEndFunction(mir);
   mozilla::TimeStamp compileStartTime = mozilla::TimeStamp::Now();
+  bool succeeded = false;
+  auto traceCompilation = mozilla::MakeScopeExit([&] {
+    TraceSpecializationCompilation(
+        mir, "backend",
+        (mozilla::TimeStamp::Now() - compileStartTime).ToMicroseconds(),
+        succeeded);
+  });
 
   {
     WarpCompilation comp(mir->alloc());
@@ -1703,6 +1718,7 @@ CodeGenerator* CompileBackEnd(MIRGenerator* mir, WarpSnapshot* snapshot) {
   }
 
   CodeGenerator* codegen = GenerateCode(mir, lir, snapshot);
+  succeeded = codegen != nullptr;
   if (codegen) {
     codegen->setCompilationTime(mozilla::TimeStamp::Now() - compileStartTime);
   }
@@ -1719,7 +1735,12 @@ static AbortReasonOr<WarpSnapshot*> CreateWarpSnapshot(JSContext* cx,
 
   WarpOracle oracle(cx, *mirGen, script);
 
+  mirGen->setSpecializationTraceId(BeginSpecializationCompilation(script));
+  mozilla::TimeStamp start = mozilla::TimeStamp::Now();
   AbortReasonOr<WarpSnapshot*> result = oracle.createSnapshot();
+  TraceSpecializationCompilation(
+      mirGen, "oracle", (mozilla::TimeStamp::Now() - start).ToMicroseconds(),
+      result.isOk());
 
   MOZ_ASSERT_IF(result.isErr(), result.unwrapErr() == AbortReason::Alloc ||
                                     result.unwrapErr() == AbortReason::Error ||
@@ -2616,6 +2637,7 @@ void jit::Invalidate(JSContext* cx, const IonScriptKeyVector& invalid,
     // Keep the ion script alive during the invalidation and flag this
     // ionScript as being invalidated.  This increment is removed by the
     // loop after the calls to InvalidateActivation.
+    TraceSpecializationInvalidation(script);
     ionScript->incrementInvalidationCount();
     numInvalidations++;
   }

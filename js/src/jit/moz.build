@@ -95,6 +95,7 @@ UNIFIED_SOURCES += [
     "SimpleAllocator.cpp",
     "Sink.cpp",
     "Snapshots.cpp",
+    "SpecializationTrace.cpp",
     "StubFolding.cpp",
     "Trampoline.cpp",
     "TrampolineNatives.cpp",

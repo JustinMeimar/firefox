@@ -36,7 +36,12 @@ class MIRGraph;
 class OptimizationInfo;
 
 class MIRGenerator final {
+  uint64_t specializationTraceId_ = 0;
+
  public:
+  uint64_t specializationTraceId() const { return specializationTraceId_; }
+  void setSpecializationTraceId(uint64_t id) { specializationTraceId_ = id; }
+
   MIRGenerator(CompileRealm* realm, const JitCompileOptions& options,
                TempAllocator* alloc, MIRGraph* graph,
                const CompileInfo* outerInfo,

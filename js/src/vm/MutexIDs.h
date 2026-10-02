@@ -70,7 +70,10 @@
   _(WasmInliningBudget, 600)            \
   _(VTuneLock, 600)                     \
   _(ShellTelemetry, 600)                \
-  _(ShellUseCounters, 600)
+  _(ShellUseCounters, 600)              \
+                                        \
+  _(SpecializationTrace, 650)           \
+  _(ShellLogging, 700)
 
 namespace js {
 namespace mutexid {

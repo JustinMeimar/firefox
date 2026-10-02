@@ -25,6 +25,7 @@
 #include "jit/RematerializedFrame.h"
 #include "jit/SharedICRegisters.h"
 #include "jit/Simulator.h"
+#include "jit/SpecializationTrace.h"
 #include "js/friend/StackLimits.h"  // js::AutoCheckRecursionLimit, js::ReportOverRecursed
 #include "js/Utility.h"
 #include "proxy/ScriptedProxyHandler.h"
@@ -1905,6 +1906,7 @@ bool jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfoArg) {
   }
 
   BailoutKind bailoutKind = *bailoutInfo->bailoutKind;
+  TraceSpecializationBailout(outerScript, BailoutKindString(bailoutKind));
   JitSpew(JitSpew_BaselineBailouts,
           "  Restored outerScript=(%s:%u:%u,%u) innerScript=(%s:%u:%u,%u) "
           "(bailoutKind=%u)",

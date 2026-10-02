@@ -1,5 +1,9 @@
 # Baseline cache trace
 
+The [specialization experiment](specialization-cache-experiment.md) extends
+the investigation with compilation-time Warp projections and Ion lifecycle
+events. Its v2 recorder and analyzer are separate from this Baseline trace.
+
 Start with a release JS shell. Its JS logger writes to stderr:
 
 ```sh

@@ -99,6 +99,7 @@ class LogModule {
   _(teleporting, "Shape Teleporting")                      \
   _(selfHosted, "Self-hosted script logging")              \
   _(baselineCache, "Baseline cache simulation trace")      \
+  _(specializationCache, "Cross-execution Ion specialization experiment") \
   _(gc, "The garbage collector")                           \
   _(mtq, "MicroTask queue")                                \
   JITSPEW_CHANNEL_LIST(_) /* A module for each JitSpew channel. */

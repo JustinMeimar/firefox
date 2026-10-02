@@ -22,6 +22,7 @@
 #include "jit/JitZone.h"
 #include "jit/MIRGenerator.h"
 #include "jit/ShapeList.h"
+#include "jit/SpecializationTrace.h"
 #include "jit/StubFolding.h"
 #include "jit/TrialInlining.h"
 #include "jit/TypeData.h"
@@ -54,6 +55,9 @@ class MOZ_STACK_CLASS WarpScriptOracle {
   HandleScript script_;
   const CompileInfo* info_;
   ICScript* icScript_;
+  uint64_t traceContext_ = 0;
+  uint64_t traceParent_;
+  uint32_t traceCallOffset_;
 
   // Index of the next ICEntry for getICEntry. This assumes the script's
   // bytecode is processed from first to last instruction.
@@ -87,14 +91,17 @@ class MOZ_STACK_CLASS WarpScriptOracle {
 
  public:
   WarpScriptOracle(JSContext* cx, WarpOracle* oracle, HandleScript script,
-                   const CompileInfo* info, ICScript* icScript)
+                   const CompileInfo* info, ICScript* icScript,
+                   uint64_t traceParent = 0, uint32_t traceCallOffset = 0)
       : cx_(cx),
         oracle_(oracle),
         mirGen_(oracle->mirGen()),
         alloc_(mirGen_.alloc()),
         script_(script),
         info_(info),
-        icScript_(icScript) {}
+        icScript_(icScript),
+        traceParent_(traceParent),
+        traceCallOffset_(traceCallOffset) {}
 
   AbortReasonOr<WarpScriptSnapshot*> createScriptSnapshot();
 
@@ -306,6 +313,11 @@ WarpEnvironment WarpScriptOracle::createEnvironment() {
 
 AbortReasonOr<WarpScriptSnapshot*> WarpScriptOracle::createScriptSnapshot() {
   MOZ_ASSERT(script_->hasJitScript());
+  InitSpecializationTrace(script_, icScript_);
+  traceContext_ = TraceSpecializationProfile(
+      script_, icScript_, mirGen_.specializationTraceId(), traceParent_,
+      traceCallOffset_,
+      info_->osrPc() ? int32_t(info_->osrPc() - script_->code()) : -1);
 
   if (!script_->jitScript()->ensureHasCachedIonData(cx_, script_)) {
     return abort(AbortReason::Error);
@@ -759,6 +771,8 @@ AbortReasonOr<WarpScriptSnapshot*> WarpScriptOracle::createScriptSnapshot() {
     return abort(AbortReason::Alloc);
   }
 
+  TraceSpecializationProfileEnd(mirGen_.specializationTraceId(), traceContext_,
+                                scriptSnapshot);
   autoClearOpSnapshots.release();
   return scriptSnapshot;
 }
@@ -998,8 +1012,15 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
 
   MOZ_ASSERT(loc.opHasIC());
 
+  const char* decision = "aborted";
+  auto traceDecision = mozilla::MakeScopeExit([&] {
+    TraceSpecializationDecision(mirGen_.specializationTraceId(), traceContext_,
+                                loc.bytecodeToOffset(script_), decision);
+  });
+
   // Don't create snapshots when testing ICs.
   if (JitOptions.forceInlineCaches) {
+    decision = "forced_generic";
     return Ok();
   }
 
@@ -1031,6 +1052,7 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
 
     // If the fallback stub was used but there's no optimized stub, use an IC.
     if (fallbackStub->enteredCount() != 0) {
+      decision = "no_stub_generic";
       return Ok();
     }
 
@@ -1038,6 +1060,7 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
     if (!AddOpSnapshot<WarpBailout>(alloc_, snapshots, offset)) {
       return abort(AbortReason::Alloc);
     }
+    decision = "cold_bailout";
     return Ok();
   }
 
@@ -1056,6 +1079,7 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
     JitSpew(JitSpew_WarpTranspiler, "Failed to attach for JSOp::%s @ %s:%u:%u",
             CodeName(loc.getOp()), script_->filename(), line,
             column.oneOriginValue());
+    decision = "attachment_failure_generic";
     return Ok();
   }
 
@@ -1082,6 +1106,7 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
       bool inlinedPolymorphicTypes = MOZ_TRY(
           maybeInlinePolymorphicTypes(snapshots, loc, stub, fallbackStub));
       if (inlinedPolymorphicTypes) {
+        decision = "polymorphic_types";
         return Ok();
       }
     }
@@ -1094,6 +1119,7 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
             "multiple active stubs for JSOp::%s @ %s:%u:%u",
             CodeName(loc.getOp()), script_->filename(), line,
             column.oneOriginValue());
+    decision = "multiple_active_generic";
     return Ok();
   }
 
@@ -1130,6 +1156,7 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
               "unsupported CacheIR opcode %s for JSOp::%s @ %s:%u:%u",
               CacheIROpNames[size_t(op)], CodeName(loc.getOp()),
               script_->filename(), line, column.oneOriginValue());
+      decision = "unsupported_cacheir_generic";
       return Ok();
     }
 
@@ -1257,6 +1284,7 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
     if (!AddOpSnapshot<WarpBailout>(alloc_, snapshots, offset)) {
       return abort(AbortReason::Alloc);
     }
+    decision = "invalid_fuse_bailout";
     return Ok();
   }
 
@@ -1302,6 +1330,10 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
     bool inlinedCall = MOZ_TRY(
         maybeInlineCall(snapshots, loc, stub, fallbackStub, stubDataCopy));
     if (inlinedCall) {
+      TraceSpecializationSelected(icScript_, stub, offset,
+                                  mirGen_.specializationTraceId(),
+                                  traceContext_);
+      decision = "inline";
       return Ok();
     }
   }
@@ -1327,6 +1359,10 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
   }
 
   fallbackStub->setUsedByTranspiler();
+
+  TraceSpecializationSelected(icScript_, stub, offset,
+                              mirGen_.specializationTraceId(), traceContext_);
+  decision = "cacheir";
 
   return Ok();
 }
@@ -1417,7 +1453,8 @@ AbortReasonOr<bool> WarpScriptOracle::maybeInlineCall(
 
   // Take a snapshot of the inlined script (which may do more
   // inlining recursively).
-  WarpScriptOracle scriptOracle(cx_, oracle_, targetScript, info, icScript);
+  WarpScriptOracle scriptOracle(cx_, oracle_, targetScript, info, icScript,
+                                traceContext_, offset);
 
   AbortReasonOr<WarpScriptSnapshot*> maybeScriptSnapshot =
       scriptOracle.createScriptSnapshot();
@@ -1552,6 +1589,8 @@ AbortReasonOr<bool> WarpScriptOracle::maybeInlinePolymorphicTypes(
     return abort(AbortReason::Alloc);
   }
 
+  TraceSpecializationTypes(mirGen_.specializationTraceId(), traceContext_,
+                           offset, list);
   return true;
 }
 

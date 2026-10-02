@@ -134,6 +134,9 @@ class alignas(uintptr_t) ICScript final : public TrailingArray<ICScript> {
 
   bool isInlined() const { return depth_ > 0; }
 
+  uint64_t specializationTraceId() const { return specializationTraceId_; }
+  void initSpecializationTrace(uint64_t id) { specializationTraceId_ = id; }
+
   void initICEntries(JSContext* cx, JSScript* script);
 
   ICEntry& icEntry(size_t index) {
@@ -255,6 +258,8 @@ class alignas(uintptr_t) ICScript final : public TrailingArray<ICScript> {
   mozilla::Atomic<uint32_t, mozilla::Relaxed> warmUpCount_ = {};
 
   uint32_t ionThreshold_;
+
+  uint64_t specializationTraceId_ = 0;
 
   // The offset of the ICFallbackStub array.
   Offset fallbackStubsOffset_;

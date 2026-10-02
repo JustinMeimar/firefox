@@ -126,6 +126,8 @@ class alignas(8) IonScript final : public TrailingArray<IonScript> {
   // Identifier of the compilation which produced this code.
   IonCompilationId compilationId_;
 
+  uint64_t specializationTraceId_ = 0;
+
   // Number of times we tried to enter this script via OSR but failed due to
   // a LOOPENTRY pc other than osrPc_.
   uint32_t osrPcMismatchCounter_ = 0;
@@ -412,6 +414,8 @@ class alignas(8) IonScript final : public TrailingArray<IonScript> {
     }
   }
   IonCompilationId compilationId() const { return compilationId_; }
+  uint64_t specializationTraceId() const { return specializationTraceId_; }
+  void setSpecializationTraceId(uint64_t id) { specializationTraceId_ = id; }
   uint32_t incrOsrPcMismatchCounter() { return ++osrPcMismatchCounter_; }
   void resetOsrPcMismatchCounter() { osrPcMismatchCounter_ = 0; }
 

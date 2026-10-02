@@ -368,8 +368,14 @@ mozilla::AtomicLogLevel& GetLevelRef(JS::OpaqueLogger logger) {
   return slm->level;
 }
 
+static Mutex& ShellLoggingMutex() {
+  static Mutex mutex(mutexid::ShellLogging);
+  return mutex;
+}
+
 void LogPrintVA(const JS::OpaqueLogger logger, mozilla::LogLevel level,
                 const char* fmt, va_list ap) {
+  LockGuard<Mutex> lock(ShellLoggingMutex());
   ShellLogModule* mod = static_cast<ShellLogModule*>(logger);
   fprintf(stderr, "[%s] ", mod->name);
   vfprintf(stderr, fmt, ap);
@@ -378,6 +384,7 @@ void LogPrintVA(const JS::OpaqueLogger logger, mozilla::LogLevel level,
 
 void LogPrintFmt(const JS::OpaqueLogger logger, mozilla::LogLevel level,
                  fmt::string_view fmt, fmt::format_args args) {
+  LockGuard<Mutex> lock(ShellLoggingMutex());
   ShellLogModule* mod = static_cast<ShellLogModule*>(logger);
   fmt::print(stderr, "[{}] {}\n", mod->name, fmt::vformat(fmt, args));
 }
