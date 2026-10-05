@@ -67,7 +67,7 @@ def _expected_executables(command_context, paths):
     return [paths["shell"]]
 
 
-def _validate_build(command_context, paths):
+def _validate_configuration(command_context, paths):
     try:
         enabled = command_context.substs.get("ENABLE_JS_AOT")
     except Exception as exc:
@@ -82,6 +82,10 @@ def _validate_build(command_context, paths):
             "Set MOZCONFIG to the config used for your AOT build, "
             "or add --enable-aot to this build's config and rebuild."
         )
+
+
+def _validate_build(command_context, paths):
+    _validate_configuration(command_context, paths)
     missing = [
         path
         for path in _expected_executables(command_context, paths)
@@ -342,7 +346,7 @@ def _bundle(paths, executables, output_dir):
 @Command(
     "ambermonkey",
     category="build",
-    description="Record, pack, relink, and test AmberMonkey AOT images.",
+    description="Record, pack, relink, clean, and test AmberMonkey AOT images.",
 )
 def ambermonkey(command_context):
     print("Usage: ./mach ambermonkey <command> [options]\n")
@@ -352,6 +356,29 @@ def ambermonkey(command_context):
     print("\nSet MOZCONFIG to the config used for your AOT build.")
     print("\nRun ./mach ambermonkey <command> --help for options.")
     return 0
+
+
+@SubCommand(
+    "ambermonkey",
+    "clean",
+    description="Remove the generated AOT image; the next build embeds an empty image.",
+)
+def ambermonkey_clean(command_context):
+    try:
+        paths = _paths(command_context)
+        _validate_configuration(command_context, paths)
+        for name in ("image", "relocs"):
+            paths[name].unlink(missing_ok=True)
+        command_context.log(
+            logging.INFO,
+            COMMAND,
+            {},
+            f"Removed generated AOT image from {paths['image'].parent}.\n"
+            "Rebuild before recording a fresh corpus. Recorded corpora are preserved.",
+        )
+        return 0
+    except (AmberMonkeyError, OSError, ValueError) as exc:
+        return _log_error(command_context, exc)
 
 
 @SubCommand(
