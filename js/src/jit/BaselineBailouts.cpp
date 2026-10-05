@@ -660,6 +660,13 @@ bool BaselineStackBuilder::buildBaselineFrame() {
   if (argsObj) {
     blFrame()->initArgsObjUnchecked(*argsObj);
   }
+
+#ifdef ENABLE_JS_AOT
+  if (JitRuntime* jrt = cx_->runtime()->jitRuntime()) {
+    blFrame()->setAOTTableBase(jrt->aotIndirectionTable().baseAddress());
+  }
+#endif
+
   return true;
 }
 
@@ -1060,6 +1067,8 @@ bool BaselineStackBuilder::buildStubFrame(uint32_t frameSize,
   // +---------------+
   // |    StubPtr    |
   // +---------------+
+  // | AOTTableBase  |  (AOT builds only)
+  // +---------------+
   // |   Padding?    |
   // +---------------+
   // |     ArgA      |
@@ -1093,6 +1102,14 @@ bool BaselineStackBuilder::buildStubFrame(uint32_t frameSize,
   if (!writePtr(fallback, "StubPtr")) {
     return false;
   }
+
+#ifdef ENABLE_JS_AOT
+  if (!writePtr(
+          cx_->runtime()->jitRuntime()->aotIndirectionTable().baseAddress(),
+          "AOTTableBase")) {
+    return false;
+  }
+#endif
 
   // Write out the arguments, copied from the baseline frame. The order
   // of the arguments is reversed relative to the baseline frame's stack

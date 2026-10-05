@@ -16,6 +16,9 @@
 #include "jit/CacheIRWriter.h"
 #include "jit/InlineScriptTree.h"
 #include "jit/Ion.h"  // TooManyFormalArguments
+#ifdef ENABLE_JS_AOT
+#  include "jit/JitRuntime.h"
+#endif
 #include "jit/StubFolding.h"
 
 #include "vm/BytecodeLocation-inl.h"
@@ -26,6 +29,15 @@ namespace js {
 namespace jit {
 
 bool DoTrialInlining(JSContext* cx, BaselineFrame* frame) {
+#ifdef ENABLE_JS_AOT
+  // aotOnly forces ion=false, so trial inlining's Inlined marker is never
+  // consumed by Warp. Skip the VM call outright rather than paying for IR
+  // generation and a discard-then-reattach whose result nobody reads.
+  if (!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation()) {
+    return true;
+  }
+#endif
+
   RootedScript script(cx, frame->script());
   ICScript* icScript = frame->icScript();
   bool isRecursive = icScript->depth() > 0;

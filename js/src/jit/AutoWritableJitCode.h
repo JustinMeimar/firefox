@@ -19,6 +19,14 @@
 #include "vm/Realm.h"
 #include "vm/Runtime.h"
 
+#ifdef ENABLE_JS_AOT
+#  include <stdint.h>
+#  include <sys/mman.h>
+
+#  include "gc/Memory.h"
+#  include "jit/FlushICache.h"
+#endif
+
 namespace js::jit {
 
 // This class ensures JIT code is executable on its destruction. Creators
@@ -31,22 +39,60 @@ class MOZ_RAII AutoWritableJitCodeFallible {
   JSRuntime* rt_;
   void* addr_;
   size_t size_;
+#ifdef ENABLE_JS_AOT
+  bool isStatic_;
+#endif
   AutoMarkJitCodeWritableForThread writableForThread_;
+
+#ifdef ENABLE_JS_AOT
+  // Static code lives in executable pages outside the JIT allocator.
+  // Temporarily make the containing pages writable when instrumentation
+  // modifies the code. The first write makes those pages private to the
+  // process.
+  [[nodiscard]] static bool StaticMprotect(void* addr, size_t size,
+                                           bool writable) {
+    size_t page = gc::SystemPageSize();
+    uintptr_t start = reinterpret_cast<uintptr_t>(addr);
+    uintptr_t aligned = start & ~(page - 1);
+    size_t len = ((size + (start - aligned)) + page - 1) & ~(page - 1);
+    int prot = writable ? (PROT_READ | PROT_WRITE) : (PROT_READ | PROT_EXEC);
+    return mprotect(reinterpret_cast<void*>(aligned), len, prot) == 0;
+  }
+#endif
 
  public:
   explicit AutoWritableJitCodeFallible(JitCode* code)
       : rt_(code->runtimeFromMainThread()),
         addr_(code->allocatedMemory()),
-        size_(code->allocatedSize()) {
+        size_(code->allocatedSize()),
+#ifdef ENABLE_JS_AOT
+        isStatic_(code->isStaticCode()),
+#endif
+        writableForThread_() {
     rt_->toggleAutoWritableJitCodeActive(true);
   }
 
   [[nodiscard]] bool makeWritable() {
+#ifdef ENABLE_JS_AOT
+    if (isStatic_) {
+      return StaticMprotect(addr_, size_, true);
+    }
+#endif
     return ExecutableAllocator::makeWritable(addr_, size_);
   }
 
   ~AutoWritableJitCodeFallible() {
-    if (!ExecutableAllocator::makeExecutableAndFlushICache(addr_, size_)) {
+    bool ok;
+#ifdef ENABLE_JS_AOT
+    if (isStatic_) {
+      jit::FlushICache(addr_, size_);
+      ok = StaticMprotect(addr_, size_, false);
+    } else
+#endif
+    {
+      ok = ExecutableAllocator::makeExecutableAndFlushICache(addr_, size_);
+    }
+    if (!ok) {
       MOZ_CRASH();
     }
     rt_->toggleAutoWritableJitCodeActive(false);

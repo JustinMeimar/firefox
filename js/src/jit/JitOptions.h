@@ -7,6 +7,10 @@
 
 #include "mozilla/Maybe.h"
 
+#ifdef ENABLE_JS_AOT
+#  include <string>
+#endif
+
 #include "jit/IonTypes.h"
 #include "js/TypeDecls.h"
 
@@ -126,9 +130,46 @@ struct DefaultJitOptions {
   uint32_t ionMaxLocalsAndArgsMainThread;
   uint32_t wasmBatchBaselineThreshold;
   uint32_t wasmBatchIonThreshold;
-#ifdef ENABLE_JS_AOT_ICS
-  bool enableAOTICs;
-  bool enableAOTICEnforce;
+#ifdef ENABLE_JS_AOT
+  // Capture and validate the baseline interpreter, then log a summary without
+  // saving the emitted code.
+  bool dumpAOTBlinterp;
+
+  // Before generating runtime baseline code, run an AOT capture pass to
+  // validate that every pointer has an indirection slot. Discard the captured
+  // bytes.
+  bool dumpAOTBaseline;
+
+  // When a recording directory is configured, each capture writes one artifact
+  // file there. Recording also enables capture of the interpreter, baseline
+  // functions, and inline cache stubs.
+  std::string aotRecordDir;
+
+  // When set alongside aotRecordDir, sweep the self-host stencil at JIT
+  // runtime init and record a baseline artifact for every self-hosted
+  // function. Mirrors the shell's --aot-record-self-hosted flag so the
+  // browser can dump the corpus itself instead of relying on shell parity.
+  bool aotRecordSelfHosted;
+
+  // Load AOT artifacts from the embedded image at startup. If the image is
+  // missing, stale, or invalid, generate code at runtime.
+  bool useAOTImage;
+
+  mozilla::Maybe<bool> useAOTIC;
+  mozilla::Maybe<bool> useAOTBaseline;
+
+  // Treat any lookup miss as fatal when strict AOT mode is enabled. This
+  // ensures CI uses only loaded artifacts.
+  bool aotEnforce;
+
+  // Honor selected AOT artifacts when they hit; on any miss stay in the tier
+  // that requires no per-script or per-IC codegen (baseline interpreter for
+  // scripts, shared IC fallback stub for ICs). Forces ion=false.
+  bool aotOnly;
+
+  // Legacy inverse of useAOTBaseline.
+  bool aotSkipBaselineFn;
+
 #endif
 
   // Spectre mitigation flags. Each mitigation has its own flag in order to

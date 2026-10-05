@@ -49,6 +49,7 @@
   _(BaselineOSR, "Baseline IC OSR messages")                                 \
   _(BaselineBailouts, "Baseline bailouts")                                   \
   _(BaselineDebugModeOSR, "Baseline debug mode on stack recompile messages") \
+  _(BaselineAOT, "AOT baseline indirection table events")                    \
                                                                              \
   /* ION COMPILER SPEW */                                                    \
   _(IonAbort, "Compilation abort messages")                                  \
@@ -112,6 +113,7 @@
   _("bl-ic-fb", BaselineICFallback)           \
   _("bl-osr", BaselineOSR)                    \
   _("bl-bails", BaselineBailouts)             \
-  _("bl-dbg-osr", BaselineDebugModeOSR)
+  _("bl-dbg-osr", BaselineDebugModeOSR)       \
+  _("bl-aot", BaselineAOT)
 
 #endif /* jit_JitSpewChannelList_h */

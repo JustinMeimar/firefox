@@ -3148,20 +3148,25 @@ bool CompilationStencil::delazifySelfHostedFunction(
           {jit::BaselineOption::ForceMainThreadCompilation});
       jit::MethodStatus result =
           jit::BaselineCompile(cx, script.get(), options);
-      if (result != jit::Method_Compiled) {
+      if (result == jit::Method_Error) {
         return false;
       }
-      MOZ_ASSERT(script->hasBaselineScript());
+      if (result == jit::Method_CantCompile) {
+        script->disableBaselineCompile();
+      }
+      if (result == jit::Method_Compiled) {
+        MOZ_ASSERT(script->hasBaselineScript());
 
-      jit::BaselineScript* baselineScript =
-          jit::BaselineScript::Copy(cx, script->baselineScript());
-      if (!baselineScript) {
-        return false;
-      }
-      if (!jitCache.put(jitCacheKey, baselineScript)) {
-        jit::BaselineScript::Destroy(cx->gcContext(), baselineScript);
-        ReportOutOfMemory(cx);
-        return false;
+        jit::BaselineScript* baselineScript =
+            jit::BaselineScript::Copy(cx, script->baselineScript());
+        if (!baselineScript) {
+          return false;
+        }
+        if (!jitCache.put(jitCacheKey, baselineScript)) {
+          jit::BaselineScript::Destroy(cx->gcContext(), baselineScript);
+          ReportOutOfMemory(cx);
+          return false;
+        }
       }
     } else {
       JS_LOG(selfHosted, Debug,

@@ -95,7 +95,11 @@
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
 #include "jit/JitcodeMap.h"
+#include "jit/JitRuntime.h"
 #include "jit/JitZone.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTRecorder.h"
+#endif
 #include "jit/shared/CodeGenerator-shared.h"
 #include "jit/Simulator.h"
 #ifdef JS_CODEGEN_ARM64
@@ -12125,6 +12129,21 @@ auto minVal(T a, Ts... args) {
     return false;
   }
 
+#ifdef ENABLE_JS_AOT
+  if (op->getBoolOption("aot-record-self-hosted")) {
+    if (jit::AOTArtifactRecorder* rec =
+            cx->runtime()->jitRuntime()->aotRecorder()) {
+      uint32_t compiled = 0, skipped = 0;
+      if (!rec->recordSelfHostedBaselineCorpus(cx, &compiled, &skipped)) {
+        return false;
+      }
+    } else {
+      fprintf(stderr, "--aot-record-self-hosted requires --aot-record=<dir>\n");
+      return false;
+    }
+  }
+#endif
+
   MultiStringRange filePaths = op->getMultiStringOption('f');
   MultiStringRange utf16FilePaths = op->getMultiStringOption('u');
   MultiStringRange preludePaths = op->getMultiStringOption('p');
@@ -12511,6 +12530,14 @@ static int Shell(JSContext* cx, OptionParser* op) {
      * uncaught exceptions have been reported since draining runs callbacks.
      */
     RunShellJobs(cx);
+
+#ifdef ENABLE_JS_AOT
+    if (auto* jrt = cx->runtime()->jitRuntime()) {
+      if (auto* rec = jrt->aotRecorder(); rec && rec->failed()) {
+        result = EXITCODE_RUNTIME_ERROR;
+      }
+    }
+#endif
 
     // Only if there's no other error, report unhandled rejections.
     if (!result && !sc->exitCode) {
@@ -13181,11 +13208,46 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "no-portable-baseline",
                         "Disable Portable Baseline Interpreter") ||
 #endif
-#ifdef ENABLE_JS_AOT_ICS
-      !op.addBoolOption('\0', "aot-ics", "Enable ahead-of-time-known ICs") ||
-      !op.addBoolOption(
-          '\0', "enforce-aot-ics",
-          "Enable enforcing only use of ahead-of-time-known ICs") ||
+#ifdef ENABLE_JS_AOT
+      !op.addBoolOption('\0', "aot-dump-blinterp",
+                        "Compile the baseline interpreter in AOT capture "
+                        "mode and log a summary line. Emitted code still "
+                        "runs in-process; no files are written.") ||
+      !op.addBoolOption('\0', "aot-dump-baseline",
+                        "Compile every baseline JIT function and IC stub "
+                        "in AOT capture mode before the real emit. "
+                        "Discards captured bytes; no files are written.") ||
+      !op.addStringOption(
+          '\0', "aot-record", "DIR",
+          "Record every AOT-captured artifact (baseline interpreter, "
+          "baseline JIT functions, IC stubs) into DIR as one .aotb "
+          "file per artifact. Implies --aot-dump-blinterp and "
+          "--aot-dump-baseline.") ||
+      !op.addBoolOption('\0', "aot",
+                        "Load all AOT artifacts from the embedded image "
+                        "at startup. Falls back to runtime codegen on "
+                        "any load failure.") ||
+      !op.addBoolOption('\0', "aot-ic",
+                        "Load the AOT Baseline Interpreter and IC stubs.") ||
+      !op.addBoolOption('\0', "aot-bl",
+                        "Load the AOT Baseline Interpreter and Baseline "
+                        "functions.") ||
+      !op.addBoolOption('\0', "aot-enforce",
+                        "With --aot: crash on any AOT lookup miss "
+                        "instead of falling back to codegen.") ||
+      !op.addBoolOption('\0', "aot-only",
+                        "Honor AOT artifacts when they hit; on any miss "
+                        "stay in the baseline interpreter (scripts) or the "
+                        "shared IC fallback stub (ICs), never generating "
+                        "baseline JIT code or IC stubs at runtime. Defaults "
+                        "to --aot when no artifact classes are selected and "
+                        "forces Ion off. Mutually exclusive with "
+                        "--aot-enforce.") ||
+      !op.addBoolOption('\0', "aot-record-self-hosted",
+                        "With --aot-record=<dir>: iterate every "
+                        "self-hosted function, delazify it, and drive "
+                        "a baseline compile so the AOT capture path "
+                        "records it. Runs before -f / -e / script.") ||
 #endif
       !op.addIntOption(
           '\0', "baseline-warmup-threshold", "COUNT",
@@ -14278,12 +14340,34 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
 #endif
 
-#ifdef ENABLE_JS_AOT_ICS
-  if (op.getBoolOption("aot-ics")) {
-    jit::JitOptions.enableAOTICs = true;
+#ifdef ENABLE_JS_AOT
+  if (op.getBoolOption("aot-dump-blinterp")) {
+    jit::JitOptions.dumpAOTBlinterp = true;
   }
-  if (op.getBoolOption("enforce-aot-ics")) {
-    jit::JitOptions.enableAOTICEnforce = true;
+  if (op.getBoolOption("aot-dump-baseline")) {
+    jit::JitOptions.dumpAOTBaseline = true;
+  }
+  if (const char* dir = op.getStringOption("aot-record")) {
+    jit::JitOptions.aotRecordDir = dir;
+  }
+  if (op.getBoolOption("aot")) {
+    jit::JitOptions.useAOTImage = true;
+    jit::JitOptions.useAOTIC = mozilla::Some(true);
+    jit::JitOptions.useAOTBaseline = mozilla::Some(true);
+    jit::JitOptions.aotSkipBaselineFn = false;
+  }
+  if (op.getBoolOption("aot-ic")) {
+    jit::JitOptions.useAOTIC = mozilla::Some(true);
+  }
+  if (op.getBoolOption("aot-bl")) {
+    jit::JitOptions.useAOTBaseline = mozilla::Some(true);
+    jit::JitOptions.aotSkipBaselineFn = false;
+  }
+  if (op.getBoolOption("aot-enforce")) {
+    jit::JitOptions.aotEnforce = true;
+  }
+  if (op.getBoolOption("aot-only")) {
+    jit::JitOptions.aotOnly = true;
   }
 #endif
 

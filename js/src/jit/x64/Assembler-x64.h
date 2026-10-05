@@ -247,6 +247,24 @@ static constexpr Register PreBarrierReg = rdx;
 
 static constexpr Register InterpreterPCReg = r14;
 
+#ifdef ENABLE_JS_AOT
+// Two AOT entry paths, two registers, chosen for their caller ABI.
+//
+// Interpreter blob is entered from generateEnterJIT via the AOT preamble
+// trampoline. EnterJIT saves callee-saved regs across the JIT call, so
+// r12 stays live for the whole interpreter session and is pin-ready.
+static constexpr Register AOTInterpPassReg = r12;
+// Baseline function blob is entered from a JIT caller. That caller may
+// itself pin r12 for its own AOT table, so the courier reg must be one
+// the caller has no live value in. r11 is volatile (dead across JIT
+// calls) and nothing in the baseline prologue touches it before
+// emitInitFrameFields reads it into the frame slot.
+static constexpr Register AOTFuncPassReg = r11;
+static_assert(AOTFuncPassReg == ScratchReg);
+static_assert(AOTInterpPassReg != ScratchReg);
+static_assert(Registers::VolatileMask & (1 << X86Encoding::r11));
+#endif
+
 static constexpr uint32_t ABIStackAlignment = 16;
 static constexpr uint32_t CodeAlignment = 16;
 static constexpr uint32_t JitStackAlignment = 16;

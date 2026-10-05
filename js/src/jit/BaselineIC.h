@@ -191,15 +191,7 @@ class ICStub {
     return isFallback();
   }
 
-#ifndef ENABLE_PORTABLE_BASELINE_INTERP
-  JitCode* jitCode() {
-    MOZ_ASSERT(!usesTrampolineCode());
-    return JitCode::FromExecutable(stubCode_);
-  }
-  bool hasJitCode() { return !!stubCode_; }
-#else  // !ENABLE_PORTABLE_BASELINE_INTERP
-  JitCode* jitCode() { return nullptr; }
-  bool hasJitCode() { return false; }
+#ifdef ENABLE_PORTABLE_BASELINE_INTERP
   uint8_t* rawJitCode() const { return stubCode_; }
   void updateRawJitCode(uint8_t* ptr) { stubCode_ = ptr; }
 #endif
@@ -274,6 +266,12 @@ class ICCacheIRStub final : public ICStub {
 
   const CacheIRStubInfo* stubInfo_;
 
+#ifdef ENABLE_JS_AOT
+  // Static stubs do not have an allocation header before their code, so cache
+  // their owner explicitly.
+  JitCode* jitCode_;
+#endif
+
 #ifndef JS_64BIT
   // Ensure stub data is 8-byte aligned on 32-bit.
   uintptr_t padding_ = 0;
@@ -282,9 +280,27 @@ class ICCacheIRStub final : public ICStub {
  public:
   ICCacheIRStub(JitCode* stubCode, const CacheIRStubInfo* stubInfo)
       : ICStub(stubCode ? stubCode->raw() : nullptr, /* isFallback = */ false),
-        stubInfo_(stubInfo) {
+        stubInfo_(stubInfo)
+#ifdef ENABLE_JS_AOT
+        ,
+        jitCode_(stubCode)
+#endif
+  {
     MOZ_ASSERT_IF(!IsPortableBaselineInterpreterEnabled(), stubCode);
   }
+
+  // Only CacheIR stubs own a JitCode. Fallback stubs share runtime-wide
+  // trampoline code, so this deliberately does not exist on the base class.
+#ifdef ENABLE_JS_AOT
+  JitCode* jitCode() { return jitCode_; }
+  bool hasJitCode() { return !!jitCode_; }
+#elif !defined(ENABLE_PORTABLE_BASELINE_INTERP)
+  JitCode* jitCode() { return JitCode::FromExecutable(stubCode_); }
+  bool hasJitCode() { return !!stubCode_; }
+#else
+  JitCode* jitCode() { return nullptr; }
+  bool hasJitCode() { return false; }
+#endif
 
   ICStub* next() const { return next_; }
   void setNext(ICStub* stub) { next_ = stub; }
@@ -317,10 +333,18 @@ class ICCacheIRStub final : public ICStub {
 // Assert stub size is what we expect to catch regressions.
 #ifdef JS_64BIT
 static_assert(sizeof(ICFallbackStub) == 3 * sizeof(uintptr_t));
+#  ifdef ENABLE_JS_AOT
+static_assert(sizeof(ICCacheIRStub) == 5 * sizeof(uintptr_t));
+#  else
 static_assert(sizeof(ICCacheIRStub) == 4 * sizeof(uintptr_t));
+#  endif
 #else
 static_assert(sizeof(ICFallbackStub) == 5 * sizeof(uintptr_t));
+#  ifdef ENABLE_JS_AOT
+static_assert(sizeof(ICCacheIRStub) == 7 * sizeof(uintptr_t));
+#  else
 static_assert(sizeof(ICCacheIRStub) == 6 * sizeof(uintptr_t));
+#  endif
 #endif
 
 inline ICStub* ICStub::maybeNext() const {

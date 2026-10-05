@@ -48,6 +48,10 @@
 
 #include "wasm/WasmBuiltins.h"
 
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTMacroAssembler-inl.h"
+#endif
+
 namespace js {
 namespace jit {
 
@@ -818,6 +822,10 @@ void MacroAssembler::branchTestProxyHandlerFamily(Condition cond,
 
 void MacroAssembler::branchTestNeedsMarkingBarrier(Condition cond,
                                                    Label* label) {
+  if (!maybeRealm_) {
+    branchTestNeedsMarkingBarrierAnyZone(cond, label, ScratchReg);
+    return;
+  }
   MOZ_ASSERT(cond == Zero || cond == NonZero);
   CompileZone* zone = realm()->zone();
   const uint32_t* needsBarrierAddr = zone->addressOfNeedsMarkingBarrier();
@@ -831,9 +839,7 @@ void MacroAssembler::branchTestNeedsMarkingBarrierAnyZone(Condition cond,
   if (maybeRealm_) {
     branchTestNeedsMarkingBarrier(cond, label);
   } else {
-    // We are compiling the interpreter or another runtime-wide trampoline, so
-    // we have to load cx->zone.
-    loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
+    loadCurrentZone(scratch);
     Address needsBarrierAddr(scratch, Zone::offsetOfNeedsMarkingBarrier());
     branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
   }

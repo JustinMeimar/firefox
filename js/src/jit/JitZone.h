@@ -19,11 +19,13 @@
 #include "gc/Barrier.h"
 #include "gc/Marking.h"
 #include "gc/WeakMap.h"
-#include "jit/CacheIRAOT.h"
 #include "jit/ExecutableAllocator.h"
 #include "jit/ICStubSpace.h"
 #include "jit/Invalidation.h"
 #include "jit/JitScript.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTCompilationKey.h"
+#endif
 #include "js/AllocPolicy.h"
 #include "js/GCHashTable.h"
 #include "js/HashTable.h"
@@ -70,6 +72,9 @@ enum class ICStubEngine : uint8_t {
 
 struct CacheIRStubKey : public DefaultHasher<CacheIRStubKey> {
   struct Lookup {
+#ifdef ENABLE_JS_AOT
+    uint32_t context = AOTICContext();
+#endif
     const uint8_t* code;
     uint32_t length;
     HashNumber hash;
@@ -83,21 +88,24 @@ struct CacheIRStubKey : public DefaultHasher<CacheIRStubKey> {
           hash(mozilla::AddToHash(mozilla::HashBytes(code, length),
                                   uint32_t(kind), uint32_t(engine))),
           kind(kind),
-          engine(engine) {}
+          engine(engine) {
+#ifdef ENABLE_JS_AOT
+      hash = mozilla::AddToHash(hash, context);
+#endif
+    }
   };
 
   static HashNumber hash(const Lookup& l) { return l.hash; }
   static bool match(const CacheIRStubKey& entry, const Lookup& l);
 
   UniquePtr<CacheIRStubInfo, JS::FreePolicy> stubInfo;
+#ifdef ENABLE_JS_AOT
+  uint32_t context = AOTICContext();
+#endif
 
   explicit CacheIRStubKey(CacheIRStubInfo* info) : stubInfo(info) {}
-  CacheIRStubKey(CacheIRStubKey&& other)
-      : stubInfo(std::move(other.stubInfo)) {}
-
-  void operator=(CacheIRStubKey&& other) {
-    stubInfo = std::move(other.stubInfo);
-  }
+  CacheIRStubKey(CacheIRStubKey&&) = default;
+  CacheIRStubKey& operator=(CacheIRStubKey&&) = default;
 };
 
 struct BaselineCacheIRStubCodeMapGCPolicy {
@@ -176,10 +184,6 @@ class JitZone {
   mozilla::Maybe<IonCompilationId> currentCompilationId_;
   bool keepJitScripts_ = false;
 
-  // Whether AOT IC loading failed due to OOM; if so, disable
-  // enforcing-AOT checks.
-  bool incompleteAOTICs_ = false;
-
   gc::Heap initialStringHeap = gc::Heap::Tenured;
 
   JitCode* generateStringConcatStub(JSContext* cx);
@@ -191,9 +195,6 @@ class JitZone {
  public:
   explicit JitZone(JSContext* cx, bool zoneHasNurseryStrings) {
     setStringsCanBeInNursery(zoneHasNurseryStrings);
-#ifdef ENABLE_JS_AOT_ICS
-    js::jit::FillAOTICs(cx, this);
-#endif
   }
   ~JitZone() {
     MOZ_ASSERT(jitScripts_.isEmpty());
@@ -318,9 +319,6 @@ class JitZone {
   mozilla::Maybe<IonCompilationId>& currentCompilationIdRef() {
     return currentCompilationId_;
   }
-
-  void setIncompleteAOTICs() { incompleteAOTICs_ = true; }
-  bool isIncompleteAOTICs() const { return incompleteAOTICs_; }
 
   void traceWeak(JSTracer* trc, JS::Realm* realm);
 

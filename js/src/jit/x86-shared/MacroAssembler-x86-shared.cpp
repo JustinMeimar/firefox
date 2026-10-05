@@ -713,7 +713,26 @@ CodeOffset MacroAssembler::call(wasm::SymbolicAddress target) {
 
 void MacroAssembler::call(ImmWord target) { Assembler::call(target); }
 
-void MacroAssembler::call(ImmPtr target) { Assembler::call(target); }
+void MacroAssembler::call(ImmPtr target) {
+#ifdef ENABLE_JS_AOT
+  if (MOZ_UNLIKELY(isAOT())) {
+    if (auto slot = aotTable().findSlot(uintptr_t(target.value))) {
+      if (IsAOTLinkSlot(*slot)) {
+        emitAOTLinkCall(*slot);
+        return;
+      }
+      ScratchRegisterScope scratch(*this);
+      emitAOTSlotCall(*slot, scratch);
+      return;
+    }
+    ScratchRegisterScope scratch(*this);
+    movePtr(target, scratch);
+    call(scratch);
+    return;
+  }
+#endif
+  Assembler::call(target);
+}
 
 void MacroAssembler::call(JitCode* target) { Assembler::call(target); }
 

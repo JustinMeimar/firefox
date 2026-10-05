@@ -14,6 +14,10 @@
 #include "debugger/DebugAPI.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTCompilationKey.h"
+#  include "jit/AOTInstaller.h"
+#endif
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineCodeGen.h"
 #include "jit/BaselineCompileTask.h"
@@ -26,6 +30,9 @@
 #include "jit/JitCommon.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/Linker.h"
+#endif
 #include "jit/MacroAssembler.h"
 #include "js/friend/StackLimits.h"  // js::AutoCheckRecursionLimit
 #include "vm/Interpreter.h"
@@ -276,6 +283,16 @@ static bool DispatchOffThreadBaselineCompile(JSContext* cx,
   return true;
 }
 
+struct BaselineCompileBatch {
+  LifoAlloc& alloc;
+  BaselineSnapshotList& snapshots;
+  bool isEager;
+};
+
+static MethodStatus BaselineCompileImpl(JSContext* cx, JSScript* script,
+                                        BaselineOptions options,
+                                        BaselineCompileBatch* batch);
+
 // Off thread baseline batching can be called from two different locations.
 // Either through stencil instantiation where we perform eager baseline
 // compilations speculatively based on Jit Hints, or on demand through the JIT.
@@ -312,9 +329,7 @@ static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
   BaselineSnapshotList snapshots;
   auto clearSnapshotList = mozilla::MakeScopeExit([&]() { snapshots.clear(); });
 
-  GlobalLexicalEnvironmentObject* globalLexical =
-      &cx->global()->lexicalEnvironment();
-  JSObject* globalThis = globalLexical->thisObject();
+  BaselineCompileBatch batch{*alloc, snapshots, isEager};
 
   Rooted<JSScript*> script(cx);
   while (!queue.isEmpty()) {
@@ -330,36 +345,14 @@ static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
       continue;
     }
 
-    if (!BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script,
-                                                                    isEager)) {
-      BaselineOptions options({BaselineOption::ForceMainThreadCompilation});
-      MethodStatus status = BaselineCompile(cx, script, options);
-      if (status != Method_Compiled) {
-        return false;
-      }
-      continue;
-    }
-
-    bool compileDebugInstrumentation = false;
-    if (!BaselineCompiler::PrepareToCompile(cx, script,
-                                            compileDebugInstrumentation)) {
+    MethodStatus status =
+        BaselineCompileImpl(cx, script, BaselineOptions(), &batch);
+    if (status == Method_Error) {
       return false;
     }
-
-    uint32_t baseWarmUpThreshold =
-        OptimizationInfo::baseWarmUpThresholdForScript(cx, script);
-    bool isIonCompileable = IsIonEnabled(cx) && CanIonCompileScript(cx, script);
-
-    MOZ_ASSERT(!script->isDebuggee());
-
-    auto* offThreadSnapshot = alloc->new_<OffThreadBaselineSnapshot>(
-        script, globalLexical, globalThis, baseWarmUpThreshold,
-        isIonCompileable, compileDebugInstrumentation);
-    if (!offThreadSnapshot) {
-      ReportOutOfMemory(cx);
-      return false;
+    if (status == Method_CantCompile) {
+      script->disableBaselineCompile();
     }
-    snapshots.insertFront(offThreadSnapshot);
   }
 
   if (snapshots.isEmpty()) {
@@ -373,7 +366,6 @@ static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
     ReportOutOfMemory(cx);
     return false;
   }
-  task->markScriptsAsCompiling();
   clearSnapshotList.release();
 
   AutoLockHelperThreadState lock;
@@ -382,6 +374,7 @@ static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
     return false;
   }
 
+  task->markScriptsAsCompiling();
   (void)alloc.release();
 
   return true;
@@ -395,8 +388,69 @@ bool jit::DispatchOffThreadBaselineBatch(JSContext* cx) {
   return DispatchOffThreadBaselineBatchImpl(cx, /* isEager = */ false);
 }
 
-MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
-                                  BaselineOptions options) {
+#ifdef ENABLE_JS_AOT
+static bool CaptureAOTBaselineScript(JSContext* cx,
+                                     const BaselineSnapshot& snapshot) {
+  JSScript* script = snapshot.script();
+  mozilla::Maybe<JSAutoNullableRealm> ar;
+  if (JS::Prefs::experimental_self_hosted_cache() && script->selfHosted()) {
+    ar.emplace(cx, nullptr);
+  }
+  TempAllocator dumpTemp(&cx->tempLifoAlloc());
+  StackMacroAssembler dumpMasm(
+      cx, dumpTemp, &cx->runtime()->jitRuntime()->aotIndirectionTable());
+  // Even disabled debugger traps embed runtime addresses. Capture the
+  // shareable code while compiling the debug variant for this runtime.
+  BaselineSnapshot aotSnapshot(
+      script, snapshot.globalLexical(), snapshot.globalThis(),
+      snapshot.baseWarmUpThreshold(), snapshot.isIonCompileable(), false);
+  if (cx->runtime()->geckoProfiler().enabled()) {
+    dumpMasm.enableProfilingInstrumentation();
+  }
+  AOTCompilationKey key;
+  WriteAOTContext(key, AOTBlobKind::BaselineFunction, JitOptions,
+                  cx->runtime()->geckoProfiler().enabled());
+  WriteAOTBaselineInputs(key, script, aotSnapshot.baseWarmUpThreshold(),
+                         aotSnapshot.isIonCompileable(),
+                         aotSnapshot.compileDebugInstrumentation());
+  if (!key.complete()) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  BaselineCompiler dumpCompiler(dumpTemp, CompileRuntime::get(cx->runtime()),
+                                dumpMasm, &aotSnapshot);
+  if (!dumpCompiler.init() ||
+      dumpCompiler.compileOffThread() != Method_Compiled) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  JitSpew(JitSpew_BaselineAOT, "baseline func AOT capture ok: %s:%u bytes=%zu",
+          script->filename() ? script->filename() : "<null>",
+          unsigned(script->lineno()), size_t(dumpMasm.instructionsSize()));
+  if (AOTArtifactRecorder* rec = cx->runtime()->jitRuntime()->aotRecorder()) {
+    mozilla::Maybe<AutoAllocInAtomsZone> allocInAtomsZone;
+    if (JS::Prefs::experimental_self_hosted_cache() && script->selfHosted()) {
+      allocInAtomsZone.emplace(cx);
+    }
+    Linker linker(dumpMasm);
+    JitCode* dumpCode = linker.newCode(cx, CodeKind::Baseline);
+    if (!dumpCode) {
+      return false;
+    }
+    BaselineScriptMetadata dumpMd = dumpCompiler.extractAOTMetadata();
+    if (!rec->recordBaselineFunction(cx, dumpCode, key.data(),
+                                     ComputeBaselineProbeHash(script), dumpMd,
+                                     dumpMasm.aotLinkSites())) {
+      return false;
+    }
+  }
+  return true;
+}
+#endif
+
+static MethodStatus BaselineCompileImpl(JSContext* cx, JSScript* script,
+                                        BaselineOptions options,
+                                        BaselineCompileBatch* batch) {
   cx->check(script);
   MOZ_ASSERT(!script->hasBaselineScript());
   MOZ_ASSERT(script->canBaselineCompile());
@@ -418,6 +472,27 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   gc::AutoSuppressGC suppressGC(cx);
 
   Rooted<JSScript*> rooted(cx, script);
+#ifdef ENABLE_JS_AOT
+  const AOTPolicy& policy = cx->runtime()->jitRuntime()->aotPolicy();
+  if (policy.shouldLoad(AOTBlobKind::BaselineFunction)) {
+    if (!compileDebugInstrumentation) {
+      if (TryInstallAOTBaselineScript(cx, rooted)) {
+        return Method_Compiled;
+      }
+      if (cx->isExceptionPending()) {
+        return Method_Error;
+      }
+    }
+    if (policy.missBehavior(AOTBlobKind::BaselineFunction) ==
+        AOTMissBehavior::Fail) {
+      MOZ_CRASH("AOT baseline function miss under --aot-enforce");
+    }
+  }
+  if (policy.missBehavior(AOTBlobKind::BaselineFunction) ==
+      AOTMissBehavior::StayInTier) {
+    return Method_CantCompile;
+  }
+#endif
   if (!BaselineCompiler::PrepareToCompile(cx, rooted,
                                           compileDebugInstrumentation)) {
     return Method_Error;
@@ -434,10 +509,24 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
                             baseWarmUpThreshold, isIonCompileable,
                             compileDebugInstrumentation);
 
-  if (BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script) &&
-      !forceMainThread) {
-    if (!DispatchOffThreadBaselineCompile(cx, snapshot)) {
-      ReportOutOfMemory(cx);
+#ifdef ENABLE_JS_AOT
+  if (policy.shouldCapture(AOTBlobKind::BaselineFunction) &&
+      !CaptureAOTBaselineScript(cx, snapshot)) {
+    return Method_Error;
+  }
+#endif
+
+  if (!forceMainThread &&
+      BaselineCompileTask::OffThreadBaselineCompilationAvailable(
+          cx, script, batch && batch->isEager)) {
+    if (batch) {
+      auto* copy = batch->alloc.new_<OffThreadBaselineSnapshot>(snapshot);
+      if (!copy) {
+        ReportOutOfMemory(cx);
+        return Method_Error;
+      }
+      batch->snapshots.insertFront(copy);
+    } else if (!DispatchOffThreadBaselineCompile(cx, snapshot)) {
       return Method_Error;
     }
     return Method_Skipped;
@@ -469,6 +558,11 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   }
 
   return status;
+}
+
+MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
+                                  BaselineOptions options) {
+  return BaselineCompileImpl(cx, script, options, nullptr);
 }
 
 static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
@@ -545,7 +639,12 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   if (osrSourceFrame && osrSourceFrame.isDebuggee()) {
     options.setFlag(BaselineOption::ForceDebugInstrumentation);
   }
-  return BaselineCompile(cx, script, options);
+
+  MethodStatus status = BaselineCompile(cx, script, options);
+  if (status == Method_CantCompile) {
+    script->disableBaselineCompile();
+  }
+  return status;
 }
 
 bool jit::CanBaselineInterpretScript(JSScript* script) {
@@ -594,7 +693,7 @@ static bool MaybeCreateBaselineInterpreterEntryScript(JSContext* cx,
   }
 
   JitRuntime* jitRuntime = cx->runtime()->jitRuntime();
-  if (script->jitCodeRaw() != jitRuntime->baselineInterpreter().codeRaw()) {
+  if (script->jitCodeRaw() != jitRuntime->baselineInterpreterEntryAddr()) {
     // script already has an updated interpreter trampoline.
 #ifdef DEBUG
     auto ptr = map->lookup(script);
@@ -1023,14 +1122,12 @@ uint8_t* BaselineScript::nativeCodeForOSREntry(uint32_t pcOffset) {
 }
 
 void BaselineScript::computeResumeNativeOffsets(
-    JSScript* script, const ResumeOffsetEntryVector& entries) {
+    JSScript* script, mozilla::Span<const ResumeOffsetEntry> entries) {
   // Translate pcOffset to BaselineScript native address. This may return
   // nullptr if compiler decided code was unreachable.
   auto computeNative = [this, &entries](uint32_t pcOffset) -> uint8_t* {
-    mozilla::Span<const ResumeOffsetEntry> entriesSpan =
-        mozilla::Span(entries.begin(), entries.length());
     size_t mid;
-    if (!ComputeBinarySearchMid(entriesSpan, pcOffset, &mid)) {
+    if (!ComputeBinarySearchMid(entries, pcOffset, &mid)) {
       return nullptr;
     }
 
@@ -1190,6 +1287,28 @@ static void ToggleProfilerInstrumentation(JitCode* code,
                                        CodeOffset(profilerExitToggleOffset));
 
   code->setProfilerInstrumented(enable);
+
+#ifdef ENABLE_JS_AOT
+  // Static baseline code can be shared by several scripts. Track profiler
+  // instrumentation per code range so the shared bytes are changed only once.
+  if (code->isStaticCode()) {
+    auto& set =
+        code->runtimeFromMainThread()->jitRuntime()->staticCodeProfilerOn_;
+    bool currentlyOn = set.has(code->raw());
+    if (currentlyOn == enable) {
+      return;
+    }
+    if (enable) {
+      AutoEnterOOMUnsafeRegion oomUnsafe;
+      if (!set.put(code->raw())) {
+        oomUnsafe.crash("staticCodeProfilerOn_ OOM");
+      }
+    } else {
+      set.remove(code->raw());
+    }
+  }
+#endif
+
   if (enable) {
     Assembler::ToggleToCmp(enterToggleLocation);
     Assembler::ToggleToCmp(exitToggleLocation);
@@ -1213,8 +1332,8 @@ void BaselineInterpreter::toggleProfilerInstrumentation(bool enable) {
   }
 
   AutoWritableJitCode awjc(code_);
-  ToggleProfilerInstrumentation(code_, profilerEnterToggleOffset_,
-                                profilerExitToggleOffset_, enable);
+  ToggleProfilerInstrumentation(code_, metadata_.profilerEnterToggleOffset,
+                                metadata_.profilerExitToggleOffset, enable);
 }
 
 void BaselineInterpreter::toggleDebuggerInstrumentation(bool enable) {
@@ -1225,7 +1344,7 @@ void BaselineInterpreter::toggleDebuggerInstrumentation(bool enable) {
   AutoWritableJitCode awjc(code_);
 
   // Toggle jumps for debugger instrumentation.
-  for (uint32_t offset : debugInstrumentationOffsets_) {
+  for (uint32_t offset : metadata_.debugInstrumentationOffsets) {
     CodeLocationLabel label(code_, CodeOffset(offset));
     if (enable) {
       Assembler::ToggleToCmp(label);
@@ -1236,9 +1355,9 @@ void BaselineInterpreter::toggleDebuggerInstrumentation(bool enable) {
 
   // Toggle DebugTrapHandler calls.
 
-  uint8_t* debugTrapHandler = codeAtOffset(debugTrapHandlerOffset_);
+  uint8_t* debugTrapHandler = codeAtOffset(metadata_.debugTrapHandlerOffset);
 
-  for (uint32_t offset : debugTrapOffsets_) {
+  for (uint32_t offset : metadata_.debugTrapOffsets) {
     uint8_t* trap = codeAtOffset(offset);
     if (enable) {
       MacroAssembler::patchNopToCall(trap, debugTrapHandler);
@@ -1256,7 +1375,7 @@ void BaselineInterpreter::toggleCodeCoverageInstrumentationUnchecked(
 
   AutoWritableJitCode awjc(code_);
 
-  for (uint32_t offset : codeCoverageOffsets_) {
+  for (uint32_t offset : metadata_.codeCoverageOffsets) {
     CodeLocationLabel label(code_, CodeOffset(offset));
     if (enable) {
       Assembler::ToggleToCmp(label);
@@ -1346,32 +1465,14 @@ void jit::ToggleBaselineProfiling(JSContext* cx, bool enable) {
   }
 }
 
-void BaselineInterpreter::init(
-    JitCode* code, uint32_t interpretOpOffset,
-    uint32_t interpretOpNoDebugTrapOffset, uint32_t bailoutPrologueOffset,
-    uint32_t bailoutResumePrologueOffset, uint32_t profilerEnterToggleOffset,
-    uint32_t profilerExitToggleOffset, uint32_t debugTrapHandlerOffset,
-    CodeOffsetVector&& debugInstrumentationOffsets,
-    CodeOffsetVector&& debugTrapOffsets, CodeOffsetVector&& codeCoverageOffsets,
-    ICReturnOffsetVector&& icReturnOffsets,
-    const CallVMOffsets& callVMOffsets) {
+void BaselineInterpreter::init(JitCode* code,
+                               BaselineInterpreterMetadata&& metadata) {
   code_ = code;
-  interpretOpOffset_ = interpretOpOffset;
-  interpretOpNoDebugTrapOffset_ = interpretOpNoDebugTrapOffset;
-  bailoutPrologueOffset_ = bailoutPrologueOffset;
-  bailoutResumePrologueOffset_ = bailoutResumePrologueOffset;
-  profilerEnterToggleOffset_ = profilerEnterToggleOffset;
-  profilerExitToggleOffset_ = profilerExitToggleOffset;
-  debugTrapHandlerOffset_ = debugTrapHandlerOffset;
-  debugInstrumentationOffsets_ = std::move(debugInstrumentationOffsets);
-  debugTrapOffsets_ = std::move(debugTrapOffsets);
-  codeCoverageOffsets_ = std::move(codeCoverageOffsets);
-  icReturnOffsets_ = std::move(icReturnOffsets);
-  callVMOffsets_ = callVMOffsets;
+  metadata_ = std::move(metadata);
 }
 
 uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
-  for (const ICReturnOffset& entry : icReturnOffsets_) {
+  for (const auto& entry : metadata_.icReturnOffsets) {
     if (entry.op == op) {
       return codeAtOffset(entry.offset);
     }
@@ -1382,6 +1483,21 @@ uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
 bool jit::GenerateBaselineInterpreter(JSContext* cx,
                                       BaselineInterpreter& interpreter) {
   if (IsBaselineInterpreterEnabled()) {
+#ifdef ENABLE_JS_AOT
+    if (cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineInterpreter) &&
+        InstallAOTBaselineInterpreter(cx, interpreter)) {
+      return true;
+    }
+    if (cx->isExceptionPending()) {
+      return false;
+    }
+    if (!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation()) {
+      JitSpew(JitSpew_BaselineAOT,
+              "AOT blinterp install failed under --aot-only; "
+              "falling back to runtime codegen for the interpreter blob");
+    }
+#endif
+
     TempAllocator temp(&cx->tempLifoAlloc());
     StackMacroAssembler masm(cx, temp);
     BaselineInterpreterGenerator generator(cx, temp, masm);
@@ -1390,3 +1506,38 @@ bool jit::GenerateBaselineInterpreter(JSContext* cx,
 
   return true;
 }
+
+#ifdef ENABLE_JS_AOT
+bool JitRuntime::captureAOTBaselineInterpreter(JSContext* cx) {
+  if (!IsBaselineInterpreterEnabled() || baselineInterpreter_.code()->isStaticCode() ||
+      !aotPolicy().shouldCapture(AOTBlobKind::BaselineInterpreter) ||
+      interpreterCaptureState_ != AOTCaptureState::Pending) {
+    return true;
+  }
+
+  interpreterCaptureState_ = AOTCaptureState::Active;
+  auto resetCapture = mozilla::MakeScopeExit([&] {
+    interpreterCaptureState_ = AOTCaptureState::Pending;
+  });
+  TempAllocator temp(&cx->tempLifoAlloc());
+  StackMacroAssembler masm(cx, temp, &aotIndirectionTable());
+  BaselineInterpreterGenerator generator(cx, temp, masm);
+  BaselineInterpreter capturedInterpreter;
+  if (!generator.generate(cx, capturedInterpreter)) {
+    return false;
+  }
+  JitSpew(JitSpew_BaselineAOT, "blinterp AOT capture ok: bytes=%zu",
+          size_t(masm.instructionsSize()));
+  if (AOTArtifactRecorder* recorder =
+          cx->runtime()->jitRuntime()->aotRecorder()) {
+    if (!recorder->recordInterpreter(cx, capturedInterpreter.code(),
+                                     capturedInterpreter.metadata(),
+                                     masm.aotLinkSites())) {
+      return false;
+    }
+  }
+  interpreterCaptureState_ = AOTCaptureState::Complete;
+  resetCapture.release();
+  return true;
+}
+#endif

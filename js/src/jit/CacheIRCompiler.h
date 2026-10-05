@@ -740,6 +740,12 @@ class MOZ_RAII CacheIRCompiler {
   const CacheIRWriter& writer_;
   StackMacroAssembler masm;
 
+ public:
+#ifdef ENABLE_JS_AOT
+  MacroAssembler& masmForAOT() { return masm; }
+#endif
+
+ protected:
   CacheRegisterAllocator allocator;
   Vector<FailurePath, 4, SystemAllocPolicy> failurePaths;
 
@@ -762,11 +768,12 @@ class MOZ_RAII CacheIRCompiler {
 
   CacheIRCompiler(JSContext* cx, TempAllocator& alloc,
                   const CacheIRWriter& writer, uint32_t stubDataOffset,
-                  Mode mode, StubFieldPolicy policy)
+                  Mode mode, StubFieldPolicy policy,
+                  AOTIndirectionTable* aotTable = nullptr)
       : enteredStubFrame_(false),
         cx_(cx),
         writer_(writer),
-        masm(cx, alloc),
+        masm(cx, alloc, aotTable),
         allocator(writer_),
         liveFloatRegs_(FloatRegisterSet::All()),
         mode_(mode),
@@ -1023,6 +1030,9 @@ class MOZ_RAII AutoOutputRegister {
 // definitions.
 class MOZ_RAII AutoStubFrame {
   BaselineCacheIRCompiler& compiler;
+#ifdef ENABLE_JS_AOT
+  mozilla::Maybe<MacroAssembler::AutoAOTTableAddress> aotScope_;
+#endif
 #ifdef DEBUG
   uint32_t framePushedAtEnterStubFrame_;
 #endif
@@ -1367,6 +1377,16 @@ class CacheIRStubInfo {
   static CacheIRStubInfo* New(CacheKind kind, ICStubEngine engine,
                               bool canMakeCalls, uint32_t stubDataOffset,
                               const CacheIRWriter& writer);
+
+#ifdef ENABLE_JS_AOT
+  // Reconstructs inline cache metadata from serialized operations and field
+  // types without requiring the original writer. Ownership transfers on
+  // success.
+  static CacheIRStubInfo* NewFromSerialized(
+      CacheKind kind, ICStubEngine engine, bool makesGCCalls,
+      uint32_t stubDataOffset, const uint8_t* cacheIRBytes, uint32_t codeLength,
+      const uint8_t* fieldTypeBytes, uint32_t numFields);
+#endif
 
   template <class Stub, StubField::Type type>
   typename MapStubFieldToType<type>::WrappedType& getStubField(

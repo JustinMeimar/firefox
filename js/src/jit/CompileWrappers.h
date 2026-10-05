@@ -86,6 +86,8 @@ class CompileRuntime {
   const void* addressOfMegamorphicSetPropCache();
   const void* addressOfStringToAtomCache();
   const void* addressOfLastBufferedWholeCell();
+  void* addressOfNurseryPosition();
+  void* addressOfNurseryAllocatedSites();
 
   bool runtimeFuseIntact(RuntimeFuses::FuseIndex index);
   const void* addressOfRuntimeFuse(RuntimeFuses::FuseIndex index);
@@ -124,20 +126,14 @@ class CompileZone {
 
   const uint32_t* addressOfNeedsMarkingBarrier();
   uint32_t* addressOfTenuredAllocCount();
-  gc::FreeSpan** addressOfFreeList(gc::AllocKind allocKind);
   bool allocNurseryObjects();
   bool allocNurseryStrings();
   bool allocNurseryBigInts();
   void* addressOfZone();
-  void* addressOfNurseryPosition();
-
-  void* addressOfNurseryAllocatedSites();
 
   bool canNurseryAllocateStrings();
   bool canNurseryAllocateBigInts();
 
-  gc::AllocSite* catchAllAllocSite(JS::TraceKind traceKind,
-                                   gc::CatchAllAllocSite siteKind);
   gc::AllocSite* tenuringAllocSite();
 
   void* jitZone();

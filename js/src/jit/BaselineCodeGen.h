@@ -207,6 +207,9 @@ class BaselineCodeGen {
   [[nodiscard]] bool emitNextIC();
   [[nodiscard]] bool emitInterruptCheck();
   [[nodiscard]] bool emitWarmUpCounterIncrement();
+  void branchWarmUpThreshold(Assembler::Condition cond, Register count,
+                             const uint32_t& threshold, Register scratch,
+                             Label* label, bool doubled = false);
 
 #define EMIT_OP(op, ...) bool emit_##op();
   FOR_EACH_OPCODE(EMIT_OP)
@@ -292,6 +295,9 @@ class BaselineCodeGen {
   [[nodiscard]] bool emitGeneratorResumePrologueBody();
 
   void emitInitFrameFields(Register nonFunctionEnv);
+#ifdef ENABLE_JS_AOT
+  void emitStoreAOTFrameTableBase(Register scratch);
+#endif
   // Sets the frame's DEBUGGEE flag if the script is a debuggee script. This
   // clobbers volatile registers, so emitAfterCall is called on the path that
   // actually calls into C++ to let the caller restore registers.
@@ -351,6 +357,10 @@ class BaselineCompilerHandler {
   bool compilingOffThread_ = false;
 
   bool needsEnvAllocSite_ = false;
+
+#ifdef ENABLE_JS_AOT
+  bool isAOT_ = false;
+#endif
 
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
 
@@ -450,6 +460,14 @@ class BaselineCompilerHandler {
   }
 
   bool realmIndependentJitcode() const {
+    // AOT code generation must produce code that can be reused by any
+    // compatible script in any realm. The same requirement applies to self
+    // hosted scripts.
+#ifdef ENABLE_JS_AOT
+    if (isAOT_) {
+      return true;
+    }
+#endif
     return JS::Prefs::experimental_self_hosted_cache() &&
            script()->selfHosted();
   }
@@ -490,6 +508,13 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
     return handler.compileDebugInstrumentation();
   }
 
+#ifdef ENABLE_JS_AOT
+  // Copies the completed compiler metadata for AOT capture. The capture
+  // compiler is discarded immediately afterward. Returns false if allocation
+  // fails.
+  BaselineScriptMetadata extractAOTMetadata();
+#endif
+
  private:
   bool compileImpl();
 
@@ -515,7 +540,7 @@ class BaselineInterpreterHandler {
   NonAssertingLabel generatorResumePrologue_;
 
   // Offsets of toggled jumps for debugger instrumentation.
-  using CodeOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
+  using CodeOffsetVector = BaselineInterpreterMetadata::CodeOffsetVector;
   CodeOffsetVector debugInstrumentationOffsets_;
 
   // Offsets of toggled jumps for code coverage instrumentation.
@@ -524,10 +549,10 @@ class BaselineInterpreterHandler {
   NonAssertingLabel codeCoverageAtPCLabel_;
 
   // Offsets of IC calls for IsIonInlinableOp ops, for Ion bailouts.
-  BaselineInterpreter::ICReturnOffsetVector icReturnOffsets_;
+  BaselineInterpreterMetadata::ICReturnOffsetVector icReturnOffsets_;
 
   // Offsets of some callVMs for BaselineDebugModeOSR.
-  BaselineInterpreter::CallVMOffsets callVMOffsets_;
+  BaselineInterpreterMetadata::CallVMOffsets callVMOffsets_;
 
   // The current JSOp we are emitting interpreter code for.
   mozilla::Maybe<JSOp> currentOp_;
@@ -551,7 +576,7 @@ class BaselineInterpreterHandler {
   }
   CodeOffsetVector& codeCoverageOffsets() { return codeCoverageOffsets_; }
 
-  BaselineInterpreter::ICReturnOffsetVector& icReturnOffsets() {
+  BaselineInterpreterMetadata::ICReturnOffsetVector& icReturnOffsets() {
     return icReturnOffsets_;
   }
 
@@ -573,7 +598,7 @@ class BaselineInterpreterHandler {
 
   [[nodiscard]] bool addDebugInstrumentationOffset(CodeOffset offset);
 
-  const BaselineInterpreter::CallVMOffsets& callVMOffsets() const {
+  const BaselineInterpreterMetadata::CallVMOffsets& callVMOffsets() const {
     return callVMOffsets_;
   }
 
@@ -633,6 +658,13 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
   void emitOutOfLineCodeCoverageInstrumentation();
   [[nodiscard]] bool emitOutOfLineGeneratorResumePrologue();
 };
+
+#ifdef ENABLE_JS_AOT
+// After baseline code is compiled or installed, create allocation sites for its
+// inline cache entries and initialize the environment allocation site when
+// needed. This runs on the main thread and ignores allocation failure.
+void FinalizeInstalledBaselineScript(JSScript* script);
+#endif
 
 }  // namespace jit
 }  // namespace js

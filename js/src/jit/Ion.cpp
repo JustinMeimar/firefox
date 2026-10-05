@@ -67,6 +67,37 @@
 #  include "vtune/VTuneWrapper.h"
 #endif
 
+#ifdef ENABLE_JS_AOT
+#  include "builtin/Array.h"
+#  include "builtin/AtomicsObject.h"
+#  include "builtin/DataViewObject.h"
+#  include "builtin/MapObject.h"
+#  include "builtin/Math.h"
+#  include "builtin/WeakMapObject.h"
+#  include "builtin/WeakSetObject.h"
+#  include "js/Wrapper.h"
+#  include "proxy/DeadObjectProxy.h"
+#  include "proxy/DOMProxy.h"
+#  include "vm/ArgumentsObject.h"
+#  include "vm/ArrayBufferObject.h"
+#  include "vm/ArrayObject.h"
+#  include "vm/BoundFunctionObject.h"
+#  include "vm/DateObject.h"
+#  include "vm/DateTime.h"
+#  include "vm/EnvironmentObject.h"
+#  include "vm/GeneratorObject.h"
+#  include "vm/Iteration.h"
+#  include "vm/JSFunction.h"
+#  include "vm/NativeObject.h"
+#  include "vm/PlainObject.h"
+#  include "vm/SharedArrayObject.h"
+#  include "vm/TypedArrayObject.h"
+#endif
+
+#ifdef ENABLE_JS_AOT
+#  include "jit/ABIFunctionList-inl.h"
+#  include "jit/AOTABIFns-inl.h"
+#endif
 #include "gc/GC-inl.h"
 #include "gc/StableCellHasher-inl.h"
 #include "jit/InlineScriptTree-inl.h"
@@ -111,8 +142,114 @@ uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
   return masm.currentOffset();
 }
 
+#ifdef ENABLE_JS_AOT
+// TODO: Move AOT table population to a dedicated source file.
+bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
+  if (!ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Interpreter) ||
+      !ensureDebugTrapHandler(cx, DebugTrapHandlerKind::Compiler)) {
+    return false;
+  }
+
+  JSRuntime* rt = cx->runtime();
+
+  // TODO: Encapsulate table population in dedicated helpers and keep direct
+  // entry mutation private.
+
+  // Order fixes the slot index, and recorded code may name an index either
+  // through the table or through a link site, so the list is append-only and
+  // lives where both this and the image shim can expand it.
+  uint32_t abiIdx = 0;
+  auto setABI = [&](auto fp) {
+    aotIndirectionTable_.set(AOTSlotForABIFn(abiIdx++),
+                             uintptr_t(JS_FUNC_TO_DATA_PTR(void*, fp)));
+  };
+
+#  define AOT_ABIFN(fp) setABI(fp);
+#  define AOT_ABIFN_NOLINK(fp) setABI(fp);
+#  define AOT_ABIFN_TYPED(fp, ...) setABI(static_cast<__VA_ARGS__>(fp));
+#  include "jit/AOTABIFns.tbl"
+#  undef AOT_ABIFN_TYPED
+#  undef AOT_ABIFN_NOLINK
+#  undef AOT_ABIFN
+
+  MOZ_RELEASE_ASSERT(abiIdx == kAOTABIFnCount);
+
+  // TODO: Factor named slot population into its own helper.
+#  define AOT_SLOT(name, expr) \
+    aotIndirectionTable_.setPointer(AOTSlot::name, expr);
+#  define AOT_ATOM_SLOT(name, ...)
+#  define AOT_LINK_SLOT AOT_SLOT
+#  include "jit/AOTSlots.tbl"
+#  undef AOT_LINK_SLOT
+#  undef AOT_ATOM_SLOT
+#  undef AOT_SLOT
+
+  aotIndirectionTable_.initAtoms(cx);
+
+  // Populate wrapper entries using offsets recorded while generating
+  // trampolines.
+  size_t n = functionWrapperOffsets_.length();
+  MOZ_RELEASE_ASSERT(n <= AOTMaxVMWrappers, "raise AOTMaxVMWrappers");
+  for (size_t i = 0; i < n; i++) {
+    aotIndirectionTable_.set(
+        AOTSlotForVMWrapper(i),
+        uintptr_t(trampolineCode(functionWrapperOffsets_[i]).value));
+  }
+
+  return true;
+}
+
+JitCode* JitRuntime::generateAOTPreambleTrampoline(JSContext* cx, void* target,
+                                                   Register passReg) {
+  // Emit a small entry trampoline that loads the runtime indirection table
+  // before entering shared static code.
+  TempAllocator temp(&cx->tempLifoAlloc());
+  StackMacroAssembler masm(cx, temp);
+  AutoCreatedBy acb(masm, "JitRuntime::generateAOTPreambleTrampoline");
+
+  masm.movePtr(ImmPtr(aotIndirectionTable_.baseAddress()), passReg);
+  masm.jump(ImmPtr(target));
+
+  Linker linker(masm);
+  return linker.newCode(cx, CodeKind::Other);
+}
+
+void JitRuntime::traceAOTPreambleTrampolines(JSTracer* trc) {
+  for (auto& e : aotPreambleTrampolines_) {
+    TraceRoot(trc, &e.trampoline, "aot-preamble-trampoline");
+  }
+  if (aotInterpPreambleTrampoline_) {
+    TraceRoot(trc, &aotInterpPreambleTrampoline_,
+              "aot-interp-preamble-trampoline");
+  }
+}
+
+bool JitRuntime::ensureAOTRecorder(JSContext* cx) {
+  if (aotRecorder_) {
+    return true;
+  }
+  auto rec = cx->make_unique<AOTArtifactRecorder>();
+  if (!rec) {
+    return false;
+  }
+  if (!rec->init(cx, aotPolicy().recordDirectory())) {
+    return false;
+  }
+  aotRecorder_ = std::move(rec);
+  return true;
+}
+#endif
+
 bool JitRuntime::initialize(JSContext* cx) {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
+
+#ifdef ENABLE_JS_AOT
+  auto policy = cx->make_unique<AOTPolicy>();
+  if (!policy || !policy->init(cx, JitOptions)) {
+    return false;
+  }
+  aotPolicy_.writeRef().reset(policy.release());
+#endif
 
   AutoAllocInAtomsZone az(cx);
   JitContext jctx(cx);
@@ -145,6 +282,21 @@ bool JitRuntime::initialize(JSContext* cx) {
   // to point to the interpreter trampoline.
   cx->runtime()->selfHostedLazyScript.ref().jitCodeRaw_ =
       interpreterStub().value;
+
+#ifdef ENABLE_JS_AOT
+  if (aotPolicy().enabled() &&
+      IsBaselineInterpreterEnabled()) {
+    if (aotPolicy().recordDirectory() && !ensureAOTRecorder(cx)) {
+      return false;
+    }
+    if (!populateAOTIndirectionTable(cx)) {
+      return false;
+    }
+    if (!captureAOTBaselineInterpreter(cx)) {
+      return false;
+    }
+  }
+#endif
 
   return true;
 }
@@ -605,6 +757,22 @@ template JitCode* JitCode::New<NoGC>(JSContext* cx, uint8_t* code,
                                      uint32_t bufferSize, uint32_t headerSize,
                                      ExecutablePool* pool, CodeKind kind);
 
+#ifdef ENABLE_JS_AOT
+JitCode* JitCode::NewStatic(JSContext* cx, uint8_t* code, uint32_t codeSize,
+                            CodeKind kind) {
+  JitCode* codeObj = cx->newCell<JitCode, NoGC>(code, /* bufferSize = */ 0,
+                                                /* headerSize = */ 0,
+                                                /* pool = */ nullptr, kind);
+  if (!codeObj) {
+    ReportOutOfMemory(cx);
+    return nullptr;
+  }
+  codeObj->isStaticCode_ = true;
+  codeObj->insnSize_ = codeSize;
+  return codeObj;
+}
+#endif
+
 void JitCode::copyFrom(MacroAssembler& masm) {
   // Store the JitCode pointer in the JitCodeHeader so we can recover the
   // gcthing from relocation tables.
@@ -623,6 +791,14 @@ void JitCode::copyFrom(MacroAssembler& masm) {
 }
 
 void JitCode::traceChildren(JSTracer* trc) {
+#ifdef ENABLE_JS_AOT
+  // Static AOT code carries no relocation tables, so there are no
+  // children to trace.
+  if (isStaticCode_) {
+    return;
+  }
+#endif
+
   // Note that we cannot mark invalidated scripts, since we've basically
   // corrupted the code stream by injecting bailouts.
   if (invalidated()) {
@@ -642,6 +818,15 @@ void JitCode::traceChildren(JSTracer* trc) {
 }
 
 void JitCode::finalize(JS::GCContext* gcx) {
+#ifdef ENABLE_JS_AOT
+  // Static code has no executable pool or allocation header. Its text remains
+  // valid after the wrapper is collected, so skip the usual ownership check.
+  if (isStaticCode_) {
+    setHeaderPtr(nullptr);
+    return;
+  }
+#endif
+
   // If this jitcode had a bytecode map, either the entry has been removed
   // from the table, or it has been detached (jitcode_ set to null) because
   // the profiler buffer still references it.

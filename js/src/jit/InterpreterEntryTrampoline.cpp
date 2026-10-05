@@ -172,8 +172,9 @@ void JitRuntime::generateBaselineInterpreterEntryTrampoline(
                                      scratch, scratch);
   masm.bind(&descriptorPushed);
 
-  // Call into baseline interpreter
-  uint8_t* blinterpAddr = baselineInterpreter().codeRaw();
+  // Enter the AOT interpreter through its preamble so the indirection table is
+  // available before dispatch begins.
+  uint8_t* blinterpAddr = baselineInterpreterEntryAddr();
   masm.assertStackAlignment(JitStackAlignment, 2 * sizeof(uintptr_t));
   masm.call(ImmPtr(blinterpAddr));
 

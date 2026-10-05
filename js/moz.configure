@@ -160,50 +160,25 @@ set_config(
     depends_if("--enable-portable-baseline-interp-force")(lambda _: True),
 )
 
-# Enable ahead-of-time-known preloaded IC bodies.
+# Enable AOT artifacts for the baseline interpreter, self hosted functions, and
+# inline cache stubs. This is supported only on x86_64.
 option(
-    "--enable-aot-ics",
-    help="{Enable|Disable} including ahead-of-time corpus of CacheIR IC bodies",
+    "--enable-aot",
+    help="{Enable|Disable} ahead-of-time compiled JIT artifacts (x86_64 only)",
 )
 
-set_define(
-    "ENABLE_JS_AOT_ICS",
-    depends_if("--enable-aot-ics")(lambda _: True),
-)
-set_config(
-    "ENABLE_JS_AOT_ICS",
-    depends_if("--enable-aot-ics")(lambda _: True),
-)
 
-# Force-on the option for AOT ICs.
-option(
-    "--enable-aot-ics-force",
-    help="{Enable|Disable} forcing the AOT ICs option on without additional configuration",
-)
+@depends("--enable-aot", target)
+def js_aot(value, target):
+    if not value:
+        return None
+    if target.cpu != "x86_64":
+        die("--enable-aot is only supported on x86_64 (got %s)", target.cpu)
+    return True
 
-set_define(
-    "ENABLE_JS_AOT_ICS_FORCE",
-    depends_if("--enable-aot-ics-force")(lambda _: True),
-)
-set_config(
-    "ENABLE_JS_AOT_ICS_FORCE",
-    depends_if("--enable-aot-ics-force")(lambda _: True),
-)
 
-# Enforce AOT ICs (testing only): abort if a new IC (not in AOT corpus) is encountered.
-option(
-    "--enable-aot-ics-enforce",
-    help="{Enable|Disable} enforcing that only AOT IC corpus is used, crashing otherwise (TEST ONLY)",
-)
-
-set_define(
-    "ENABLE_JS_AOT_ICS_ENFORCE",
-    depends_if("--enable-aot-ics-enforce")(lambda _: True),
-)
-set_config(
-    "ENABLE_JS_AOT_ICS_ENFORCE",
-    depends_if("--enable-aot-ics-enforce")(lambda _: True),
-)
+set_define("ENABLE_JS_AOT", js_aot)
+set_config("ENABLE_JS_AOT", js_aot)
 
 
 # JIT support

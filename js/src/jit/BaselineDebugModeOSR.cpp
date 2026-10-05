@@ -12,6 +12,7 @@
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/JSJitFrameIter.h"
+#include "js/ErrorReport.h"
 
 #include "jit/JitScript-inl.h"
 #include "jit/JSJitFrameIter-inl.h"
@@ -429,11 +430,12 @@ bool js::jit::RecompileBaselineScriptForDebugMode(
   }
   MethodStatus status = BaselineCompile(cx, script, options);
   if (status != Method_Compiled) {
-    // We will only fail to recompile for debug mode due to OOM. Restore
-    // the old baseline script in case something doesn't properly
-    // propagate OOM.
-    MOZ_ASSERT(status == Method_Error);
+    // Restore the old script on allocation failure or a policy refusal.
+    MOZ_ASSERT(status == Method_Error || status == Method_CantCompile);
     script->jitScript()->setBaselineScript(script, oldBaselineScript);
+    if (status == Method_CantCompile) {
+      JS_ReportErrorASCII(cx, "Baseline recompilation is unavailable");
+    }
     return false;
   }
 

@@ -7,6 +7,7 @@
 
 #include "mozilla/MacroForEach.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Span.h"
 #include "mozilla/Variant.h"
 
 #if defined(JS_CODEGEN_X86)
@@ -32,6 +33,7 @@
 #endif
 #include "jit/ABIArgGenerator.h"
 #include "jit/ABIFunctions.h"
+#include "jit/AOT.h"
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/MoveResolver.h"
@@ -356,6 +358,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // self_hosted_cache is enabled) self-hosted baseline code.
   CompileRealm* maybeRealm_ = nullptr;
 
+#ifdef ENABLE_JS_AOT
+  AOTIndirectionTable* const aotTable_;
+  mozilla::Maybe<Address> aotTableAddress_;
+  mozilla::Maybe<Address> aotFailureTableAddress_;
+  Vector<AOTLinkSite, 0, SystemAllocPolicy> aotLinkSites_;
+#endif
+
   // Labels for handling exceptions and failures.
   NonAssertingLabel failureLabel_;
 
@@ -363,9 +372,82 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Constructor is protected. Use one of the derived classes!
   explicit MacroAssembler(TempAllocator& alloc,
                           CompileRuntime* maybeRuntime = nullptr,
-                          CompileRealm* maybeRealm = nullptr);
+                          CompileRealm* maybeRealm = nullptr,
+                          AOTIndirectionTable* aotTable = nullptr);
 
  public:
+  bool isAOT() const {
+#ifdef ENABLE_JS_AOT
+    return aotTable_ != nullptr;
+#else
+    return false;
+#endif
+  }
+
+#ifdef ENABLE_JS_AOT
+  AOTIndirectionTable& aotTable() const {
+    MOZ_ASSERT(aotTable_);
+    return *aotTable_;
+  }
+
+  class MOZ_RAII AutoAOTTableAddress {
+    MacroAssembler& masm_;
+    mozilla::Maybe<Address> prev_;
+
+   public:
+    AutoAOTTableAddress(MacroAssembler& masm, const Address& address)
+        : masm_(masm), prev_(masm.aotTableAddress_) {
+      masm.setAOTTableAddress(address);
+    }
+    ~AutoAOTTableAddress() { masm_.aotTableAddress_ = prev_; }
+    AutoAOTTableAddress(const AutoAOTTableAddress&) = delete;
+    void operator=(const AutoAOTTableAddress&) = delete;
+  };
+
+  void setAOTTableAddress(const Address& address) {
+    aotTableAddress_ = mozilla::Some(address);
+  }
+
+  void emitAOTLoadTableBase(Register dest);
+  void emitAOTSlotLoad(AOTSlot slot, Register dest);
+  void emitAOTAddress(AOTSlot slot, Register dest);
+
+  // Transfer control through a slot. Where the architecture has a memory
+  // operand form the slot read folds into the branch, so only the table base
+  // load remains. The scratch register holds that base and is clobbered.
+  void emitAOTSlotCall(AOTSlot slot, Register scratch);
+  void emitAOTSlotJump(AOTSlot slot, Register scratch);
+
+  // Reach a link slot with a rip relative instruction whose displacement is
+  // left zero and recorded as a link site. The next build's static linker
+  // supplies the displacement, so generated code skips the table load. Only
+  // valid for slots IsAOTLinkSlot accepts.
+  void emitAOTLinkAddress(AOTSlot slot, Register dest);
+  void emitAOTLinkLoad(AOTSlot slot, Register dest);
+  void emitAOTLinkCall(AOTSlot slot);
+
+  mozilla::Span<const AOTLinkSite> aotLinkSites() const {
+    return {aotLinkSites_.begin(), aotLinkSites_.length()};
+  }
+
+  void emitAOTDispatch(Register opcodeReg, Register tableReg);
+  size_t aotDispatchTableEntrySize() const;
+
+  // Seed the current BaselineFrame's AOT table slot from the courier
+  // register set up by generateAOTPreambleTrampoline. Called once at
+  // frame init.
+  void emitAOTStoreFrameTableBase(Register passReg, Register scratch,
+                                  const Address& dst);
+
+  // Generator resume path: copy the AOT table base from the caller's
+  // BaselineFrame slot into ours.
+  void emitAOTCopyFrameTableBaseFromCaller(Register scratch);
+#endif
+
+  uint32_t callVMWrapper(VMFunctionId id, Register scratch);
+  void writeDispatchTableEntry(uint32_t tableOffset, size_t index,
+                               const Label& handler);
+
   MoveResolver& moveResolver() {
     // As an optimization, the MoveResolver is a persistent data structure
     // shared between visitors in the CodeGenerator. This assertion
@@ -1041,6 +1123,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // Load instructions
 
   inline void load32SignExtendToPtr(const Address& src, Register dest) PER_ARCH;
+#ifdef ENABLE_JS_AOT
+  inline void load32SignExtendToPtr(const BaseIndex& src, Register dest)
+      DEFINED_ON(x64);
+#endif
 
   inline void loadAbiReturnAddress(Register dest) PER_SHARED_ARCH;
 
@@ -5133,6 +5219,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
                     Label* notSameDigit);
 
   void loadJSContext(Register dest);
+  void loadCurrentRealm(Register dest);
+  void loadCurrentZone(Register dest);
+  void loadZoneAddress(size_t offset, Register dest);
+  void loadZoneField(size_t offset, Register dest);
+  gc::Heap initialHeapForAllocation(JS::TraceKind kind);
+  void branchIfNurseryAllocDisabled(JS::TraceKind kind, Register scratch,
+                                    Label* fail);
 
   void loadGlobalObjectData(Register dest);
 
@@ -5274,7 +5367,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
     computeEffectiveAddress(address, PreBarrierReg);
 
     TrampolinePtr preBarrier = preBarrierTrampoline(type);
-
     call(preBarrier);
     Pop(PreBarrierReg);
     // On arm64, SP may be < PSP now (that's OK).
@@ -5674,6 +5766,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // Inline allocation.
  private:
+  void branchIfProfilingDisabled(Label* label);
   void checkAllocatorState(Register temp, gc::AllocKind allocKind, Label* fail);
   bool shouldNurseryAllocate(gc::AllocKind allocKind, gc::Heap initialHeap);
   void nurseryAllocateObject(
@@ -5681,11 +5774,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
       size_t nDynamicSlots, Label* fail,
       const AllocSiteInput& allocSite = AllocSiteInput());
   void bumpPointerAllocate(Register result, Register temp, Label* fail,
-                           CompileZone* zone, JS::TraceKind traceKind,
-                           uint32_t size,
+                           JS::TraceKind traceKind, uint32_t size,
                            const AllocSiteInput& allocSite = AllocSiteInput());
-  void updateAllocSite(Register temp, Register result, CompileZone* zone,
-                       Register site);
+  void updateAllocSite(Register temp, Register site);
 
   void freeListAllocate(Register result, Register temp, gc::AllocKind allocKind,
                         Label* fail);
@@ -6058,10 +6149,31 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
   using MacroAssemblerSpecific::movePtr;
+#ifdef ENABLE_JS_AOT
+  inline void movePtr(ImmPtr imm, Register dest);
+  inline void movePtr(ImmGCPtr imm, Register dest);
 
+  using MacroAssemblerSpecific::storePtr;
+  inline void storePtr(ImmPtr imm, const Address& address);
+#ifndef JS_CODEGEN_RISCV64
+  inline void storePtr(Register src, AbsoluteAddress address);
+#endif
+
+  using MacroAssemblerSpecific::loadPtr;
+#ifndef JS_CODEGEN_RISCV64
+  inline void loadPtr(AbsoluteAddress addr, Register dest);
+#endif
+
+  using MacroAssemblerSpecific::jump;
+  inline void jump(TrampolinePtr code);
+
+  inline void loadRuntime(Register reg);
+  inline void movePtr(TrampolinePtr ptr, Register dest);
+#else
   void movePtr(TrampolinePtr ptr, Register dest) {
     movePtr(ImmPtr(ptr.value), dest);
   }
+#endif
 
  private:
   void handleFailure();
@@ -6069,10 +6181,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
  public:
   Label* exceptionLabel() {
     // Exceptions are currently handled the same way as sequential failures.
-    return &failureLabel_;
+    return failureLabel();
   }
 
-  Label* failureLabel() { return &failureLabel_; }
+  Label* failureLabel() {
+#ifdef ENABLE_JS_AOT
+    if (isAOT()) {
+      MOZ_RELEASE_ASSERT(aotTableAddress_);
+      MOZ_RELEASE_ASSERT(!aotFailureTableAddress_ ||
+                         *aotFailureTableAddress_ == *aotTableAddress_);
+      aotFailureTableAddress_ = aotTableAddress_;
+    }
+#endif
+    return &failureLabel_;
+  }
 
   void finish();
   void link(JitCode* code);
@@ -6207,7 +6329,8 @@ class MOZ_RAII StackMacroAssembler : public MacroAssembler {
   JS::AutoCheckCannotGC nogc;
 
  public:
-  StackMacroAssembler(JSContext* cx, TempAllocator& alloc);
+  StackMacroAssembler(JSContext* cx, TempAllocator& alloc,
+                      AOTIndirectionTable* aotTable = nullptr);
 };
 
 // WasmMacroAssembler does not contain GC pointers, so it doesn't need the no-GC

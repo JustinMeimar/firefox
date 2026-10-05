@@ -10,6 +10,10 @@
 #include "gc/FinalizationObservers.h"
 #include "gc/GCContext.h"
 #include "gc/PublicIterators.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/AOTInstaller.h"
+#  include "jit/JitOptions.h"
+#endif
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Invalidation.h"
@@ -494,6 +498,17 @@ js::jit::JitZone* Zone::createJitZone(JSContext* cx) {
   if (!jitZone) {
     return nullptr;
   }
+
+#ifdef ENABLE_JS_AOT
+  // Static inline cache stubs belong to the atoms zone. Install them when that
+  // zone first has JIT state.
+  if (isAtomsZone()) {
+    (void)jit::TryLoadAOTICStubs(cx, jitZone.get());
+    if (cx->isExceptionPending()) {
+      return nullptr;
+    }
+  }
+#endif
 
   jitZone_ = jitZone.release();
   return jitZone_;

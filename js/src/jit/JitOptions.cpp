@@ -192,18 +192,26 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether to enable extra code to perform dynamic validations.
   SET_DEFAULT(runExtraChecks, false);
 
-#ifdef ENABLE_JS_AOT_ICS
-  SET_DEFAULT(enableAOTICs, false);
-  SET_DEFAULT(enableAOTICEnforce, false);
-#endif
-
-#ifdef ENABLE_JS_AOT_ICS_FORCE
-  SET_DEFAULT(enableAOTICs, true);
-#endif
-
-#ifdef ENABLE_JS_AOT_ICS_ENFORCE
-  SET_DEFAULT(enableAOTICs, true);
-  SET_DEFAULT(enableAOTICEnforce, true);
+#ifdef ENABLE_JS_AOT
+  SET_DEFAULT(dumpAOTBlinterp, false);
+  SET_DEFAULT(dumpAOTBaseline, false);
+  SET_DEFAULT(useAOTImage, false);
+  if (getenv("JIT_OPTION_useAOTIC")) {
+    useAOTIC = mozilla::Some(overrideDefault("JIT_OPTION_useAOTIC", false));
+  }
+  if (getenv("JIT_OPTION_useAOTBaseline")) {
+    useAOTBaseline = mozilla::Some(overrideDefault("JIT_OPTION_useAOTBaseline", false));
+  }
+  SET_DEFAULT(aotEnforce, false);
+  SET_DEFAULT(aotOnly, false);
+  if (const char* dir = getenv("JIT_OPTION_aotRecordDir")) {
+    aotRecordDir = dir;
+  }
+  SET_DEFAULT(aotSkipBaselineFn, false);
+  SET_DEFAULT(aotRecordSelfHosted, false);
+  if (const char* value = getenv("JIT_OPTION_aotRecordSelfHosted")) {
+    aotRecordSelfHosted = *value && strcmp(value, "0") != 0;
+  }
 #endif
 
   // How many invocations or loop iterations are needed before functions
@@ -303,9 +311,19 @@ DefaultJitOptions::DefaultJitOptions() {
   SET_DEFAULT(ionMaxLocalsAndArgs, 10 * 1000);
   SET_DEFAULT(ionMaxLocalsAndArgsMainThread, 256);
 
+#ifdef ENABLE_JS_AOT
+  // Match browser prefs so AOT artifacts recorded under browser defaults load
+  // in the shell without --spectre-mitigations=on. These three are baked into
+  // blinterp/baseline/IC bytes and are part of each artifact's compilation
+  // context.
+  SET_DEFAULT(spectreIndexMasking, true);
+  SET_DEFAULT(spectreObjectMitigations, true);
+  SET_DEFAULT(spectreStringMitigations, true);
+#else
   SET_DEFAULT(spectreIndexMasking, false);
   SET_DEFAULT(spectreObjectMitigations, false);
   SET_DEFAULT(spectreStringMitigations, false);
+#endif
   SET_DEFAULT(spectreValueMasking, false);
   SET_DEFAULT(spectreJitToCxxCalls, false);
 

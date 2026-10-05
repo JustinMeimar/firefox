@@ -1,0 +1,42 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+FINAL_LIBRARY = "js"
+
+include("../../js-config.mozbuild")
+include("../../js-cxxflags.mozbuild")
+
+GeneratedFile(
+    "AOTImageFormat.inc",
+    script="../GenerateAOTImage.py",
+    entry_point="generate_descriptor",
+    inputs=["../AOTImageSchema.yaml"],
+)
+
+# The shim needs the image and its relocation list sitting next to it at
+# compile time. Using a .inc suffix (rather than .bin) puts these
+# GeneratedFiles in mozbuild's pre-compile tier, so they exist before the shim
+# is compiled.
+GeneratedFile(
+    "AOTImage.inc",
+    script="GenerateEmptyAOTImage.py",
+    entry_point="main",
+    inputs=["!AOTImageFormat.inc"],
+)
+
+GeneratedFile(
+    "AOTImageRelocs.inc",
+    script="GenerateEmptyAOTImage.py",
+    entry_point="main_relocs",
+    inputs=["!AOTImageFormat.inc"],
+)
+
+SOURCES += [
+    "AOTImageIncbin.cpp",
+]
+
+# Both the preprocessor and the assembler search for the generated files
+# relative to the object directory. Engine headers are spelled relative to the
+# js/src root, two levels up.
+LOCAL_INCLUDES += ["!.", "!../..", "../.."]

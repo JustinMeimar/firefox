@@ -330,6 +330,12 @@ void js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc,
     r->traceRoots(trc, traceOrMark);
   }
 
+#ifdef ENABLE_JS_AOT
+  if (rt->hasJitRuntime()) {
+    rt->jitRuntime()->aotIndirectionTable().trace(trc);
+  }
+#endif
+
   if (!JS::RuntimeHeapIsMinorCollecting()) {
     // Trace the self-hosting stencil. The contents of this are always tenured.
     rt->traceSelfHostingStencil(trc);
@@ -338,6 +344,12 @@ void js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc,
          zone.next()) {
       zone->traceRootsInMajorGC(trc);
     }
+
+#ifdef ENABLE_JS_AOT
+    if (rt->hasJitRuntime()) {
+      rt->jitRuntime()->traceAOTPreambleTrampolines(trc);
+    }
+#endif
   }
 
   // Trace helper thread roots.
@@ -412,6 +424,13 @@ class AssertNoRootsTracer final : public JS::CallbackTracer {
 
 void js::gc::GCRuntime::finishRoots() {
   AutoNoteSingleThreadedRegion anstr;
+
+#ifdef ENABLE_JS_AOT
+  if (rt->hasJitRuntime()) {
+    rt->jitRuntime()->aotIndirectionTable().clearRoots();
+    rt->jitRuntime()->clearAOTPreambleTrampolines();
+  }
+#endif
 
   rt->finishAtoms();
   restoreSharedAtomsZone();

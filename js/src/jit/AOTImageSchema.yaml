@@ -1,0 +1,190 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# [SMDOC] AOT Image Schema
+# ========================
+# This file defines the binary layout of each artifact in an AOT image. The
+# generator uses it to create matching metadata structures and serialization
+# helpers. Readers and writers share the same schema.
+#
+# An artifact declares its compilation key and installation metadata. Metadata
+# declares fixed fields and trailing arrays. Both are written as
+# a single "type: member" pair, where member is the path to the corresponding
+# member of the hand written metadata type. Fixed fields use unsigned integer
+# types; arrays name their C++ element type.
+#
+# An artifact's kind identifier is its position in the artifacts mapping. Each array
+# contributes a u32 element count, appended to the fixed fields. Alignment
+# padding is inserted so that the serialized form has no implicit padding.
+#
+# Compilation keys begin with common_key_fields, followed by the artifact
+# compilation_key fields in declaration order.
+#
+# Increment the image format version whenever the binary layout changes.
+
+format:
+  image_magic: 0x49544F41
+  image_version: 5
+  blob_file_magic: 0x42544F41
+  blob_file_version: 4
+  build_identity_size: 32
+  alignment: 16
+  text_alignment: 4096
+  code_alignment: 16
+  link_site_width: 4
+
+records:
+  Header:
+    - u32: magic
+    - u16: version
+    - u16: reserved
+    - u32: blobCount
+    - u32: buildIdentityOffset
+    - u32: buildIdentitySize
+    - u32: directoryOffset
+    - u32: textOffset
+    - u32: textSize
+    - u32: imageSize
+  DirectoryEntry:
+    - u32: kind
+    - u32: probeHash
+    - bytes20: identityHash
+    - u32: textOffset
+    - u32: textSize
+    - u32: dataOffset
+    - u32: fieldsSize
+    - u32: arraysSize
+    - u32: keySize
+  AOTBlobFileHeader:
+    - u32: magic
+    - u16: version
+    - u16: reserved
+    - u32: kind
+    - u32: probeHash
+    - bytes20: identityHash
+    - u32: fieldsSize
+    - u32: arraysSize
+    - u32: codeSize
+    - u32: linkSitesSize
+    - u32: slotTableHash
+    - u32: keySize
+    - bytes32: buildIdentity
+  AOTLinkSite:
+    - u32: codeOffset
+    - u32: slot
+
+array_types:
+  uint8_t: {size: 1, alignment: 1}
+  uint32_t: {size: 4, alignment: 4}
+  js::jit::BaselineInterpreterMetadata::ICReturnOffset: {size: 8, alignment: 4}
+  js::jit::RetAddrEntry: {size: 8, alignment: 4}
+  js::jit::BaselineScript::OSREntry: {size: 8, alignment: 4}
+  js::jit::BaselineScript::DebugTrapEntry: {size: 8, alignment: 4}
+  js::jit::ResumeOffsetEntry: {size: 8, alignment: 4}
+
+common_key_fields:
+  - u32: kind
+  - bytes: buildIdentity
+  - u32: cpuFeatures
+  - bool: spectreIndexMasking
+  - bool: spectreObjectMitigations
+  - bool: spectreStringMitigations
+  - bool: lessDebugCode
+  - bool: profiling
+
+artifacts:
+  BaselineInterpreter:
+    filename_prefix: interp
+    doc: |
+      Baseline interpreter variant.
+    compilation_key:
+      - bool: disableInlining
+      - bool: baselineJit
+      - bool: baselineBatching
+      - u32: baselineQueueCapacity
+    metadata:
+      cpp_type: "js::jit::BaselineInterpreterMetadata"
+      fields:
+        - u32: interpretOpOffset
+        - u32: interpretOpNoDebugTrapOffset
+        - u32: bailoutPrologueOffset
+        - u32: bailoutResumePrologueOffset
+        - u32: profilerEnterToggleOffset
+        - u32: profilerExitToggleOffset
+        - u32: debugTrapHandlerOffset
+        - u32: callVMOffsets.debugPrologueOffset
+        - u32: callVMOffsets.debugEpilogueOffset
+        - u32: callVMOffsets.debugAfterYieldOffset
+      arrays:
+        - uint32_t: debugInstrumentationOffsets
+        - uint32_t: debugTrapOffsets
+        - uint32_t: codeCoverageOffsets
+        - js::jit::BaselineInterpreterMetadata::ICReturnOffset: icReturnOffsets
+
+  BaselineFunction:
+    filename_prefix: blfun
+    doc: |
+      Per-JSScript baseline JIT code plus the metadata needed to
+      reconstruct a BaselineScript on load. Compilation inputs are
+      serialized by the compilation-key writers.
+    compilation_key:
+      - bool: disableInlining
+      - u32: ionMaxScriptSizeMainThread
+      - u32: ionMaxLocalsAndArgsMainThread
+      - bool: eagerIonCompilation
+      - u32: baseWarmUpThreshold
+      - bool: ionCompileable
+      - bool: debugInstrumentation
+      - u32: immutableFlags
+      - u32: functionFlags
+      - u32: nargs
+      - u32: nfixed
+      - u32: nslots
+      - u32: numICEntries
+      - u32: scopeKind
+      - bool: hasNonSyntacticScope
+      - bool: isFunction
+      - bool: needsArgsObj
+      - bool: argsObjAliasesFormals
+      - u32_array: gcThingKinds
+      - bytes: immutableScriptData
+    metadata:
+      cpp_type: "js::jit::BaselineScriptMetadata"
+      fields:
+        - u32: warmUpCheckPrologueOffset
+        - u32: profilerEnterToggleOffset
+        - u32: profilerExitToggleOffset
+        - u8: flags
+        - u8: disableIon
+        - u8: uninlineable
+      arrays:
+        - js::jit::RetAddrEntry: retAddrEntries
+        - js::jit::BaselineScript::OSREntry: osrEntries
+        - js::jit::BaselineScript::DebugTrapEntry: debugTrapEntries
+        - js::jit::ResumeOffsetEntry: resumeOffsetEntries
+
+  InlineCacheStub:
+    filename_prefix: ic
+    doc: |
+      One AOT-compiled CacheIR stub. On load the CacheIR bytes plus
+      the trailing field-type table are used to reconstruct a
+      CacheIRStubInfo; the resulting CacheIRStubKey names the static
+      text range in the per-zone stub map.
+    compilation_key:
+      - bool: enableICFramePointers
+      - bool: fullDebugChecks
+      - {u32: cacheKind, metadata: cacheKind}
+      - {u32: stubDataOffset, metadata: stubDataOffset}
+      - {bytes: cacheIRCode, metadata: cacheIRCode}
+      - {bytes: fieldTypes, metadata: fieldTypes}
+    metadata:
+      cpp_type: "js::jit::AOTICStubMetadata"
+      fields:
+        - u8: cacheKind
+        - u8: makesGCCalls
+        - u8: stubDataOffset
+        - u8: localTracingSlots
+      arrays:
+        - uint8_t: cacheIRCode
+        - uint8_t: fieldTypes

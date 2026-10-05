@@ -913,6 +913,53 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
 
   bool allocNurseryGetterSetters() const { return allocNurseryGetterSetters_; }
 
+  static constexpr size_t offsetOfNurseryAllocFlag(JS::TraceKind kind) {
+    switch (kind) {
+      case JS::TraceKind::Object:
+        return offsetof(Zone, allocNurseryObjects_) +
+               decltype(allocNurseryObjects_)::offsetOfValue();
+      case JS::TraceKind::String:
+        return offsetof(Zone, allocNurseryStrings_) +
+               decltype(allocNurseryStrings_)::offsetOfValue();
+      case JS::TraceKind::BigInt:
+        return offsetof(Zone, allocNurseryBigInts_) +
+               decltype(allocNurseryBigInts_)::offsetOfValue();
+      default:
+        MOZ_CRASH("Unsupported JIT nursery allocation kind");
+    }
+  }
+
+  static constexpr size_t offsetOfCatchAllAllocSite(
+      JS::TraceKind kind, js::gc::CatchAllAllocSite site) {
+    if (site == js::gc::CatchAllAllocSite::Optimized) {
+      MOZ_ASSERT(kind == JS::TraceKind::Object);
+      return offsetof(Zone, pretenuring.optimizedAllocSite);
+    }
+    MOZ_ASSERT(size_t(kind) < js::gc::NurseryTraceKinds);
+    return offsetof(Zone, pretenuring.unknownAllocSites[size_t(kind)]);
+  }
+
+  static constexpr size_t offsetOfTenuredAllocCount() {
+    return offsetof(Zone, tenuredAllocsSinceMinorGC_);
+  }
+
+  static constexpr size_t offsetOfFreeList(js::gc::AllocKind thingKind) {
+    return offsetof(Zone, arenas) +
+           decltype(arenas)::offsetOfFreeList(thingKind);
+  }
+
+  static constexpr size_t offsetOfPreservedWrappers() {
+    return offsetof(Zone, preservedWrappers_);
+  }
+
+  static constexpr size_t offsetOfPreservedWrappersCount() {
+    return offsetof(Zone, preservedWrappersCount_);
+  }
+
+  static constexpr size_t offsetOfPreservedWrappersCapacity() {
+    return offsetof(Zone, preservedWrappersCapacity_);
+  }
+
   js::gc::Heap minHeapToTenure(JS::TraceKind kind) const {
     switch (kind) {
       case JS::TraceKind::Object:

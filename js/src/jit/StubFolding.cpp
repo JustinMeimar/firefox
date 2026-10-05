@@ -17,6 +17,14 @@
 #include "jit/JitScript.h"
 #include "jit/ShapeList.h"
 
+#ifdef ENABLE_JS_AOT
+#  include "gc/Zone.h"
+#  include "jit/JitRuntime.h"
+#  include "jit/JitZone.h"
+#  include "vm/JSContext.h"
+#  include "vm/Runtime.h"
+#endif
+
 #include "vm/List-inl.h"
 
 using namespace js;
@@ -431,6 +439,23 @@ static bool TryFoldingGuardShapes(JSContext* cx, ICFallbackStub* fallback,
     cx->runtime()->setUseCounter(cx->global(), JSUseCounter::IC_STUB_TOO_LARGE);
     return true;
   }
+
+#ifdef ENABLE_JS_AOT
+  // Under --aot-only, peek the corpus before we discard existing stubs. If
+  // the folded variant isn't present we would destroy accumulated ICs to
+  // install nothing.
+  if (!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation()) {
+    CacheIRStubKey::Lookup lookup(cacheKind, ICStubEngine::Baseline,
+                                  writer.codeStart(), writer.codeLength());
+    JitZone* atomsJitZone = cx->runtime()->atomsZone()->jitZone();
+    CacheIRStubInfo* peekInfo = nullptr;
+    JitCode* candidate =
+        atomsJitZone->getBaselineCacheIRStubCode(lookup, &peekInfo);
+    if (!candidate || !candidate->isStaticCode()) {
+      return true;
+    }
+  }
+#endif
 
   // Replace the existing stubs with the new folded stub.
   MaybeMarkingLock lock;

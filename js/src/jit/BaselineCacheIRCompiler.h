@@ -41,7 +41,34 @@ struct Register;
 
 using MaybeMarkingLock = mozilla::Maybe<gc::AutoMarkingLock>;
 
-enum class ICAttachResult { Attached, DuplicateStub, TooLarge, OOM };
+enum class ICAttachResult {
+  Attached,
+  DuplicateStub,
+  TooLarge,
+  OOM,
+#ifdef ENABLE_JS_AOT
+  // No AOT artifact for this IC shape and --aot-only forbids runtime codegen;
+  // caller should leave the existing IC chain intact and rely on the shared
+  // fallback stub for this site.
+  AOTMissSkipped,
+#endif
+};
+
+// An AOT miss is authoritative under --aot-only: the corpus lookup is the
+// only source we consult, so failing it is not the kind of failure that
+// should push the IC toward Megamorphic and then Generic. Treat it as
+// "handled" so trackNotAttached is not invoked.
+inline bool ICAttachResultIsHandled(ICAttachResult r) {
+  if (r == ICAttachResult::Attached) {
+    return true;
+  }
+#ifdef ENABLE_JS_AOT
+  if (r == ICAttachResult::AOTMissSkipped) {
+    return true;
+  }
+#endif
+  return false;
+}
 
 enum class DiscardExistingStubs { Yes, No };
 
@@ -173,7 +200,8 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
   friend class AutoStubFrame;
 
   BaselineCacheIRCompiler(JSContext* cx, TempAllocator& alloc,
-                          const CacheIRWriter& writer, uint32_t stubDataOffset);
+                          const CacheIRWriter& writer, uint32_t stubDataOffset,
+                          AOTIndirectionTable* aotTable = nullptr);
 
   [[nodiscard]] bool init(CacheKind kind);
 

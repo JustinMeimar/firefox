@@ -33,6 +33,7 @@ struct CompilationAtomCache;
 }  // namespace frontend
 
 namespace jit {
+class JitRuntime;
 class MacroAssembler;
 }  // namespace jit
 
@@ -45,6 +46,7 @@ class StaticStrings {
   friend struct js::frontend::CompilationAtomCache;
 
   friend class js::jit::MacroAssembler;
+  friend class js::jit::JitRuntime;
 
  private:
   // Strings matches `[A-Za-z0-9$_]{2}` pattern.

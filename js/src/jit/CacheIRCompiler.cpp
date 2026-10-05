@@ -1582,6 +1582,9 @@ bool CacheIRWriter::stubDataEqualsIgnoringShapeAndOffset(
 
 bool CacheIRStubKey::match(const CacheIRStubKey& entry,
                            const CacheIRStubKey::Lookup& l) {
+#ifdef ENABLE_JS_AOT
+  if (entry.context != l.context) return false;
+#endif
   if (entry.stubInfo->kind() != l.kind) {
     return false;
   }
@@ -1635,6 +1638,29 @@ CacheIRStubInfo* CacheIRStubInfo::New(CacheKind kind, ICStubEngine engine,
   return new (p) CacheIRStubInfo(kind, engine, makesGCCalls, stubDataOffset,
                                  writer.codeLength());
 }
+
+#ifdef ENABLE_JS_AOT
+CacheIRStubInfo* CacheIRStubInfo::NewFromSerialized(
+    CacheKind kind, ICStubEngine engine, bool makesGCCalls,
+    uint32_t stubDataOffset, const uint8_t* cacheIRBytes, uint32_t codeLength,
+    const uint8_t* fieldTypeBytes, uint32_t numFields) {
+  size_t bytesNeeded = sizeof(CacheIRStubInfo) + codeLength + (numFields + 1);
+  uint8_t* p = js_pod_malloc<uint8_t>(bytesNeeded);
+  if (!p) {
+    return nullptr;
+  }
+
+  uint8_t* codeStart = p + sizeof(CacheIRStubInfo);
+  mozilla::PodCopy(codeStart, cacheIRBytes, codeLength);
+
+  uint8_t* fieldTypes = codeStart + codeLength;
+  mozilla::PodCopy(fieldTypes, fieldTypeBytes, numFields);
+  fieldTypes[numFields] = uint8_t(StubField::Type::Limit);
+
+  return new (p)
+      CacheIRStubInfo(kind, engine, makesGCCalls, stubDataOffset, codeLength);
+}
+#endif
 
 bool OperandLocation::operator==(const OperandLocation& other) const {
   if (kind_ != other.kind_) {
@@ -3990,11 +4016,6 @@ bool CacheIRCompiler::emitBigIntToIntPtr(BigIntOperandId inputId,
   return true;
 }
 
-static gc::Heap InitialBigIntHeap(JSContext* cx) {
-  JS::Zone* zone = cx->zone();
-  return zone->allocNurseryBigInts() ? gc::Heap::Default : gc::Heap::Tenured;
-}
-
 static void EmitAllocateBigInt(MacroAssembler& masm, Register result,
                                Register temp, const LiveRegisterSet& liveSet,
                                gc::Heap initialHeap, Label* fail) {
@@ -4009,10 +4030,16 @@ static void EmitAllocateBigInt(MacroAssembler& masm, Register result,
 
     masm.PushRegsInMask(liveSet);
     using Fn = void* (*)(JSContext * cx, bool requestMinorGC);
+    masm.move32(Imm32(0), result);
+    if (requestMinorGC) {
+      Label disabled;
+      masm.branchIfNurseryAllocDisabled(JS::TraceKind::BigInt, temp, &disabled);
+      masm.move32(Imm32(1), result);
+      masm.bind(&disabled);
+    }
     masm.setupUnalignedABICall(temp);
     masm.loadJSContext(temp);
     masm.passABIArg(temp);
-    masm.move32(Imm32(requestMinorGC), result);
     masm.passABIArg(result);
     masm.callWithABI<Fn, jit::AllocateBigIntNoGC>();
     masm.storeCallPointerResult(result);
@@ -4042,7 +4069,7 @@ bool CacheIRCompiler::emitIntPtrToBigIntResult(IntPtrOperandId inputId) {
   save.takeUnchecked(output);
 
   // Allocate a new BigInt. The code after this must be infallible.
-  gc::Heap initialHeap = InitialBigIntHeap(cx_);
+  gc::Heap initialHeap = masm.initialHeapForAllocation(JS::TraceKind::BigInt);
   EmitAllocateBigInt(masm, scratch1, scratch2, save, initialHeap,
                      failure->label());
 
@@ -7842,7 +7869,7 @@ bool CacheIRCompiler::emitLoadTypedArrayElementResult(
     save.takeUnchecked(scratch2);
     save.takeUnchecked(output);
 
-    gc::Heap initialHeap = InitialBigIntHeap(cx_);
+    gc::Heap initialHeap = masm.initialHeapForAllocation(JS::TraceKind::BigInt);
     EmitAllocateBigInt(masm, *bigInt, scratch1, save, initialHeap,
                        failure->label());
   }
@@ -8102,7 +8129,8 @@ bool CacheIRCompiler::emitLoadDataViewValueResult(
       LiveRegisterSet save = liveVolatileRegs();
       save.takeUnchecked(bigInt);
       save.takeUnchecked(bigIntScratch);
-      gc::Heap initialHeap = InitialBigIntHeap(cx_);
+      gc::Heap initialHeap =
+          masm.initialHeapForAllocation(JS::TraceKind::BigInt);
       EmitAllocateBigInt(masm, bigInt, bigIntScratch, save, initialHeap, &fail);
       masm.jump(&done);
 
@@ -10368,7 +10396,7 @@ bool CacheIRCompiler::emitConcatStringsResult(StringOperandId lhsId,
     // code in CallRegExpStub.
     Label vmCall;
     Register temp = CallTempReg2;
-    masm.movePtr(ImmPtr(cx_->zone()->jitZone()), temp);
+    masm.loadZoneField(Zone::offsetOfJitZone(), temp);
     masm.loadPtr(Address(temp, JitZone::offsetOfStringConcatStub()), temp);
     masm.branchTestPtr(Assembler::Zero, temp, temp, &vmCall);
     masm.call(Address(temp, JitCode::offsetOfCode()));
