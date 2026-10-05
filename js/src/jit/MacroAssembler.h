@@ -360,12 +360,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
 #ifdef ENABLE_JS_AOT
   AOTIndirectionTable* const aotTable_;
-  // Frame addressed by FramePointer for AOT table loads in this emission region.
-  mozilla::Maybe<FrameType> aotTableFrame_;
-  mozilla::Maybe<FrameType> aotFailureFrame_;
+  mozilla::Maybe<Address> aotTableAddress_;
+  mozilla::Maybe<Address> aotFailureTableAddress_;
   Vector<AOTLinkSite, 0, SystemAllocPolicy> aotLinkSites_;
-
-  void setAOTTableFrame(FrameType type);
 #endif
 
   // Labels for handling exceptions and failures.
@@ -393,19 +390,23 @@ class MacroAssembler : public MacroAssemblerSpecific {
     return *aotTable_;
   }
 
-  class MOZ_RAII AutoAOTTableFrame {
+  class MOZ_RAII AutoAOTTableAddress {
     MacroAssembler& masm_;
-    mozilla::Maybe<FrameType> prev_;
+    mozilla::Maybe<Address> prev_;
 
    public:
-    AutoAOTTableFrame(MacroAssembler& masm, FrameType type)
-        : masm_(masm), prev_(masm.aotTableFrame_) {
-      masm.setAOTTableFrame(type);
+    AutoAOTTableAddress(MacroAssembler& masm, const Address& address)
+        : masm_(masm), prev_(masm.aotTableAddress_) {
+      masm.setAOTTableAddress(address);
     }
-    ~AutoAOTTableFrame() { masm_.aotTableFrame_ = prev_; }
-    AutoAOTTableFrame(const AutoAOTTableFrame&) = delete;
-    void operator=(const AutoAOTTableFrame&) = delete;
+    ~AutoAOTTableAddress() { masm_.aotTableAddress_ = prev_; }
+    AutoAOTTableAddress(const AutoAOTTableAddress&) = delete;
+    void operator=(const AutoAOTTableAddress&) = delete;
   };
+
+  void setAOTTableAddress(const Address& address) {
+    aotTableAddress_ = mozilla::Some(address);
+  }
 
   void emitAOTLoadTableBase(Register dest);
   void emitAOTSlotLoad(AOTSlot slot, Register dest);
@@ -6169,10 +6170,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
   Label* failureLabel() {
 #ifdef ENABLE_JS_AOT
     if (isAOT()) {
-      MOZ_RELEASE_ASSERT(aotTableFrame_);
-      MOZ_RELEASE_ASSERT(!aotFailureFrame_ ||
-                         *aotFailureFrame_ == *aotTableFrame_);
-      aotFailureFrame_ = aotTableFrame_;
+      MOZ_RELEASE_ASSERT(aotTableAddress_);
+      MOZ_RELEASE_ASSERT(!aotFailureTableAddress_ ||
+                         *aotFailureTableAddress_ == *aotTableAddress_);
+      aotFailureTableAddress_ = aotTableAddress_;
     }
 #endif
     return &failureLabel_;

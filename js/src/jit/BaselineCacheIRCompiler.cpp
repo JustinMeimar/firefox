@@ -98,13 +98,7 @@ BaselineCacheIRCompiler::BaselineCacheIRCompiler(JSContext* cx,
                                                  AOTIndirectionTable* aotTable)
     : CacheIRCompiler(cx, alloc, writer, stubDataOffset, Mode::Baseline,
                       StubFieldPolicy::Address, aotTable),
-      makesGCCalls_(false)
-#ifdef ENABLE_JS_AOT
-      ,
-      aotFrame_(masm, FrameType::BaselineJS)
-#endif
-{
-}
+      makesGCCalls_(false) {}
 
 // AutoStubFrame methods
 AutoStubFrame::AutoStubFrame(BaselineCacheIRCompiler& compiler)
@@ -132,7 +126,9 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
   MOZ_ASSERT(!compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = true;
 #ifdef ENABLE_JS_AOT
-  aotScope_.emplace(masm, FrameType::BaselineStub);
+  aotScope_.emplace(
+      masm,
+      Address(FramePointer, BaselineStubFrameLayout::AOTTableOffsetFromFP));
 #endif
 
   // All current uses of this are to call VM functions that can GC.
@@ -148,7 +144,10 @@ void AutoStubFrame::leave(MacroAssembler& masm) {
 
   EmitBaselineLeaveStubFrame(masm);
 #ifdef ENABLE_JS_AOT
-  aotScope_.reset();
+  // Calls can clobber baselineFrameReg(). Use the restored frame pointer until
+  // the emission scope ends.
+  masm.setAOTTableAddress(
+      Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
 #endif
   if (JitOptions.enableICFramePointers) {
     // We will pop the frame pointer when we return,
@@ -210,6 +209,11 @@ void BaselineCacheIRCompiler::callVM(MacroAssembler& masm) {
 
 JitCode* BaselineCacheIRCompiler::compile() {
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compile");
+#ifdef ENABLE_JS_AOT
+  MacroAssembler::AutoAOTTableAddress aotScope(
+      masm, Address(baselineFrameReg(),
+                    BaselineFrame::reverseOffsetOfAOTTableBase()));
+#endif
 
 #ifndef JS_USE_LINK_REGISTER
   masm.adjustFrame(sizeof(intptr_t));

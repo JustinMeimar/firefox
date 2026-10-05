@@ -1036,7 +1036,7 @@ class MOZ_RAII AutoOutputRegister {
 class MOZ_RAII AutoStubFrame {
   BaselineCacheIRCompiler& compiler;
 #ifdef ENABLE_JS_AOT
-  mozilla::Maybe<MacroAssembler::AutoAOTTableFrame> aotScope_;
+  mozilla::Maybe<MacroAssembler::AutoAOTTableAddress> aotScope_;
 #endif
 #ifdef DEBUG
   uint32_t framePushedAtEnterStubFrame_;

@@ -16,23 +16,9 @@ using namespace js::jit;
 
 #ifdef ENABLE_JS_AOT
 
-void MacroAssembler::setAOTTableFrame(FrameType type) {
-  MOZ_RELEASE_ASSERT(type == FrameType::BaselineJS ||
-                     type == FrameType::BaselineStub);
-  aotTableFrame_ = mozilla::Some(type);
-}
-
 void MacroAssembler::emitAOTLoadTableBase(Register dest) {
-  MOZ_RELEASE_ASSERT(aotTableFrame_);
-  if (*aotTableFrame_ == FrameType::BaselineStub) {
-    MacroAssemblerSpecific::loadPtr(
-        Address(FramePointer, BaselineStubFrameLayout::AOTTableOffsetFromFP),
-        dest);
-  } else {
-    MacroAssemblerSpecific::loadPtr(
-        Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()),
-        dest);
-  }
+  MOZ_RELEASE_ASSERT(aotTableAddress_);
+  MacroAssemblerSpecific::loadPtr(*aotTableAddress_, dest);
 }
 
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
@@ -152,7 +138,7 @@ void MacroAssembler::emitAOTStoreFrameTableBase(Register passReg,
     // The entry preamble places the indirection table address in the register
     // used to initialize this frame.
     storePtr(passReg, dst);
-    setAOTTableFrame(FrameType::BaselineJS);
+    setAOTTableAddress(dst);
     return;
   }
   // All baseline frames store the indirection table address so static inline
@@ -163,14 +149,15 @@ void MacroAssembler::emitAOTStoreFrameTableBase(Register passReg,
 }
 
 void MacroAssembler::emitAOTCopyFrameTableBaseFromCaller(Register scratch) {
-  setAOTTableFrame(FrameType::BaselineJS);
+  Address tableAddress(FramePointer,
+                       BaselineFrame::reverseOffsetOfAOTTableBase());
+  setAOTTableAddress(tableAddress);
   // When resuming a generator, copy the indirection table address from the
   // caller's saved baseline frame into the reconstructed frame.
   loadPtr(Address(FramePointer, 0), scratch);
   loadPtr(Address(scratch, BaselineFrame::reverseOffsetOfAOTTableBase()),
           scratch);
-  storePtr(scratch,
-           Address(FramePointer, BaselineFrame::reverseOffsetOfAOTTableBase()));
+  storePtr(scratch, tableAddress);
 }
 
 #endif  // ENABLE_JS_AOT

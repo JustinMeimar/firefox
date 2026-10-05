@@ -4783,10 +4783,10 @@ void MacroAssembler::finish() {
   if (failureLabel_.used()) {
     bind(&failureLabel_);
 #ifdef ENABLE_JS_AOT
-    mozilla::Maybe<AutoAOTTableFrame> aotScope;
+    mozilla::Maybe<AutoAOTTableAddress> aotScope;
     if (isAOT()) {
-      MOZ_RELEASE_ASSERT(aotFailureFrame_);
-      aotScope.emplace(*this, *aotFailureFrame_);
+      MOZ_RELEASE_ASSERT(aotFailureTableAddress_);
+      aotScope.emplace(*this, *aotFailureTableAddress_);
     }
 #endif
     handleFailure();
