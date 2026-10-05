@@ -430,7 +430,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
     return {aotLinkSites_.begin(), aotLinkSites_.length()};
   }
 
-  void callPreBarrierAOT(MIRType type, Register scratch);
   void emitAOTDispatch(Register opcodeReg, Register tableReg);
   size_t aotDispatchTableEntrySize() const;
 
@@ -5344,15 +5343,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Push(PreBarrierReg);
     computeEffectiveAddress(address, PreBarrierReg);
 
-#ifdef ENABLE_JS_AOT
-    if (isAOT()) {
-      callPreBarrierAOT(type, ScratchReg);
-    } else
-#endif
-    {
-      TrampolinePtr preBarrier = preBarrierTrampoline(type);
-      call(preBarrier);
-    }
+    TrampolinePtr preBarrier = preBarrierTrampoline(type);
+    call(preBarrier);
     Pop(PreBarrierReg);
     // On arm64, SP may be < PSP now (that's OK).
     // eg testcase: tests/auto-regress/bug702915.js

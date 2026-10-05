@@ -84,29 +84,6 @@ void MacroAssembler::emitAOTLinkLoad(AOTSlot slot, Register dest) {
       AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
 }
 
-static AOTSlot PreBarrierSlotForMIRType(MIRType type) {
-  switch (type) {
-    case MIRType::Value:
-      return AOTSlot::PreBarrier_Value;
-    case MIRType::String:
-      return AOTSlot::PreBarrier_String;
-    case MIRType::Object:
-      return AOTSlot::PreBarrier_Object;
-    case MIRType::Shape:
-      return AOTSlot::PreBarrier_Shape;
-    case MIRType::WasmAnyRef:
-      return AOTSlot::PreBarrier_WasmAnyRef;
-    default:
-      MOZ_CRASH("Unexpected MIRType for pre-barrier");
-  }
-}
-
-void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
-  MOZ_ASSERT(isAOT());
-  MOZ_ASSERT(scratch != PreBarrierReg);
-  emitAOTSlotCall(PreBarrierSlotForMIRType(type), scratch);
-}
-
 void MacroAssembler::emitAOTDispatch(Register opcodeReg, Register tableReg) {
   if (isAOT()) {
     // AOT dispatch tables store int32 offsets relative to the table base.

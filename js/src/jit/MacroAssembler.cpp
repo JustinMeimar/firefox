@@ -76,9 +76,6 @@ const double js::jit::MathRandomScaleInv =
 #endif
 
 TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
-#ifdef ENABLE_JS_AOT
-  MOZ_ASSERT(!isAOT());
-#endif
   const JitRuntime* rt = runtime()->jitRuntime();
   return rt->preBarrier(type);
 }
