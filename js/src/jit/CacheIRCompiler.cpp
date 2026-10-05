@@ -3977,16 +3977,6 @@ bool CacheIRCompiler::emitBigIntToIntPtr(BigIntOperandId inputId,
   return true;
 }
 
-static gc::Heap InitialBigIntHeap(JSContext* cx, MacroAssembler& masm) {
-  // AOT IC stubs are shared across zones, but nursery BigInt allocation is
-  // zone-specific. Tenured allocation works in every zone.
-  if (masm.isAOT()) {
-    return gc::Heap::Tenured;
-  }
-  JS::Zone* zone = cx->zone();
-  return zone->allocNurseryBigInts() ? gc::Heap::Default : gc::Heap::Tenured;
-}
-
 static void EmitAllocateBigInt(MacroAssembler& masm, Register result,
                                Register temp, const LiveRegisterSet& liveSet,
                                gc::Heap initialHeap, Label* fail) {
@@ -4001,10 +3991,16 @@ static void EmitAllocateBigInt(MacroAssembler& masm, Register result,
 
     masm.PushRegsInMask(liveSet);
     using Fn = void* (*)(JSContext * cx, bool requestMinorGC);
+    masm.move32(Imm32(0), result);
+    if (requestMinorGC) {
+      Label disabled;
+      masm.branchIfNurseryAllocDisabled(JS::TraceKind::BigInt, temp, &disabled);
+      masm.move32(Imm32(1), result);
+      masm.bind(&disabled);
+    }
     masm.setupUnalignedABICall(temp);
     masm.loadJSContext(temp);
     masm.passABIArg(temp);
-    masm.move32(Imm32(requestMinorGC), result);
     masm.passABIArg(result);
     masm.callWithABI<Fn, jit::AllocateBigIntNoGC>();
     masm.storeCallPointerResult(result);
@@ -4034,7 +4030,7 @@ bool CacheIRCompiler::emitIntPtrToBigIntResult(IntPtrOperandId inputId) {
   save.takeUnchecked(output);
 
   // Allocate a new BigInt. The code after this must be infallible.
-  gc::Heap initialHeap = InitialBigIntHeap(cx_, masm);
+  gc::Heap initialHeap = masm.initialHeapForAllocation(JS::TraceKind::BigInt);
   EmitAllocateBigInt(masm, scratch1, scratch2, save, initialHeap,
                      failure->label());
 
@@ -7834,7 +7830,7 @@ bool CacheIRCompiler::emitLoadTypedArrayElementResult(
     save.takeUnchecked(scratch2);
     save.takeUnchecked(output);
 
-    gc::Heap initialHeap = InitialBigIntHeap(cx_, masm);
+    gc::Heap initialHeap = masm.initialHeapForAllocation(JS::TraceKind::BigInt);
     EmitAllocateBigInt(masm, *bigInt, scratch1, save, initialHeap,
                        failure->label());
   }
@@ -8094,7 +8090,8 @@ bool CacheIRCompiler::emitLoadDataViewValueResult(
       LiveRegisterSet save = liveVolatileRegs();
       save.takeUnchecked(bigInt);
       save.takeUnchecked(bigIntScratch);
-      gc::Heap initialHeap = InitialBigIntHeap(cx_, masm);
+      gc::Heap initialHeap =
+          masm.initialHeapForAllocation(JS::TraceKind::BigInt);
       EmitAllocateBigInt(masm, bigInt, bigIntScratch, save, initialHeap, &fail);
       masm.jump(&done);
 
@@ -8468,39 +8465,15 @@ bool CacheIRCompiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
                     &isUndefined);
 
   masm.bind(&isCallable);
-#ifdef ENABLE_JS_AOT
-  if (masm.isAOT()) {
-    masm.movePtr(ImmGCPtr(cx_->names().function), scratch);
-    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
-  } else
-#endif
-  {
-    masm.moveValue(StringValue(cx_->names().function), output.valueReg());
-  }
+  masm.moveValue(StringValue(cx_->names().function), output.valueReg());
   masm.jump(&done);
 
   masm.bind(&isUndefined);
-#ifdef ENABLE_JS_AOT
-  if (masm.isAOT()) {
-    masm.movePtr(ImmGCPtr(cx_->names().undefined), scratch);
-    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
-  } else
-#endif
-  {
-    masm.moveValue(StringValue(cx_->names().undefined), output.valueReg());
-  }
+  masm.moveValue(StringValue(cx_->names().undefined), output.valueReg());
   masm.jump(&done);
 
   masm.bind(&isObject);
-#ifdef ENABLE_JS_AOT
-  if (masm.isAOT()) {
-    masm.movePtr(ImmGCPtr(cx_->names().object), scratch);
-    masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
-  } else
-#endif
-  {
-    masm.moveValue(StringValue(cx_->names().object), output.valueReg());
-  }
+  masm.moveValue(StringValue(cx_->names().object), output.valueReg());
   masm.jump(&done);
 
   {
@@ -10381,16 +10354,7 @@ bool CacheIRCompiler::emitConcatStringsResult(StringOperandId lhsId,
     // code in CallRegExpStub.
     Label vmCall;
     Register temp = CallTempReg2;
-#ifdef ENABLE_JS_AOT
-    if (masm.isAOT()) {
-      masm.loadJSContext(temp);
-      masm.loadPtr(Address(temp, JSContext::offsetOfZone()), temp);
-      masm.loadPtr(Address(temp, Zone::offsetOfJitZone()), temp);
-    } else
-#endif
-    {
-      masm.movePtr(ImmPtr(cx_->zone()->jitZone()), temp);
-    }
+    masm.loadZoneField(Zone::offsetOfJitZone(), temp);
     masm.loadPtr(Address(temp, JitZone::offsetOfStringConcatStub()), temp);
     masm.branchTestPtr(Assembler::Zero, temp, temp, &vmCall);
     masm.call(Address(temp, JitCode::offsetOfCode()));

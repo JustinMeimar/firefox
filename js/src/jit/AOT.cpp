@@ -9,13 +9,16 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Maybe.h"
 
+#include "gc/Tracer.h"
 #include "jit/AOTPolicy.h"
 #include "jit/JitContext.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "util/Text.h"
+#include "vm/JSAtomUtils.h"
 #include "vm/JSContext.h"
 #include "vm/Runtime.h"
+#include "vm/StringType.h"
 
 #if defined(JS_CODEGEN_X64)
 #  include "jit/x64/Assembler-x64.h"
@@ -117,6 +120,29 @@ mozilla::Maybe<AOTSlot> AOTIndirectionTable::findSlot(uintptr_t value) const {
   return mozilla::Nothing();
 }
 
+void AOTIndirectionTable::initAtoms(JSContext* cx) {
+#define AOT_SLOT(name, ...)
+#define AOT_LINK_SLOT(name, ...)
+#define AOT_ATOM_SLOT(name, expr)  \
+  atoms_.name = StringValue(expr); \
+  set(AOTSlot::name, uintptr_t(atoms_.name.unbarrieredAddress()));
+#include "jit/AOTSlots.tbl"
+#undef AOT_ATOM_SLOT
+#undef AOT_LINK_SLOT
+#undef AOT_SLOT
+}
+
+void AOTIndirectionTable::trace(JSTracer* trc) {
+#define AOT_SLOT(name, ...)
+#define AOT_LINK_SLOT(name, ...)
+#define AOT_ATOM_SLOT(name, ...) \
+  TraceRoot(trc, atoms_.name.unbarrieredAddress(), "aot-" #name);
+#include "jit/AOTSlots.tbl"
+#undef AOT_ATOM_SLOT
+#undef AOT_LINK_SLOT
+#undef AOT_SLOT
+}
+
 mozilla::Maybe<AOTSlot> AOTIndirectionTable::findAtomSlot(
     uintptr_t value) const {
   if (value == 0) {
@@ -124,9 +150,10 @@ mozilla::Maybe<AOTSlot> AOTIndirectionTable::findAtomSlot(
   }
 #define AOT_SLOT(name, ...)
 #define AOT_LINK_SLOT(name, ...)
-#define AOT_ATOM_SLOT(name, ...)                  \
-  if (slots_[uint32_t(AOTSlot::name)] == value) { \
-    return mozilla::Some(AOTSlot::name);          \
+#define AOT_ATOM_SLOT(name, ...)                          \
+  if (atoms_.name.get().isString() &&                     \
+      uintptr_t(atoms_.name.get().toString()) == value) { \
+    return mozilla::Some(AOTSlot::name);                  \
   }
 #include "jit/AOTSlots.tbl"
 #undef AOT_ATOM_SLOT

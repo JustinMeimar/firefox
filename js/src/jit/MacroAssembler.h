@@ -430,7 +430,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
     return {aotLinkSites_.begin(), aotLinkSites_.length()};
   }
 
-  void loadZoneForAOT(Register dest);
   void callPreBarrierAOT(MIRType type, Register scratch);
   void emitAOTDispatch(Register opcodeReg, Register tableReg);
   size_t aotDispatchTableEntrySize() const;
@@ -5201,6 +5200,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
                     Label* notSameDigit);
 
   void loadJSContext(Register dest);
+  void loadCurrentRealm(Register dest);
+  void loadCurrentZone(Register dest);
+  void loadZoneAddress(size_t offset, Register dest);
+  void loadZoneField(size_t offset, Register dest);
+  gc::Heap initialHeapForAllocation(JS::TraceKind kind);
+  void branchIfNurseryAllocDisabled(JS::TraceKind kind, Register scratch,
+                                    Label* fail);
 
   void loadGlobalObjectData(Register dest);
 
@@ -5746,6 +5752,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // Inline allocation.
  private:
+  void branchIfProfilingDisabled(Label* label);
   void checkAllocatorState(Register temp, gc::AllocKind allocKind, Label* fail);
   bool shouldNurseryAllocate(gc::AllocKind allocKind, gc::Heap initialHeap);
   void nurseryAllocateObject(
@@ -5753,11 +5760,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
       size_t nDynamicSlots, Label* fail,
       const AllocSiteInput& allocSite = AllocSiteInput());
   void bumpPointerAllocate(Register result, Register temp, Label* fail,
-                           CompileZone* zone, JS::TraceKind traceKind,
-                           uint32_t size,
+                           JS::TraceKind traceKind, uint32_t size,
                            const AllocSiteInput& allocSite = AllocSiteInput());
-  void updateAllocSite(Register temp, Register result, CompileZone* zone,
-                       Register site);
+  void updateAllocSite(Register temp, Register site);
 
   void freeListAllocate(Register result, Register temp, gc::AllocKind allocKind,
                         Label* fail);

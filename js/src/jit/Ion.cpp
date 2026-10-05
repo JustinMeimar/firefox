@@ -178,13 +178,15 @@ bool JitRuntime::populateAOTIndirectionTable(JSContext* cx) {
 
   // TODO: Factor named slot population into its own helper.
 #  define AOT_SLOT(name, expr) \
-    aotIndirectionTable_.set(AOTSlot::name, uintptr_t(expr));
-#  define AOT_ATOM_SLOT AOT_SLOT
+    aotIndirectionTable_.setPointer(AOTSlot::name, expr);
+#  define AOT_ATOM_SLOT(name, ...)
 #  define AOT_LINK_SLOT AOT_SLOT
 #  include "jit/AOTSlots.tbl"
 #  undef AOT_LINK_SLOT
 #  undef AOT_ATOM_SLOT
 #  undef AOT_SLOT
+
+  aotIndirectionTable_.initAtoms(cx);
 
   // Populate wrapper entries using offsets recorded while generating
   // trampolines.

@@ -784,12 +784,10 @@ void MacroAssembler::branchTestProxyHandlerFamily(Condition cond,
 
 void MacroAssembler::branchTestNeedsMarkingBarrier(Condition cond,
                                                    Label* label) {
-#ifdef ENABLE_JS_AOT
-  if (isAOT()) {
+  if (!maybeRealm_) {
     branchTestNeedsMarkingBarrierAnyZone(cond, label, ScratchReg);
     return;
   }
-#endif
   MOZ_ASSERT(cond == Zero || cond == NonZero);
   CompileZone* zone = realm()->zone();
   const uint32_t* needsBarrierAddr = zone->addressOfNeedsMarkingBarrier();
@@ -803,16 +801,7 @@ void MacroAssembler::branchTestNeedsMarkingBarrierAnyZone(Condition cond,
   if (maybeRealm_) {
     branchTestNeedsMarkingBarrier(cond, label);
   } else {
-    // We are compiling the interpreter or another runtime-wide trampoline, so
-    // we have to load cx->zone.
-#ifdef ENABLE_JS_AOT
-    if (isAOT()) {
-      loadZoneForAOT(scratch);
-    } else
-#endif
-    {
-      loadPtr(AbsoluteAddress(runtime()->addressOfZone()), scratch);
-    }
+    loadCurrentZone(scratch);
     Address needsBarrierAddr(scratch, Zone::offsetOfNeedsMarkingBarrier());
     branchTest32(cond, needsBarrierAddr, Imm32(0x1), label);
   }

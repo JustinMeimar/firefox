@@ -1055,7 +1055,13 @@ void MacroAssembler::moveValue(const Value& src, const ValueOperand& dest) {
   }
 
 #ifdef ENABLE_JS_AOT
-  MOZ_ASSERT(!isAOT(), "moveValue with GC thing not intercepted in AOT mode");
+  if (isAOT()) {
+    auto slot = aotTable().findAtomSlot(uintptr_t(src.toGCThing()));
+    MOZ_RELEASE_ASSERT(slot, "AOT GC values require a runtime binding");
+    emitAOTSlotLoad(*slot, dest.valueReg());
+    loadValue(Address(dest.valueReg(), 0), dest);
+    return;
+  }
 #endif
   movWithPatch(ImmWord(src.asRawBits()), dest.valueReg());
   writeDataRelocation(src);

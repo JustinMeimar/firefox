@@ -282,16 +282,11 @@ void MacroAssembler::checkAllocatorState(Register temp, gc::AllocKind allocKind,
            fail);
 #endif
 
-  // If the zone has a realm with an object allocation metadata hook, emit a
-  // guard for this. Note that IC stubs and some other trampolines can be shared
-  // across realms, so we don't bake in a realm pointer.
-  // TODO(aot): confirm skipping this guard during AOT fill is sound. The
-  // hasRealmWithAllocMetadataBuilder check is a compile-time property,
-  // whereas AOT ICs bind their realm and zone at runtime.
-  if (gc::IsObjectAllocKind(allocKind) && !isAOT() &&
-      realm()->zone()->hasRealmWithAllocMetadataBuilder()) {
-    loadJSContext(temp);
-    loadPtr(Address(temp, JSContext::offsetOfRealm()), temp);
+  // Shared code must check the executing realm even when the recording zone
+  // has no allocation metadata builders.
+  if (gc::IsObjectAllocKind(allocKind) &&
+      (!maybeRealm_ || realm()->zone()->hasRealmWithAllocMetadataBuilder())) {
+    loadCurrentRealm(temp);
     branchPtr(Assembler::NotEqual,
               Address(temp, Realm::offsetOfAllocationMetadataBuilder()),
               ImmWord(0), fail);
@@ -350,9 +345,8 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
   MOZ_ASSERT(totalSize < INT32_MAX);
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
-  CompileZone* zone = isAOT() ? nullptr : realm()->zone();
-  bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::Object,
-                      totalSize, allocSite);
+  bumpPointerAllocate(result, temp, fail, JS::TraceKind::Object, totalSize,
+                      allocSite);
 
   if (nDynamicSlots) {
     store32(Imm32(nDynamicSlots),
@@ -390,15 +384,7 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   // Load the first and last offsets of the zone's free list for |allocKind|.
   // If there is no room remaining in the span, fall back to get the next one.
   auto loadFreeList = [this, allocKind](Register target) {
-#ifdef ENABLE_JS_AOT
-    if (isAOT()) {
-      loadZoneForAOT(target);
-      loadPtr(Address(target, Zone::offsetOfFreeList(allocKind)), target);
-      return;
-    }
-#endif
-    loadPtr(AbsoluteAddress(realm()->zone()->addressOfFreeList(allocKind)),
-            target);
+    loadZoneField(Zone::offsetOfFreeList(allocKind), target);
   };
 
   loadFreeList(temp);
@@ -429,11 +415,12 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
 
   bind(&success);
 
-  if (!isAOT() && runtime()->geckoProfiler().enabled()) {
-    CompileZone* zone = realm()->zone();
-    uint32_t* countAddress = zone->addressOfTenuredAllocCount();
-    movePtr(ImmPtr(countAddress), temp);
+  if (!maybeRealm_ || runtime()->geckoProfiler().enabled()) {
+    Label done;
+    branchIfProfilingDisabled(&done);
+    loadZoneAddress(Zone::offsetOfTenuredAllocCount(), temp);
     add32(Imm32(1), Address(temp, 0));
+    bind(&done);
   }
 }
 
@@ -647,9 +634,7 @@ void MacroAssembler::nurseryAllocateString(Register result, Register temp,
   // with the nursery's end will always fail in such cases.
 
   size_t thingSize = gc::Arena::thingSize(allocKind);
-  CompileZone* zone = isAOT() ? nullptr : realm()->zone();
-  bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::String,
-                      thingSize);
+  bumpPointerAllocate(result, temp, fail, JS::TraceKind::String, thingSize);
 }
 
 // Inline version of Nursery::allocateBigInt.
@@ -661,9 +646,7 @@ void MacroAssembler::nurseryAllocateBigInt(Register result, Register temp,
   // with the nursery's end will always fail in such cases.
 
   size_t thingSize = gc::Arena::thingSize(gc::AllocKind::BIGINT);
-  CompileZone* zone = isAOT() ? nullptr : realm()->zone();
-  bumpPointerAllocate(result, temp, fail, zone, JS::TraceKind::BigInt,
-                      thingSize);
+  bumpPointerAllocate(result, temp, fail, JS::TraceKind::BigInt, thingSize);
 }
 
 static bool IsNurseryAllocEnabled(CompileZone* zone, JS::TraceKind kind) {
@@ -679,11 +662,32 @@ static bool IsNurseryAllocEnabled(CompileZone* zone, JS::TraceKind kind) {
   }
 }
 
+gc::Heap MacroAssembler::initialHeapForAllocation(JS::TraceKind kind) {
+  return maybeRealm_ && !IsNurseryAllocEnabled(realm()->zone(), kind)
+             ? gc::Heap::Tenured
+             : gc::Heap::Default;
+}
+
+void MacroAssembler::branchIfNurseryAllocDisabled(JS::TraceKind kind,
+                                                  Register scratch,
+                                                  Label* fail) {
+  if (maybeRealm_) {
+    if (!IsNurseryAllocEnabled(realm()->zone(), kind)) {
+      jump(fail);
+    }
+  } else {
+    loadCurrentZone(scratch);
+    branch8(Assembler::Equal,
+            Address(scratch, Zone::offsetOfNurseryAllocFlag(kind)), Imm32(0),
+            fail);
+  }
+}
+
 // This function handles nursery allocations for JS. For wasm, see
 // MacroAssembler::wasmBumpPointerAllocate.
 void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
-                                         Label* fail, CompileZone* zone,
-                                         JS::TraceKind traceKind, uint32_t size,
+                                         Label* fail, JS::TraceKind traceKind,
+                                         uint32_t size,
                                          const AllocSiteInput& allocSite) {
   MOZ_ASSERT(size >= gc::MinCellSize);
 
@@ -691,24 +695,12 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   MOZ_ASSERT(totalSize < INT32_MAX, "Nursery allocation too large");
   MOZ_ASSERT(totalSize % gc::CellAlignBytes == 0);
 
-  // Nursery allocation availability is normally fixed when code is generated.
-  // During AOT capture, rely on the runtime nursery boundary check because no
-  // active zone is available.
-  if (zone && !IsNurseryAllocEnabled(zone, traceKind)) {
-    jump(fail);
-    return;
-  }
+  branchIfNurseryAllocDisabled(traceKind, temp, fail);
 
   // Use a relative 32 bit offset to the Nursery position_ to currentEnd_ to
   // avoid 64-bit immediate loads.
   int32_t endOffset = Nursery::offsetOfCurrentEndFromPosition();
-
-#ifdef ENABLE_JS_AOT
-  void* posAddr = zone ? zone->addressOfNurseryPosition()
-                       : runtime()->addressOfNurseryPosition();
-#else
-  void* posAddr = zone->addressOfNurseryPosition();
-#endif
+  void* posAddr = runtime()->addressOfNurseryPosition();
   movePtr(ImmPtr(posAddr), temp);
 
   loadPtr(Address(temp, 0), result);
@@ -717,55 +709,27 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
   storePtr(result, Address(temp, 0));
   subPtr(Imm32(size), result);
 
-#ifdef ENABLE_JS_AOT
-  if (!zone && allocSite.is<gc::CatchAllAllocSite>()) {
-    int32_t siteOffset = Zone::offsetOfUnknownAllocSite(traceKind);
-    loadZoneForAOT(temp);
-    computeEffectiveAddress(Address(temp, siteOffset), temp);
+  if (allocSite.is<gc::CatchAllAllocSite>()) {
+    loadZoneAddress(Zone::offsetOfCatchAllAllocSite(
+                        traceKind, allocSite.as<gc::CatchAllAllocSite>()),
+                    temp);
+    if (traceKind != JS::TraceKind::Object || !maybeRealm_ ||
+        runtime()->geckoProfiler().enabled()) {
+      Label done;
+      if (traceKind == JS::TraceKind::Object) {
+        branchIfProfilingDisabled(&done);
+      }
+      add32(Imm32(1),
+            Address(temp, gc::AllocSite::offsetOfNurseryAllocCount()));
+      bind(&done);
+    }
     orPtr(Imm32(int32_t(traceKind)), temp);
     storePtr(temp, Address(result, -js::Nursery::nurseryCellHeaderSize()));
-
-    if (traceKind != JS::TraceKind::Object) {
-      int32_t allocCountOffset =
-          siteOffset + gc::AllocSite::offsetOfNurseryAllocCount();
-      loadZoneForAOT(temp);
-      add32(Imm32(1), Address(temp, allocCountOffset));
-    }
-    return;
-  }
-#endif
-
-  if (allocSite.is<gc::CatchAllAllocSite>()) {
-    // No allocation site supplied. This is the case when called from Warp, or
-    // from places that don't support pretenuring.
-    gc::CatchAllAllocSite siteKind = allocSite.as<gc::CatchAllAllocSite>();
-    gc::AllocSite* site = zone->catchAllAllocSite(traceKind, siteKind);
-    uintptr_t headerWord = gc::NurseryCellHeader::MakeValue(site, traceKind);
-    storePtr(ImmWord(headerWord),
-             Address(result, -js::Nursery::nurseryCellHeaderSize()));
-
-    if (traceKind != JS::TraceKind::Object ||
-        runtime()->geckoProfiler().enabled()) {
-      // Update the catch all allocation site, which his is used to calculate
-      // nursery allocation counts so we can determine whether to disable
-      // nursery allocation of strings and bigints.
-      uint32_t* countAddress = site->nurseryAllocCountAddress();
-      CheckedInt<int32_t> counterOffset =
-          (CheckedInt<uintptr_t>(uintptr_t(countAddress)) -
-           CheckedInt<uintptr_t>(uintptr_t(posAddr)))
-              .toChecked<int32_t>();
-      if (counterOffset.isValid()) {
-        add32(Imm32(1), Address(temp, counterOffset.value()));
-      } else {
-        movePtr(ImmPtr(countAddress), temp);
-        add32(Imm32(1), Address(temp, 0));
-      }
-    }
   } else {
     // Update allocation site and store pointer in the nursery cell header. This
     // is only used from baseline.
     Register site = allocSite.as<Register>();
-    updateAllocSite(temp, result, zone, site);
+    updateAllocSite(temp, site);
     // See NurseryCellHeader::MakeValue.
     orPtr(Imm32(int32_t(traceKind)), site);
     storePtr(site, Address(result, -js::Nursery::nurseryCellHeaderSize()));
@@ -773,8 +737,7 @@ void MacroAssembler::bumpPointerAllocate(Register result, Register temp,
 }
 
 // Update the allocation site in the same way as Nursery::allocateCell.
-void MacroAssembler::updateAllocSite(Register temp, Register result,
-                                     CompileZone* zone, Register site) {
+void MacroAssembler::updateAllocSite(Register temp, Register site) {
   Label done;
 
   add32(Imm32(1), Address(site, gc::AllocSite::offsetOfNurseryAllocCount()));
@@ -783,22 +746,10 @@ void MacroAssembler::updateAllocSite(Register temp, Register result,
            Address(site, gc::AllocSite::offsetOfNurseryAllocCount()),
            Imm32(js::gc::NormalSiteAttentionThreshold), &done);
 
-#ifdef ENABLE_JS_AOT
-  if (!zone) {
-    movePtr(ImmPtr(runtime()->addressOfNurseryAllocatedSites()), temp);
-    push(result);
-    loadPtr(Address(temp, 0), result);
-    storePtr(result,
-             Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
-    storePtr(site, Address(temp, 0));
-    pop(result);
-    bind(&done);
-    return;
-  }
-#endif
-  loadPtr(AbsoluteAddress(zone->addressOfNurseryAllocatedSites()), temp);
+  AbsoluteAddress allocatedSites(runtime()->addressOfNurseryAllocatedSites());
+  loadPtr(allocatedSites, temp);
   storePtr(temp, Address(site, gc::AllocSite::offsetOfNextNurseryAllocated()));
-  storePtr(site, AbsoluteAddress(zone->addressOfNurseryAllocatedSites()));
+  storePtr(site, allocatedSites);
 
   bind(&done);
 }
@@ -851,44 +802,17 @@ void MacroAssembler::preserveWrapper(Register wrapper, Register scratchSuccess,
                                      const LiveRegisterSet& liveRegs) {
   Label done, abiCall;
 
-#ifdef ENABLE_JS_AOT
-  if (isAOT()) {
-    loadZoneForAOT(scratch2);
-    loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappersCount()),
-            scratchSuccess);
-    branchPtr(Assembler::Equal,
-              Address(scratch2, Zone::offsetOfPreservedWrappersCapacity()),
-              scratchSuccess, &abiCall);
-    loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappers()), scratch2);
-  } else
-#endif
-  {
-    CompileZone* zone = realm()->zone();
-
-    loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCount()),
-            scratchSuccess);
-    branchPtr(
-        Assembler::Equal,
-        AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCapacity()),
-        scratchSuccess, &abiCall);
-    loadPtr(AbsoluteAddress(zone->zone()->addressOfPreservedWrappers()),
-            scratch2);
-  }
-
+  loadZoneAddress(0, scratch2);
+  loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappersCount()),
+          scratchSuccess);
+  branchPtr(Assembler::Equal,
+            Address(scratch2, Zone::offsetOfPreservedWrappersCapacity()),
+            scratchSuccess, &abiCall);
+  loadPtr(Address(scratch2, Zone::offsetOfPreservedWrappers()), scratch2);
   storePtr(wrapper, BaseIndex(scratch2, scratchSuccess, ScalePointer));
   addPtr(Imm32(1), scratchSuccess);
-#ifdef ENABLE_JS_AOT
-  if (isAOT()) {
-    loadZoneForAOT(scratch2);
-    storePtr(scratchSuccess,
-             Address(scratch2, Zone::offsetOfPreservedWrappersCount()));
-  } else
-#endif
-  {
-    CompileZone* zone = realm()->zone();
-    storePtr(scratchSuccess,
-             AbsoluteAddress(zone->zone()->addressOfPreservedWrappersCount()));
-  }
+  loadZoneAddress(Zone::offsetOfPreservedWrappersCount(), scratch2);
+  storePtr(scratchSuccess, Address(scratch2, 0));
 
   move32(Imm32(1), scratchSuccess);
 
@@ -2781,9 +2705,46 @@ void MacroAssembler::loadJSContext(Register dest) {
   movePtr(ImmPtr(runtime()->mainContextPtr()), dest);
 }
 
-static const uint8_t* ContextRealmPtr(CompileRuntime* rt) {
-  return (static_cast<const uint8_t*>(rt->mainContextPtr()) +
-          JSContext::offsetOfRealm());
+void MacroAssembler::loadCurrentRealm(Register dest) {
+  loadPtr(AbsoluteAddress(runtime()->addressOfRealm()), dest);
+}
+
+void MacroAssembler::loadCurrentZone(Register dest) {
+  loadPtr(AbsoluteAddress(runtime()->addressOfZone()), dest);
+}
+
+void MacroAssembler::loadZoneAddress(size_t offset, Register dest) {
+  if (maybeRealm_) {
+    auto* zone = static_cast<uint8_t*>(realm()->zone()->addressOfZone());
+    movePtr(ImmPtr(zone + offset), dest);
+  } else {
+    loadCurrentZone(dest);
+    if (offset) {
+      computeEffectiveAddress(Address(dest, offset), dest);
+    }
+  }
+}
+
+void MacroAssembler::loadZoneField(size_t offset, Register dest) {
+  if (maybeRealm_) {
+    auto* zone = static_cast<uint8_t*>(realm()->zone()->addressOfZone());
+    loadPtr(AbsoluteAddress(zone + offset), dest);
+  } else {
+    loadCurrentZone(dest);
+    loadPtr(Address(dest, offset), dest);
+  }
+}
+
+void MacroAssembler::branchIfProfilingDisabled(Label* label) {
+  if (maybeRealm_) {
+    if (!runtime()->geckoProfiler().enabled()) {
+      jump(label);
+    }
+  } else {
+    branch32(Assembler::Equal,
+             AbsoluteAddress(runtime()->geckoProfiler().addressOfEnabled()),
+             Imm32(0), label);
+  }
 }
 
 uint32_t MacroAssembler::callVMWrapper(VMFunctionId id, Register scratch) {
@@ -2819,18 +2780,18 @@ void MacroAssembler::writeDispatchTableEntry(uint32_t tableOffset, size_t index,
 }
 
 void MacroAssembler::loadGlobalObjectData(Register dest) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  loadCurrentRealm(dest);
   loadPtr(Address(dest, Realm::offsetOfActiveGlobal()), dest);
   loadPrivate(Address(dest, GlobalObject::offsetOfGlobalDataSlot()), dest);
 }
 
 void MacroAssembler::switchToRealm(Register realm) {
-  storePtr(realm, AbsoluteAddress(ContextRealmPtr(runtime())));
+  storePtr(realm, AbsoluteAddress(runtime()->addressOfRealm()));
 }
 
 void MacroAssembler::loadRealmFuse(RealmFuses::FuseIndex index, Register dest) {
   // Load Realm pointer
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  loadCurrentRealm(dest);
   loadPtr(Address(dest, RealmFuses::offsetOfFuseWordRelativeToRealm(index)),
           dest);
 }
@@ -2896,7 +2857,7 @@ void MacroAssembler::switchToWasmInstanceRealm(Register scratch1,
 
 template <typename ValueType>
 void MacroAssembler::storeLocalAllocSite(ValueType value, Register scratch) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), scratch);
+  loadCurrentRealm(scratch);
   storePtr(value, Address(scratch, JS::Realm::offsetOfLocalAllocSite()));
 }
 
@@ -2909,7 +2870,7 @@ void MacroAssembler::debugAssertContextRealm(const void* realm,
 #ifdef DEBUG
   Label ok;
   movePtr(ImmPtr(realm), scratch);
-  branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr(runtime())),
+  branchPtr(Assembler::Equal, AbsoluteAddress(runtime()->addressOfRealm()),
             scratch, &ok);
   assumeUnreachable("Unexpected context realm");
   bind(&ok);
@@ -2930,7 +2891,7 @@ void MacroAssembler::setIsCrossRealmArrayConstructor(Register obj,
   loadPtr(Address(obj, JSObject::offsetOfShape()), output);
   loadPtr(Address(output, Shape::offsetOfBaseShape()), output);
   loadPtr(Address(output, BaseShape::offsetOfRealm()), output);
-  branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr(runtime())),
+  branchPtr(Assembler::Equal, AbsoluteAddress(runtime()->addressOfRealm()),
             output, &isFalse);
 
   // The object must be a function.
@@ -2955,7 +2916,7 @@ void MacroAssembler::guardObjectHasSameRealm(Register obj, Register scratch,
   loadPtr(Address(obj, JSObject::offsetOfShape()), scratch);
   loadPtr(Address(scratch, Shape::offsetOfBaseShape()), scratch);
   loadPtr(Address(scratch, BaseShape::offsetOfRealm()), scratch);
-  branchPtr(Assembler::NotEqual, AbsoluteAddress(ContextRealmPtr(runtime())),
+  branchPtr(Assembler::NotEqual, AbsoluteAddress(runtime()->addressOfRealm()),
             scratch, fail);
 }
 
@@ -4051,7 +4012,7 @@ void MacroAssembler::loadJitActivation(Register dest) {
 }
 
 void MacroAssembler::loadBaselineCompileQueue(Register dest) {
-  loadPtr(AbsoluteAddress(ContextRealmPtr(runtime())), dest);
+  loadCurrentRealm(dest);
   computeEffectiveAddress(Address(dest, Realm::offsetOfBaselineCompileQueue()),
                           dest);
 }
@@ -4793,6 +4754,12 @@ void MacroAssembler::finish() {
   }
 
   MacroAssemblerSpecific::finish();
+#ifdef ENABLE_JS_AOT
+  if (isAOT() && !oom()) {
+    MOZ_RELEASE_ASSERT(!dataRelocationTableBytes());
+    MOZ_RELEASE_ASSERT(!jumpRelocationTableBytes());
+  }
+#endif
 
   MOZ_RELEASE_ASSERT(
       size() <= MaxCodeBytesPerProcess,

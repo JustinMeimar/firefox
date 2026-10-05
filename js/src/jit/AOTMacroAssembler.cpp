@@ -107,13 +107,6 @@ void MacroAssembler::callPreBarrierAOT(MIRType type, Register scratch) {
   emitAOTSlotCall(PreBarrierSlotForMIRType(type), scratch);
 }
 
-void MacroAssembler::loadZoneForAOT(Register dest) {
-  MOZ_ASSERT(isAOT());
-  loadJSContext(dest);
-  MacroAssemblerSpecific::loadPtr(Address(dest, JSContext::offsetOfZone()),
-                                  dest);
-}
-
 void MacroAssembler::emitAOTDispatch(Register opcodeReg, Register tableReg) {
   if (isAOT()) {
     // AOT dispatch tables store int32 offsets relative to the table base.

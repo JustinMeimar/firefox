@@ -51,10 +51,16 @@ inline void MacroAssembler::movePtr(ImmPtr imm, Register dest) {
 inline void MacroAssembler::movePtr(ImmGCPtr imm, Register dest) {
   if (MOZ_UNLIKELY(isAOT())) {
     if (auto slot = aotTable().findAtomSlot(uintptr_t(imm.value))) {
-      emitAOTSlotLoad(*slot, dest);
+      Register temp = dest == CallTempReg0 ? CallTempReg1 : CallTempReg0;
+      Push(temp);
+      emitAOTSlotLoad(*slot, temp);
+      unboxGCThingForGCBarrier(Address(temp, 0), dest);
+      Pop(temp);
       return;
     }
-    // Other GC pointers retain their normal relocation behavior.
+    MOZ_RELEASE_ASSERT(!imm.value, "AOT GC operands require a runtime binding");
+    MacroAssemblerSpecific::movePtr(ImmWord(0), dest);
+    return;
   }
   MacroAssemblerSpecific::movePtr(imm, dest);
 }

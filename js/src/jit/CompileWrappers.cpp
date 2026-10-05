@@ -98,7 +98,6 @@ const void* CompileRuntime::addressOfLastBufferedWholeCell() {
   return runtime()->gc.addressOfLastBufferedWholeCell();
 }
 
-#ifdef ENABLE_JS_AOT
 void* CompileRuntime::addressOfNurseryPosition() {
   return runtime()->gc.addressOfNurseryPosition();
 }
@@ -106,8 +105,6 @@ void* CompileRuntime::addressOfNurseryPosition() {
 void* CompileRuntime::addressOfNurseryAllocatedSites() {
   return runtime()->gc.addressOfNurseryAllocatedSites();
 }
-
-#endif
 
 const void* CompileRuntime::addressOfRuntimeFuse(
     RuntimeFuses::FuseIndex index) {
@@ -162,10 +159,6 @@ uint32_t* CompileZone::addressOfTenuredAllocCount() {
   return zone()->addressOfTenuredAllocCount();
 }
 
-gc::FreeSpan** CompileZone::addressOfFreeList(gc::AllocKind allocKind) {
-  return zone()->arenas.addressOfFreeList(allocKind);
-}
-
 bool CompileZone::allocNurseryObjects() {
   return zone()->allocNurseryObjects();
 }
@@ -180,15 +173,6 @@ bool CompileZone::allocNurseryBigInts() {
 
 void* CompileZone::addressOfZone() { return zone(); }
 
-void* CompileZone::addressOfNurseryPosition() {
-  return zone()->runtimeFromAnyThread()->gc.addressOfNurseryPosition();
-}
-
-void* CompileZone::addressOfNurseryAllocatedSites() {
-  JSRuntime* rt = zone()->runtimeFromAnyThread();
-  return rt->gc.addressOfNurseryAllocatedSites();
-}
-
 void* CompileZone::jitZone() { return zone()->jitZone(); }
 
 bool CompileZone::canNurseryAllocateStrings() {
@@ -197,16 +181,6 @@ bool CompileZone::canNurseryAllocateStrings() {
 
 bool CompileZone::canNurseryAllocateBigInts() {
   return zone()->allocNurseryBigInts();
-}
-
-gc::AllocSite* CompileZone::catchAllAllocSite(JS::TraceKind traceKind,
-                                              gc::CatchAllAllocSite siteKind) {
-  if (siteKind == gc::CatchAllAllocSite::Optimized) {
-    // This is assumed when counting allocations.
-    MOZ_ASSERT(traceKind == JS::TraceKind::Object);
-    return zone()->optimizedAllocSite();
-  }
-  return zone()->unknownAllocSite(traceKind);
 }
 
 gc::AllocSite* CompileZone::tenuringAllocSite() {

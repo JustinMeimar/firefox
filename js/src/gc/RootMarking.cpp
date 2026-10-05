@@ -330,6 +330,12 @@ void js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc,
     r->traceRoots(trc, traceOrMark);
   }
 
+#ifdef ENABLE_JS_AOT
+  if (rt->hasJitRuntime()) {
+    rt->jitRuntime()->aotIndirectionTable().trace(trc);
+  }
+#endif
+
   if (!JS::RuntimeHeapIsMinorCollecting()) {
     // Trace the self-hosting stencil. The contents of this are always tenured.
     rt->traceSelfHostingStencil(trc);
@@ -419,6 +425,13 @@ class AssertNoRootsTracer final : public JS::CallbackTracer {
 void js::gc::GCRuntime::finishRoots() {
   AutoNoteSingleThreadedRegion anstr;
 
+#ifdef ENABLE_JS_AOT
+  if (rt->hasJitRuntime()) {
+    rt->jitRuntime()->aotIndirectionTable().clearRoots();
+    rt->jitRuntime()->clearAOTPreambleTrampolines();
+  }
+#endif
+
   rt->finishAtoms();
   restoreSharedAtomsZone();
 
@@ -434,12 +447,6 @@ void js::gc::GCRuntime::finishRoots() {
 
 #ifdef JS_GC_ZEAL
   clearSelectedForMarking();
-#endif
-
-#ifdef ENABLE_JS_AOT
-  if (rt->hasJitRuntime()) {
-    rt->jitRuntime()->clearAOTPreambleTrampolines();
-  }
 #endif
 
   // Clear any remaining roots from the embedding (as otherwise they will be

@@ -14,9 +14,11 @@
 
 #  include <cstdint>
 #  include <iterator>
+#  include <type_traits>
 
 #  include "jstypes.h"
 
+#  include "gc/Barrier.h"
 #  include "jit/AOTImageFormatGenerated.h"
 #  include "jit/Registers.h"
 #  include "js/experimental/TypedData.h"  // JS_FOR_EACH_TYPED_ARRAY
@@ -26,6 +28,7 @@ struct JS_PUBLIC_API JSContext;
 namespace js::jit {
 
 class JitCode;
+class JitRuntime;
 
 extern const double MathRandomScaleInv;
 
@@ -119,7 +122,7 @@ bool IsAOTLinkSlot(AOTSlot slot);
 constexpr mozilla::HashNumber AOTSlotTableHash() {
   const char* const names[] = {
 #  define AOT_SLOT(name, ...) #name,
-#  define AOT_ATOM_SLOT(name, ...) "@" #name,
+#  define AOT_ATOM_SLOT(name, ...) "@value-root:" #name,
 #  define AOT_LINK_SLOT(name, ...) "&" #name,
 #  include "jit/AOTSlots.tbl"
 #  undef AOT_LINK_SLOT
@@ -146,14 +149,31 @@ constexpr mozilla::HashNumber AOTSlotTableHash() {
 const char* AOTSlotName(AOTSlot slot);
 
 class AOTIndirectionTable {
+  friend class JitRuntime;
+
  public:
   AOTIndirectionTable() = default;
+  AOTIndirectionTable(const AOTIndirectionTable&) = delete;
+  void operator=(const AOTIndirectionTable&) = delete;
+
+  void trace(JSTracer* trc);
+  void clearRoots() { atoms_ = AtomRoots{}; }
+
+ private:
+  void initAtoms(JSContext* cx);
+
+  template <typename T>
+  void setPointer(AOTSlot slot, T* value) {
+    static_assert(!std::is_base_of_v<gc::Cell, T>);
+    set(slot, uintptr_t(value));
+  }
 
   void set(AOTSlot slot, uintptr_t value) {
     MOZ_ASSERT(uint32_t(slot) < uint32_t(AOTSlot::Count));
     slots_[uint32_t(slot)] = value;
   }
 
+ public:
   uintptr_t get(AOTSlot slot) const {
     MOZ_ASSERT(uint32_t(slot) < uint32_t(AOTSlot::Count));
     return slots_[uint32_t(slot)];
@@ -173,6 +193,15 @@ class AOTIndirectionTable {
 
  private:
   uintptr_t slots_[uint32_t(AOTSlot::Count)] = {};
+  struct AtomRoots {
+#  define AOT_SLOT(name, ...)
+#  define AOT_LINK_SLOT(name, ...)
+#  define AOT_ATOM_SLOT(name, ...) HeapPtr<Value> name;
+#  include "jit/AOTSlots.tbl"
+#  undef AOT_ATOM_SLOT
+#  undef AOT_LINK_SLOT
+#  undef AOT_SLOT
+  } atoms_;
 };
 
 // Creates a preamble for static code when needed. The preamble initializes the
