@@ -34,6 +34,12 @@ bool AOTPolicy::init(JSContext* cx, const DefaultJitOptions& options) {
     JS_ReportErrorASCII(cx, "aot-only and aot-enforce are mutually exclusive");
     return false;
   }
+  if (options.aotOnly &&
+      (options.dumpAOTBaseline || !options.aotRecordDir.empty())) {
+    JS_ReportErrorASCII(cx,
+                        "aot-only cannot be combined with AOT code capture");
+    return false;
+  }
   bool defaultComponents = options.useAOTImage ||
       (options.aotOnly && !options.useAOTIC && !options.useAOTBaseline);
   if (options.useAOTIC.valueOr(defaultComponents)) {

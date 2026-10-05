@@ -48,6 +48,7 @@
 #  include "jit/AOTABIFns-inl.h"
 #  include "jit/JitScript-inl.h"
 #  include "vm/JSObject-inl.h"
+#  include "vm/JSScript-inl.h"
 
 namespace js::jit {
 
@@ -291,7 +292,8 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
     // Trigger baseline compilation here so the recorder receives the generated
     // artifact through the normal compilation path.
     Rooted<JSScript*> script(cx, fun->nonLazyScript());
-    if (!script || !CanBaselineInterpretScript(script)) {
+    if (!script || !CanBaselineInterpretScript(script) ||
+        !script->canBaselineCompile() || script->hasBaselineScript()) {
       (*skippedOut)++;
       continue;
     }
@@ -310,7 +312,8 @@ bool AOTArtifactRecorder::recordSelfHostedBaselineCorpus(JSContext* cx,
     if (status == Method_Error) {
       return false;
     }
-    if (status != Method_Compiled) {
+    if (status != Method_Compiled ||
+        script->baselineScript()->method()->isStaticCode() || failed()) {
       (*skippedOut)++;
       cx->clearPendingException();
       continue;

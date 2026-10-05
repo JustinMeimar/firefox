@@ -17,7 +17,6 @@
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTCompilationKey.h"
 #  include "jit/AOTInstaller.h"
-#  include "jit/Linker.h"
 #endif
 #include "jit/AutoWritableJitCode.h"
 #include "jit/BaselineCodeGen.h"
@@ -30,6 +29,9 @@
 #include "jit/JitCommon.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
+#ifdef ENABLE_JS_AOT
+#  include "jit/Linker.h"
+#endif
 #include "jit/MacroAssembler.h"
 #include "js/friend/StackLimits.h"  // js::AutoCheckRecursionLimit
 #include "vm/Interpreter.h"
@@ -277,6 +279,16 @@ static bool DispatchOffThreadBaselineCompile(JSContext* cx,
   return true;
 }
 
+struct BaselineCompileBatch {
+  LifoAlloc& alloc;
+  BaselineSnapshotList& snapshots;
+  bool isEager;
+};
+
+static MethodStatus BaselineCompileImpl(JSContext* cx, JSScript* script,
+                                        BaselineOptions options,
+                                        BaselineCompileBatch* batch);
+
 // Off thread baseline batching can be called from two different locations.
 // Either through stencil instantiation where we perform eager baseline
 // compilations speculatively based on Jit Hints, or on demand through the JIT.
@@ -313,9 +325,7 @@ static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
   BaselineSnapshotList snapshots;
   auto clearSnapshotList = mozilla::MakeScopeExit([&]() { snapshots.clear(); });
 
-  GlobalLexicalEnvironmentObject* globalLexical =
-      &cx->global()->lexicalEnvironment();
-  JSObject* globalThis = globalLexical->thisObject();
+  BaselineCompileBatch batch{*alloc, snapshots, isEager};
 
   Rooted<JSScript*> script(cx);
   while (!queue.isEmpty()) {
@@ -331,36 +341,14 @@ static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
       continue;
     }
 
-    if (!BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script,
-                                                                    isEager)) {
-      BaselineOptions options({BaselineOption::ForceMainThreadCompilation});
-      MethodStatus status = BaselineCompile(cx, script, options);
-      if (status != Method_Compiled) {
-        return false;
-      }
-      continue;
-    }
-
-    bool compileDebugInstrumentation = false;
-    if (!BaselineCompiler::PrepareToCompile(cx, script,
-                                            compileDebugInstrumentation)) {
+    MethodStatus status =
+        BaselineCompileImpl(cx, script, BaselineOptions(), &batch);
+    if (status == Method_Error) {
       return false;
     }
-
-    uint32_t baseWarmUpThreshold =
-        OptimizationInfo::baseWarmUpThresholdForScript(cx, script);
-    bool isIonCompileable = IsIonEnabled(cx) && CanIonCompileScript(cx, script);
-
-    MOZ_ASSERT(!script->isDebuggee());
-
-    auto* offThreadSnapshot = alloc->new_<OffThreadBaselineSnapshot>(
-        script, globalLexical, globalThis, baseWarmUpThreshold,
-        isIonCompileable, compileDebugInstrumentation);
-    if (!offThreadSnapshot) {
-      ReportOutOfMemory(cx);
-      return false;
+    if (status == Method_CantCompile) {
+      script->disableBaselineCompile();
     }
-    snapshots.insertFront(offThreadSnapshot);
   }
 
   if (snapshots.isEmpty()) {
@@ -374,7 +362,6 @@ static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
     ReportOutOfMemory(cx);
     return false;
   }
-  task->markScriptsAsCompiling();
   clearSnapshotList.release();
 
   AutoLockHelperThreadState lock;
@@ -383,6 +370,7 @@ static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
     return false;
   }
 
+  task->markScriptsAsCompiling();
   (void)alloc.release();
 
   return true;
@@ -396,8 +384,69 @@ bool jit::DispatchOffThreadBaselineBatch(JSContext* cx) {
   return DispatchOffThreadBaselineBatchImpl(cx, /* isEager = */ false);
 }
 
-MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
-                                  BaselineOptions options) {
+#ifdef ENABLE_JS_AOT
+static bool CaptureAOTBaselineScript(JSContext* cx,
+                                     const BaselineSnapshot& snapshot) {
+  JSScript* script = snapshot.script();
+  mozilla::Maybe<JSAutoNullableRealm> ar;
+  if (JS::Prefs::experimental_self_hosted_cache() && script->selfHosted()) {
+    ar.emplace(cx, nullptr);
+  }
+  TempAllocator dumpTemp(&cx->tempLifoAlloc());
+  StackMacroAssembler dumpMasm(
+      cx, dumpTemp, &cx->runtime()->jitRuntime()->aotIndirectionTable());
+  // Even disabled debugger traps embed runtime addresses. Capture the
+  // shareable code while compiling the debug variant for this runtime.
+  BaselineSnapshot aotSnapshot(
+      script, snapshot.globalLexical(), snapshot.globalThis(),
+      snapshot.baseWarmUpThreshold(), snapshot.isIonCompileable(), false);
+  if (cx->runtime()->geckoProfiler().enabled()) {
+    dumpMasm.enableProfilingInstrumentation();
+  }
+  AOTCompilationKey key;
+  WriteAOTContext(key, AOTBlobKind::BaselineFunction, JitOptions,
+                  cx->runtime()->geckoProfiler().enabled());
+  WriteAOTBaselineInputs(key, script, aotSnapshot.baseWarmUpThreshold(),
+                         aotSnapshot.isIonCompileable(),
+                         aotSnapshot.compileDebugInstrumentation());
+  if (!key.complete()) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  BaselineCompiler dumpCompiler(dumpTemp, CompileRuntime::get(cx->runtime()),
+                                dumpMasm, &aotSnapshot);
+  if (!dumpCompiler.init() ||
+      dumpCompiler.compileOffThread() != Method_Compiled) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  JitSpew(JitSpew_BaselineAOT, "baseline func AOT capture ok: %s:%u bytes=%zu",
+          script->filename() ? script->filename() : "<null>",
+          unsigned(script->lineno()), size_t(dumpMasm.instructionsSize()));
+  if (AOTArtifactRecorder* rec = cx->runtime()->jitRuntime()->aotRecorder()) {
+    mozilla::Maybe<AutoAllocInAtomsZone> allocInAtomsZone;
+    if (JS::Prefs::experimental_self_hosted_cache() && script->selfHosted()) {
+      allocInAtomsZone.emplace(cx);
+    }
+    Linker linker(dumpMasm);
+    JitCode* dumpCode = linker.newCode(cx, CodeKind::Baseline);
+    if (!dumpCode) {
+      return false;
+    }
+    BaselineScriptMetadata dumpMd = dumpCompiler.extractAOTMetadata();
+    if (!rec->recordBaselineFunction(cx, dumpCode, key.data(),
+                                     ComputeBaselineProbeHash(script), dumpMd,
+                                     dumpMasm.aotLinkSites())) {
+      return false;
+    }
+  }
+  return true;
+}
+#endif
+
+static MethodStatus BaselineCompileImpl(JSContext* cx, JSScript* script,
+                                        BaselineOptions options,
+                                        BaselineCompileBatch* batch) {
   cx->check(script);
   MOZ_ASSERT(!script->hasBaselineScript());
   MOZ_ASSERT(script->canBaselineCompile());
@@ -412,13 +461,6 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   bool forceMainThread =
       compileDebugInstrumentation ||
       options.hasFlag(BaselineOption::ForceMainThreadCompilation);
-#ifdef ENABLE_JS_AOT
-  // Run capture on the main thread because background baseline compilation does
-  // not perform AOT capture.
-  if (cx->runtime()->jitRuntime()->aotPolicy().shouldCapture(AOTBlobKind::BaselineFunction)) {
-    forceMainThread = true;
-  }
-#endif
 
   JitContext jctx(cx);
 
@@ -426,6 +468,27 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   gc::AutoSuppressGC suppressGC(cx);
 
   Rooted<JSScript*> rooted(cx, script);
+#ifdef ENABLE_JS_AOT
+  const AOTPolicy& policy = cx->runtime()->jitRuntime()->aotPolicy();
+  if (policy.shouldLoad(AOTBlobKind::BaselineFunction)) {
+    if (!compileDebugInstrumentation) {
+      if (TryInstallAOTBaselineScript(cx, rooted)) {
+        return Method_Compiled;
+      }
+      if (cx->isExceptionPending()) {
+        return Method_Error;
+      }
+    }
+    if (policy.missBehavior(AOTBlobKind::BaselineFunction) ==
+        AOTMissBehavior::Fail) {
+      MOZ_CRASH("AOT baseline function miss under --aot-enforce");
+    }
+  }
+  if (policy.missBehavior(AOTBlobKind::BaselineFunction) ==
+      AOTMissBehavior::StayInTier) {
+    return Method_CantCompile;
+  }
+#endif
   if (!BaselineCompiler::PrepareToCompile(cx, rooted,
                                           compileDebugInstrumentation)) {
     return Method_Error;
@@ -442,10 +505,24 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
                             baseWarmUpThreshold, isIonCompileable,
                             compileDebugInstrumentation);
 
-  if (BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script) &&
-      !forceMainThread) {
-    if (!DispatchOffThreadBaselineCompile(cx, snapshot)) {
-      ReportOutOfMemory(cx);
+#ifdef ENABLE_JS_AOT
+  if (policy.shouldCapture(AOTBlobKind::BaselineFunction) &&
+      !CaptureAOTBaselineScript(cx, snapshot)) {
+    return Method_Error;
+  }
+#endif
+
+  if (!forceMainThread &&
+      BaselineCompileTask::OffThreadBaselineCompilationAvailable(
+          cx, script, batch && batch->isEager)) {
+    if (batch) {
+      auto* copy = batch->alloc.new_<OffThreadBaselineSnapshot>(snapshot);
+      if (!copy) {
+        ReportOutOfMemory(cx);
+        return Method_Error;
+      }
+      batch->snapshots.insertFront(copy);
+    } else if (!DispatchOffThreadBaselineCompile(cx, snapshot)) {
       return Method_Error;
     }
     return Method_Skipped;
@@ -459,64 +536,6 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
     ar.emplace(cx, nullptr);
   }
   StackMacroAssembler masm(cx, temp);
-
-#ifdef ENABLE_JS_AOT
-  // Compile once in capture mode to validate pointer indirection and optionally
-  // record the artifact. Compile again to produce code for the current runtime.
-  if (cx->runtime()->jitRuntime()->aotPolicy().shouldCapture(AOTBlobKind::BaselineFunction)) {
-    TempAllocator dumpTemp(&cx->tempLifoAlloc());
-    StackMacroAssembler dumpMasm(
-        cx, dumpTemp, &cx->runtime()->jitRuntime()->aotIndirectionTable());
-    // Even disabled debugger traps embed runtime addresses. Capture the
-    // shareable code while compiling the debug variant for this runtime.
-    BaselineSnapshot aotSnapshot(script, globalLexical, globalThis,
-                                 baseWarmUpThreshold, isIonCompileable, false);
-    if (cx->runtime()->geckoProfiler().enabled()) {
-      dumpMasm.enableProfilingInstrumentation();
-    }
-    AOTCompilationKey key;
-    WriteAOTContext(key, AOTBlobKind::BaselineFunction, JitOptions,
-                    cx->runtime()->geckoProfiler().enabled());
-    WriteAOTBaselineInputs(key, script, aotSnapshot.baseWarmUpThreshold(),
-                           aotSnapshot.isIonCompileable(),
-                           aotSnapshot.compileDebugInstrumentation());
-    if (!key.complete()) {
-      ReportOutOfMemory(cx);
-      return Method_Error;
-    }
-    BaselineCompiler dumpCompiler(dumpTemp, CompileRuntime::get(cx->runtime()),
-                                  dumpMasm, &aotSnapshot);
-    if (!dumpCompiler.init()) {
-      ReportOutOfMemory(cx);
-      return Method_Error;
-    }
-    if (dumpCompiler.compileOffThread() != Method_Compiled) {
-      ReportOutOfMemory(cx);
-      return Method_Error;
-    }
-    JitSpew(JitSpew_BaselineAOT,
-            "baseline func AOT capture ok: %s:%u bytes=%zu",
-            script->filename() ? script->filename() : "<null>",
-            unsigned(script->lineno()), size_t(dumpMasm.instructionsSize()));
-    if (AOTArtifactRecorder* rec = cx->runtime()->jitRuntime()->aotRecorder()) {
-      mozilla::Maybe<AutoAllocInAtomsZone> allocInAtomsZone;
-      if (JS::Prefs::experimental_self_hosted_cache() && script->selfHosted()) {
-        allocInAtomsZone.emplace(cx);
-      }
-      Linker linker(dumpMasm);
-      JitCode* dumpCode = linker.newCode(cx, CodeKind::Baseline);
-      if (!dumpCode) {
-        return Method_Error;
-      }
-      BaselineScriptMetadata dumpMd = dumpCompiler.extractAOTMetadata();
-      if (!rec->recordBaselineFunction(cx, dumpCode, key.data(),
-                                       ComputeBaselineProbeHash(script), dumpMd,
-                                       dumpMasm.aotLinkSites())) {
-        return Method_Error;
-      }
-    }
-  }
-#endif
 
   BaselineCompiler compiler(temp, CompileRuntime::get(cx->runtime()), masm,
                             &snapshot);
@@ -537,18 +556,16 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   return status;
 }
 
+MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
+                                  BaselineOptions options) {
+  return BaselineCompileImpl(cx, script, options, nullptr);
+}
+
 static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
                                         AbstractFramePtr osrSourceFrame) {
   if (!CanBaselineCompileScript(cx, script)) {
     return Method_CantCompile;
   }
-
-#ifdef ENABLE_JS_AOT
-  if (!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation() && !cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineFunction)) {
-    script->disableBaselineCompile();
-    return Method_CantCompile;
-  }
-#endif
 
   // This check is needed in the following corner case. Consider a function h,
   //
@@ -619,31 +636,11 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     options.setFlag(BaselineOption::ForceDebugInstrumentation);
   }
 
-#ifdef ENABLE_JS_AOT
-  if (cx->runtime()->jitRuntime()->aotPolicy().shouldLoad(AOTBlobKind::BaselineFunction)) {
-    // Debuggee scripts skip AOT install because runtime trap edits would make
-    // a static copy stale. Enforcement still applies below so debuggees never
-    // escape to runtime codegen under --aot-only or --aot-enforce.
-    if (!script->isDebuggee() &&
-        !options.hasFlag(BaselineOption::ForceDebugInstrumentation)) {
-      if (TryInstallAOTBaselineScript(cx, script)) {
-        return Method_Compiled;
-      }
-      if (cx->isExceptionPending()) {
-        return Method_Error;
-      }
-    }
-    if ((cx->runtime()->jitRuntime()->aotPolicy().missBehavior(AOTBlobKind::BaselineFunction) == AOTMissBehavior::Fail)) {
-      MOZ_CRASH("AOT baseline function miss under --aot-enforce");
-    }
-  }
-  if (!cx->runtime()->jitRuntime()->aotPolicy().allowsCompilation()) {
+  MethodStatus status = BaselineCompile(cx, script, options);
+  if (status == Method_CantCompile) {
     script->disableBaselineCompile();
-    return Method_CantCompile;
   }
-#endif
-
-  return BaselineCompile(cx, script, options);
+  return status;
 }
 
 bool jit::CanBaselineInterpretScript(JSScript* script) {
