@@ -25,15 +25,14 @@
 
 format:
   image_magic: 0x49544F41
-  image_version: 6
+  image_version: 7
   blob_file_magic: 0x42544F41
-  blob_file_version: 4
+  blob_file_version: 5
   build_identity_size: 32
   alignment: 16
   # Support Linux ARM64 kernels with 4, 16, or 64 KiB pages.
   text_alignment: 65536
   code_alignment: 16
-  link_site_width: 4
 
 records:
   Header:
@@ -74,6 +73,9 @@ records:
   AOTLinkSite:
     - u32: codeOffset
     - u32: slot
+    - u8: kind
+    - u8: reg
+    - u16: width
 
 array_types:
   uint8_t: {size: 1, alignment: 1}
