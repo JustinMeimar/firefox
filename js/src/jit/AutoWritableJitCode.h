@@ -87,6 +87,9 @@ class MOZ_RAII AutoWritableJitCodeFallible {
     if (isStatic_) {
       jit::FlushICache(addr_, size_);
       ok = StaticMprotect(addr_, size_, false);
+      // Other threads can execute this shared code without a local flush.
+      MOZ_RELEASE_ASSERT(jit::CanFlushExecutionContextForAllThreads());
+      jit::FlushExecutionContextForAllThreads();
     } else
 #endif
     {
