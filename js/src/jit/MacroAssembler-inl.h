@@ -785,7 +785,12 @@ void MacroAssembler::branchTestProxyHandlerFamily(Condition cond,
 void MacroAssembler::branchTestNeedsMarkingBarrier(Condition cond,
                                                    Label* label) {
   if (!maybeRealm_) {
-    branchTestNeedsMarkingBarrierAnyZone(cond, label, ScratchReg);
+#ifdef JS_CODEGEN_ARM64
+    ScratchRegisterScope scratch(*this);
+#else
+    Register scratch = ScratchReg;
+#endif
+    branchTestNeedsMarkingBarrierAnyZone(cond, label, scratch);
     return;
   }
   MOZ_ASSERT(cond == Zero || cond == NonZero);
