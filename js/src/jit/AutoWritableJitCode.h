@@ -25,6 +25,11 @@
 
 #  include "gc/Memory.h"
 #  include "jit/FlushICache.h"
+
+extern "C" {
+extern const uint8_t aot_image_start[];
+extern const uint8_t aot_image_end[];
+}
 #endif
 
 namespace js::jit {
@@ -55,6 +60,8 @@ class MOZ_RAII AutoWritableJitCodeFallible {
     uintptr_t start = reinterpret_cast<uintptr_t>(addr);
     uintptr_t aligned = start & ~(page - 1);
     size_t len = ((size + (start - aligned)) + page - 1) & ~(page - 1);
+    MOZ_RELEASE_ASSERT(aligned >= uintptr_t(aot_image_start));
+    MOZ_RELEASE_ASSERT(aligned + len <= uintptr_t(aot_image_end));
     int prot = writable ? (PROT_READ | PROT_WRITE) : (PROT_READ | PROT_EXEC);
     return mprotect(reinterpret_cast<void*>(aligned), len, prot) == 0;
   }

@@ -10,6 +10,7 @@
 
 #  include <cstring>
 
+#  include "gc/Memory.h"
 #  include "jit/FlushICache.h"
 #  include "jit/JitSpewer.h"
 
@@ -30,6 +31,11 @@ mozilla::Span<const uint8_t> CurrentAOTBuildIdentity() {
 const AOTImage* AOTImage::embedded() {
   // Instrumentation rewrites code shared by all runtimes in this process.
   if (!CanFlushExecutionContextForAllThreads()) {
+    return nullptr;
+  }
+  if (gc::SystemPageSize() > image::TextAlignment ||
+      uintptr_t(aot_image_start) % gc::SystemPageSize() ||
+      uintptr_t(aot_image_end) % gc::SystemPageSize()) {
     return nullptr;
   }
   static const auto image = [] {
