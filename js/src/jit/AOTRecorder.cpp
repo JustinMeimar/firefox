@@ -78,17 +78,12 @@ bool FileMatches(FILE* file, ArtifactParts parts) {
 }
 
 mozilla::Result<mozilla::Ok, ArtifactIOError> PublishArtifact(
-    const char* path, ArtifactParts parts) {
-  auto temporaryPath = JS_smprintf("%s.tmp.XXXXXX", path);
-  if (!temporaryPath) {
-    return mozilla::Err(
-        ArtifactIOError{"AOT temporary path allocation failed", ENOMEM});
-  }
-  mozilla::UniqueFileHandle fd(mkstemp(temporaryPath.get()));
+    const char* path, char* temporaryPath, ArtifactParts parts) {
+  mozilla::UniqueFileHandle fd(mkstemp(temporaryPath));
   if (!fd) {
     return mozilla::Err(ArtifactIOError{"AOT record open failed", errno});
   }
-  auto cleanup = mozilla::MakeScopeExit([&] { unlink(temporaryPath.get()); });
+  auto cleanup = mozilla::MakeScopeExit([&] { unlink(temporaryPath); });
   UniqueFile file(fdopen(fd.get(), "wb"), fclose);
   if (!file) {
     return mozilla::Err(ArtifactIOError{"AOT record fdopen failed", errno});
@@ -106,7 +101,7 @@ mozilla::Result<mozilla::Ok, ArtifactIOError> PublishArtifact(
   }
 
   // Publish complete artifacts without replacing a concurrent writer's file.
-  if (link(temporaryPath.get(), path) == 0) {
+  if (link(temporaryPath, path) == 0) {
     return mozilla::Ok();
   }
   if (errno != EEXIST) {
@@ -172,6 +167,13 @@ bool AOTArtifactRecorder::record(
     }
     return false;
   }
+  auto temporaryPath = JS_smprintf("%s.tmp.XXXXXX", path.get());
+  if (!temporaryPath) {
+    if (kind != AOTBlobKind::InlineCacheStub) {
+      ReportOutOfMemory(cx);
+    }
+    return false;
+  }
 
   // IC attachment forbids exceptions, and debug OSR cannot report an error
   // while rewriting the stack. The shell checks failed_ after execution.
@@ -209,7 +211,7 @@ bool AOTArtifactRecorder::record(
   }
   parts[N + 3] = {code->raw(), code->instructionsSize()};
   parts[N + 4] = mozilla::AsBytes(sites);
-  auto result = PublishArtifact(path.get(), parts);
+  auto result = PublishArtifact(path.get(), temporaryPath.get(), parts);
   if (result.isErr()) {
     reportPublicationError(result.unwrapErr());
   }
