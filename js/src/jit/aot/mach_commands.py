@@ -536,8 +536,16 @@ def ambermonkey_build_image(command_context, corpus, output_dir=None):
 @SubCommand(
     "ambermonkey", "test", description="Record jit-tests and test the linked AOT image."
 )
-def ambermonkey_test(command_context):
+@CommandArgument("-j", "--jobs", type=int, help="Number of concurrent jit-tests.")
+@CommandArgument("--timeout", type=int, help="Timeout per jit-test in seconds.")
+def ambermonkey_test(command_context, jobs=None, timeout=None):
     try:
+        jit_test_args = []
+        for option, value in (("-j", jobs), ("-t", timeout)):
+            if value is not None:
+                if value <= 0:
+                    raise AmberMonkeyError(f"{option} must be positive")
+                jit_test_args.extend([option, str(value)])
         paths = _paths(command_context)
         _validate_build(command_context, paths)
         if not paths["shell"].is_file():
@@ -565,6 +573,7 @@ def ambermonkey_test(command_context):
                 [
                     sys.executable,
                     str(jit_test),
+                    *jit_test_args,
                     f"--args=--aot-record={corpus} --no-ion",
                     str(paths["shell"]),
                 ],
@@ -577,7 +586,8 @@ def ambermonkey_test(command_context):
             _run_test_stage(
                 command_context,
                 "testing jit-tests",
-                [sys.executable, str(jit_test), "--args=--aot", str(paths["shell"])],
+                [sys.executable, str(jit_test), *jit_test_args,
+                 "--args=--aot", str(paths["shell"])],
                 env=_clean_environment(),
             )
         return 0
