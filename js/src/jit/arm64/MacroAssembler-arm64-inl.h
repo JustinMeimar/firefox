@@ -115,6 +115,14 @@ void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
   Ldrsw(ARMRegister(dest, 64), toMemOperand(src));
 }
 
+#ifdef ENABLE_JS_AOT
+void MacroAssembler::load32SignExtendToPtr(const BaseIndex& src,
+                                           Register dest) {
+  load32(src, dest);
+  move32To64SignExtend(dest, Register64(dest));
+}
+#endif
+
 void MacroAssembler::loadAbiReturnAddress(Register dest) { movePtr(lr, dest); }
 
 // ===============================================================
