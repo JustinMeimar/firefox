@@ -145,6 +145,10 @@ bool AOTArtifactRecorder::record(
   if (failed_) {
     return true;
   }
+  MOZ_RELEASE_ASSERT(code->jumpRelocTableBytes() == 0,
+                     "AOT-recorded code has jump relocations");
+  MOZ_RELEASE_ASSERT(code->dataRelocTableBytes() == 0,
+                     "AOT-recorded code has data relocations");
   auto blob = encode(md);
   size_t arraysSize = 0;
   for (auto array : blob.arrays) {
