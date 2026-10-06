@@ -420,6 +420,8 @@ static bool CaptureAOTBaselineScript(JSContext* cx,
     ReportOutOfMemory(cx);
     return false;
   }
+  // Flush constant pools before measuring the captured instruction buffer.
+  Linker linker(dumpMasm);
   JitSpew(JitSpew_BaselineAOT, "baseline func AOT capture ok: %s:%u bytes=%zu",
           script->filename() ? script->filename() : "<null>",
           unsigned(script->lineno()), size_t(dumpMasm.instructionsSize()));
@@ -428,7 +430,6 @@ static bool CaptureAOTBaselineScript(JSContext* cx,
     if (JS::Prefs::experimental_self_hosted_cache() && script->selfHosted()) {
       allocInAtomsZone.emplace(cx);
     }
-    Linker linker(dumpMasm);
     JitCode* dumpCode = linker.newCode(cx, CodeKind::Baseline);
     if (!dumpCode) {
       return false;
