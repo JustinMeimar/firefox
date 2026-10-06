@@ -19,6 +19,7 @@
 extern "C" {
 extern const uint8_t aot_image_start[];
 extern const uint8_t aot_image_end[];
+extern const uint8_t aot_image_emitted_end[];
 extern const uint8_t aot_build_identity[32];
 }
 
@@ -40,6 +41,11 @@ const AOTImage* AOTImage::embedded() {
   }
   static const auto image = [] {
     size_t size = size_t(aot_image_end - aot_image_start);
+    size_t emitted = size_t(aot_image_emitted_end - aot_image_start);
+    MOZ_RELEASE_ASSERT(
+        emitted == reinterpret_cast<const image::Header*>(aot_image_start)
+                       ->imageSize,
+        "AOT image size drift between packer and image shim");
     auto image = fromBytes({aot_image_start, size});
     if (!image) {
       JitSpew(JitSpew_BaselineAOT,

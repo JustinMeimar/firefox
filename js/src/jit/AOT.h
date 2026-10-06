@@ -148,6 +148,8 @@ constexpr mozilla::HashNumber AOTSlotTableHash() {
 
 const char* AOTSlotName(AOTSlot slot);
 
+enum class AOTLinkKind : uint8_t { Call, Address, Load64 };
+
 class AOTIndirectionTable {
   friend class JitRuntime;
 
