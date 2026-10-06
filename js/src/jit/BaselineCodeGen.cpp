@@ -1445,10 +1445,6 @@ void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
                   frame.addressOfICScript());
   }
   masm.bind(&done);
-
-#ifdef ENABLE_JS_AOT
-  emitStoreAOTFrameTableBase(scratch);
-#endif
 }
 
 template <>
@@ -1522,12 +1518,6 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   } else {
     masm.storePtr(scratch1, frame.addressOfInterpreterPC());
   }
-
-#ifdef ENABLE_JS_AOT
-  // The first scratch register may still hold the interpreter program counter
-  // on some targets, so use the second scratch register for this store.
-  emitStoreAOTFrameTableBase(scratch2);
-#endif
 }
 
 
@@ -6512,12 +6502,6 @@ template <typename Handler>
 bool BaselineCodeGen<Handler>::emitGeneratorResumePrologueBody() {
   JSScript* maybeScript = handler.maybeScript();
 
-#ifdef ENABLE_JS_AOT
-  // The resume path skips emitInitFrameFields, and the calls below may load
-  // runtime state through the frame's indirection table.
-  emitStoreAOTFrameTableBase(R2.scratchReg());
-#endif
-
   AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
   MOZ_ASSERT(!regs.has(FramePointer));
   if (HasInterpreterPCReg()) {
@@ -7103,6 +7087,14 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   masm.checkStackAlignment();
   masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
 
+#ifdef ENABLE_JS_AOT
+  // The profiler and the generator resume prologue may load runtime state
+  // through the frame's indirection table, so populate it first.
+  emitStoreAOTFrameTableBase(R2.scratchReg());
+#endif
+
+  emitProfilerEnterFrame();
+
   // A bailout of an Ion frame that's still mid-generator-resume re-enters here
   // to redo the resume in Baseline.
   masm.bind(&bailoutResumePrologue_);
@@ -7114,12 +7106,7 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
   // Initialize BaselineFrame. Also handles env chain pre-initialization (in
   // case GC gets run during stack check). For global and eval scripts, the env
   // chain is in R1. For function scripts, the env chain is in the callee.
-  // Runs before emitProfilerEnterFrame so the AOT table-base slot is
-  // populated before any subsequent loadJSContext (which may reach through
-  // emitAOTSlotLoad).
   emitInitFrameFields(R1.scratchReg());
-
-  emitProfilerEnterFrame();
 
   // When compiling with Debugger instrumentation, set the debuggeeness of
   // the frame before any operation that can call into the VM.
@@ -7418,9 +7405,6 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   // External entry point for Ion resume prologue bailouts.
   bailoutResumePrologueOffset_ = CodeOffset(masm.currentOffset());
   restoreInterpreterPCReg();
-#ifdef ENABLE_JS_AOT
-  masm.loadPtr(frame.addressOfAOTTableBase(), AOTInterpPassReg);
-#endif
   masm.moveToStackPtr(FramePointer);
   masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
   masm.jump(&bailoutResumePrologue_);
