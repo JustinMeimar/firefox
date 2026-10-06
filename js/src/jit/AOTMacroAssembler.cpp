@@ -18,7 +18,11 @@ using namespace js::jit;
 
 void MacroAssembler::emitAOTLoadTableBase(Register dest) {
   MOZ_RELEASE_ASSERT(aotTableAddress_);
-  MacroAssemblerSpecific::loadPtr(*aotTableAddress_, dest);
+  MacroAssemblerSpecific::loadPtr(aotTableAddress_->address, dest);
+  if (aotTableAddress_->throughCaller) {
+    MacroAssemblerSpecific::loadPtr(
+        Address(dest, BaselineFrame::reverseOffsetOfAOTTableBase()), dest);
+  }
 }
 
 void MacroAssembler::emitAOTSlotLoad(AOTSlot slot, Register dest) {
