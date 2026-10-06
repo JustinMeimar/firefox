@@ -62,9 +62,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   const MacroAssembler& asMasm() const;
 
   // Bridges to the derived MacroAssembler, which is incomplete in this header
-  // so its members cannot be named here. Defined in MacroAssembler-x64-inl.h.
-  inline void moveRuntimeAddress(ImmPtr addr, Register dest);
-  inline bool isAOTCodegen() const;
+  // so its members cannot be named here. Defined in MacroAssembler-x64.cpp.
+  void moveRuntimeAddress(ImmPtr addr, Register dest);
+  bool isAOTCodegen() const;
 
   void bindOffsets(const MacroAssemblerX86Shared::UsesVector&);
 
