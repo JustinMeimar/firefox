@@ -256,7 +256,9 @@ def _record_argv(shell, corpus, workload=None):
 
 
 def _log_error(command_context, message):
-    command_context.log(logging.ERROR, COMMAND, {}, str(message))
+    command_context.log(
+        logging.ERROR, COMMAND, {"message": str(message)}, "{message}"
+    )
     return 1
 
 
