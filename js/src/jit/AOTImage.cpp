@@ -10,6 +10,7 @@
 
 #  include <cstring>
 
+#  include "jit/FlushICache.h"
 #  include "jit/JitSpewer.h"
 
 // Symbols exported by the image shim, which embeds either a recorded image or
@@ -27,6 +28,10 @@ mozilla::Span<const uint8_t> CurrentAOTBuildIdentity() {
 }
 
 const AOTImage* AOTImage::embedded() {
+  // Instrumentation rewrites code shared by all runtimes in this process.
+  if (!CanFlushExecutionContextForAllThreads()) {
+    return nullptr;
+  }
   static const auto image = [] {
     size_t size = size_t(aot_image_end - aot_image_start);
     auto image = fromBytes({aot_image_start, size});
