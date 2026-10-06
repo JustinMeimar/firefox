@@ -32,7 +32,7 @@ constexpr mozilla::HashNumber AOTABIFnTableHash() {
   };
   mozilla::HashNumber h = 0;
   for (const char* e : entries) {
-    h = mozilla::AddToHash(h, mozilla::HashStringUntilZero(e));
+    h = mozilla::AddToHash(h, AOTHashName(e));
   }
   return mozilla::AddToHash(h, kAOTABIFnCount);
 }

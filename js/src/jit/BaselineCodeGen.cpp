@@ -1375,6 +1375,20 @@ bool BaselineCodeGen<Handler>::emitDebugPrologue() {
   return emitDebugInstrumentation(ifDebuggee);
 }
 
+#ifdef ENABLE_JS_AOT
+template <>
+void BaselineCompilerCodeGen::emitStoreAOTFrameTableBase(Register scratch) {
+  masm.emitAOTStoreFrameTableBase(AOTFuncPassReg, scratch,
+                                  frame.addressOfAOTTableBase());
+}
+
+template <>
+void BaselineInterpreterCodeGen::emitStoreAOTFrameTableBase(Register scratch) {
+  masm.emitAOTStoreFrameTableBase(AOTInterpPassReg, scratch,
+                                  frame.addressOfAOTTableBase());
+}
+#endif
+
 template <>
 void BaselineCompilerCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   Register scratch = R0.scratchReg();
@@ -1516,19 +1530,6 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
 #endif
 }
 
-#ifdef ENABLE_JS_AOT
-template <>
-void BaselineCompilerCodeGen::emitStoreAOTFrameTableBase(Register scratch) {
-  masm.emitAOTStoreFrameTableBase(AOTFuncPassReg, scratch,
-                                  frame.addressOfAOTTableBase());
-}
-
-template <>
-void BaselineInterpreterCodeGen::emitStoreAOTFrameTableBase(Register scratch) {
-  masm.emitAOTStoreFrameTableBase(AOTInterpPassReg, scratch,
-                                  frame.addressOfAOTTableBase());
-}
-#endif
 
 // Assert we don't need a post write barrier to write sourceObj to a slot of
 // destObj. See comments in WarpBuilder::buildNamedLambdaEnv.

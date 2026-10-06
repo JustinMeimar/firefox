@@ -113,6 +113,14 @@ constexpr bool IsNamedAOTLinkSlot(AOTSlot slot) {
 // from a table too heavy to pull into every macro assembler consumer.
 bool IsAOTLinkSlot(AOTSlot slot);
 
+constexpr mozilla::HashNumber AOTHashName(const char* name) {
+  mozilla::HashNumber hash = 0;
+  for (; *name; name++) {
+    hash = mozilla::AddToHash(hash, *name);
+  }
+  return hash;
+}
+
 // Identifies the slot numbering this build compiles against. Link sites name
 // slots by index, so an image recorded against a different numbering would
 // bind to the wrong symbol. Hashing the effective slot list rather than the
@@ -131,7 +139,7 @@ constexpr mozilla::HashNumber AOTSlotTableHash() {
   };
   mozilla::HashNumber h = 0;
   for (const char* n : names) {
-    h = mozilla::AddToHash(h, mozilla::HashStringUntilZero(n));
+    h = mozilla::AddToHash(h, AOTHashName(n));
   }
   const uint32_t layout[] = {uint32_t(AOTSlot::NamedSlot_Begin),
                              uint32_t(AOTSlot::NamedSlot_End),
