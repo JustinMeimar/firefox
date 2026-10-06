@@ -29,6 +29,12 @@
 namespace js {
 namespace jit {
 
+void MacroAssemblerCompat::moveRuntimeAddress(ImmPtr addr, Register dest) {
+  asMasm().movePtr(addr, dest);
+}
+
+bool MacroAssemblerCompat::isAOTCodegen() const { return asMasm().isAOT(); }
+
 enum class Width { _32 = 32, _64 = 64 };
 
 static inline ARMRegister X(Register r) { return ARMRegister(r, 64); }

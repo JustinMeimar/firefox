@@ -51,11 +51,11 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
 
  public:
   // Bridges to the derived MacroAssembler, which is incomplete in this header
-  // so its members cannot be named here. Defined in MacroAssembler-arm64-inl.h.
+  // so its members cannot be named here. Defined in MacroAssembler-arm64.cpp.
   // Members of this class that reach a runtime address by any other route bake
   // it in, which AOT codegen cannot see and cannot fix up.
-  inline void moveRuntimeAddress(ImmPtr addr, Register dest);
-  inline bool isAOTCodegen() const;
+  void moveRuntimeAddress(ImmPtr addr, Register dest);
+  bool isAOTCodegen() const;
 
   // Restrict to only VIXL-internal functions.
   vixl::MacroAssembler& asVIXL();

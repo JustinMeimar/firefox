@@ -71,12 +71,6 @@ void MacroAssembler::move32ZeroExtendToPtr(Register src, Register dest) {
 // ===============================================================
 // Load instructions
 
-void MacroAssemblerX64::moveRuntimeAddress(ImmPtr addr, Register dest) {
-  asMasm().movePtr(addr, dest);
-}
-
-bool MacroAssemblerX64::isAOTCodegen() const { return asMasm().isAOT(); }
-
 void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
   movslq(Operand(src), dest);
 }

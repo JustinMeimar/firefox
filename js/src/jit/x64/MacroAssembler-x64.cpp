@@ -21,6 +21,12 @@
 using namespace js;
 using namespace js::jit;
 
+void MacroAssemblerX64::moveRuntimeAddress(ImmPtr addr, Register dest) {
+  asMasm().movePtr(addr, dest);
+}
+
+bool MacroAssemblerX64::isAOTCodegen() const { return asMasm().isAOT(); }
+
 void MacroAssemblerX64::loadConstantDouble(double d, FloatRegister dest) {
   if (maybeInlineDouble(d, dest)) {
     return;
