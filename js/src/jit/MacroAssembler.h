@@ -359,9 +359,20 @@ class MacroAssembler : public MacroAssemblerSpecific {
   CompileRealm* maybeRealm_ = nullptr;
 
 #ifdef ENABLE_JS_AOT
+  struct AOTTableAddress {
+    Address address;
+    bool throughCaller;
+
+    AOTTableAddress(const Address& address, bool throughCaller = false)
+        : address(address), throughCaller(throughCaller) {}
+
+    bool operator==(const AOTTableAddress& other) const {
+      return address == other.address && throughCaller == other.throughCaller;
+    }
+  };
   AOTIndirectionTable* const aotTable_;
-  mozilla::Maybe<Address> aotTableAddress_;
-  mozilla::Maybe<Address> aotFailureTableAddress_;
+  mozilla::Maybe<AOTTableAddress> aotTableAddress_;
+  mozilla::Maybe<AOTTableAddress> aotFailureTableAddress_;
   Vector<AOTLinkSite, 0, SystemAllocPolicy> aotLinkSites_;
 #endif
 
@@ -392,19 +403,22 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   class MOZ_RAII AutoAOTTableAddress {
     MacroAssembler& masm_;
-    mozilla::Maybe<Address> prev_;
+    mozilla::Maybe<AOTTableAddress> prev_;
 
    public:
-    AutoAOTTableAddress(MacroAssembler& masm, const Address& address)
+    AutoAOTTableAddress(MacroAssembler& masm, const AOTTableAddress& address)
         : masm_(masm), prev_(masm.aotTableAddress_) {
       masm.setAOTTableAddress(address);
     }
+    AutoAOTTableAddress(MacroAssembler& masm, const Address& address,
+                       bool throughCaller)
+        : AutoAOTTableAddress(masm, AOTTableAddress(address, throughCaller)) {}
     ~AutoAOTTableAddress() { masm_.aotTableAddress_ = prev_; }
     AutoAOTTableAddress(const AutoAOTTableAddress&) = delete;
     void operator=(const AutoAOTTableAddress&) = delete;
   };
 
-  void setAOTTableAddress(const Address& address) {
+  void setAOTTableAddress(const AOTTableAddress& address) {
     aotTableAddress_ = mozilla::Some(address);
   }
 

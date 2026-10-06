@@ -920,7 +920,7 @@ class BaselineStubFrameLayout : public CommonFrameLayout {
  public:
   static constexpr size_t ICStubOffset = sizeof(void*);
   static constexpr int ICStubOffsetFromFP = -int(ICStubOffset);
-#ifdef ENABLE_JS_AOT
+#if defined(ENABLE_JS_AOT) && !defined(JS_CODEGEN_ARM64)
   static constexpr int AOTTableOffsetFromFP = 2 * -int(sizeof(void*));
   static constexpr int InlinedICScriptOffsetFromFP = 3 * -int(sizeof(void*));
   static constexpr size_t LocallyTracedValueOffset = 3 * sizeof(void*);

@@ -126,9 +126,14 @@ void AutoStubFrame::enter(MacroAssembler& masm, Register scratch) {
   MOZ_ASSERT(!compiler.enteredStubFrame_);
   compiler.enteredStubFrame_ = true;
 #ifdef ENABLE_JS_AOT
+#  ifdef JS_CODEGEN_ARM64
+  // ARM64 keeps the stub frame aligned by reading the caller's table slot.
+  aotScope_.emplace(masm, Address(FramePointer, 0), true);
+#  else
   aotScope_.emplace(
       masm,
       Address(FramePointer, BaselineStubFrameLayout::AOTTableOffsetFromFP));
+#  endif
 #endif
 
   // All current uses of this are to call VM functions that can GC.
