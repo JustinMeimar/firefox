@@ -56,6 +56,7 @@ void MacroAssembler::emitAOTSlotJump(AOTSlot slot, Register scratch) {
 #  endif
 }
 
+#  ifdef JS_CODEGEN_X64
 // The encoders return the offset just past the instruction, so its
 // displacement occupies the four bytes before that.
 static uint32_t DisplacementOffset(CodeOffset afterInstruction) {
@@ -83,6 +84,20 @@ void MacroAssembler::emitAOTLinkLoad(AOTSlot slot, Register dest) {
   propagateOOM(aotLinkSites_.append(
       AOTLinkSite{DisplacementOffset(off), uint32_t(slot)}));
 }
+
+#  else
+void MacroAssembler::emitAOTLinkAddress(AOTSlot slot, Register dest) {
+  MOZ_CRASH("AOT link slots are not implemented for this backend");
+}
+
+void MacroAssembler::emitAOTLinkCall(AOTSlot slot) {
+  MOZ_CRASH("AOT link slots are not implemented for this backend");
+}
+
+void MacroAssembler::emitAOTLinkLoad(AOTSlot slot, Register dest) {
+  MOZ_CRASH("AOT link slots are not implemented for this backend");
+}
+#  endif
 
 void MacroAssembler::emitAOTDispatch(Register opcodeReg, Register tableReg) {
   if (isAOT()) {

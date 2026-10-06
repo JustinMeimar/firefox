@@ -1111,7 +1111,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void load32SignExtendToPtr(const Address& src, Register dest) PER_ARCH;
 #ifdef ENABLE_JS_AOT
   inline void load32SignExtendToPtr(const BaseIndex& src, Register dest)
-      DEFINED_ON(x64);
+      DEFINED_ON(x64, arm64);
 #endif
 
   inline void loadAbiReturnAddress(Register dest) PER_SHARED_ARCH;
