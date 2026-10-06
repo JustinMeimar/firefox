@@ -53,7 +53,7 @@ namespace {
 
 __attribute__((used)) void EmbedAOTImage() {
   asm(AOT_IMAGE_PUSH
-      ".balign 4096\n\t"
+      ".balign 65536\n\t"
       ".globl aot_image_start\n\t"
       ".type aot_image_start, @object\n"
       "aot_image_start:" AOT_IMAGE_POP);
@@ -61,7 +61,7 @@ __attribute__((used)) void EmbedAOTImage() {
 #include "jit/aot/AOTImageRelocs.inc"
 
   asm(AOT_IMAGE_PUSH
-      ".balign 4096\n\t"
+      ".balign 65536\n\t"
       ".globl aot_image_end\n\t"
       ".type aot_image_end, @object\n"
       "aot_image_end:\n\t"

@@ -25,12 +25,13 @@
 
 format:
   image_magic: 0x49544F41
-  image_version: 5
+  image_version: 6
   blob_file_magic: 0x42544F41
   blob_file_version: 4
   build_identity_size: 32
   alignment: 16
-  text_alignment: 4096
+  # Support Linux ARM64 kernels with 4, 16, or 64 KiB pages.
+  text_alignment: 65536
   code_alignment: 16
   link_site_width: 4
 
