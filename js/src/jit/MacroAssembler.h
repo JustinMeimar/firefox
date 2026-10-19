@@ -363,7 +363,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
     Address address;
     bool throughCaller;
 
-    AOTTableAddress(const Address& address, bool throughCaller = false)
+    explicit AOTTableAddress(const Address& address, bool throughCaller = false)
         : address(address), throughCaller(throughCaller) {}
 
     bool operator==(const AOTTableAddress& other) const {
@@ -411,7 +411,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
       masm.setAOTTableAddress(address);
     }
     AutoAOTTableAddress(MacroAssembler& masm, const Address& address,
-                       bool throughCaller)
+                        bool throughCaller = false)
         : AutoAOTTableAddress(masm, AOTTableAddress(address, throughCaller)) {}
     ~AutoAOTTableAddress() { masm_.aotTableAddress_ = prev_; }
     AutoAOTTableAddress(const AutoAOTTableAddress&) = delete;
@@ -420,6 +420,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   void setAOTTableAddress(const AOTTableAddress& address) {
     aotTableAddress_ = mozilla::Some(address);
+  }
+
+  void setAOTTableAddress(const Address& address) {
+    setAOTTableAddress(AOTTableAddress(address));
   }
 
   void emitAOTLoadTableBase(Register dest);

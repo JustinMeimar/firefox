@@ -4,8 +4,6 @@
 
 #include "jit/BaselineCacheIRCompiler.h"
 
-#include "mozilla/RandomNum.h"
-
 #include "gc/GC.h"
 #ifdef ENABLE_JS_AOT
 #  include "jit/AOTImage.h"

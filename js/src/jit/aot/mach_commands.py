@@ -256,9 +256,7 @@ def _record_argv(shell, corpus, workload=None):
 
 
 def _log_error(command_context, message):
-    command_context.log(
-        logging.ERROR, COMMAND, {"message": str(message)}, "{message}"
-    )
+    command_context.log(logging.ERROR, COMMAND, {"message": str(message)}, "{message}")
     return 1
 
 
@@ -416,7 +414,9 @@ def ambermonkey_record(command_context, corpus, workload=None):
         )
         if rc:
             return rc
-        corpus, blobs = _load_corpus(corpus, PACKER.AOTImageFormat.load(paths["format"]))
+        corpus, blobs = _load_corpus(
+            corpus, PACKER.AOTImageFormat.load(paths["format"])
+        )
         command_context.log(
             logging.INFO,
             COMMAND,
@@ -561,7 +561,9 @@ def ambermonkey_test(command_context, jobs=None, timeout=None):
         jit_test = (
             Path(command_context.topsrcdir) / "js" / "src" / "jit-test" / "jit_test.py"
         )
-        with tempfile.TemporaryDirectory(prefix="ambermonkey-corpus-", dir="/tmp") as corpus:
+        with tempfile.TemporaryDirectory(
+            prefix="ambermonkey-corpus-", dir="/tmp"
+        ) as corpus:
             _run_test_stage(
                 command_context,
                 "recording builtins",
@@ -586,8 +588,13 @@ def ambermonkey_test(command_context, jobs=None, timeout=None):
             _run_test_stage(
                 command_context,
                 "testing jit-tests",
-                [sys.executable, str(jit_test), *jit_test_args,
-                 "--args=--aot", str(paths["shell"])],
+                [
+                    sys.executable,
+                    str(jit_test),
+                    *jit_test_args,
+                    "--args=--aot",
+                    str(paths["shell"]),
+                ],
                 env=_clean_environment(),
             )
         return 0

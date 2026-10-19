@@ -17,4 +17,3 @@
 
 - prefer to assert rather than throw or log error messages, unless fallible behaviour is
   tolerated in the design.
-

@@ -1605,7 +1605,8 @@ class RecursiveMakeBackend(MakeBackend):
 
         if any(mozpath.basename(o) == "AOTImageIncbin.o" for o in objs) and (
             isinstance(obj, (Program, SharedLibrary))
-            or isinstance(obj, StaticLibrary) and obj.no_expand_lib
+            or isinstance(obj, StaticLibrary)
+            and obj.no_expand_lib
         ):
             stem = "AOTBuildIdentity_" + obj.name.replace(".", "_")
             identity_obj = mozpath.join(obj.objdir, stem + ".o")
@@ -1626,7 +1627,8 @@ class RecursiveMakeBackend(MakeBackend):
             )
             inputs.extend(
                 mozpath.join(mozpath.dirname(o), "backend.mk")
-                for o in objs if mozpath.basename(o) == "AOTImageIncbin.o"
+                for o in objs
+                if mozpath.basename(o) == "AOTImageIncbin.o"
             )
             inputs.append(mozpath.join(obj.objdir, "backend.mk"))
             manifest = stem + ".inputs"
@@ -1635,7 +1637,10 @@ class RecursiveMakeBackend(MakeBackend):
             script = "$(topsrcdir)/js/src/jit/aot/GenerateAOTBuildIdentity.py"
             destination = (
                 "$(DEPTH)/js/src/jit/aot/build-identities/"
-                + obj.relobjdir.replace("/", "_") + "_" + stem + ".bin"
+                + obj.relobjdir.replace("/", "_")
+                + "_"
+                + stem
+                + ".bin"
             )
             deps = " ".join(os.path.relpath(p, obj.objdir) for p in inputs)
             backend_file.write(f"{stem}.o: {manifest} {script} {deps}\n")

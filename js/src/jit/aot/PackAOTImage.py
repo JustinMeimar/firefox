@@ -38,7 +38,9 @@ class Blob:
         if magic != format.BLOB_FILE_MAGIC:
             raise ValueError(f"{path}: bad magic {magic:#x}")
         if version != format.BLOB_FILE_VERSION:
-            raise ValueError(f"{path}: unsupported version {version}; re-record the corpus")
+            raise ValueError(
+                f"{path}: unsupported version {version}; re-record the corpus"
+            )
         if len(data) < format.blob_header.size:
             raise ValueError(f"{path}: truncated blob file")
         header = format.blob_header.unpack_from(data)
@@ -80,8 +82,13 @@ class Blob:
         self.link_sites = []
         for offset in range(p, p + link_sites_size, format.link_site.size):
             site = format.link_site.unpack_from(data, offset)
-            self.link_sites.append((site["codeOffset"], site["slot"],
-                                    site["kind"], site["reg"], site["width"]))
+            self.link_sites.append((
+                site["codeOffset"],
+                site["slot"],
+                site["kind"],
+                site["reg"],
+                site["width"],
+            ))
         self.source = path
         if header["reserved"] or self.kind not in format.kind_names:
             raise ValueError(f"{path}: unsupported artifact kind or flags")
@@ -102,7 +109,7 @@ class Blob:
             validate_link_site(kind, reg, width)
             if offset < previous_end or offset + width > self.code_size:
                 raise ValueError(f"{path}: invalid or overlapping link site")
-            if any(self.code[offset:offset + width]):
+            if any(self.code[offset : offset + width]):
                 raise ValueError(f"{path}: nonzero link site")
             previous_end = offset + width
 
@@ -152,8 +159,12 @@ def pack(blobs, build_identities, out_path, relocs_path, format):
     for path in build_identities:
         with open(path, "rb") as stream:
             identities.append(stream.read())
-    if not identities or any(len(value) != format.BUILD_IDENTITY_SIZE for value in identities):
-        raise ValueError("A destination build identity is required; build stage 1 first")
+    if not identities or any(
+        len(value) != format.BUILD_IDENTITY_SIZE for value in identities
+    ):
+        raise ValueError(
+            "A destination build identity is required; build stage 1 first"
+        )
     build_identity = blobs[0].build_identity if blobs else identities[0]
     if build_identity not in identities:
         raise ValueError("Corpus belongs to another build; re-record with this build")
@@ -164,8 +175,10 @@ def pack(blobs, build_identities, out_path, relocs_path, format):
         identity = (blob.kind, blob.identity_hash)
         previous = unique.get(identity)
         if previous and (
-            previous.key != blob.key or previous.fields != blob.fields
-            or previous.arrays != blob.arrays or previous.code != blob.code
+            previous.key != blob.key
+            or previous.fields != blob.fields
+            or previous.arrays != blob.arrays
+            or previous.code != blob.code
             or previous.link_sites != blob.link_sites
             or previous.probe_hash != blob.probe_hash
             or previous.slot_table_hash != blob.slot_table_hash
@@ -196,8 +209,12 @@ def pack(blobs, build_identities, out_path, relocs_path, format):
 def build_image(blobs, build_identity, format):
     assert len(build_identity) == format.BUILD_IDENTITY_SIZE
     build_identity_offset = format.header.size
-    directory_offset = align_up(build_identity_offset + format.BUILD_IDENTITY_SIZE, format.ALIGNMENT)
-    data_start = align_up(directory_offset + format.directory_entry.size * len(blobs), format.ALIGNMENT)
+    directory_offset = align_up(
+        build_identity_offset + format.BUILD_IDENTITY_SIZE, format.ALIGNMENT
+    )
+    data_start = align_up(
+        directory_offset + format.directory_entry.size * len(blobs), format.ALIGNMENT
+    )
 
     entries = []
     cursor = data_start
@@ -215,7 +232,9 @@ def build_image(blobs, build_identity, format):
             "textOffset": text_cursor,
             "textSize": b.code_size,
         }
-        cursor = align_up(cursor + b.key_size + b.fields_size + b.arrays_size, format.ALIGNMENT)
+        cursor = align_up(
+            cursor + b.key_size + b.fields_size + b.arrays_size, format.ALIGNMENT
+        )
         text_cursor += b.code_size
         entries.append(e)
 
@@ -227,7 +246,8 @@ def build_image(blobs, build_identity, format):
     buf = bytearray(image_size)
 
     format.header.pack_into(
-        buf, 0,
+        buf,
+        0,
         magic=format.IMAGE_MAGIC,
         version=format.IMAGE_VERSION,
         reserved=0,
@@ -240,7 +260,9 @@ def build_image(blobs, build_identity, format):
         imageSize=image_size,
     )
 
-    buf[build_identity_offset : build_identity_offset + format.BUILD_IDENTITY_SIZE] = build_identity
+    buf[build_identity_offset : build_identity_offset + format.BUILD_IDENTITY_SIZE] = (
+        build_identity
+    )
 
     sites = []
     for i, e in enumerate(entries):
@@ -255,8 +277,10 @@ def build_image(blobs, build_identity, format):
         buf[p + e["fieldsSize"] : p + e["fieldsSize"] + e["arraysSize"]] = b.arrays
         t = text_offset + e["textOffset"]
         buf[t : t + e["textSize"]] = b.code
-        sites.extend((t + offset, slot, kind, reg, width)
-                     for offset, slot, kind, reg, width in b.link_sites)
+        sites.extend(
+            (t + offset, slot, kind, reg, width)
+            for offset, slot, kind, reg, width in b.link_sites
+        )
 
     return buf, sorted(sites)
 
@@ -267,7 +291,9 @@ def main(argv):
     p.add_argument("record_dir", help="Directory of .aotb files")
     p.add_argument("out", help="Output AOTImage.bin path")
     p.add_argument(
-        "--build-identity", action="append", required=True,
+        "--build-identity",
+        action="append",
+        required=True,
         help="Destination native build identity (repeat for multiple link targets)",
     )
     p.add_argument(

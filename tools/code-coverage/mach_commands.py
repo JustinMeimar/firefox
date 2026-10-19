@@ -91,6 +91,8 @@ def _get_suite(task_name):
 
 
 def _get_platform(task_name):
+    if "android" in task_name:
+        return "android"
     if "linux" in task_name:
         return "linux"
     if "win" in task_name:

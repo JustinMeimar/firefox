@@ -375,7 +375,9 @@ def generate_format_header(output, yaml_path):
         "  switch (kind) {",
     ]
     for name, blob in schema["artifacts"].items():
-        lines.append(f'    case AOTBlobKind::{name}: return "{blob["filename_prefix"]}";')
+        lines.append(
+            f'    case AOTBlobKind::{name}: return "{blob["filename_prefix"]}";'
+        )
     lines += ["  }", '  MOZ_CRASH("Invalid AOT artifact kind");', "}"]
     lines += [
         f"inline constexpr uint32_t BlobFileMagic = {constants['blob_file_magic']};",
@@ -412,7 +414,8 @@ def generate_format_header(output, yaml_path):
             lines.append("}  // namespace image")
     lines.append("}  // namespace js::jit")
     output.write(
-        HEADER_TEMPLATE % {
+        HEADER_TEMPLATE
+        % {
             "includeguard": "jit_AOTImageFormatGenerated_h",
             "contents": emit_lines(lines),
         }

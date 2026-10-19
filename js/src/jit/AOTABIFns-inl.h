@@ -11,8 +11,6 @@
 
 #  include "mozilla/HashFunctions.h"
 
-#  include <stdint.h>
-
 #  include "jit/AOT.h"
 
 namespace js::jit {

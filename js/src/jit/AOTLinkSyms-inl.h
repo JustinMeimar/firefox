@@ -9,8 +9,6 @@
 
 #ifdef ENABLE_JS_AOT
 
-#  include <iterator>
-
 #  include "builtin/DataViewObject.h"
 #  include "builtin/MapObject.h"
 #  include "builtin/WeakMapObject.h"

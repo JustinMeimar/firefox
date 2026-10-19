@@ -17,8 +17,6 @@ namespace jit {
 inline void EmitBaselineTailCallVM(TrampolinePtr target, MacroAssembler& masm,
                                    uint32_t argSize) {
 #ifdef DEBUG
-  ScratchRegisterScope scratch(masm);
-
   // We can assume during this that R0 and R1 have been pushed.
   // Store frame size without VMFunction arguments for debug assertions.
   ScratchRegisterScope scratch(masm);
