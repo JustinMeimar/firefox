@@ -1544,6 +1544,7 @@ linux64-aarch64/opt:
         extra-config:
             extra_mozconfig_content:
                 - ac_add_options --target=aarch64
+                - ac_add_options --enable-aot
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         tooltool-downloads: public
