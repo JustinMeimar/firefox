@@ -246,6 +246,8 @@ JitCode* BaselineCacheIRCompiler::compile() {
   do {
     CacheOp op = reader.readOp();
     perfSpewer_.recordInstruction(masm, op);
+    bool makesGCCallsBefore = makesGCCalls_;
+    makesGCCalls_ = false;
     switch (op) {
 #define DEFINE_OP(op, ...)                 \
   case CacheOp::op:                        \
@@ -257,6 +259,10 @@ JitCode* BaselineCacheIRCompiler::compile() {
       default:
         MOZ_CRASH("Invalid op");
     }
+    if (ICTraceEnabled()) {
+      ICTraceBaselineOp(op, makesGCCalls_);
+    }
+    makesGCCalls_ |= makesGCCallsBefore;
     allocator.nextOp();
   } while (reader.more());
 

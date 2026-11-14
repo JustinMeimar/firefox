@@ -44,6 +44,8 @@ using namespace js::jit;
 // 'C' clone: u64 newStub, u64 oldStub.
 // 'E' stub entry: u64 stub, u64 frame.
 // 'X' stub guard failure: u64 stub, u64 frame.
+// 'B' baseline stub compiler emitted a CacheOp: u16 cacheOp, u8 makesGCCalls
+//   (the op entered a stub frame to call into the VM or JIT code).
 // 'T' Warp starts transpiling a CacheOp: u16 cacheOp.
 // 'M' MIR node added while Warp transpiles a CacheOp: u16 cacheOp,
 //   str opcode, u32 alias set (bit 31 store), u8 bits where
@@ -242,6 +244,13 @@ void jit::ICTraceClone(ICCacheIRStub* newStub, ICCacheIRStub* oldStub) {
   Write('C');
   WritePtr(newStub);
   WritePtr(oldStub);
+}
+
+void jit::ICTraceBaselineOp(CacheOp op, bool makesGCCalls) {
+  LockGuard<Mutex> guard(*gLock);
+  Write('B');
+  Write(uint16_t(op));
+  Write(uint8_t(makesGCCalls));
 }
 
 void jit::ICTraceTranspile(CacheOp op) {

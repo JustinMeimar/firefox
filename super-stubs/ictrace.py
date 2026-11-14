@@ -123,6 +123,7 @@ def collect_mir(trace_paths, out_path):
     t = Trace()
     mir = Counter()
     transpiled = Counter()
+    baseline = Counter()  # (cacheop, makesGCCalls)
     for path in trace_paths:
         with open(path, "rb") as f:
             r = Reader(f)
@@ -141,6 +142,9 @@ def collect_mir(trace_paths, out_path):
                         r.read(16)
                     elif tag == b"T":
                         transpiled[t.cacheops[r.u16()][1]] += 1
+                    elif tag == b"B":
+                        op = t.cacheops[r.u16()][1]
+                        baseline[(op, r.u8())] += 1
                     elif tag == b"M":
                         op = r.u16()
                         name = r.str()
@@ -161,6 +165,7 @@ def collect_mir(trace_paths, out_path):
                 "cacheops": t.cacheops,
                 "transpile": t.transpile,
                 "transpiled": transpiled,
+                "baseline": baseline,
                 "mir": mir,
             },
             out,
@@ -254,6 +259,8 @@ def aggregate(trace_path, out_path):
                         stub_site[new] = site
                 elif tag == b"T":
                     r.u16()
+                elif tag == b"B":
+                    r.read(3)
                 elif tag == b"M":
                     op = r.u16()
                     name = r.str()
