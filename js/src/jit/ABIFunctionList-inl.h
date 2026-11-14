@@ -32,6 +32,7 @@
 #include "jit/Bailouts.h"  // js::jit::FinishBailoutToBaseline, js::jit::Bailout,
                            // js::jit::InvalidationBailout
 
+#include "jit/ICTrace.h"      // js::jit::ICTraceStubEntry
 #include "jit/Ion.h"          // js::jit::LazyLinkTopActivation
 #include "jit/JitFrames.h"    // HandleException
 #include "jit/VMFunctions.h"  // Rest of js::jit::* functions.
@@ -164,6 +165,8 @@ namespace jit {
   _(js::jit::HasNativeDataPropertyPure<false>)                                 \
   _(js::jit::HasNativeDataPropertyPure<true>)                                  \
   _(js::jit::HasNativeElementPure)                                             \
+  _(js::jit::ICTraceStubEntry)                                                 \
+  _(js::jit::ICTraceStubFailure)                                               \
   _(js::jit::InitBaselineFrameForOsr)                                          \
   _(js::jit::InvalidationBailout)                                              \
   _(js::jit::InvokeFromInterpreterStub)                                        \

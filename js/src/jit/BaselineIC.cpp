@@ -13,6 +13,7 @@
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/CacheIRGenerator.h"
 #include "jit/CacheIRHealth.h"
+#include "jit/ICTrace.h"
 #include "jit/JitFrames.h"
 #include "jit/JitHints.h"
 #include "jit/JitRuntime.h"
@@ -450,7 +451,9 @@ void ICFallbackStub::trackNotAttached() { state().trackNotAttached(); }
 // exists that transpiled that IC, we notify that compilation. This
 // helps the bailout code tell whether a bailing instruction hoisted
 // by LICM would have been executed anyway.
-static void MaybeNotifyWarp(JSScript* script, ICFallbackStub* stub) {
+static void MaybeNotifyWarp(BaselineFrame* frame, ICFallbackStub* stub) {
+  ICTraceFallback(frame, stub);
+  JSScript* script = frame->outerScript();
   if (stub->state().usedByTranspiler() && script->hasIonScript()) {
     script->ionScript()->noteBaselineFallback();
   }
@@ -694,7 +697,7 @@ void FallbackICCodeCompiler::PushStubPayload(MacroAssembler& masm,
 bool DoToBoolFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
                       HandleValue arg, MutableHandleValue ret) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "ToBool");
 
   TryAttachStub<ToBoolIRGenerator>("ToBool", cx, frame, stub, arg);
@@ -729,7 +732,7 @@ bool DoGetElemFallback(JSContext* cx, BaselineFrame* frame,
                        ICFallbackStub* stub, HandleValue lhs, HandleValue rhs,
                        MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "GetElem");
 
 #ifdef DEBUG
@@ -752,7 +755,7 @@ bool DoGetElemSuperFallback(JSContext* cx, BaselineFrame* frame,
                             HandleValue rhs, HandleValue receiver,
                             MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
 
@@ -857,7 +860,7 @@ bool DoSetElemFallback(JSContext* cx, BaselineFrame* frame,
   using DeferType = SetPropIRGenerator::DeferType;
 
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   RootedScript script(cx, frame->script());
   RootedScript outerScript(cx, script);
@@ -1025,7 +1028,7 @@ bool DoInFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
                   HandleValue key, HandleValue objValue,
                   MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "In");
 
   if (!objValue.isObject()) {
@@ -1072,7 +1075,7 @@ bool DoHasOwnFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
                       HandleValue keyValue, HandleValue objValue,
                       MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "HasOwn");
 
   TryAttachStub<HasPropIRGenerator>("HasOwn", cx, frame, stub,
@@ -1113,7 +1116,7 @@ bool DoCheckPrivateFieldFallback(JSContext* cx, BaselineFrame* frame,
                                  ICFallbackStub* stub, HandleValue objValue,
                                  HandleValue keyValue, MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
 
@@ -1160,7 +1163,7 @@ bool DoGetNameFallback(JSContext* cx, BaselineFrame* frame,
                        ICFallbackStub* stub, HandleObject envChain,
                        MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   RootedScript script(cx, frame->script());
   jsbytecode* pc = StubOffsetToPc(stub, script);
@@ -1210,7 +1213,7 @@ bool DoBindNameFallback(JSContext* cx, BaselineFrame* frame,
                         ICFallbackStub* stub, HandleObject envChain,
                         MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
   JSOp op = JSOp(*pc);
@@ -1259,7 +1262,7 @@ bool FallbackICCodeCompiler::emit_BindName() {
 bool DoLazyConstantFallback(JSContext* cx, BaselineFrame* frame,
                             ICFallbackStub* stub, MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   RootedScript script(cx, frame->script());
   jsbytecode* pc = StubOffsetToPc(stub, script);
@@ -1312,7 +1315,7 @@ bool DoGetPropFallback(JSContext* cx, BaselineFrame* frame,
                        ICFallbackStub* stub, HandleValue val,
                        MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   RootedScript script(cx, frame->script());
   jsbytecode* pc = StubOffsetToPc(stub, script);
@@ -1345,7 +1348,7 @@ bool DoGetPropSuperFallback(JSContext* cx, BaselineFrame* frame,
                             ICFallbackStub* stub, HandleValue receiver,
                             HandleValue val, MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   RootedScript script(cx, frame->script());
   jsbytecode* pc = StubOffsetToPc(stub, script);
@@ -1447,7 +1450,7 @@ bool DoSetPropFallback(JSContext* cx, BaselineFrame* frame,
   using DeferType = SetPropIRGenerator::DeferType;
 
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   RootedScript script(cx, frame->script());
   jsbytecode* pc = StubOffsetToPc(stub, script);
@@ -1635,7 +1638,7 @@ bool FallbackICCodeCompiler::emit_SetProp() {
 bool DoCallFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
                     uint32_t argc, Value* vp, MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   RootedScript script(cx, frame->script());
   jsbytecode* pc = StubOffsetToPc(stub, script);
@@ -1728,7 +1731,7 @@ bool DoSpreadCallFallback(JSContext* cx, BaselineFrame* frame,
                           ICFallbackStub* stub, Value* vp,
                           MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   RootedScript script(cx, frame->script());
   jsbytecode* pc = StubOffsetToPc(stub, script);
@@ -1974,7 +1977,7 @@ bool DoGetIteratorFallback(JSContext* cx, BaselineFrame* frame,
                            ICFallbackStub* stub, HandleValue value,
                            MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "GetIterator");
 
   TryAttachStub<GetIteratorIRGenerator>("GetIterator", cx, frame, stub, value);
@@ -2011,7 +2014,7 @@ bool DoOptimizeSpreadCallFallback(JSContext* cx, BaselineFrame* frame,
                                   ICFallbackStub* stub, HandleValue value,
                                   MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "OptimizeSpreadCall");
 
   TryAttachStub<OptimizeSpreadCallIRGenerator>("OptimizeSpreadCall", cx, frame,
@@ -2040,7 +2043,7 @@ bool DoInstanceOfFallback(JSContext* cx, BaselineFrame* frame,
                           ICFallbackStub* stub, HandleValue lhs,
                           HandleValue rhs, MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "InstanceOf");
 
   if (!rhs.isObject()) {
@@ -2093,7 +2096,7 @@ bool FallbackICCodeCompiler::emit_InstanceOf() {
 bool DoTypeOfFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
                       HandleValue val, MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "TypeOf");
 
   TryAttachStub<TypeOfIRGenerator>("TypeOf", cx, frame, stub, val);
@@ -2124,7 +2127,7 @@ bool DoTypeOfEqFallback(JSContext* cx, BaselineFrame* frame,
                         ICFallbackStub* stub, HandleValue val,
                         MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "TypeOfEq");
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
@@ -2163,7 +2166,7 @@ bool DoToPropertyKeyFallback(JSContext* cx, BaselineFrame* frame,
                              ICFallbackStub* stub, HandleValue val,
                              MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "ToPropertyKey");
 
   TryAttachStub<ToPropertyKeyIRGenerator>("ToPropertyKey", cx, frame, stub,
@@ -2222,7 +2225,7 @@ bool DoUnaryArithFallback(JSContext* cx, BaselineFrame* frame,
                           ICFallbackStub* stub, HandleValue val,
                           MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
   JSOp op = JSOp(*pc);
@@ -2306,7 +2309,7 @@ bool DoBinaryArithFallback(JSContext* cx, BaselineFrame* frame,
                            ICFallbackStub* stub, HandleValue lhs,
                            HandleValue rhs, MutableHandleValue ret) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
   JSOp op = JSOp(*pc);
@@ -2426,7 +2429,7 @@ bool DoCompareFallback(JSContext* cx, BaselineFrame* frame,
                        ICFallbackStub* stub, HandleValue lhs, HandleValue rhs,
                        MutableHandleValue ret) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
   JSOp op = JSOp(*pc);
@@ -2522,7 +2525,7 @@ bool FallbackICCodeCompiler::emit_Compare() {
 bool DoNewArrayFallback(JSContext* cx, BaselineFrame* frame,
                         ICFallbackStub* stub, MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "NewArray");
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
@@ -2561,7 +2564,7 @@ bool FallbackICCodeCompiler::emit_NewArray() {
 bool DoNewObjectFallback(JSContext* cx, BaselineFrame* frame,
                          ICFallbackStub* stub, MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "NewObject");
 
   RootedScript script(cx, frame->script());
@@ -2597,7 +2600,7 @@ bool FallbackICCodeCompiler::emit_NewObject() {
 bool DoLambdaFallback(JSContext* cx, BaselineFrame* frame, ICFallbackStub* stub,
                       MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "Lambda");
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
@@ -2635,7 +2638,7 @@ bool FallbackICCodeCompiler::emit_Lambda() {
 bool DoCloseIterFallback(JSContext* cx, BaselineFrame* frame,
                          ICFallbackStub* stub, HandleObject iter) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "CloseIter");
 
   jsbytecode* pc = StubOffsetToPc(stub, frame->script());
@@ -2666,7 +2669,7 @@ bool DoOptimizeGetIteratorFallback(JSContext* cx, BaselineFrame* frame,
                                    ICFallbackStub* stub, HandleValue value,
                                    MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "OptimizeGetIterator");
 
   TryAttachStub<OptimizeGetIteratorIRGenerator>("OptimizeGetIterator", cx,
@@ -2696,7 +2699,7 @@ bool FallbackICCodeCompiler::emit_OptimizeGetIterator() {
 bool DoGetImportFallback(JSContext* cx, BaselineFrame* frame,
                          ICFallbackStub* stub, MutableHandleValue res) {
   stub->incrementEnteredCount();
-  MaybeNotifyWarp(frame->outerScript(), stub);
+  MaybeNotifyWarp(frame, stub);
   FallbackICSpew(cx, stub, "GetImport");
 
   RootedObject envChain(cx, frame->environmentChain());

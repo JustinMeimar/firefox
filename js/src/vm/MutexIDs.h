@@ -43,6 +43,7 @@
   _(JitSpewGraphOutput, 500)            \
   _(PerfSpewer, 500)                    \
   _(CacheIRSpewer, 500)                 \
+  _(ICTrace, 500)                       \
   _(DateTimeInfoMutex, 500)             \
   _(ProcessExecutableRegion, 500)       \
   _(BufferStreamState, 500)             \

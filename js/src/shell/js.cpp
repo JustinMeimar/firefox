@@ -92,6 +92,7 @@
 
 #include "jit/BaselineCompileQueue.h"
 #include "jit/CacheIRHealth.h"
+#include "jit/ICTrace.h"
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
 #include "jit/JitcodeMap.h"
@@ -12808,7 +12809,10 @@ int main(int argc, char** argv) {
   // This buffer should outlive JS_Shutdown.
   Maybe<FileContents> selfHostedXDRBuffer;
 
-  auto shutdownEngine = MakeScopeExit([] { JS_ShutDown(); });
+  auto shutdownEngine = MakeScopeExit([] {
+    jit::ICTraceClose();
+    JS_ShutDown();
+  });
 
   if (!SetGlobalOptionsPostJSInit(op)) {
     return EXIT_FAILURE;
@@ -13173,6 +13177,9 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "no-baseline", "Disable baseline compiler") ||
       !op.addBoolOption('\0', "baseline-eager",
                         "Always baseline-compile methods") ||
+      !op.addStringOption('\0', "ic-trace", "PATH",
+                          "Write a binary trace of baseline IC stub activity "
+                          "to PATH") ||
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
       !op.addBoolOption('\0', "portable-baseline-eager",
                         "Always use the portable baseline interpreter") ||
@@ -13751,6 +13758,13 @@ bool SetGlobalOptionsPreJSInit(const OptionParser& op) {
 }
 
 bool SetGlobalOptionsPostJSInit(const OptionParser& op) {
+  if (const char* path = op.getStringOption("ic-trace")) {
+    if (!jit::ICTraceOpen(path)) {
+      fprintf(stderr, "Failed to open IC trace file %s\n", path);
+      return false;
+    }
+  }
+
   // Allow dumping on Linux with the fuzzing flag set, even when running with
   // the suid/sgid flag set on the shell.
 #ifdef XP_LINUX

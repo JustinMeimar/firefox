@@ -13,6 +13,7 @@
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIROpsGenerated.h"
 #include "jit/CacheIRReader.h"
+#include "jit/ICTrace.h"
 #include "jit/LIR.h"
 #include "jit/MIR-wasm.h"
 #include "jit/MIR.h"
@@ -70,8 +71,13 @@ class MOZ_RAII WarpCacheIRTranspiler : public WarpBuilderShared {
   bool pushedResult_ = false;
 #endif
 
+  CacheOp currentOp_ = CacheOp::NumOpcodes;
+
   inline void addUnchecked(MInstruction* ins) {
     current->add(ins);
+    if (ICTraceEnabled()) {
+      ICTraceMIR(currentOp_, ins);
+    }
 
     // If we have not set a more specific bailout kind, mark this instruction
     // as transpiled CacheIR. If one of these instructions bails out, we
@@ -352,6 +358,7 @@ bool WarpCacheIRTranspiler::transpile(
   CacheIRReader reader(stubInfo_);
   do {
     CacheOp op = reader.readOp();
+    currentOp_ = op;
     switch (op) {
 #define DEFINE_OP(op, ...)   \
   case CacheOp::op:          \

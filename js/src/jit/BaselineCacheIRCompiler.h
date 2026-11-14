@@ -144,6 +144,8 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
 
   void emitAtomizeString(Register str, Register temp, Label* failure);
 
+  void emitICTraceStubEvent(Register frameReg, bool failure);
+
   bool emitCallScriptedGetterShared(ValOperandId receiverId,
                                     ObjOperandId calleeId, bool sameRealm,
                                     uint32_t nargsAndFlagsOffset,

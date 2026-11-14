@@ -19,6 +19,7 @@
 #include "gc/GCEnum.h"
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/CacheIRGenerator.h"
+#include "jit/ICTrace.h"
 #include "jit/IonCacheIRCompiler.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
@@ -1231,6 +1232,7 @@ ICCacheIRStub* ICCacheIRStub::clone(JSRuntime* rt, ICStubSpace& newSpace,
   }
 
   ICCacheIRStub* newStub = new (newStubMem) ICCacheIRStub(*this);
+  ICTraceClone(newStub, this);
 
   const uint8_t* src = this->stubDataStart();
   uint8_t* dest = newStub->stubDataStart();

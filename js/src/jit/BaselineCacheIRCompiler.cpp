@@ -11,6 +11,7 @@
 #include "jit/CacheIRAOT.h"
 #include "jit/CacheIRSpewer.h"
 #include "jit/CacheIRWriter.h"
+#include "jit/ICTrace.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitZone.h"
@@ -233,6 +234,12 @@ JitCode* BaselineCacheIRCompiler::compile() {
   Address enteredCount(ICStubReg, ICCacheIRStub::offsetOfEnteredCount());
   masm.add32(Imm32(1), enteredCount);
 
+  if (ICTraceEnabled()) {
+    emitICTraceStubEvent(
+        JitOptions.enableICFramePointers ? baselineFrameReg() : FramePointer,
+        /* failure = */ false);
+  }
+
   perfSpewer_.startRecording();
 
   CacheIRReader reader(writer_);
@@ -269,6 +276,9 @@ JitCode* BaselineCacheIRCompiler::compile() {
     }
     if (JitOptions.enableICFramePointers) {
       PopICFrameRegs(masm);
+    }
+    if (ICTraceEnabled()) {
+      emitICTraceStubEvent(FramePointer, /* failure = */ true);
     }
     EmitStubGuardFailure(masm);
   }
@@ -2013,6 +2023,31 @@ bool BaselineCacheIRCompiler::init(CacheKind kind) {
   return true;
 }
 
+void BaselineCacheIRCompiler::emitICTraceStubEvent(Register frameReg,
+                                                   bool failure) {
+  LiveRegisterSet save(GeneralRegisterSet::Volatile(),
+                       FloatRegisterSet::Volatile());
+  save.addUnchecked(ICTailCallReg);
+  masm.PushRegsInMask(save);
+
+  AllocatableGeneralRegisterSet regs(GeneralRegisterSet::Volatile());
+  regs.takeUnchecked(ICStubReg);
+  regs.takeUnchecked(frameReg);
+  Register scratch = regs.takeAny();
+
+  using Fn = void (*)(ICCacheIRStub* stub, void* framePtr);
+  masm.setupUnalignedABICall(scratch);
+  masm.passABIArg(ICStubReg);
+  masm.passABIArg(frameReg);
+  if (failure) {
+    masm.callWithABI<Fn, ICTraceStubFailure>();
+  } else {
+    masm.callWithABI<Fn, ICTraceStubEntry>();
+  }
+
+  masm.PopRegsInMask(save);
+}
+
 static void ResetEnteredCounts(const ICEntry* icEntry) {
   ICStub* stub = icEntry->firstStub();
   while (true) {
@@ -2312,6 +2347,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   auto newStub = new (newStubMem) ICCacheIRStub(code, stubInfo);
   writer.copyStubData(newStub->stubDataStart());
   newStub->setTypeData(writer.typeData());
+  ICTraceAttach(newStub, icScript, stub, kind);
 
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
   newStub->updateRawJitCode(pbl::GetICInterpreter());
