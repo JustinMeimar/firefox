@@ -32,6 +32,7 @@ void ICTraceFallback(BaselineFrame* frame, ICFallbackStub* stub);
 void ICTraceAttach(ICCacheIRStub* stub, ICScript* icScript,
                    ICFallbackStub* fallback, CacheKind kind);
 void ICTraceClone(ICCacheIRStub* newStub, ICCacheIRStub* oldStub);
+void ICTraceTranspile(CacheOp op);
 void ICTraceMIR(CacheOp op, MInstruction* ins);
 
 }  // namespace jit

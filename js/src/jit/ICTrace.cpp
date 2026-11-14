@@ -4,7 +4,10 @@
 
 #include "jit/ICTrace.h"
 
+#include "mozilla/Sprintf.h"
+
 #include <stdio.h>
+#include <unistd.h>
 
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
@@ -29,7 +32,7 @@ using namespace js::jit;
 // Header: "ICTRACE1",
 //   u16 count, {u8 length, u8 flags, str name} per JSOp, where flags are
 //     1 jump, 2 jump target, 4 no fallthrough, 8 has IC,
-//   u16 count, {u8 argLength, str name} per CacheOp,
+//   u16 count, {u8 argLength, u8 transpile, str name} per CacheOp,
 //   u16 count, {str name} per CacheKind.
 // 'S' script: u64 scriptId, str filename, u32 line, u32 column,
 //   u32 count, {u32 offset, u8 op, u16 uses, u16 defs} per op,
@@ -41,6 +44,7 @@ using namespace js::jit;
 // 'C' clone: u64 newStub, u64 oldStub.
 // 'E' stub entry: u64 stub, u64 frame.
 // 'X' stub guard failure: u64 stub, u64 frame.
+// 'T' Warp starts transpiling a CacheOp: u16 cacheOp.
 // 'M' MIR node added while Warp transpiles a CacheOp: u16 cacheOp,
 //   str opcode, u32 alias set (bit 31 store), u8 bits where
 //   1 effectful, 2 possibly calls, 4 guard.
@@ -88,6 +92,7 @@ void WriteHeader() {
   Write(uint16_t(CacheOp::NumOpcodes));
   for (size_t i = 0; i < size_t(CacheOp::NumOpcodes); i++) {
     Write(uint8_t(CacheIROpInfos[i].argLength));
+    Write(uint8_t(CacheIROpInfos[i].transpile));
     WriteString(CacheIROpNames[i]);
   }
 
@@ -141,6 +146,13 @@ void MaybeWriteScript(JSScript* script, uint64_t id) {
 
 bool jit::ICTraceOpen(const char* path) {
   MOZ_ASSERT(!gState);
+  char expanded[4096];
+  const char* pid = strstr(path, "%p");
+  if (pid) {
+    SprintfLiteral(expanded, "%.*s%u%s", int(pid - path), path,
+                   unsigned(getpid()), pid + 2);
+    path = expanded;
+  }
   FILE* file = fopen(path, "wb");
   if (!file) {
     return false;
@@ -230,6 +242,12 @@ void jit::ICTraceClone(ICCacheIRStub* newStub, ICCacheIRStub* oldStub) {
   Write('C');
   WritePtr(newStub);
   WritePtr(oldStub);
+}
+
+void jit::ICTraceTranspile(CacheOp op) {
+  LockGuard<Mutex> guard(*gLock);
+  Write('T');
+  Write(uint16_t(op));
 }
 
 void jit::ICTraceMIR(CacheOp op, MInstruction* ins) {

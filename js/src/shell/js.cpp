@@ -13179,7 +13179,7 @@ bool InitOptionParser(OptionParser& op) {
                         "Always baseline-compile methods") ||
       !op.addStringOption('\0', "ic-trace", "PATH",
                           "Write a binary trace of baseline IC stub activity "
-                          "to PATH") ||
+                          "to PATH (%p expands to the pid)") ||
 #ifdef ENABLE_PORTABLE_BASELINE_INTERP
       !op.addBoolOption('\0', "portable-baseline-eager",
                         "Always use the portable baseline interpreter") ||

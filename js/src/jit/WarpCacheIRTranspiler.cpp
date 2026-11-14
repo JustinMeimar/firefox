@@ -359,6 +359,9 @@ bool WarpCacheIRTranspiler::transpile(
   do {
     CacheOp op = reader.readOp();
     currentOp_ = op;
+    if (ICTraceEnabled()) {
+      ICTraceTranspile(op);
+    }
     switch (op) {
 #define DEFINE_OP(op, ...)   \
   case CacheOp::op:          \

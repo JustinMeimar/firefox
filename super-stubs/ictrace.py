@@ -7,6 +7,7 @@ an aggregate (pickle) of block instances keyed by their outcome tuple.
 
   ictrace.py aggregate TRACE OUT.pkl
   ictrace.py report OUT.pkl
+  ictrace.py mir OUT.pkl TRACE...
 """
 
 import hashlib
@@ -75,6 +76,7 @@ class Trace:
         self.jsops = []  # (length, flags, name)
         self.cacheops = []  # (argLength, name)
         self.kinds = []
+        self.transpile = []
         self.scripts = {}
         self.recipes = {}  # digest -> recipe id
         self.recipe_info = []  # id -> (kind, code bytes)
@@ -99,6 +101,70 @@ class Trace:
             names.append(name)
             i += arglen
         return self.kinds[kind], names
+
+
+def read_header(r, t):
+    if r.read(8) != b"ICTRACE1":
+        raise SystemExit("bad magic")
+    t.jsops, t.cacheops, t.kinds, t.transpile = [], [], [], []
+    for _ in range(r.u16()):
+        length, flags = r.u8(), r.u8()
+        t.jsops.append((length, flags, r.str()))
+    for _ in range(r.u16()):
+        arglen, transpile = r.u8(), r.u8()
+        t.cacheops.append((arglen, r.str()))
+        t.transpile.append(transpile)
+    for _ in range(r.u16()):
+        t.kinds.append(r.str())
+
+
+def collect_mir(trace_paths, out_path):
+    """Union of 'M' records over many traces, skipping everything else."""
+    t = Trace()
+    mir = Counter()
+    transpiled = Counter()
+    for path in trace_paths:
+        with open(path, "rb") as f:
+            r = Reader(f)
+            try:
+                read_header(r, t)
+                while True:
+                    tag = r.read(1)
+                    if tag in (b"E", b"X"):
+                        r.read(16)
+                    elif tag == b"F":
+                        r.read(36)
+                    elif tag == b"A":
+                        r.read(29)
+                        r.read(r.u32())
+                    elif tag == b"C":
+                        r.read(16)
+                    elif tag == b"T":
+                        transpiled[t.cacheops[r.u16()][1]] += 1
+                    elif tag == b"M":
+                        op = r.u16()
+                        name = r.str()
+                        mir[(t.cacheops[op][1], name, r.u32(), r.u8())] += 1
+                    elif tag == b"S":
+                        r.read(8)
+                        r.str()
+                        r.read(8)
+                        r.read(r.u32() * 9)
+                        r.read(r.u32())
+                    else:
+                        raise SystemExit(f"{path}: bad tag {tag!r}")
+            except EOFError:
+                pass
+    with open(out_path, "wb") as out:
+        pickle.dump(
+            {
+                "cacheops": t.cacheops,
+                "transpile": t.transpile,
+                "transpiled": transpiled,
+                "mir": mir,
+            },
+            out,
+        )
 
 
 def aggregate(trace_path, out_path):
@@ -154,16 +220,7 @@ def aggregate(trace_path, out_path):
 
     with open(trace_path, "rb") as f:
         r = Reader(f)
-        if r.read(8) != b"ICTRACE1":
-            raise SystemExit("bad magic")
-        for _ in range(r.u16()):
-            length, flags = r.u8(), r.u8()
-            t.jsops.append((length, flags, r.str()))
-        for _ in range(r.u16()):
-            arglen = r.u8()
-            t.cacheops.append((arglen, r.str()))
-        for _ in range(r.u16()):
-            t.kinds.append(r.str())
+        read_header(r, t)
         jsop_flags = [fl for _, fl, _ in t.jsops]
 
         try:
@@ -195,6 +252,8 @@ def aggregate(trace_path, out_path):
                     site = stub_site.get(old)
                     if site is not None:
                         stub_site[new] = site
+                elif tag == b"T":
+                    r.u16()
                 elif tag == b"M":
                     op = r.u16()
                     name = r.str()
@@ -225,6 +284,7 @@ def aggregate(trace_path, out_path):
             {
                 "jsops": t.jsops,
                 "cacheops": t.cacheops,
+                "transpile": t.transpile,
                 "kinds": t.kinds,
                 "scripts": {
                     sid: (sc.filename, sc.line, sc.column, sc.ops, sc.code)
@@ -246,6 +306,7 @@ def load(path):
         d = pickle.load(f)
     t = Trace()
     t.jsops, t.cacheops, t.kinds = d["jsops"], d["cacheops"], d["kinds"]
+    t.transpile = d["transpile"]
     t.recipe_info = d["recipe_info"]
     jsop_flags = [fl for _, fl, _ in t.jsops]
     for sid, fields in d["scripts"].items():
@@ -283,6 +344,8 @@ def main():
     cmd = sys.argv[1]
     if cmd == "aggregate":
         aggregate(sys.argv[2], sys.argv[3])
+    elif cmd == "mir":
+        collect_mir(sys.argv[3:], sys.argv[2])
     elif cmd == "report":
         report(sys.argv[2])
     else:
