@@ -47,7 +47,16 @@ class Reader:
 
 
 class Script:
-    __slots__ = ("id", "filename", "line", "column", "ops", "code", "leader_of")
+    __slots__ = (
+        "id",
+        "filename",
+        "line",
+        "column",
+        "ops",
+        "code",
+        "leader_of",
+        "index_of",
+    )
 
     def __init__(self, id, filename, line, column, ops, code):
         self.id = id

@@ -24,6 +24,7 @@ import sys
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(__file__))
+import dataflow  # noqa: E402
 import ictrace  # noqa: E402
 
 STORE = 1 << 31
@@ -181,13 +182,13 @@ def classify_recipe(names, effects, costs, gc_rule):
 
 
 def cut(outcomes, script, recipes, jsop_names, rule):
-    """Yields (kind, length) for each run of IC executions in a block instance.
+    """Yields (kind, outcomes) for each run of IC executions in a block instance.
 
     kind is 'region' for fusible runs and a barrier reason otherwise.
     """
     ops = script.ops
-    index_of = {op[0]: i for i, op in enumerate(ops)}
-    run = 0
+    index_of = script.index_of
+    run = []
     stores = 0
     prev_index = None
     for pc, rid in outcomes:
@@ -203,57 +204,117 @@ def cut(outcomes, script, recipes, jsop_names, rule):
         if between_barrier is not None:
             if run:
                 yield ("region", run)
-            run, stores = 0, 0
-            yield ("jsop:" + between_barrier, 0)
+            run, stores = [], 0
+            yield ("jsop:" + between_barrier, [])
 
         if rid == ictrace.MISS:
             if run:
                 yield ("region", run)
-            run, stores = 0, 0
-            yield ("miss", 1)
+            run, stores = [], 0
+            yield ("miss", [(pc, rid)])
             continue
         r = recipes[rid]
         if r.barrier:
             if run:
                 yield ("region", run)
-            run, stores = 0, 0
-            yield ("+".join(sorted(r.reasons)), 1)
+            run, stores = [], 0
+            yield ("+".join(sorted(r.reasons)), [(pc, rid)])
             continue
         if stores and r.has_guard:
             blocked = rule == "strict" or (r.guard_loads & stores)
             if blocked:
                 yield ("region", run)
-                run, stores = 0, 0
-        run += 1
+                run, stores = [], 0
+        run.append((pc, rid))
         stores |= r.stores
     if run:
         yield ("region", run)
+
+
+def simulate(script, outcomes, jsop_names):
+    """Stack simulation from the block leader through the last IC op.
+
+    Returns {pc: (popped, pushed)} for the IC ops in outcomes.
+    """
+    sim = dataflow.StackSim(script, jsop_names)
+    wanted = {pc for pc, _ in outcomes}
+    last = outcomes[-1][0]
+    start = script.index_of[script.leader_of[outcomes[0][0]]]
+    io = {}
+    for offset, op, uses, defs in script.ops[start:]:
+        popped, pushed = sim.step(offset, op, uses, defs)
+        if offset in wanted:
+            io[offset] = (popped, pushed)
+        if offset >= last:
+            break
+    return io
+
+
+def region_metrics(run, io, decoder):
+    """(stack inputs, inputs from earlier ICs in the region, guards,
+    redundant guards, guards on values from earlier ICs) for one region."""
+    produced = set()
+    inputs = internal = guards = redundant = on_produced = 0
+    seen = set()
+    for pc, rid in run:
+        popped, pushed = io[pc]
+        inputs += len(popped)
+        internal += sum(1 for v in popped if v in produced)
+        produced_before = set(produced)
+        produced.update(pushed)
+        decoded = decoder.decode(rid)
+        if decoded is None:
+            continue
+        for key in dataflow.guard_keys(decoded, popped, "env"):
+            guards += 1
+            if key in seen:
+                redundant += 1
+            elif any(o[0] == "v" and o[1] in produced_before for o in key[1]):
+                on_produced += 1
+            seen.add(key)
+    return inputs, internal, guards, redundant, on_produced
 
 
 def report(agg_pkl, mir_pkl, gc_rule):
     t, d = ictrace.load(agg_pkl)
     effects = classify_ops(mir_pkl)
     costs = load_cost_estimates()
+    decoder = dataflow.RecipeDecoder(t)
     jsop_names = [n for _, _, n in t.jsops]
     recipes = []
     for rid in range(len(t.recipe_info)):
         _, names = t.decode_recipe(rid)
         recipes.append(classify_recipe(names, effects, costs, gc_rule))
+    for script in t.scripts.values():
+        script.index_of = {op[0]: i for i, op in enumerate(script.ops)}
 
-    total = 0
     for rule in ("strict", "alias"):
         sizes = Counter()
         barriers = Counter()
         jsop_cuts = Counter()
+        flow = Counter()
         for (sid, _, outcomes), n in d["instances"].items():
             script = t.scripts[sid]
-            for kind, length in cut(outcomes, script, recipes, jsop_names, rule):
+            io = None
+            for kind, run in cut(outcomes, script, recipes, jsop_names, rule):
                 if kind == "region":
-                    sizes[length] += n
+                    sizes[len(run)] += n
+                    if io is None:
+                        io = simulate(script, outcomes, jsop_names)
+                    inputs, internal, guards, redundant, on_produced = (
+                        region_metrics(run, io, decoder)
+                    )
+                    flow["stack inputs"] += n * inputs
+                    flow["inputs from earlier IC in region"] += n * internal
+                    flow["guards"] += n * guards
+                    flow["redundant guards (field wildcard)"] += n * redundant
+                    flow["other guards on values from earlier IC"] += (
+                        n * on_produced
+                    )
                 elif kind.startswith("jsop:"):
                     jsop_cuts[kind[5:]] += n
                 else:
-                    barriers[kind] += n * length
+                    barriers[kind] += n * len(run)
         in_regions = sum(k * n for k, n in sizes.items())
         total = in_regions + sum(barriers.values())
         print(f"== rule {rule}, gc {gc_rule}")
@@ -267,6 +328,9 @@ def report(agg_pkl, mir_pkl, gc_rule):
             n = sizes[k]
             print(f"  {k:3d}: {n:12d} {k * n:12d} {(k - 1) * n:12d}")
         print(f"dispatches saved {sum((k - 1) * n for k, n in sizes.items())}")
+        print("dataflow inside regions:")
+        for k, n in flow.items():
+            print(f"  {k:36s} {n}")
         print("non-IC ops cutting regions:")
         for k, n in jsop_cuts.most_common(15):
             print(f"  {k:24s} {n}")
