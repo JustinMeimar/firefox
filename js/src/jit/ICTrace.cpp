@@ -259,6 +259,15 @@ void jit::ICTraceTranspile(CacheOp op) {
   Write(uint16_t(op));
 }
 
+static const char* MIROpcodeName(MDefinition::Opcode op) {
+  static const char* const names[] = {
+#define NAME(x) #x,
+      MIR_OPCODE_LIST(NAME)
+#undef NAME
+  };
+  return names[unsigned(op)];
+}
+
 void jit::ICTraceMIR(CacheOp op, MInstruction* ins) {
   AliasSet alias = ins->getAliasSet();
   uint32_t aliasBits = alias.flags() | (alias.isStore() ? 1u << 31 : 0);
@@ -268,7 +277,7 @@ void jit::ICTraceMIR(CacheOp op, MInstruction* ins) {
   LockGuard<Mutex> guard(*gLock);
   Write('M');
   Write(uint16_t(op));
-  WriteString(ins->opName());
+  WriteString(MIROpcodeName(ins->op()));
   Write(aliasBits);
   Write(bits);
 }
