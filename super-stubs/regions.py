@@ -3,6 +3,7 @@
 
   regions.py classify MIR.pkl
   regions.py report AGG.pkl MIR.pkl
+  regions.py export AGG.pkl MIR.pkl OUT_DIR
 
 AGG.pkl comes from `ictrace.py aggregate`, MIR.pkl from `ictrace.py mir`.
 
@@ -275,7 +276,7 @@ def region_metrics(run, io, decoder):
     return inputs, internal, guards, redundant, on_produced
 
 
-def report(agg_pkl, mir_pkl, gc_rule):
+def prepare(agg_pkl, mir_pkl, gc_rule):
     t, d = ictrace.load(agg_pkl)
     effects = classify_ops(mir_pkl)
     costs = load_cost_estimates()
@@ -287,34 +288,48 @@ def report(agg_pkl, mir_pkl, gc_rule):
         recipes.append(classify_recipe(names, effects, costs, gc_rule))
     for script in t.scripts.values():
         script.index_of = {op[0]: i for i, op in enumerate(script.ops)}
+    return t, d, recipes, decoder, jsop_names
 
+
+def walk(t, d, recipes, decoder, jsop_names, rule):
+    """Yields (sid, kind, run, n, metrics) for every cut of every block
+    instance; metrics is None unless kind is 'region'."""
+    for (sid, _, outcomes), n in d["instances"].items():
+        script = t.scripts[sid]
+        io = None
+        for kind, run in cut(outcomes, script, recipes, jsop_names, rule):
+            metrics = None
+            if kind == "region":
+                if io is None:
+                    io = simulate(script, outcomes, jsop_names)
+                metrics = region_metrics(run, io, decoder)
+            yield sid, kind, run, n, metrics
+
+
+def report(agg_pkl, mir_pkl, gc_rule):
+    t, d, recipes, decoder, jsop_names = prepare(agg_pkl, mir_pkl, gc_rule)
     for rule in ("strict", "alias"):
         sizes = Counter()
         barriers = Counter()
         jsop_cuts = Counter()
         flow = Counter()
-        for (sid, _, outcomes), n in d["instances"].items():
-            script = t.scripts[sid]
-            io = None
-            for kind, run in cut(outcomes, script, recipes, jsop_names, rule):
-                if kind == "region":
-                    sizes[len(run)] += n
-                    if io is None:
-                        io = simulate(script, outcomes, jsop_names)
-                    inputs, internal, guards, redundant, on_produced = (
-                        region_metrics(run, io, decoder)
-                    )
-                    flow["stack inputs"] += n * inputs
-                    flow["inputs from earlier IC in region"] += n * internal
-                    flow["guards"] += n * guards
-                    flow["redundant guards (field wildcard)"] += n * redundant
-                    flow["other guards on values from earlier IC"] += (
-                        n * on_produced
-                    )
-                elif kind.startswith("jsop:"):
-                    jsop_cuts[kind[5:]] += n
-                else:
-                    barriers[kind] += n * len(run)
+        for sid, kind, run, n, metrics in walk(
+            t, d, recipes, decoder, jsop_names, rule
+        ):
+            if kind == "region":
+                sizes[len(run)] += n
+                inputs, internal, guards, redundant, on_produced = metrics
+                flow["stack inputs"] += n * inputs
+                flow["inputs from earlier IC in region"] += n * internal
+                flow["guards"] += n * guards
+                flow["redundant guards (field wildcard)"] += n * redundant
+                flow["other guards on values from earlier IC"] += (
+                    n * on_produced
+                )
+            elif kind.startswith("jsop:"):
+                jsop_cuts[kind[5:]] += n
+            else:
+                barriers[kind] += n * len(run)
         in_regions = sum(k * n for k, n in sizes.items())
         total = in_regions + sum(barriers.values())
         print(f"== rule {rule}, gc {gc_rule}")
@@ -335,6 +350,88 @@ def report(agg_pkl, mir_pkl, gc_rule):
         for k, n in jsop_cuts.most_common(15):
             print(f"  {k:24s} {n}")
         print()
+
+
+def export(agg_pkl, mir_pkl, out_dir, gc_rule, per_size=60):
+    """Writes summary.json and examples-RULE.json for the region viewer."""
+    import json
+
+    t, d, recipes, decoder, jsop_names = prepare(agg_pkl, mir_pkl, gc_rule)
+    summary = {"workload": os.path.basename(agg_pkl), "rules": {}}
+    recipe_ops = {}
+    for rule in ("strict", "alias"):
+        sizes = Counter()
+        barriers = Counter()
+        jsop_cuts = Counter()
+        flow = [0] * 5
+        distinct = defaultdict(lambda: [0, None])
+        for sid, kind, run, n, metrics in walk(
+            t, d, recipes, decoder, jsop_names, rule
+        ):
+            if kind == "region":
+                sizes[len(run)] += n
+                for i, m in enumerate(metrics):
+                    flow[i] += n * m
+                entry = distinct[(sid, tuple(run))]
+                entry[0] += n
+                entry[1] = metrics
+            elif kind.startswith("jsop:"):
+                jsop_cuts[kind[5:]] += n
+            else:
+                barriers[kind] += n * len(run)
+
+        by_size = defaultdict(list)
+        for (sid, run), (n, metrics) in distinct.items():
+            by_size[len(run)].append((n, sid, run, metrics))
+        examples = {}
+        for k, items in by_size.items():
+            items.sort(key=lambda x: -x[0])
+            out = []
+            for n, sid, run, metrics in items[:per_size]:
+                script = t.scripts[sid]
+                rid_at = dict(run)
+                first, last = script.index_of[run[0][0]], script.index_of[run[-1][0]]
+                ops = []
+                for offset, op, _, _ in script.ops[first : last + 1]:
+                    rid = rid_at.get(offset)
+                    if rid is not None and rid not in recipe_ops:
+                        recipe_ops[rid] = [
+                            x for x in t.decode_recipe(rid)[1] if x not in STRUCTURAL_OPS
+                        ]
+                    ops.append([offset, jsop_names[op], rid])
+                out.append(
+                    {
+                        "file": script.filename,
+                        "line": script.line,
+                        "column": script.column,
+                        "n": n,
+                        "metrics": list(metrics),
+                        "ops": ops,
+                    }
+                )
+            examples[k] = {"distinct": len(items), "items": out}
+        with open(os.path.join(out_dir, f"examples-{rule}.json"), "w") as f:
+            json.dump(examples, f, separators=(",", ":"))
+
+        in_regions = sum(k * n for k, n in sizes.items())
+        summary["rules"][rule] = {
+            "ic_executions": in_regions + sum(barriers.values()),
+            "in_regions": in_regions,
+            "barriers": dict(barriers.most_common()),
+            "jsop_cuts": dict(jsop_cuts.most_common()),
+            "sizes": [
+                [k, sizes[k], len(by_size[k])] for k in sorted(sizes)
+            ],
+            "stack_inputs": flow[0],
+            "inputs_from_region": flow[1],
+            "guards": flow[2],
+            "repeated_guards": flow[3],
+            "guards_on_region_values": flow[4],
+        }
+    with open(os.path.join(out_dir, "recipes.json"), "w") as f:
+        json.dump(recipe_ops, f, separators=(",", ":"))
+    with open(os.path.join(out_dir, "summary.json"), "w") as f:
+        json.dump(summary, f, indent=1)
 
 
 def classify(mir_pkl):
@@ -368,6 +465,8 @@ def main():
         classify(args[1])
     elif args[:1] == ["report"]:
         report(args[1], args[2], gc_rule)
+    elif args[:1] == ["export"]:
+        export(args[1], args[2], args[3], gc_rule)
     else:
         raise SystemExit(__doc__)
 

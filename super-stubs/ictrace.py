@@ -7,6 +7,9 @@ an aggregate (pickle) of block instances keyed by their outcome tuple.
 
   ictrace.py aggregate TRACE OUT.pkl
   ictrace.py report OUT.pkl
+
+OUT may also be the JSON written by agg/ (ictrace-agg TRACE OUT.json), the
+faster equivalent of `aggregate`.
   ictrace.py mir OUT.pkl TRACE...
 """
 
@@ -317,9 +320,40 @@ def aggregate(trace_path, out_path):
         )
 
 
+def load_json(path):
+    import json
+
+    with open(path) as f:
+        j = json.load(f)
+    return {
+        "jsops": [tuple(x) for x in j["jsops"]],
+        "cacheops": [(a, n) for a, _, n in j["cacheops"]],
+        "transpile": [t for _, t, _ in j["cacheops"]],
+        "kinds": j["kinds"],
+        "scripts": {
+            int(sid): (f, line, col, [tuple(o) for o in ops], bytes.fromhex(code))
+            for sid, (f, line, col, ops, code) in j["scripts"].items()
+        },
+        "recipe_info": [(k, bytes.fromhex(c)) for k, c in j["recipe_info"]],
+        "instances": Counter(
+            {
+                (sid, leader, tuple(tuple(o) for o in outs)): n
+                for sid, leader, outs, n in j["instances"]
+            }
+        ),
+        "mir": Counter(),
+        "hits": j["hits"],
+        "misses": j["misses"],
+        "unknown_stubs": j["unknown_stubs"],
+    }
+
+
 def load(path):
-    with open(path, "rb") as f:
-        d = pickle.load(f)
+    if path.endswith(".json"):
+        d = load_json(path)
+    else:
+        with open(path, "rb") as f:
+            d = pickle.load(f)
     t = Trace()
     t.jsops, t.cacheops, t.kinds = d["jsops"], d["cacheops"], d["kinds"]
     t.transpile = d["transpile"]
