@@ -161,6 +161,9 @@ class JitRuntime {
   // Thunk to enter the interpreter from JIT code.
   WriteOnceData<uint32_t> interpreterStubOffset_{0};
 
+  // Thunk to continue monomorphic Baseline code in the Baseline Interpreter.
+  WriteOnceData<uint32_t> monoBaselineExitStubOffset_{0};
+
   // Thunk to convert the value in R0 to int32 if it's a double.
   // Note: this stub treats -0 as +0 and may clobber R1.scratchReg().
   WriteOnceData<uint32_t> doubleToInt32ValueStubOffset_{0};
@@ -246,6 +249,7 @@ class JitRuntime {
 
   void generateLazyLinkStub(MacroAssembler& masm);
   void generateInterpreterStub(MacroAssembler& masm);
+  void generateMonoBaselineExitStub(MacroAssembler& masm);
   void generateDoubleToInt32ValueStub(MacroAssembler& masm);
   void generateProfilerExitFrameTailStub(MacroAssembler& masm,
                                          Label* profilerExitTail);
@@ -446,6 +450,9 @@ class JitRuntime {
   }
   TrampolinePtr interpreterStub() const {
     return trampolineCode(interpreterStubOffset_);
+  }
+  TrampolinePtr monoBaselineExitStub() const {
+    return trampolineCode(monoBaselineExitStubOffset_);
   }
 
   TrampolinePtr getDoubleToInt32ValueStub() const {

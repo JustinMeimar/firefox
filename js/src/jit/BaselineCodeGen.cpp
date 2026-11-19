@@ -270,6 +270,15 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
 
   MOZ_ASSERT(!script->hasBaselineScript());
 
+  if (JitOptions.baselineMono && !compileDebugInstrumentation() &&
+      !JitOptions.enableICFramePointers &&
+      !runtime->geckoProfiler().enabled() &&
+      !script->jitScript()->monoFailed() &&
+      !IsRealmIndependentBaselineCode(script) && !script->isGenerator() &&
+      !script->isAsync() && IsMonomorphicScript(script)) {
+    handler.setMono(cx);
+  }
+
   if (!compileImpl()) {
     ReportOutOfMemory(cx);
     return Method_Error;
@@ -313,6 +322,15 @@ bool BaselineCompiler::compileImpl() {
 
   perfSpewer_.recordOffset(masm, "OOLPostBarrierSlot");
   emitOutOfLinePostBarrierSlot();
+
+  if (!handler.monoExits().empty()) {
+    perfSpewer_.recordOffset(masm, "MonoExits");
+    TrampolinePtr exitStub = runtime->jitRuntime()->monoBaselineExitStub();
+    for (const auto& exit : handler.monoExits()) {
+      masm.bind(exit.label);
+      EmitMonoExit(masm, exit.operands, exit.pcOffset, exitStub);
+    }
+  }
 
   perfSpewer_.endRecording();
 
@@ -376,6 +394,10 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
 
   if (compileDebugInstrumentation()) {
     baselineScript->setHasDebugInstrumentation();
+  }
+
+  if (!handler.monoExits().empty()) {
+    baselineScript->setIsMono(handler.releaseInlinedStubs());
   }
 
   // If BytecodeAnalysis indicated that we should disable Ion or inlining,
@@ -728,6 +750,58 @@ void BaselineCompilerHandler::createAllocSites() {
 }
 
 template <>
+bool BaselineCompilerCodeGen::emitInlinedIC(uint32_t entryIndex,
+                                            bool* inlined) {
+  *inlined = false;
+
+  JSScript* script = handler.script();
+  ICStub* firstStub =
+      script->jitScript()->icScript()->icEntry(entryIndex).firstStub();
+  if (firstStub->isFallback()) {
+    return true;
+  }
+  ICCacheIRStub* stub = firstStub->toCacheIRStub();
+  CacheKind kind = stub->stubInfo()->kind();
+
+  if (frame.stackDepth() > handler.opStackDepth()) {
+    return true;
+  }
+  uint32_t popped = handler.opStackDepth() - frame.stackDepth();
+  mozilla::Maybe<MonoOperands> operands = MonoOperandsFor(kind, popped);
+  if (!operands) {
+    return true;
+  }
+  frame.assertSyncedStack();
+
+  void* mem = handler.alloc().allocate(sizeof(Label));
+  if (!mem) {
+    return false;
+  }
+  Label* failure = new (mem) Label();
+  InlinedStub* inlinedStub;
+  if (!EmitInlinedStub(handler.monoCx(), masm, handler.alloc(), stub, kind,
+                       failure, &inlinedStub)) {
+    return false;
+  }
+  if (!inlinedStub) {
+    return true;
+  }
+  handler.addInlinedStub(inlinedStub);
+  uint32_t pcOffset = script->pcToOffset(handler.pc());
+  if (!handler.addMonoExit(failure, pcOffset, *operands)) {
+    return false;
+  }
+  *inlined = true;
+  return true;
+}
+
+template <>
+bool BaselineInterpreterCodeGen::emitInlinedIC(uint32_t entryIndex,
+                                               bool* inlined) {
+  MOZ_CRASH("Unexpected inlined IC in the Baseline Interpreter");
+}
+
+template <>
 bool BaselineCompilerCodeGen::emitNextIC() {
   AutoCreatedBy acb(masm, "emitNextIC");
 
@@ -754,6 +828,16 @@ bool BaselineCompilerCodeGen::emitNextIC() {
   if (BytecodeOpCanHaveAllocSite(JSOp(*handler.pc())) &&
       !handler.addAllocSiteIndex(entryIndex)) {
     return false;
+  }
+
+  if (handler.monoCx()) {
+    bool inlined;
+    if (!emitInlinedIC(entryIndex, &inlined)) {
+      return false;
+    }
+    if (inlined) {
+      return true;
+    }
   }
 
   // Load stub pointer into ICStubReg.
@@ -7092,6 +7176,7 @@ bool BaselineCompiler::emitBody() {
     }
 
     frame.assertValidState(*info);
+    handler.setOpStackDepth(frame.stackDepth());
 
     // If the script has a resume offset for this pc we need to keep track of
     // the native code offset.

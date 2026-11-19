@@ -377,6 +377,9 @@ class alignas(uintptr_t) JitScript final
     bool hadIonOSR : 1;
     bool ranBytecodeAnalysis : 1;
     bool initializedTemplateEnv : 1;
+    // True if monomorphic Baseline code of this script continued in the
+    // Baseline Interpreter.
+    bool monoFailed : 1;
   };
   Flags flags_ = {};  // Zero-initialize flags.
 
@@ -419,6 +422,9 @@ class alignas(uintptr_t) JitScript final
 
   void setRanBytecodeAnalysis() { flags_.ranBytecodeAnalysis = true; }
   bool ranBytecodeAnalysis() const { return flags_.ranBytecodeAnalysis; }
+
+  void setMonoFailed() { flags_.monoFailed = true; }
+  bool monoFailed() const { return flags_.monoFailed; }
 
   uint32_t numICEntries() const { return icScript_.numICEntries(); }
 

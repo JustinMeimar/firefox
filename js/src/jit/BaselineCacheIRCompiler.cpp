@@ -76,15 +76,15 @@ static void PopICFrameRegs(MacroAssembler& masm) {
 
 Address CacheRegisterAllocator::addressOf(MacroAssembler& masm,
                                           BaselineFrameSlot slot) const {
-  uint32_t offset =
-      stackPushed_ + GetICStackValueOffset() + slot.slot() * sizeof(JS::Value);
+  uint32_t offset = stackPushed_ + (inlined_ ? 0 : GetICStackValueOffset()) +
+                    slot.slot() * sizeof(JS::Value);
   return Address(masm.getStackPointer(), offset);
 }
 BaseValueIndex CacheRegisterAllocator::addressOf(MacroAssembler& masm,
                                                  Register argcReg,
                                                  BaselineFrameSlot slot) const {
-  uint32_t offset =
-      stackPushed_ + GetICStackValueOffset() + slot.slot() * sizeof(JS::Value);
+  uint32_t offset = stackPushed_ + (inlined_ ? 0 : GetICStackValueOffset()) +
+                    slot.slot() * sizeof(JS::Value);
   return BaseValueIndex(masm.getStackPointer(), argcReg, offset);
 }
 
@@ -92,9 +92,10 @@ BaseValueIndex CacheRegisterAllocator::addressOf(MacroAssembler& masm,
 BaselineCacheIRCompiler::BaselineCacheIRCompiler(JSContext* cx,
                                                  TempAllocator& alloc,
                                                  const CacheIRWriter& writer,
-                                                 uint32_t stubDataOffset)
+                                                 uint32_t stubDataOffset,
+                                                 MacroAssembler* externalMasm)
     : CacheIRCompiler(cx, alloc, writer, stubDataOffset, Mode::Baseline,
-                      StubFieldPolicy::Address),
+                      StubFieldPolicy::Address, externalMasm),
       makesGCCalls_(false) {}
 
 // AutoStubFrame methods
@@ -242,29 +243,9 @@ JitCode* BaselineCacheIRCompiler::compile() {
 
   perfSpewer_.startRecording();
 
-  CacheIRReader reader(writer_);
-  do {
-    CacheOp op = reader.readOp();
-    perfSpewer_.recordInstruction(masm, op);
-    bool makesGCCallsBefore = makesGCCalls_;
-    makesGCCalls_ = false;
-    switch (op) {
-#define DEFINE_OP(op, ...)                 \
-  case CacheOp::op:                        \
-    if (!emit##op(reader)) return nullptr; \
-    break;
-      CACHE_IR_OPS(DEFINE_OP)
-#undef DEFINE_OP
-
-      default:
-        MOZ_CRASH("Invalid op");
-    }
-    if (ICTraceEnabled()) {
-      ICTraceBaselineOp(op, makesGCCalls_);
-    }
-    makesGCCalls_ |= makesGCCallsBefore;
-    allocator.nextOp();
-  } while (reader.more());
+  if (!emitOps()) {
+    return nullptr;
+  }
 
   MOZ_ASSERT(!enteredStubFrame_);
   allocator.discardStack(masm);
@@ -301,6 +282,59 @@ JitCode* BaselineCacheIRCompiler::compile() {
   newStubCode->setLocalTracingSlots(localTracingSlots_);
 
   return newStubCode;
+}
+
+bool BaselineCacheIRCompiler::emitOps() {
+  CacheIRReader reader(writer_);
+  do {
+    CacheOp op = reader.readOp();
+    if (!allocator.inlined()) {
+      perfSpewer_.recordInstruction(masm, op);
+    }
+    bool makesGCCallsBefore = makesGCCalls_;
+    makesGCCalls_ = false;
+    switch (op) {
+#define DEFINE_OP(op, ...)               \
+  case CacheOp::op:                      \
+    if (!emit##op(reader)) return false; \
+    break;
+      CACHE_IR_OPS(DEFINE_OP)
+#undef DEFINE_OP
+
+      default:
+        MOZ_CRASH("Invalid op");
+    }
+    if (ICTraceEnabled()) {
+      ICTraceBaselineOp(op, makesGCCalls_);
+    }
+    makesGCCalls_ |= makesGCCallsBefore;
+    allocator.nextOp();
+  } while (reader.more());
+  return true;
+}
+
+bool BaselineCacheIRCompiler::compileInline(Label* failure) {
+  AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compileInline");
+  MOZ_ASSERT(!JitOptions.enableICFramePointers);
+
+  allocator.setInlined();
+  if (!emitOps()) {
+    return false;
+  }
+  MOZ_ASSERT(!enteredStubFrame_);
+  MOZ_ASSERT(!makesGCCalls_);
+  allocator.discardStack(masm);
+
+  Label done;
+  masm.jump(&done);
+  for (size_t i = 0; i < failurePaths.length(); i++) {
+    if (!emitFailurePath(i)) {
+      return false;
+    }
+    masm.jump(failure);
+  }
+  masm.bind(&done);
+  return true;
 }
 
 bool BaselineCacheIRCompiler::emitGuardShape(ObjOperandId objId,

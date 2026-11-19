@@ -24,6 +24,7 @@
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitZone.h"
+#include "jit/MonoBaseline.h"
 #include "jit/SharedICHelpers.h"
 #include "jit/SharedICRegisters.h"
 #include "jit/VMFunctions.h"
@@ -1277,8 +1278,10 @@ ICCacheIRStub* ICCacheIRStub::clone(JSRuntime* rt, ICStubSpace& newSpace,
 
 template <typename T>
 static inline bool ShouldTraceWeakEdgeInStub(JSTracer* trc) {
-  if constexpr (std::is_same_v<T, IonICStub>) {
-    // 'Weak' edges are traced strongly in IonICs.
+  if constexpr (std::is_same_v<T, IonICStub> ||
+                std::is_same_v<T, InlinedStub>) {
+    // 'Weak' edges are traced strongly in IonICs and stubs inlined in Baseline
+    // code.
     return true;
   } else {
     static_assert(std::is_same_v<T, ICCacheIRStub>);
@@ -1439,6 +1442,8 @@ template void jit::TraceCacheIRStub(JSTracer* trc, ICCacheIRStub* stub,
                                     const CacheIRStubInfo* stubInfo);
 
 template void jit::TraceCacheIRStub(JSTracer* trc, IonICStub* stub,
+                                    const CacheIRStubInfo* stubInfo);
+template void jit::TraceCacheIRStub(JSTracer* trc, InlinedStub* stub,
                                     const CacheIRStubInfo* stubInfo);
 
 template <typename T>

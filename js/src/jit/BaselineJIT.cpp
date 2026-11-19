@@ -27,6 +27,7 @@
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/MacroAssembler.h"
+#include "jit/MonoBaseline.h"
 #include "js/friend/StackLimits.h"  // js::AutoCheckRecursionLimit
 #include "vm/Interpreter.h"
 
@@ -410,7 +411,8 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       options.hasFlag(BaselineOption::ForceDebugInstrumentation);
   bool forceMainThread =
       compileDebugInstrumentation ||
-      options.hasFlag(BaselineOption::ForceMainThreadCompilation);
+      options.hasFlag(BaselineOption::ForceMainThreadCompilation) ||
+      JitOptions.baselineMono;
 
   JitContext jctx(cx);
 
@@ -499,7 +501,13 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
   if (script->hasBaselineScript()) {
-    return Method_Compiled;
+    if (!script->baselineScript()->monoFailed()) {
+      return Method_Compiled;
+    }
+    if (script->getWarmUpCount() <= JitOptions.baselineJitWarmUpThreshold ||
+        !MaybeDiscardFailedMonoBaseline(cx, script)) {
+      return Method_Skipped;
+    }
   }
 
   if (!CanBaselineCompileScript(cx, script)) {
@@ -833,6 +841,7 @@ BaselineScript* BaselineScript::New(JSContext* cx,
 }
 
 BaselineScript* BaselineScript::Copy(JSContext* cx, BaselineScript* bs) {
+  MOZ_RELEASE_ASSERT(!bs->isMono());
   BaselineScript* script = jit::BaselineScript::New(
       cx, bs->warmUpCheckPrologueOffset_, bs->profilerEnterToggleOffset_,
       bs->profilerExitToggleOffset_, bs->retAddrEntries().size(),
@@ -875,10 +884,19 @@ BaselineScript* BaselineScript::Copy(JSContext* cx, BaselineScript* bs) {
 
 void BaselineScript::trace(JSTracer* trc) {
   TraceEdge(trc, &method_, "baseline-method");
+  TraceInlinedStubs(trc, inlinedStubs_);
 }
 
 void BaselineScript::Destroy(JS::GCContext* gcx, BaselineScript* script) {
   MOZ_ASSERT(!script->hasPendingIonCompileTask());
+
+  if (script->inlinedStubs_) {
+    Zone* zone = script->method_->zone();
+    if (zone->needsMarkingBarrier()) {
+      TraceInlinedStubs(zone->barrierTracer(), script->inlinedStubs_);
+    }
+    InlinedStub::DestroyList(script->inlinedStubs_);
+  }
 
   // Trigger write barrier since we are destroying this outside GC.
   script->method_ = nullptr;
@@ -1052,6 +1070,11 @@ bool BaselineScript::OSREntryForFrame(JSContext* cx, BaselineFrame* frame,
   BaselineScript* baselineScript = script->baselineScript();
   jsbytecode* pc = frame->interpreterPC();
   size_t pcOffset = script->pcToOffset(pc);
+
+  if (baselineScript->monoFailed()) {
+    *entry = nullptr;
+    return true;
+  }
 
   if (MOZ_UNLIKELY(frame->isDebuggee() &&
                    !baselineScript->hasDebugInstrumentation())) {

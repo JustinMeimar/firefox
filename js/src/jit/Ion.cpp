@@ -203,6 +203,10 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   generateInterpreterStub(masm);
   rangeRecorder.recordOffset("Trampoline: Interpreter");
 
+  JitSpew(JitSpew_Codegen, "# Emitting mono Baseline exit stub");
+  generateMonoBaselineExitStub(masm);
+  rangeRecorder.recordOffset("Trampoline: MonoBaselineExit");
+
   JitSpew(JitSpew_Codegen, "# Emitting double-to-int32-value stub");
   generateDoubleToInt32ValueStub(masm);
   rangeRecorder.recordOffset("Trampoline: DoubleToInt32ValueStub");

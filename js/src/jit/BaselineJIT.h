@@ -37,6 +37,7 @@ namespace jit {
 
 class BaselineFrame;
 class ExceptionBailoutInfo;
+class InlinedStub;
 class IonCompileTask;
 class JitActivation;
 class JSJitFrameIter;
@@ -196,6 +197,9 @@ class alignas(uintptr_t) BaselineScript final
   // An ion compilation that is ready, but isn't linked yet.
   MainThreadData<IonCompileTask*> pendingIonCompileTask_{nullptr};
 
+  // The stub data of the stubs that monomorphic code inlines.
+  InlinedStub* inlinedStubs_ = nullptr;
+
   // Baseline Interpreter can enter Baseline Compiler code at this address. This
   // is right after the warm-up counter check in the prologue.
   uint32_t warmUpCheckPrologueOffset_ = 0;
@@ -224,6 +228,12 @@ class alignas(uintptr_t) BaselineScript final
     // Flag set when compiled for use with Debugger. Handles various
     // Debugger hooks and compiles toggled calls for traps.
     HAS_DEBUG_INSTRUMENTATION = 1 << 0,
+
+    // Flag set when compiled monomorphic. See MonoBaseline.h.
+    IS_MONO = 1 << 1,
+
+    // Flag set when monomorphic code continued in the Baseline Interpreter.
+    MONO_FAILED = 1 << 2,
   };
 
   // Native code offset for OSR from Baseline Interpreter into Baseline JIT at
@@ -308,6 +318,14 @@ class alignas(uintptr_t) BaselineScript final
   bool hasDebugInstrumentation() const {
     return flags_ & HAS_DEBUG_INSTRUMENTATION;
   }
+
+  void setIsMono(InlinedStub* inlinedStubs) {
+    flags_ |= IS_MONO;
+    inlinedStubs_ = inlinedStubs;
+  }
+  bool isMono() const { return flags_ & IS_MONO; }
+  void setMonoFailed() { flags_ |= MONO_FAILED; }
+  bool monoFailed() const { return flags_ & MONO_FAILED; }
 
   uint8_t* warmUpCheckPrologueAddr() const {
     return method_->raw() + warmUpCheckPrologueOffset_;

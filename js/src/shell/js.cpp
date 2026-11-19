@@ -13161,6 +13161,9 @@ bool InitOptionParser(OptionParser& op) {
       !op.addStringOption(
           '\0', "baseline-batching", "on/off",
           "Batch baseline scripts before dispatching (default: off)") ||
+      !op.addBoolOption('\0', "baseline-mono",
+                        "Compile scripts whose ICs are monomorphic with their "
+                        "stubs inlined in Baseline code") ||
       !op.addStringOption('\0', "ion-offthread-compile", "on/off",
                           "Compile Ion scripts offthread (default: on)") ||
       !op.addStringOption('\0', "ion-parallel-compile", "on/off",
@@ -14398,6 +14401,10 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
     } else {
       return OptionFailure("baseline-batching", str);
     }
+  }
+
+  if (op.getBoolOption("baseline-mono")) {
+    jit::JitOptions.baselineMono = true;
   }
 
   int32_t queueCapacity = op.getIntOption("baseline-queue-capacity");

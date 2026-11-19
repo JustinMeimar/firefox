@@ -74,6 +74,7 @@ UNIFIED_SOURCES += [
     "MIR-wasm.cpp",
     "MIR.cpp",
     "MIRGraph.cpp",
+    "MonoBaseline.cpp",
     "MoveResolver.cpp",
     "PerfSpewer.cpp",
     "ProcessExecutableMemory.cpp",

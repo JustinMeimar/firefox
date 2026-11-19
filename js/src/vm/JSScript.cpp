@@ -3480,7 +3480,7 @@ void JSScript::updateJitCodeRaw(JSRuntime* rt) {
   } else if (hasIonScript()) {
     jit::IonScript* ion = ionScript();
     setJitCodeRaw(ion->method()->raw());
-  } else if (hasBaselineScript()) {
+  } else if (hasBaselineScript() && !baselineScript()->monoFailed()) {
     setJitCodeRaw(baselineScript()->method()->raw());
   } else if (hasJitScript() && js::jit::IsBaselineInterpreterEnabled()) {
     bool usingEntryTrampoline = false;

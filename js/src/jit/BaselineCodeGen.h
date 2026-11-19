@@ -10,6 +10,7 @@
 #include "jit/CompileWrappers.h"
 #include "jit/FixedList.h"
 #include "jit/MacroAssembler.h"
+#include "jit/MonoBaseline.h"
 #include "jit/PerfSpewer.h"
 
 namespace js {
@@ -205,6 +206,7 @@ class BaselineCodeGen {
   [[nodiscard]] bool emitGetAliasedDebugVar(ValueOperand dest);
 
   [[nodiscard]] bool emitNextIC();
+  [[nodiscard]] bool emitInlinedIC(uint32_t entryIndex, bool* inlined);
   [[nodiscard]] bool emitInterruptCheck();
   [[nodiscard]] bool emitWarmUpCounterIncrement();
 
@@ -352,6 +354,21 @@ class BaselineCompilerHandler {
 
   bool needsEnvAllocSite_ = false;
 
+  // Set when compiling monomorphic code. See MonoBaseline.h.
+  JSContext* monoCx_ = nullptr;
+
+  // The stack depth before the current op.
+  uint32_t opStackDepth_ = 0;
+
+  InlinedStub* inlinedStubs_ = nullptr;
+
+  struct MonoExit {
+    Label* label;
+    uint32_t pcOffset;
+    MonoOperands operands;
+  };
+  Vector<MonoExit, 0, SystemAllocPolicy> monoExits_;
+
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
 
  public:
@@ -359,6 +376,7 @@ class BaselineCompilerHandler {
 
   BaselineCompilerHandler(MacroAssembler& masm, TempAllocator& alloc,
                           BaselineSnapshot* snapshot);
+  ~BaselineCompilerHandler() { InlinedStub::DestroyList(inlinedStubs_); }
 
   [[nodiscard]] bool init();
 
@@ -443,6 +461,32 @@ class BaselineCompilerHandler {
 
   bool compilingOffThread() const { return compilingOffThread_; }
   void setCompilingOffThread() { compilingOffThread_ = true; }
+
+  TempAllocator& alloc() const { return alloc_; }
+
+  void setMono(JSContext* cx) { monoCx_ = cx; }
+  JSContext* monoCx() const { return monoCx_; }
+
+  void setOpStackDepth(uint32_t depth) { opStackDepth_ = depth; }
+  uint32_t opStackDepth() const { return opStackDepth_; }
+
+  void addInlinedStub(InlinedStub* stub) {
+    stub->setNext(inlinedStubs_);
+    inlinedStubs_ = stub;
+  }
+  InlinedStub* releaseInlinedStubs() {
+    InlinedStub* list = inlinedStubs_;
+    inlinedStubs_ = nullptr;
+    return list;
+  }
+
+  [[nodiscard]] bool addMonoExit(Label* label, uint32_t pcOffset,
+                                 MonoOperands operands) {
+    return monoExits_.append(MonoExit{label, pcOffset, operands});
+  }
+  const Vector<MonoExit, 0, SystemAllocPolicy>& monoExits() const {
+    return monoExits_;
+  }
 
   bool addEnvAllocSite() {
     needsEnvAllocSite_ = true;

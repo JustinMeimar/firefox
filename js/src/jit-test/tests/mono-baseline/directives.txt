@@ -1,0 +1,1 @@
+|jit-test| --baseline-mono; --blinterp-warmup-threshold=2; --baseline-warmup-threshold=30; --no-ion

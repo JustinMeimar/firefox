@@ -173,6 +173,10 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether offthread baseline compilation should be batched.
   SET_DEFAULT(baselineBatching, false);
 
+  // Whether Baseline compiles scripts whose ICs are monomorphic with their
+  // stubs inlined. See MonoBaseline.h.
+  SET_DEFAULT(baselineMono, false);
+
   // Whether Warp should use ICs instead of transpiling Baseline CacheIR.
   SET_DEFAULT(forceInlineCaches, false);
 
