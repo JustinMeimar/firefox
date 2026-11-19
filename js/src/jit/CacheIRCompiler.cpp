@@ -1732,6 +1732,46 @@ bool FailurePath::canShareFailurePath(const FailurePath& other) const {
   return true;
 }
 
+bool FailurePath::needsRestore(
+    mozilla::Span<const OperandLocation> origInputs) const {
+  if (stackPushed_ != 0 || !spilledRegs_.empty()) {
+    return true;
+  }
+  MOZ_ASSERT(inputs_.length() == origInputs.size());
+  for (size_t i = 0; i < inputs_.length(); i++) {
+    if (inputs_[i] != origInputs[i]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool js::jit::EmitInlinedFailurePath(
+    JSContext* cx, MacroAssembler& masm,
+    mozilla::Span<const OperandLocation> origInputs, FailurePath& failure) {
+  CacheIRWriter writer(cx);
+  for (size_t i = 0; i < origInputs.size(); i++) {
+    writer.setInputOperandId(i);
+  }
+  CacheRegisterAllocator allocator(writer);
+  if (!allocator.init()) {
+    return false;
+  }
+  allocator.setInlined();
+  for (size_t i = 0; i < origInputs.size(); i++) {
+    allocator.initInputLocation(i, origInputs[i]);
+    allocator.setOperandLocation(i, failure.input(i));
+  }
+  allocator.setStackPushed(failure.stackPushed());
+  if (!allocator.setSpilledRegs(failure.spilledRegs())) {
+    return false;
+  }
+
+  masm.bind(failure.label());
+  allocator.restoreInputState(masm);
+  return true;
+}
+
 bool CacheIRCompiler::addFailurePath(FailurePath** failure) {
 #ifdef DEBUG
   allocator.setAddedFailurePath();

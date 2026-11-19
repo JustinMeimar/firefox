@@ -316,7 +316,8 @@ bool BaselineCacheIRCompiler::emitOps() {
   return true;
 }
 
-bool BaselineCacheIRCompiler::compileInline(Label* failure) {
+bool BaselineCacheIRCompiler::compileInline(InlinedInputVector& origInputs,
+                                            InlinedFailureVector& failures) {
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compileInline");
   MOZ_ASSERT(!JitOptions.enableICFramePointers);
 
@@ -328,15 +329,16 @@ bool BaselineCacheIRCompiler::compileInline(Label* failure) {
   MOZ_ASSERT(!makesGCCalls_);
   allocator.discardStack(masm);
 
-  Label done;
-  masm.jump(&done);
-  for (size_t i = 0; i < failurePaths.length(); i++) {
-    if (!emitFailurePath(i)) {
+  for (size_t i = 0; i < writer_.numInputOperands(); i++) {
+    if (!origInputs.append(allocator.origInputLocation(i))) {
       return false;
     }
-    masm.jump(failure);
   }
-  masm.bind(&done);
+  for (FailurePath& failure : failurePaths) {
+    if (!failures.append(std::move(failure))) {
+      return false;
+    }
+  }
   return true;
 }
 

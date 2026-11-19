@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "jit/CacheIRCompiler.h"
 #include "util/Memory.h"
 
 class JSScript;
@@ -32,11 +33,11 @@ enum class CacheKind : uint8_t;
 //
 // A script whose IC ops each have at most one stub when Baseline compiles it
 // is compiled monomorphic. Each IC op with a stub that makes no calls has the
-// stub emitted inline, with its stub fields as constants. Each other IC op
-// with a stub calls a copy of that stub instead of the first stub of its IC
-// chain, so it runs the same shared stub code. The copy is owned by the
-// BaselineScript, which traces its edges strongly, and its next stub is an
-// exit for the op.
+// stub emitted inline, with its stub fields as constants and its failure paths
+// out of line next to its exit. Each other IC op with a stub calls a copy of
+// that stub instead of the first stub of its IC chain, so it runs the same
+// shared stub code. The copy is owned by the BaselineScript, which traces its
+// edges strongly, and its next stub is an exit for the op.
 //
 // Stubs fail only before they have effects, so when a stub fails the exit
 // only has to rebuild the frame the Baseline Interpreter expects at the op: it
@@ -54,6 +55,29 @@ enum class CacheKind : uint8_t;
 // exit when they run next, and the script stops entering the code without
 // being marked polymorphic. Frames can't be stopped inside an inline stub,
 // since inline stubs make no calls that can run script or collect garbage.
+//
+// For example, an inline GetProp stub that loads a fixed slot, on x64:
+//
+//     nop5                         ; becomes a call to inval on discard
+//     cmp   tag(R0), Object
+//     jne   exit                   ; nothing to restore yet
+//     unbox R0 -> R0               ; the input is unboxed in place
+//     cmp   shape(R0), $shape
+//     jne   restore                ; the input must be boxed again
+//     load  slot(R0) -> R0
+//     ...                          ; next op
+//
+//   Out of line, after the epilogue:
+//
+//   inval:
+//     add   rsp, 8                 ; drop the return address of the call
+//   exit:
+//     push  unstored stack values
+//     mov   $pcOffset, ICStubReg
+//     jmp   exit tail              ; continues in the Baseline Interpreter
+//   restore:
+//     box   Object, R0 -> R0
+//     jmp   exit
 
 // Where the operands an op took off the stack before its IC are when its stub
 // fails.
@@ -137,12 +161,14 @@ struct MonoInlineStub {
 // Whether the stub can be emitted inline.
 bool CanInlineMonoStub(ICCacheIRStub* stub);
 
-// Emits the stub inline, jumping to failure with its inputs restored when it
-// fails. Returns false on OOM, with *inlined false if the stub could not be
-// emitted.
+// Emits the stub inline, appending its original input locations and its
+// failure paths for emitting out of line. Returns false on OOM, with *inlined
+// false if the stub could not be emitted.
 [[nodiscard]] bool EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
                                        TempAllocator& alloc,
-                                       ICCacheIRStub* stub, Label* failure,
+                                       ICCacheIRStub* stub,
+                                       InlinedInputVector& origInputs,
+                                       InlinedFailureVector& failures,
                                        bool* inlined);
 
 // Puts back the operands of an inline stub and continues at the op in the

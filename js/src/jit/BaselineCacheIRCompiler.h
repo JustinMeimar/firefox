@@ -188,8 +188,10 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
   JitCode* compile();
 
   // Emits the stub inline in Baseline code, with its stub fields as constants.
-  // Failures restore the inputs and jump to failure.
-  [[nodiscard]] bool compileInline(Label* failure);
+  // Appends the original input locations and the failure paths, which are
+  // left unbound for emitting out of line.
+  [[nodiscard]] bool compileInline(InlinedInputVector& origInputs,
+                                   InlinedFailureVector& failures);
 
   bool makesGCCalls() const;
   bool localTracingSlots() const { return localTracingSlots_; }

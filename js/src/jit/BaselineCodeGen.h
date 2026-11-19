@@ -364,19 +364,24 @@ class BaselineCompilerHandler {
 
  public:
   // The exit of an inline stub, with the stack values that are not stored on
-  // the stack when it fails.
+  // the stack when it fails and the failure paths that restore its inputs.
   struct MonoExit {
-    Label* label;
     uint32_t stubOffset;
     uint32_t pcOffset;
     MonoOperands operands;
     uint32_t valuesStart;
     uint32_t valuesEnd;
+    uint32_t inputsStart;
+    uint32_t inputsEnd;
+    uint32_t failuresStart;
+    uint32_t failuresEnd;
   };
 
  private:
   Vector<MonoExit, 0, SystemAllocPolicy> monoExits_;
   Vector<StackValue, 0, SystemAllocPolicy> monoExitValues_;
+  InlinedInputVector monoExitInputs_;
+  InlinedFailureVector monoExitFailures_;
   Vector<MonoInlineStub, 0, SystemAllocPolicy> monoInlineStubs_;
 
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
@@ -484,14 +489,24 @@ class BaselineCompilerHandler {
     stub->setNext(monoStubs_);
     monoStubs_ = stub;
   }
-  [[nodiscard]] bool addMonoExit(Label* label, uint32_t stubOffset,
-                                 uint32_t pcOffset, MonoOperands operands,
+  InlinedInputVector& monoExitInputs() { return monoExitInputs_; }
+  InlinedFailureVector& monoExitFailures() { return monoExitFailures_; }
+  [[nodiscard]] bool addMonoExit(uint32_t stubOffset, uint32_t pcOffset,
+                                 MonoOperands operands, uint32_t inputsStart,
+                                 uint32_t failuresStart,
                                  CompilerFrameInfo& frame) {
     uint32_t start = monoExitValues_.length();
     return frame.appendUnsynced(monoExitValues_) &&
-           monoExits_.append(MonoExit{label, stubOffset, pcOffset, operands,
-                                      start,
-                                      uint32_t(monoExitValues_.length())});
+           monoExits_.append(
+               MonoExit{.stubOffset = stubOffset,
+                        .pcOffset = pcOffset,
+                        .operands = operands,
+                        .valuesStart = start,
+                        .valuesEnd = uint32_t(monoExitValues_.length()),
+                        .inputsStart = inputsStart,
+                        .inputsEnd = uint32_t(monoExitInputs_.length()),
+                        .failuresStart = failuresStart,
+                        .failuresEnd = uint32_t(monoExitFailures_.length())});
   }
   [[nodiscard]] bool addMonoInlineStub(uint32_t stubOffset,
                                        uint32_t exitOffset) {

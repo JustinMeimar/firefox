@@ -167,7 +167,9 @@ bool js::jit::CanInlineMonoStub(ICCacheIRStub* stub) {
 
 bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
                                   TempAllocator& alloc, ICCacheIRStub* stub,
-                                  Label* failure, bool* inlined) {
+                                  InlinedInputVector& origInputs,
+                                  InlinedFailureVector& failures,
+                                  bool* inlined) {
   *inlined = false;
   MOZ_ASSERT(CanInlineMonoStub(stub));
   const CacheIRStubInfo* info = stub->stubInfo();
@@ -194,7 +196,7 @@ bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
   }
 
   BaselineCacheIRCompiler compiler(cx, alloc, writer, 0, &masm);
-  if (!compiler.init(kind) || !compiler.compileInline(failure)) {
+  if (!compiler.init(kind) || !compiler.compileInline(origInputs, failures)) {
     return false;
   }
   *inlined = true;

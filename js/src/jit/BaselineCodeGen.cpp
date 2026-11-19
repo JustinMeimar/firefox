@@ -332,11 +332,32 @@ bool BaselineCompiler::compileImpl() {
 #ifndef JS_USE_LINK_REGISTER
       masm.addToStackPtr(Imm32(sizeof(void*)));
 #endif
-      masm.bind(exit.label);
+      mozilla::Span<const OperandLocation> inputs(
+          handler.monoExitInputs().begin() + exit.inputsStart,
+          handler.monoExitInputs().begin() + exit.inputsEnd);
+      Label exitLabel;
+      masm.bind(&exitLabel);
+      for (uint32_t i = exit.failuresStart; i < exit.failuresEnd; i++) {
+        FailurePath& failure = handler.monoExitFailures()[i];
+        if (!failure.needsRestore(inputs)) {
+          masm.bind(failure.label());
+        }
+      }
       for (uint32_t i = exit.valuesStart; i < exit.valuesEnd; i++) {
         frame.pushValue(handler.monoExitValue(i));
       }
       EmitMonoExit(masm, exit.operands, exit.pcOffset, exitTail);
+
+      for (uint32_t i = exit.failuresStart; i < exit.failuresEnd; i++) {
+        FailurePath& failure = handler.monoExitFailures()[i];
+        if (failure.needsRestore(inputs)) {
+          if (!EmitInlinedFailurePath(handler.monoCx(), masm, inputs,
+                                      failure)) {
+            return false;
+          }
+          masm.jump(&exitLabel);
+        }
+      }
     }
   }
 
@@ -799,20 +820,18 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex, bool* emitted) {
   }
 
   if (CanInlineMonoStub(stub)) {
-    void* mem = handler.alloc().allocate(sizeof(Label));
-    if (!mem) {
-      return false;
-    }
-    Label* failure = new (mem) Label();
+    uint32_t inputsStart = handler.monoExitInputs().length();
+    uint32_t failuresStart = handler.monoExitFailures().length();
     uint32_t stubOffset = masm.nopPatchableToCall().offset();
     bool inlined;
     if (!EmitInlinedMonoStub(handler.monoCx(), masm, handler.alloc(), stub,
-                             failure, &inlined)) {
+                             handler.monoExitInputs(),
+                             handler.monoExitFailures(), &inlined)) {
       return false;
     }
     if (inlined) {
-      if (!handler.addMonoExit(failure, stubOffset, pcOffset, *operands,
-                               frame)) {
+      if (!handler.addMonoExit(stubOffset, pcOffset, *operands, inputsStart,
+                               failuresStart, frame)) {
         return false;
       }
       *emitted = true;

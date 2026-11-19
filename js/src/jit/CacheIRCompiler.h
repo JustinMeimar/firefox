@@ -7,6 +7,7 @@
 
 #include "mozilla/Casting.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Span.h"
 
 #include "jit/CacheIR.h"
 #include "jit/CacheIRReader.h"
@@ -420,6 +421,10 @@ class MOZ_RAII CacheRegisterAllocator {
     origInputLocations_[i].setBaselineFrame(slot);
     operandLocations_[i].setBaselineFrame(slot);
   }
+  void initInputLocation(size_t i, const OperandLocation& loc) {
+    origInputLocations_[i] = loc;
+    operandLocations_[i] = loc;
+  }
 
   void initInputLocation(size_t i, const TypedOrValueRegister& reg);
   void initInputLocation(size_t i, const ConstantOrRegister& value);
@@ -690,6 +695,9 @@ class FailurePath {
   // be emitted for two failure paths, so we can share them.
   bool canShareFailurePath(const FailurePath& other) const;
 
+  // Whether the inputs must be moved back to their original locations.
+  bool needsRestore(mozilla::Span<const OperandLocation> origInputs) const;
+
   void setHasAutoScratchFloatRegister() {
 #ifdef DEBUG
     MOZ_ASSERT(!hasAutoScratchFloatRegister_);
@@ -704,6 +712,15 @@ class FailurePath {
 #endif
   }
 };
+
+using InlinedInputVector = Vector<OperandLocation, 0, SystemAllocPolicy>;
+using InlinedFailureVector = Vector<FailurePath, 0, SystemAllocPolicy>;
+
+// Binds the failure path of a stub emitted inline and moves the inputs back to
+// their original locations.
+[[nodiscard]] bool EmitInlinedFailurePath(
+    JSContext* cx, MacroAssembler& masm,
+    mozilla::Span<const OperandLocation> origInputs, FailurePath& failure);
 
 /**
  * Wrap an offset so that a call can decide to embed a constant
