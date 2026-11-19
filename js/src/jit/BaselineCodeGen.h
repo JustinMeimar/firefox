@@ -362,6 +362,23 @@ class BaselineCompilerHandler {
 
   MonoStub* monoStubs_ = nullptr;
 
+ public:
+  // The exit of an inline stub, with the stack values that are not stored on
+  // the stack when it fails.
+  struct MonoExit {
+    Label* label;
+    uint32_t stubOffset;
+    uint32_t pcOffset;
+    MonoOperands operands;
+    uint32_t valuesStart;
+    uint32_t valuesEnd;
+  };
+
+ private:
+  Vector<MonoExit, 0, SystemAllocPolicy> monoExits_;
+  Vector<StackValue, 0, SystemAllocPolicy> monoExitValues_;
+  Vector<MonoInlineStub, 0, SystemAllocPolicy> monoInlineStubs_;
+
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
 
  public:
@@ -455,6 +472,8 @@ class BaselineCompilerHandler {
   bool compilingOffThread() const { return compilingOffThread_; }
   void setCompilingOffThread() { compilingOffThread_ = true; }
 
+  TempAllocator& alloc() const { return alloc_; }
+
   void setMono(JSContext* cx) { monoCx_ = cx; }
   JSContext* monoCx() const { return monoCx_; }
 
@@ -465,7 +484,29 @@ class BaselineCompilerHandler {
     stub->setNext(monoStubs_);
     monoStubs_ = stub;
   }
-  bool hasMonoStubs() const { return monoStubs_; }
+  [[nodiscard]] bool addMonoExit(Label* label, uint32_t stubOffset,
+                                 uint32_t pcOffset, MonoOperands operands,
+                                 CompilerFrameInfo& frame) {
+    uint32_t start = monoExitValues_.length();
+    return frame.appendUnsynced(monoExitValues_) &&
+           monoExits_.append(MonoExit{label, stubOffset, pcOffset, operands,
+                                      start,
+                                      uint32_t(monoExitValues_.length())});
+  }
+  [[nodiscard]] bool addMonoInlineStub(uint32_t stubOffset,
+                                       uint32_t exitOffset) {
+    return monoInlineStubs_.append(MonoInlineStub{stubOffset, exitOffset});
+  }
+  Vector<MonoInlineStub, 0, SystemAllocPolicy>& monoInlineStubs() {
+    return monoInlineStubs_;
+  }
+  const Vector<MonoExit, 0, SystemAllocPolicy>& monoExits() const {
+    return monoExits_;
+  }
+  const StackValue& monoExitValue(uint32_t index) const {
+    return monoExitValues_[index];
+  }
+  bool hasMonoCode() const { return monoStubs_ || !monoExits_.empty(); }
   MonoStub* releaseMonoStubs() {
     MonoStub* list = monoStubs_;
     monoStubs_ = nullptr;
@@ -522,6 +563,7 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
   bool compileImpl();
 
   bool emitBody();
+  bool monoInlinesIC(JSOp op);
 
   [[nodiscard]] bool emitDebugTrap();
 };

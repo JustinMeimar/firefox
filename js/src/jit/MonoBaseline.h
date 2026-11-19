@@ -22,28 +22,38 @@ namespace jit {
 
 class BaselineFrame;
 class ICCacheIRStub;
+class Label;
+class MacroAssembler;
+class TempAllocator;
+struct TrampolinePtr;
 enum class CacheKind : uint8_t;
 
 // [SMDOC] Monomorphic Baseline
 //
 // A script whose IC ops each have at most one stub when Baseline compiles it
-// is compiled monomorphic: each IC op with a stub calls a copy of that stub
-// instead of the first stub of its IC chain, so it runs the same shared stub
-// code. The copy is owned by the BaselineScript, which traces its edges
-// strongly, and its next stub is an exit for the op.
+// is compiled monomorphic. Each IC op with a stub that makes no calls has the
+// stub emitted inline, with its stub fields as constants. Each other IC op
+// with a stub calls a copy of that stub instead of the first stub of its IC
+// chain, so it runs the same shared stub code. The copy is owned by the
+// BaselineScript, which traces its edges strongly, and its next stub is an
+// exit for the op.
 //
-// Baseline keeps the stack synced at IC ops, and stubs fail only before they
-// have effects, so when the stub fails the exit only has to put back the
-// operands the op took off the stack to have the frame the Baseline
-// Interpreter expects at the op. It then continues there, in the same frame.
+// Stubs fail only before they have effects, so when a stub fails the exit
+// only has to rebuild the frame the Baseline Interpreter expects at the op: it
+// pushes the stack values the compiler had not stored yet, then puts back the
+// operands the op took off the stack. Calls need every stack value stored, so
+// only inline stubs leave values unstored. The exit then continues at the op
+// in the Baseline Interpreter, in the same frame.
 //
 // The first such exit marks the script polymorphic. The script stops entering
 // its monomorphic code, and once it warms up again in the Baseline Interpreter
 // and no frame runs that code anymore, it is compiled with IC chains.
 //
 // When the IC stubs of a script whose monomorphic code is on the stack are
-// discarded, the copies are discarded too: they fail right away, and the
-// script stops entering the code without being marked polymorphic.
+// discarded, its stubs are discarded too: copies fail right away, inline stubs
+// exit when they run next, and the script stops entering the code without
+// being marked polymorphic. Frames can't be stopped inside an inline stub,
+// since inline stubs make no calls that can run script or collect garbage.
 
 // Where the operands an op took off the stack before its IC are when its stub
 // fails.
@@ -114,6 +124,31 @@ class MonoStub {
   static void TraceList(JSTracer* trc, MonoStub* list);
   static void DiscardList(JSRuntime* rt, MonoStub* list);
 };
+
+// An inline stub, by the code offsets of the end of the nop it starts with and
+// of an entry to its exit that drops a return address. Discarding the stubs of
+// the script makes the nop a call to the exit, so that the stub exits when it
+// runs next.
+struct MonoInlineStub {
+  uint32_t stubOffset;
+  uint32_t exitOffset;
+};
+
+// Whether the stub can be emitted inline.
+bool CanInlineMonoStub(ICCacheIRStub* stub);
+
+// Emits the stub inline, jumping to failure with its inputs restored when it
+// fails. Returns false on OOM, with *inlined false if the stub could not be
+// emitted.
+[[nodiscard]] bool EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
+                                       TempAllocator& alloc,
+                                       ICCacheIRStub* stub, Label* failure,
+                                       bool* inlined);
+
+// Puts back the operands of an inline stub and continues at the op in the
+// Baseline Interpreter.
+void EmitMonoExit(MacroAssembler& masm, MonoOperands operands,
+                  uint32_t pcOffset, TrampolinePtr exitTail);
 
 // Whether every IC op of the script that has a stub has exactly one and has
 // never failed to attach another.

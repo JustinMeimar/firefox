@@ -38,6 +38,7 @@ namespace jit {
 class BaselineFrame;
 class ExceptionBailoutInfo;
 class MonoStub;
+struct MonoInlineStub;
 class IonCompileTask;
 class JitActivation;
 class JSJitFrameIter;
@@ -199,6 +200,8 @@ class alignas(uintptr_t) BaselineScript final
 
   // The stubs that monomorphic code calls.
   MonoStub* monoStubs_ = nullptr;
+  MonoInlineStub* monoInlineStubs_ = nullptr;
+  size_t numMonoInlineStubs_ = 0;
 
   // Baseline Interpreter can enter Baseline Compiler code at this address. This
   // is right after the warm-up counter check in the prologue.
@@ -319,9 +322,12 @@ class alignas(uintptr_t) BaselineScript final
     return flags_ & HAS_DEBUG_INSTRUMENTATION;
   }
 
-  void setIsMono(MonoStub* monoStubs) {
+  void setIsMono(MonoStub* monoStubs, MonoInlineStub* inlineStubs,
+                 uint32_t numInlineStubs) {
     flags_ |= IS_MONO;
     monoStubs_ = monoStubs;
+    monoInlineStubs_ = inlineStubs;
+    numMonoInlineStubs_ = numInlineStubs;
   }
   bool isMono() const { return flags_ & IS_MONO; }
   void setMonoFailed() { flags_ |= MONO_FAILED; }

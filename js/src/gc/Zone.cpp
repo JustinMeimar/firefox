@@ -349,7 +349,7 @@ void Zone::forceDiscardJitCode(JS::GCContext* gcx,
           jit::FinishDiscardBaselineScript(gcx, script);
         }
 
-        // Monomorphic code runs copies of the stubs we are discarding.
+        // Monomorphic code runs the stubs we are discarding.
         if (jitScript->hasBaselineScript() &&
             jitScript->baselineScript()->isMono()) {
           jit::DiscardMonoStubs(gcx->runtime(), script);

@@ -5,11 +5,15 @@
 #include "jit/MonoBaseline.h"
 
 #include "gc/GC.h"
+#include "jit/BaselineCacheIRCompiler.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIR.h"
+#include "jit/CacheIRCloner.h"
 #include "jit/CacheIRCompiler.h"
+#include "jit/CacheIRReader.h"
+#include "jit/CacheIRWriter.h"
 #include "jit/Invalidation.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
@@ -117,6 +121,114 @@ static bool CanCopyStub(ICCacheIRStub* stub) {
     }
     offset += StubField::sizeInBytes(type);
   }
+}
+
+// Ops whose Baseline code reads stub data without a constant form.
+static bool CanInlineOp(CacheOp op) {
+  switch (op) {
+    case CacheOp::AddAndStoreFixedSlot:
+    case CacheOp::AddAndStoreDynamicSlot:
+    case CacheOp::AllocateAndStoreDynamicSlot:
+    case CacheOp::GuardDOMExpandoMissingOrGuardShape:
+    case CacheOp::LoadDOMExpandoValueGuardGeneration:
+    case CacheOp::HasClassResult:
+    case CacheOp::HasShapeResult:
+    case CacheOp::NewArrayObjectResult:
+    case CacheOp::NewPlainObjectResult:
+    case CacheOp::NewFunctionCloneResult:
+    case CacheOp::MetaCreateThis:
+    case CacheOp::ProxyGetResult:
+    case CacheOp::ProxySet:
+    case CacheOp::CallNativeGetterResult:
+    case CacheOp::CallDOMGetterResult:
+    case CacheOp::CallNativeSetter:
+    case CacheOp::CallDOMSetter:
+      return false;
+    default:
+      return true;
+  }
+}
+
+bool js::jit::CanInlineMonoStub(ICCacheIRStub* stub) {
+  const CacheIRStubInfo* info = stub->stubInfo();
+  if (info->makesGCCalls() || !CanCopyStub(stub)) {
+    return false;
+  }
+  CacheIRReader reader(info);
+  while (reader.more()) {
+    CacheOp op = reader.readOp();
+    if (!CanInlineOp(op)) {
+      return false;
+    }
+    reader.skip(CacheIROpInfos[size_t(op)].argLength);
+  }
+  return true;
+}
+
+bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
+                                  TempAllocator& alloc, ICCacheIRStub* stub,
+                                  Label* failure, bool* inlined) {
+  *inlined = false;
+  MOZ_ASSERT(CanInlineMonoStub(stub));
+  const CacheIRStubInfo* info = stub->stubInfo();
+  CacheKind kind = info->kind();
+
+  CacheIRWriter writer(cx);
+  for (size_t i = 0; i < NumInputsForCacheKind(kind); i++) {
+    writer.setInputOperandId(i);
+  }
+  CacheIRReader reader(info);
+  CacheIRCloner cloner(stub);
+  while (reader.more()) {
+    cloner.cloneOp(reader.readOp(), reader, writer);
+  }
+  if (writer.failed()) {
+    return true;
+  }
+
+  // The code holds weak edges strongly, so mark them if we are marking.
+  Zone* zone = cx->zone();
+  if (zone->needsMarkingBarrier()) {
+    TraceCacheIRStub(zone->barrierTracer(),
+                     reinterpret_cast<MonoStubCopy*>(stub), info);
+  }
+
+  BaselineCacheIRCompiler compiler(cx, alloc, writer, 0, &masm);
+  if (!compiler.init(kind) || !compiler.compileInline(failure)) {
+    return false;
+  }
+  *inlined = true;
+  return true;
+}
+
+void js::jit::EmitMonoExit(MacroAssembler& masm, MonoOperands operands,
+                           uint32_t pcOffset, TrampolinePtr exitTail) {
+  Address top(masm.getStackPointer(), 0);
+  switch (operands) {
+    case MonoOperands::InPlace:
+      break;
+    case MonoOperands::R0:
+      masm.pushValue(R0);
+      break;
+    case MonoOperands::R0R1:
+      masm.pushValue(R0);
+      masm.pushValue(R1);
+      break;
+    case MonoOperands::SetProp:
+      masm.storeValue(R0, top);
+      masm.pushValue(R1);
+      break;
+    case MonoOperands::SetElem:
+      masm.loadValue(top, R2);
+      masm.storeValue(R0, top);
+      masm.pushValue(R1);
+      masm.pushValue(R2);
+      break;
+    case MonoOperands::Count:
+      MOZ_CRASH();
+  }
+  masm.move32(Imm32(pcOffset), ICStubReg);
+  masm.jump(exitTail);
 }
 
 MonoStub* MonoStub::New(JSContext* cx, ICCacheIRStub* stub, uint32_t pcOffset,
@@ -264,7 +376,9 @@ void JitRuntime::generateMonoStubExits(MacroAssembler& masm) {
   EmitStubGuardFailure(masm);
 
   // Stubs jump to these with the return address of their call on the stack,
-  // their inputs restored and the stub register pointing to the exit.
+  // their inputs restored and the stub register pointing to the exit. Inline
+  // stubs jump to the tail with their operands put back and the stub register
+  // holding the pc offset.
   Label exit;
   for (size_t i = 0; i < size_t(MonoOperands::Count); i++) {
     monoStubExitOffsets_[MonoOperands(i)] = startTrampolineCode(masm);
@@ -301,6 +415,7 @@ void JitRuntime::generateMonoStubExits(MacroAssembler& masm) {
   }
 
   masm.bind(&exit);
+  monoStubExitTailOffset_ = exit.offset();
   AllocatableGeneralRegisterSet regs(GeneralRegisterSet::Volatile());
   regs.takeUnchecked(ICStubReg);
   Register frame = regs.takeAny();

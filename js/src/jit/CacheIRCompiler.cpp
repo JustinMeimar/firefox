@@ -9646,10 +9646,18 @@ bool CacheIRCompiler::emitCallObjectHasSparseElementResult(
 void CacheIRCompiler::emitLoadStubFieldConstant(StubFieldOffset val,
                                                 Register dest) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
-  MOZ_ASSERT(mode_ == Mode::Ion);
   switch (val.getStubFieldType()) {
     case StubField::Type::Shape:
       masm.movePtr(ImmGCPtr(shapeStubField(val.getOffset())), dest);
+      break;
+    case StubField::Type::WeakShape:
+      masm.movePtr(ImmGCPtr(weakShapeStubField(val.getOffset())), dest);
+      break;
+    case StubField::Type::Symbol:
+      masm.movePtr(ImmGCPtr(symbolStubField(val.getOffset())), dest);
+      break;
+    case StubField::Type::AllocSite:
+      masm.movePtr(ImmPtr(allocSiteStubField(val.getOffset())), dest);
       break;
     case StubField::Type::String:
       masm.movePtr(ImmGCPtr(stringStubField(val.getOffset())), dest);
@@ -9715,7 +9723,6 @@ void CacheIRCompiler::emitLoadValueStubField(StubFieldOffset val,
              val.getStubFieldType() == StubField::Type::WeakValue);
 
   if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
-    MOZ_ASSERT(mode_ == Mode::Ion);
     if (val.getStubFieldType() == StubField::Type::Value) {
       masm.moveValue(valueStubField(val.getOffset()), dest);
     } else {
@@ -9733,7 +9740,6 @@ void CacheIRCompiler::emitLoadDoubleValueStubField(StubFieldOffset val,
   MOZ_ASSERT(val.getStubFieldType() == StubField::Type::Double);
 
   if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
-    MOZ_ASSERT(mode_ == Mode::Ion);
     double d = doubleStubField(val.getOffset());
     masm.moveValue(DoubleValue(d), dest);
   } else {

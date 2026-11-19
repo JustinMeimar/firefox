@@ -230,6 +230,9 @@ class CompilerFrameInfo : public FrameInfo {
   FixedList<StackValue> stack;
   size_t spIndex;
 
+  // Whether syncing the stack only syncs up to the last value in a register.
+  bool deferSync_ = false;
+
  public:
   CompilerFrameInfo(JSScript* script, MacroAssembler& masm)
       : FrameInfo(masm), script(script), spIndex(0) {}
@@ -324,6 +327,22 @@ class CompilerFrameInfo : public FrameInfo {
   void sync(StackValue* val);
   void syncStack(uint32_t uses);
   uint32_t numUnsyncedSlots();
+
+  void setDeferSync(bool defer) { deferSync_ = defer; }
+
+  // Appends the values not stored on the stack, from the bottom.
+  template <typename Vec>
+  [[nodiscard]] bool appendUnsynced(Vec& values) {
+    for (size_t i = stackDepth() - numUnsyncedSlots(); i < stackDepth(); i++) {
+      if (!values.append(stack[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Pushes the value without changing the frame.
+  void pushValue(const StackValue& val);
   void popRegsAndSync(uint32_t uses);
 
   void assertSyncedStack() const {

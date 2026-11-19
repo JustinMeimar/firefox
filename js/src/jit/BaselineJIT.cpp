@@ -889,6 +889,15 @@ void BaselineScript::trace(JSTracer* trc) {
 
 void BaselineScript::discardMonoStubs(JSRuntime* rt) {
   MonoStub::DiscardList(rt, monoStubs_);
+  if (numMonoInlineStubs_ == 0) {
+    return;
+  }
+  AutoWritableJitCode awjc(method_);
+  for (uint32_t i = 0; i < numMonoInlineStubs_; i++) {
+    const MonoInlineStub& stub = monoInlineStubs_[i];
+    MacroAssembler::patchNopToCall(method_->raw() + stub.stubOffset,
+                                   method_->raw() + stub.exitOffset);
+  }
 }
 
 void BaselineScript::Destroy(JS::GCContext* gcx, BaselineScript* script) {
@@ -901,6 +910,7 @@ void BaselineScript::Destroy(JS::GCContext* gcx, BaselineScript* script) {
     }
     MonoStub::DestroyList(script->monoStubs_);
   }
+  js_free(script->monoInlineStubs_);
 
   // Trigger write barrier since we are destroying this outside GC.
   script->method_ = nullptr;

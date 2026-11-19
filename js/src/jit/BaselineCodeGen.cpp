@@ -322,6 +322,24 @@ bool BaselineCompiler::compileImpl() {
   perfSpewer_.recordOffset(masm, "OOLPostBarrierSlot");
   emitOutOfLinePostBarrierSlot();
 
+  if (!handler.monoExits().empty()) {
+    perfSpewer_.recordOffset(masm, "MonoExits");
+    TrampolinePtr exitTail = runtime->jitRuntime()->monoStubExitTail();
+    for (const auto& exit : handler.monoExits()) {
+      if (!handler.addMonoInlineStub(exit.stubOffset, masm.currentOffset())) {
+        return false;
+      }
+#ifndef JS_USE_LINK_REGISTER
+      masm.addToStackPtr(Imm32(sizeof(void*)));
+#endif
+      masm.bind(exit.label);
+      for (uint32_t i = exit.valuesStart; i < exit.valuesEnd; i++) {
+        frame.pushValue(handler.monoExitValue(i));
+      }
+      EmitMonoExit(masm, exit.operands, exit.pcOffset, exitTail);
+    }
+  }
+
   perfSpewer_.endRecording();
 
   return true;
@@ -386,8 +404,19 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
     baselineScript->setHasDebugInstrumentation();
   }
 
-  if (handler.hasMonoStubs()) {
-    baselineScript->setIsMono(handler.releaseMonoStubs());
+  if (handler.hasMonoCode()) {
+    auto& inlineStubs = handler.monoInlineStubs();
+    MonoInlineStub* inlineStubsCopy = nullptr;
+    if (!inlineStubs.empty()) {
+      inlineStubsCopy = js_pod_malloc<MonoInlineStub>(inlineStubs.length());
+      if (!inlineStubsCopy) {
+        ReportOutOfMemory(cx);
+        return false;
+      }
+      std::copy(inlineStubs.begin(), inlineStubs.end(), inlineStubsCopy);
+    }
+    baselineScript->setIsMono(handler.releaseMonoStubs(), inlineStubsCopy,
+                              inlineStubs.length());
   }
 
   // If BytecodeAnalysis indicated that we should disable Ion or inlining,
@@ -760,16 +789,39 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex, bool* emitted) {
   if (!operands) {
     return true;
   }
-  frame.assertSyncedStack();
+  uint32_t pcOffset = script->pcToOffset(handler.pc());
 
-  // The copy needs the alloc sites the stub gets when Baseline compiles.
+  // The stub needs the alloc sites it gets when Baseline compiles.
   if (BytecodeOpCanHaveAllocSite(JSOp(*handler.pc()))) {
     ICScript* icScript = script->jitScript()->icScript();
     gc::AutoMarkingLock lock(script->zone(), icScript->markingLock());
     CreateAllocSitesForICChain(script, entryIndex, lock);
   }
 
-  uint32_t pcOffset = script->pcToOffset(handler.pc());
+  if (CanInlineMonoStub(stub)) {
+    void* mem = handler.alloc().allocate(sizeof(Label));
+    if (!mem) {
+      return false;
+    }
+    Label* failure = new (mem) Label();
+    uint32_t stubOffset = masm.nopPatchableToCall().offset();
+    bool inlined;
+    if (!EmitInlinedMonoStub(handler.monoCx(), masm, handler.alloc(), stub,
+                             failure, &inlined)) {
+      return false;
+    }
+    if (inlined) {
+      if (!handler.addMonoExit(failure, stubOffset, pcOffset, *operands,
+                               frame)) {
+        return false;
+      }
+      *emitted = true;
+      return true;
+    }
+  }
+
+  frame.syncStack(0);
+
   bool oom;
   MonoStub* monoStub =
       MonoStub::New(handler.monoCx(), stub, pcOffset, *operands, &oom);
@@ -832,6 +884,7 @@ bool BaselineCompilerCodeGen::emitNextIC() {
     if (emitted) {
       return true;
     }
+    frame.syncStack(0);
   }
 
   // Load stub pointer into ICStubReg.
@@ -7126,6 +7179,84 @@ bool BaselineCodeGen<Handler>::emitEpilogue() {
   return true;
 }
 
+// Whether the op takes its operands off the stack right before its IC and
+// pushes the result after it, without jumping.
+static bool MonoCanDeferSync(JSOp op) {
+  switch (op) {
+    case JSOp::Add:
+    case JSOp::Sub:
+    case JSOp::Mul:
+    case JSOp::Div:
+    case JSOp::Mod:
+    case JSOp::Pow:
+    case JSOp::BitOr:
+    case JSOp::BitXor:
+    case JSOp::BitAnd:
+    case JSOp::Lsh:
+    case JSOp::Rsh:
+    case JSOp::Ursh:
+    case JSOp::Pos:
+    case JSOp::Neg:
+    case JSOp::BitNot:
+    case JSOp::Inc:
+    case JSOp::Dec:
+    case JSOp::ToNumeric:
+    case JSOp::Lt:
+    case JSOp::Le:
+    case JSOp::Gt:
+    case JSOp::Ge:
+    case JSOp::Eq:
+    case JSOp::Ne:
+    case JSOp::StrictEq:
+    case JSOp::StrictNe:
+    case JSOp::GetProp:
+    case JSOp::GetElem:
+    case JSOp::In:
+    case JSOp::HasOwn:
+    case JSOp::Typeof:
+    case JSOp::TypeofExpr:
+    case JSOp::TypeofEq:
+    case JSOp::ToPropertyKey:
+    case JSOp::Instanceof:
+    case JSOp::Not:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Whether the IC of the op is emitted inline with its operands in registers,
+// so that the values below them need not be stored first.
+bool BaselineCompiler::monoInlinesIC(JSOp op) {
+  if (!MonoCanDeferSync(op)) {
+    return false;
+  }
+  JSScript* script = handler.script();
+  uint32_t pcOffset = script->pcToOffset(handler.pc());
+  ICScript* icScript = script->jitScript()->icScript();
+  for (uint32_t i = handler.icEntryIndex(); i < icScript->numICEntries(); i++) {
+    uint32_t entryPcOffset = icScript->fallbackStub(i)->pcOffset();
+    if (entryPcOffset < pcOffset) {
+      continue;
+    }
+    if (entryPcOffset > pcOffset) {
+      return false;
+    }
+    ICStub* firstStub = icScript->icEntry(i).firstStub();
+    if (firstStub->isFallback()) {
+      return false;
+    }
+    ICCacheIRStub* stub = firstStub->toCacheIRStub();
+    CacheKind kind = stub->stubInfo()->kind();
+    mozilla::Maybe<MonoOperands> operands =
+        MonoOperandsFor(kind, NumInputsForCacheKind(kind));
+    return operands &&
+           (*operands == MonoOperands::R0 || *operands == MonoOperands::R0R1) &&
+           CanInlineMonoStub(stub);
+  }
+  return false;
+}
+
 bool BaselineCompiler::emitBody() {
   AutoCreatedBy acb(masm, "BaselineCompiler::emitBody");
 
@@ -7193,6 +7324,10 @@ bool BaselineCompiler::emitBody() {
                                     handler.column(), frame);
     }
 
+    if (handler.monoCx()) {
+      frame.setDeferSync(monoInlinesIC(op));
+    }
+
 #define EMIT_OP(OP, ...)                                \
   case JSOp::OP: {                                      \
     AutoCreatedBy acb(masm, "op=" #OP);                 \
@@ -7206,6 +7341,8 @@ bool BaselineCompiler::emitBody() {
     }
 
 #undef EMIT_OP
+
+    frame.setDeferSync(false);
 
     MOZ_ASSERT(masm.framePushed() == 0);
 

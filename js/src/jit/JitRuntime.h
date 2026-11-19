@@ -168,6 +168,7 @@ class JitRuntime {
                            size_t(MonoOperands::Count)>
       monoStubExitOffsets_;
   WriteOnceData<uint32_t> monoStubFailOffset_{0};
+  WriteOnceData<uint32_t> monoStubExitTailOffset_{0};
 
   // Thunk to convert the value in R0 to int32 if it's a double.
   // Note: this stub treats -0 as +0 and may clobber R1.scratchReg().
@@ -458,6 +459,9 @@ class JitRuntime {
   }
   TrampolinePtr monoStubExit(MonoOperands operands) const {
     return trampolineCode(monoStubExitOffsets_[operands]);
+  }
+  TrampolinePtr monoStubExitTail() const {
+    return trampolineCode(monoStubExitTailOffset_);
   }
   TrampolinePtr monoStubFail() const {
     return trampolineCode(monoStubFailOffset_);

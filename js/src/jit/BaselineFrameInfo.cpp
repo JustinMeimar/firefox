@@ -34,29 +34,32 @@ bool CompilerFrameInfo::init(TempAllocator& alloc) {
   return true;
 }
 
-void CompilerFrameInfo::sync(StackValue* val) {
-  switch (val->kind()) {
+void CompilerFrameInfo::pushValue(const StackValue& val) {
+  switch (val.kind()) {
     case StackValue::Stack:
       break;
     case StackValue::LocalSlot:
-      masm.pushValue(addressOfLocal(val->localSlot()));
+      masm.pushValue(addressOfLocal(val.localSlot()));
       break;
     case StackValue::ArgSlot:
-      masm.pushValue(addressOfArg(val->argSlot()));
+      masm.pushValue(addressOfArg(val.argSlot()));
       break;
     case StackValue::ThisSlot:
       masm.pushValue(addressOfThis());
       break;
     case StackValue::Register:
-      masm.pushValue(val->reg());
+      masm.pushValue(val.reg());
       break;
     case StackValue::Constant:
-      masm.pushValue(val->constant());
+      masm.pushValue(val.constant());
       break;
     default:
       MOZ_CRASH("Invalid kind");
   }
+}
 
+void CompilerFrameInfo::sync(StackValue* val) {
+  pushValue(*val);
   val->setStack();
 }
 
@@ -64,6 +67,11 @@ void CompilerFrameInfo::syncStack(uint32_t uses) {
   MOZ_ASSERT(uses <= stackDepth());
 
   uint32_t depth = stackDepth() - uses;
+  if (deferSync_) {
+    while (depth > 0 && stack[depth - 1].kind() != StackValue::Register) {
+      depth--;
+    }
+  }
 
   for (uint32_t i = 0; i < depth; i++) {
     StackValue* current = &stack[i];

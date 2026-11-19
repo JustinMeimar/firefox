@@ -76,15 +76,15 @@ static void PopICFrameRegs(MacroAssembler& masm) {
 
 Address CacheRegisterAllocator::addressOf(MacroAssembler& masm,
                                           BaselineFrameSlot slot) const {
-  uint32_t offset =
-      stackPushed_ + GetICStackValueOffset() + slot.slot() * sizeof(JS::Value);
+  uint32_t offset = stackPushed_ + (inlined_ ? 0 : GetICStackValueOffset()) +
+                    slot.slot() * sizeof(JS::Value);
   return Address(masm.getStackPointer(), offset);
 }
 BaseValueIndex CacheRegisterAllocator::addressOf(MacroAssembler& masm,
                                                  Register argcReg,
                                                  BaselineFrameSlot slot) const {
-  uint32_t offset =
-      stackPushed_ + GetICStackValueOffset() + slot.slot() * sizeof(JS::Value);
+  uint32_t offset = stackPushed_ + (inlined_ ? 0 : GetICStackValueOffset()) +
+                    slot.slot() * sizeof(JS::Value);
   return BaseValueIndex(masm.getStackPointer(), argcReg, offset);
 }
 
@@ -92,9 +92,12 @@ BaseValueIndex CacheRegisterAllocator::addressOf(MacroAssembler& masm,
 BaselineCacheIRCompiler::BaselineCacheIRCompiler(JSContext* cx,
                                                  TempAllocator& alloc,
                                                  const CacheIRWriter& writer,
-                                                 uint32_t stubDataOffset)
-    : CacheIRCompiler(cx, alloc, writer, stubDataOffset, Mode::Baseline,
-                      StubFieldPolicy::Address),
+                                                 uint32_t stubDataOffset,
+                                                 MacroAssembler* externalMasm)
+    : CacheIRCompiler(
+          cx, alloc, writer, stubDataOffset, Mode::Baseline,
+          externalMasm ? StubFieldPolicy::Constant : StubFieldPolicy::Address,
+          externalMasm),
       makesGCCalls_(false) {}
 
 // AutoStubFrame methods
@@ -184,6 +187,7 @@ AutoStubFrame::~AutoStubFrame() { MOZ_ASSERT(!compiler.enteredStubFrame_); }
 bool BaselineCacheIRCompiler::makesGCCalls() const { return makesGCCalls_; }
 
 Address BaselineCacheIRCompiler::stubAddress(uint32_t offset) const {
+  MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Address);
   return Address(ICStubReg, stubDataOffset_ + offset);
 }
 
@@ -242,29 +246,9 @@ JitCode* BaselineCacheIRCompiler::compile() {
 
   perfSpewer_.startRecording();
 
-  CacheIRReader reader(writer_);
-  do {
-    CacheOp op = reader.readOp();
-    perfSpewer_.recordInstruction(masm, op);
-    bool makesGCCallsBefore = makesGCCalls_;
-    makesGCCalls_ = false;
-    switch (op) {
-#define DEFINE_OP(op, ...)                 \
-  case CacheOp::op:                        \
-    if (!emit##op(reader)) return nullptr; \
-    break;
-      CACHE_IR_OPS(DEFINE_OP)
-#undef DEFINE_OP
-
-      default:
-        MOZ_CRASH("Invalid op");
-    }
-    if (ICTraceEnabled()) {
-      ICTraceBaselineOp(op, makesGCCalls_);
-    }
-    makesGCCalls_ |= makesGCCallsBefore;
-    allocator.nextOp();
-  } while (reader.more());
+  if (!emitOps()) {
+    return nullptr;
+  }
 
   MOZ_ASSERT(!enteredStubFrame_);
   allocator.discardStack(masm);
@@ -303,6 +287,59 @@ JitCode* BaselineCacheIRCompiler::compile() {
   return newStubCode;
 }
 
+bool BaselineCacheIRCompiler::emitOps() {
+  CacheIRReader reader(writer_);
+  do {
+    CacheOp op = reader.readOp();
+    if (!allocator.inlined()) {
+      perfSpewer_.recordInstruction(masm, op);
+    }
+    bool makesGCCallsBefore = makesGCCalls_;
+    makesGCCalls_ = false;
+    switch (op) {
+#define DEFINE_OP(op, ...)               \
+  case CacheOp::op:                      \
+    if (!emit##op(reader)) return false; \
+    break;
+      CACHE_IR_OPS(DEFINE_OP)
+#undef DEFINE_OP
+
+      default:
+        MOZ_CRASH("Invalid op");
+    }
+    if (ICTraceEnabled()) {
+      ICTraceBaselineOp(op, makesGCCalls_);
+    }
+    makesGCCalls_ |= makesGCCallsBefore;
+    allocator.nextOp();
+  } while (reader.more());
+  return true;
+}
+
+bool BaselineCacheIRCompiler::compileInline(Label* failure) {
+  AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compileInline");
+  MOZ_ASSERT(!JitOptions.enableICFramePointers);
+
+  allocator.setInlined();
+  if (!emitOps()) {
+    return false;
+  }
+  MOZ_ASSERT(!enteredStubFrame_);
+  MOZ_ASSERT(!makesGCCalls_);
+  allocator.discardStack(masm);
+
+  Label done;
+  masm.jump(&done);
+  for (size_t i = 0; i < failurePaths.length(); i++) {
+    if (!emitFailurePath(i)) {
+      return false;
+    }
+    masm.jump(failure);
+  }
+  masm.bind(&done);
+  return true;
+}
+
 bool BaselineCacheIRCompiler::emitGuardShape(ObjOperandId objId,
                                              uint32_t shapeOffset) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
@@ -319,6 +356,18 @@ bool BaselineCacheIRCompiler::emitGuardShape(ObjOperandId objId,
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
     return false;
+  }
+
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    Shape* shape = weakShapeStubField(shapeOffset);
+    if (needSpectreMitigations) {
+      masm.branchTestObjShape(Assembler::NotEqual, obj, shape, scratch1, obj,
+                              failure->label());
+    } else {
+      masm.branchTestObjShapeNoSpectreMitigations(Assembler::NotEqual, obj,
+                                                  shape, failure->label());
+    }
+    return true;
   }
 
   Address addr(stubAddress(shapeOffset));
@@ -345,8 +394,14 @@ bool BaselineCacheIRCompiler::emitGuardProto(ObjOperandId objId,
     return false;
   }
 
-  Address addr(stubAddress(protoOffset));
   masm.loadObjProto(obj, scratch);
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.branchPtr(Assembler::NotEqual, scratch,
+                   ImmGCPtr(weakObjectStubField(protoOffset)),
+                   failure->label());
+    return true;
+  }
+  Address addr(stubAddress(protoOffset));
   masm.branchPtr(Assembler::NotEqual, addr, scratch, failure->label());
   return true;
 }
@@ -365,12 +420,21 @@ bool BaselineCacheIRCompiler::emitGuardCompartment(ObjOperandId objId,
 
   // Verify that the global wrapper is still valid, as
   // it is pre-requisite for doing the compartment check.
-  Address globalWrapper(stubAddress(globalOffset));
-  masm.loadPtr(globalWrapper, scratch);
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.movePtr(ImmGCPtr(objectStubField(globalOffset)), scratch);
+  } else {
+    masm.loadPtr(stubAddress(globalOffset), scratch);
+  }
   Address handlerAddr(scratch, ProxyObject::offsetOfHandler());
   masm.branchPtr(Assembler::Equal, handlerAddr,
                  ImmPtr(&DeadObjectProxy::singleton), failure->label());
 
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.branchTestObjCompartment(Assembler::NotEqual, obj,
+                                  compartmentStubField(compartmentOffset),
+                                  scratch, failure->label());
+    return true;
+  }
   Address addr(stubAddress(compartmentOffset));
   masm.branchTestObjCompartment(Assembler::NotEqual, obj, addr, scratch,
                                 failure->label());
@@ -386,6 +450,18 @@ bool BaselineCacheIRCompiler::emitGuardAnyClass(ObjOperandId objId,
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
     return false;
+  }
+
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    const JSClass* clasp = classStubField(claspOffset);
+    if (objectGuardNeedsSpectreMitigations(objId)) {
+      masm.branchTestObjClass(Assembler::NotEqual, obj, clasp, scratch, obj,
+                              failure->label());
+    } else {
+      masm.branchTestObjClassNoSpectreMitigations(
+          Assembler::NotEqual, obj, clasp, scratch, failure->label());
+    }
+    return true;
   }
 
   Address testAddr(stubAddress(claspOffset));
@@ -411,10 +487,17 @@ bool BaselineCacheIRCompiler::emitGuardHasProxyHandler(ObjOperandId objId,
     return false;
   }
 
+  Address handlerAddr(obj, ProxyObject::offsetOfHandler());
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.branchPtr(Assembler::NotEqual, handlerAddr,
+                   ImmPtr(proxyHandlerStubField(handlerOffset)),
+                   failure->label());
+    return true;
+  }
+
   Address testAddr(stubAddress(handlerOffset));
   masm.loadPtr(testAddr, scratch);
 
-  Address handlerAddr(obj, ProxyObject::offsetOfHandler());
   masm.branchPtr(Assembler::NotEqual, handlerAddr, scratch, failure->label());
   return true;
 }
@@ -429,6 +512,12 @@ bool BaselineCacheIRCompiler::emitGuardSpecificObject(ObjOperandId objId,
     return false;
   }
 
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.branchPtr(Assembler::NotEqual, obj,
+                   ImmGCPtr(weakObjectStubField(expectedOffset)),
+                   failure->label());
+    return true;
+  }
   Address addr(stubAddress(expectedOffset));
   masm.branchPtr(Assembler::NotEqual, addr, obj, failure->label());
   return true;
@@ -451,9 +540,15 @@ bool BaselineCacheIRCompiler::emitGuardFunctionScript(
     return false;
   }
 
-  Address addr(stubAddress(expectedOffset));
   masm.loadPrivate(Address(fun, JSFunction::offsetOfJitInfoOrScript()),
                    scratch);
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.branchPtr(Assembler::NotEqual, scratch,
+                   ImmGCPtr(weakBaseScriptStubField(expectedOffset)),
+                   failure->label());
+    return true;
+  }
+  Address addr(stubAddress(expectedOffset));
   masm.branchPtr(Assembler::NotEqual, addr, scratch, failure->label());
   return true;
 }
@@ -467,6 +562,14 @@ bool BaselineCacheIRCompiler::emitGuardSpecificAtom(StringOperandId strId,
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
     return false;
+  }
+
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    JSOffThreadAtom* atom = &stringStubField(expectedOffset)->asOffThreadAtom();
+    LiveRegisterSet volatileRegs = liveVolatileRegs();
+    volatileRegs.takeUnchecked(scratch);
+    masm.guardSpecificAtom(str, atom, scratch, volatileRegs, failure->label());
+    return true;
   }
 
   Address atomAddr(stubAddress(expectedOffset));
@@ -522,6 +625,11 @@ bool BaselineCacheIRCompiler::emitGuardSpecificSymbol(SymbolOperandId symId,
     return false;
   }
 
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.branchPtr(Assembler::NotEqual, sym,
+                   ImmGCPtr(symbolStubField(expectedOffset)), failure->label());
+    return true;
+  }
   Address addr(stubAddress(expectedOffset));
   masm.branchPtr(Assembler::NotEqual, addr, sym, failure->label());
   return true;
@@ -532,19 +640,39 @@ bool BaselineCacheIRCompiler::emitGuardSpecificValue(ValOperandId valId,
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
   ValueOperand val = allocator.useValueRegister(masm, valId);
 
+  Maybe<Value> expected;
+  Maybe<AutoScratchRegister> maybeScratch;
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    expected.emplace(valueStubField(expectedOffset));
+    if (expected->isNaN()) {
+      maybeScratch.emplace(allocator, masm);
+    }
+  }
+
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
     return false;
   }
 
-  Address addr(stubAddress(expectedOffset));
-  masm.branchTestValue(Assembler::NotEqual, addr, val, failure->label());
+  if (expected && expected->isNaN()) {
+    masm.branchTestNaNValue(Assembler::NotEqual, val, *maybeScratch,
+                            failure->label());
+  } else if (expected) {
+    masm.branchTestValue(Assembler::NotEqual, val, *expected, failure->label());
+  } else {
+    Address addr(stubAddress(expectedOffset));
+    masm.branchTestValue(Assembler::NotEqual, addr, val, failure->label());
+  }
   return true;
 }
 
 bool BaselineCacheIRCompiler::emitLoadValueResult(uint32_t valOffset) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
   AutoOutputRegister output(*this);
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.moveValue(valueStubField(valOffset), output.valueReg());
+    return true;
+  }
   masm.loadValue(stubAddress(valOffset), output.valueReg());
   return true;
 }
@@ -553,6 +681,10 @@ bool BaselineCacheIRCompiler::emitUncheckedLoadWeakValueResult(
     uint32_t valOffset) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
   AutoOutputRegister output(*this);
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.moveValue(weakValueStubField(valOffset), output.valueReg());
+    return true;
+  }
   masm.loadValue(stubAddress(valOffset), output.valueReg());
   return true;
 }
@@ -563,6 +695,11 @@ bool BaselineCacheIRCompiler::emitUncheckedLoadWeakObjectResult(
   AutoOutputRegister output(*this);
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
 
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.moveValue(ObjectValue(*weakObjectStubField(objOffset)),
+                   output.valueReg());
+    return true;
+  }
   masm.loadPtr(stubAddress(objOffset), scratch);
   masm.tagValue(JSVAL_TYPE_OBJECT, scratch, output.valueReg());
   return true;
@@ -575,6 +712,11 @@ bool BaselineCacheIRCompiler::emitLoadFixedSlotResult(ObjOperandId objId,
   Register obj = allocator.useRegister(masm, objId);
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
 
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.loadValue(Address(obj, int32StubField(offsetOffset)),
+                   output.valueReg());
+    return true;
+  }
   masm.load32(stubAddress(offsetOffset), scratch);
   masm.loadValue(BaseIndex(obj, scratch, TimesOne), output.valueReg());
   return true;
@@ -594,6 +736,12 @@ bool BaselineCacheIRCompiler::emitLoadDynamicSlotResult(ObjOperandId objId,
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
   AutoScratchRegister scratch2(allocator, masm);
 
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch2);
+    masm.loadValue(Address(scratch2, int32StubField(offsetOffset)),
+                   output.valueReg());
+    return true;
+  }
   masm.load32(stubAddress(offsetOffset), scratch);
   masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch2);
   masm.loadValue(BaseIndex(scratch2, scratch, TimesOne), output.valueReg());
@@ -796,6 +944,10 @@ bool BaselineCacheIRCompiler::emitLoadConstantStringResult(uint32_t strOffset) {
   AutoOutputRegister output(*this);
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
 
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.moveValue(StringValue(stringStubField(strOffset)), output.valueReg());
+    return true;
+  }
   masm.loadPtr(stubAddress(strOffset), scratch);
   masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
   return true;
@@ -914,8 +1066,11 @@ bool BaselineCacheIRCompiler::emitStoreSlotShared(bool isFixed,
     scratch2.emplace(allocator, masm);
   }
 
-  Address offsetAddr = stubAddress(offsetOffset);
-  masm.load32(offsetAddr, scratch1);
+  if (stubFieldPolicy_ == StubFieldPolicy::Constant) {
+    masm.move32(Imm32(int32StubField(offsetOffset)), scratch1);
+  } else {
+    masm.load32(stubAddress(offsetOffset), scratch1);
+  }
 
   if (isFixed) {
     BaseIndex slot(obj, scratch1, TimesOne);
