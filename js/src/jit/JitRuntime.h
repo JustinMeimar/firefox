@@ -23,6 +23,7 @@
 #include "jit/IonTypes.h"
 #include "jit/JitCode.h"
 #include "jit/JitHints.h"
+#include "jit/MonoBaseline.h"
 #include "jit/shared/Assembler-shared.h"
 #include "jit/TrampolineNatives.h"
 #include "js/AllocPolicy.h"
@@ -161,8 +162,12 @@ class JitRuntime {
   // Thunk to enter the interpreter from JIT code.
   WriteOnceData<uint32_t> interpreterStubOffset_{0};
 
-  // Thunk to continue monomorphic Baseline code in the Baseline Interpreter.
-  WriteOnceData<uint32_t> monoBaselineExitStubOffset_{0};
+  // Thunks to which stubs called by monomorphic Baseline code jump when they
+  // fail, to continue in the Baseline Interpreter.
+  mozilla::EnumeratedArray<MonoOperands, WriteOnceData<uint32_t>,
+                           size_t(MonoOperands::Count)>
+      monoStubExitOffsets_;
+  WriteOnceData<uint32_t> monoStubFailOffset_{0};
 
   // Thunk to convert the value in R0 to int32 if it's a double.
   // Note: this stub treats -0 as +0 and may clobber R1.scratchReg().
@@ -249,7 +254,7 @@ class JitRuntime {
 
   void generateLazyLinkStub(MacroAssembler& masm);
   void generateInterpreterStub(MacroAssembler& masm);
-  void generateMonoBaselineExitStub(MacroAssembler& masm);
+  void generateMonoStubExits(MacroAssembler& masm);
   void generateDoubleToInt32ValueStub(MacroAssembler& masm);
   void generateProfilerExitFrameTailStub(MacroAssembler& masm,
                                          Label* profilerExitTail);
@@ -451,8 +456,11 @@ class JitRuntime {
   TrampolinePtr interpreterStub() const {
     return trampolineCode(interpreterStubOffset_);
   }
-  TrampolinePtr monoBaselineExitStub() const {
-    return trampolineCode(monoBaselineExitStubOffset_);
+  TrampolinePtr monoStubExit(MonoOperands operands) const {
+    return trampolineCode(monoStubExitOffsets_[operands]);
+  }
+  TrampolinePtr monoStubFail() const {
+    return trampolineCode(monoStubFailOffset_);
   }
 
   TrampolinePtr getDoubleToInt32ValueStub() const {

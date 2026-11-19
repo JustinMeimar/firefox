@@ -271,7 +271,6 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
   MOZ_ASSERT(!script->hasBaselineScript());
 
   if (JitOptions.baselineMono && !compileDebugInstrumentation() &&
-      !JitOptions.enableICFramePointers &&
       !runtime->geckoProfiler().enabled() &&
       !script->jitScript()->monoFailed() &&
       !IsRealmIndependentBaselineCode(script) && !script->isGenerator() &&
@@ -322,15 +321,6 @@ bool BaselineCompiler::compileImpl() {
 
   perfSpewer_.recordOffset(masm, "OOLPostBarrierSlot");
   emitOutOfLinePostBarrierSlot();
-
-  if (!handler.monoExits().empty()) {
-    perfSpewer_.recordOffset(masm, "MonoExits");
-    TrampolinePtr exitStub = runtime->jitRuntime()->monoBaselineExitStub();
-    for (const auto& exit : handler.monoExits()) {
-      masm.bind(exit.label);
-      EmitMonoExit(masm, exit.operands, exit.pcOffset, exitStub);
-    }
-  }
 
   perfSpewer_.endRecording();
 
@@ -396,8 +386,8 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
     baselineScript->setHasDebugInstrumentation();
   }
 
-  if (!handler.monoExits().empty()) {
-    baselineScript->setIsMono(handler.releaseInlinedStubs());
+  if (handler.hasMonoStubs()) {
+    baselineScript->setIsMono(handler.releaseMonoStubs());
   }
 
   // If BytecodeAnalysis indicated that we should disable Ion or inlining,
@@ -750,9 +740,8 @@ void BaselineCompilerHandler::createAllocSites() {
 }
 
 template <>
-bool BaselineCompilerCodeGen::emitInlinedIC(uint32_t entryIndex,
-                                            bool* inlined) {
-  *inlined = false;
+bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex, bool* emitted) {
+  *emitted = false;
 
   JSScript* script = handler.script();
   ICStub* firstStub =
@@ -761,44 +750,49 @@ bool BaselineCompilerCodeGen::emitInlinedIC(uint32_t entryIndex,
     return true;
   }
   ICCacheIRStub* stub = firstStub->toCacheIRStub();
-  CacheKind kind = stub->stubInfo()->kind();
 
   if (frame.stackDepth() > handler.opStackDepth()) {
     return true;
   }
   uint32_t popped = handler.opStackDepth() - frame.stackDepth();
-  mozilla::Maybe<MonoOperands> operands = MonoOperandsFor(kind, popped);
+  mozilla::Maybe<MonoOperands> operands =
+      MonoOperandsFor(stub->stubInfo()->kind(), popped);
   if (!operands) {
     return true;
   }
   frame.assertSyncedStack();
 
-  void* mem = handler.alloc().allocate(sizeof(Label));
-  if (!mem) {
-    return false;
+  // The copy needs the alloc sites the stub gets when Baseline compiles.
+  if (BytecodeOpCanHaveAllocSite(JSOp(*handler.pc()))) {
+    ICScript* icScript = script->jitScript()->icScript();
+    gc::AutoMarkingLock lock(script->zone(), icScript->markingLock());
+    CreateAllocSitesForICChain(script, entryIndex, lock);
   }
-  Label* failure = new (mem) Label();
-  InlinedStub* inlinedStub;
-  if (!EmitInlinedStub(handler.monoCx(), masm, handler.alloc(), stub, kind,
-                       failure, &inlinedStub)) {
-    return false;
-  }
-  if (!inlinedStub) {
-    return true;
-  }
-  handler.addInlinedStub(inlinedStub);
+
   uint32_t pcOffset = script->pcToOffset(handler.pc());
-  if (!handler.addMonoExit(failure, pcOffset, *operands)) {
+  bool oom;
+  MonoStub* monoStub =
+      MonoStub::New(handler.monoCx(), stub, pcOffset, *operands, &oom);
+  if (!monoStub) {
+    return !oom;
+  }
+  handler.addMonoStub(monoStub);
+
+  masm.movePtr(ImmPtr(monoStub->stub()), ICStubReg);
+  CodeOffset returnOffset;
+  EmitCallIC(masm, &returnOffset);
+  if (!handler.retAddrEntries().emplaceBack(pcOffset, RetAddrEntry::Kind::IC,
+                                            returnOffset)) {
     return false;
   }
-  *inlined = true;
+  *emitted = true;
   return true;
 }
 
 template <>
-bool BaselineInterpreterCodeGen::emitInlinedIC(uint32_t entryIndex,
-                                               bool* inlined) {
-  MOZ_CRASH("Unexpected inlined IC in the Baseline Interpreter");
+bool BaselineInterpreterCodeGen::emitMonoIC(uint32_t entryIndex,
+                                            bool* emitted) {
+  MOZ_CRASH("Unexpected mono IC in the Baseline Interpreter");
 }
 
 template <>
@@ -831,11 +825,11 @@ bool BaselineCompilerCodeGen::emitNextIC() {
   }
 
   if (handler.monoCx()) {
-    bool inlined;
-    if (!emitInlinedIC(entryIndex, &inlined)) {
+    bool emitted;
+    if (!emitMonoIC(entryIndex, &emitted)) {
       return false;
     }
-    if (inlined) {
+    if (emitted) {
       return true;
     }
   }

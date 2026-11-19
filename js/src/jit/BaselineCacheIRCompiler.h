@@ -169,16 +169,13 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
 
   BaselineICPerfSpewer perfSpewer_;
 
-  [[nodiscard]] bool emitOps();
-
  public:
   BaselineICPerfSpewer& perfSpewer() { return perfSpewer_; }
 
   friend class AutoStubFrame;
 
   BaselineCacheIRCompiler(JSContext* cx, TempAllocator& alloc,
-                          const CacheIRWriter& writer, uint32_t stubDataOffset,
-                          MacroAssembler* externalMasm = nullptr);
+                          const CacheIRWriter& writer, uint32_t stubDataOffset);
 
   [[nodiscard]] bool init(CacheKind kind);
 
@@ -186,10 +183,6 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
   void callVM(MacroAssembler& masm);
 
   JitCode* compile();
-
-  // Emits the stub inline in Baseline code, with ICStubReg pointing to its
-  // stub data. Failures restore the inputs and jump to failure.
-  [[nodiscard]] bool compileInline(Label* failure);
 
   bool makesGCCalls() const;
   bool localTracingSlots() const { return localTracingSlots_; }

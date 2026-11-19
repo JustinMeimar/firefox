@@ -1219,6 +1219,24 @@ void CacheIRWriter::copyStubData(uint8_t* dest) const {
   }
 }
 
+void jit::CopyCacheIRStubData(const CacheIRStubInfo* info, const uint8_t* src,
+                              uint8_t* dest) {
+  for (uint32_t field = 0;; field++) {
+    StubField::Type type = info->fieldType(field);
+    if (type == StubField::Type::Limit) {
+      break;
+    }
+    MOZ_ASSERT(type != StubField::Type::ICScript);
+    if (StubField::sizeIsWord(type)) {
+      InitWordStubField(type, dest, *reinterpret_cast<const uintptr_t*>(src));
+    } else {
+      InitInt64StubField(type, dest, *reinterpret_cast<const uint64_t*>(src));
+    }
+    src += StubField::sizeInBytes(type);
+    dest += StubField::sizeInBytes(type);
+  }
+}
+
 ICCacheIRStub* ICCacheIRStub::clone(JSRuntime* rt, ICStubSpace& newSpace,
                                     ICScriptHandling icScriptHandling) {
   const CacheIRStubInfo* info = stubInfo();
@@ -1279,9 +1297,9 @@ ICCacheIRStub* ICCacheIRStub::clone(JSRuntime* rt, ICStubSpace& newSpace,
 template <typename T>
 static inline bool ShouldTraceWeakEdgeInStub(JSTracer* trc) {
   if constexpr (std::is_same_v<T, IonICStub> ||
-                std::is_same_v<T, InlinedStub>) {
-    // 'Weak' edges are traced strongly in IonICs and stubs inlined in Baseline
-    // code.
+                std::is_same_v<T, MonoStubCopy>) {
+    // 'Weak' edges are traced strongly in IonICs and stubs copied for
+    // monomorphic Baseline code.
     return true;
   } else {
     static_assert(std::is_same_v<T, ICCacheIRStub>);
@@ -1443,7 +1461,7 @@ template void jit::TraceCacheIRStub(JSTracer* trc, ICCacheIRStub* stub,
 
 template void jit::TraceCacheIRStub(JSTracer* trc, IonICStub* stub,
                                     const CacheIRStubInfo* stubInfo);
-template void jit::TraceCacheIRStub(JSTracer* trc, InlinedStub* stub,
+template void jit::TraceCacheIRStub(JSTracer* trc, MonoStubCopy* stub,
                                     const CacheIRStubInfo* stubInfo);
 
 template <typename T>

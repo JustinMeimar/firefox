@@ -5,88 +5,29 @@
 #include "jit/MonoBaseline.h"
 
 #include "gc/GC.h"
-#include "jit/BaselineCacheIRCompiler.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
-#include "jit/CacheIRCloner.h"
+#include "jit/CacheIR.h"
 #include "jit/CacheIRCompiler.h"
-#include "jit/CacheIRWriter.h"
 #include "jit/Invalidation.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitScript.h"
 #include "jit/JSJitFrameIter.h"
-#include "jit/Linker.h"
 #include "jit/MacroAssembler.h"
-#include "js/UniquePtr.h"
+#include "jit/SharedICHelpers.h"
+#include "util/Memory.h"
 #include "vm/HelperThreads.h"
 
 #include "jit/JitScript-inl.h"
 #include "jit/JSJitFrameIter-inl.h"
 #include "jit/MacroAssembler-inl.h"
+#include "jit/SharedICHelpers-inl.h"
 #include "vm/JSScript-inl.h"
 
 using namespace js;
 using namespace js::jit;
-
-InlinedStub* InlinedStub::New(const CacheIRWriter& writer, CacheKind kind) {
-  UniquePtr<CacheIRStubInfo> stubInfo(CacheIRStubInfo::New(
-      kind, ICStubEngine::Baseline,
-      /* makesGCCalls = */ false, stubDataOffset(), writer));
-  if (!stubInfo) {
-    return nullptr;
-  }
-  uint8_t* mem =
-      js_pod_malloc<uint8_t>(stubDataOffset() + writer.stubDataSize());
-  if (!mem) {
-    return nullptr;
-  }
-  auto* stub = new (mem) InlinedStub(stubInfo.release());
-  writer.copyStubData(mem + stubDataOffset());
-  return stub;
-}
-
-void InlinedStub::Destroy(InlinedStub* stub) {
-  js_free(stub->stubInfo_);
-  stub->~InlinedStub();
-  js_free(stub);
-}
-
-void InlinedStub::DestroyList(InlinedStub* list) {
-  while (list) {
-    InlinedStub* next = list->next();
-    Destroy(list);
-    list = next;
-  }
-}
-
-void InlinedStub::trace(JSTracer* trc) {
-  TraceCacheIRStub(trc, this, stubInfo_);
-}
-
-void js::jit::TraceInlinedStubs(JSTracer* trc, InlinedStub* list) {
-  for (InlinedStub* stub = list; stub; stub = stub->next()) {
-    stub->trace(trc);
-  }
-}
-
-bool js::jit::IsMonomorphicScript(JSScript* script) {
-  ICScript* icScript = script->jitScript()->icScript();
-  bool hasStub = false;
-  for (size_t i = 0; i < icScript->numICEntries(); i++) {
-    if (icScript->icEntry(i).firstStub()->isFallback()) {
-      continue;
-    }
-    const ICState& state = icScript->fallbackStub(i)->state();
-    if (state.mode() != ICState::Mode::Specialized ||
-        state.numOptimizedStubs() != 1 || state.hasFailures()) {
-      return false;
-    }
-    hasStub = true;
-  }
-  return hasStub;
-}
 
 mozilla::Maybe<MonoOperands> js::jit::MonoOperandsFor(CacheKind kind,
                                                       uint32_t popped) {
@@ -128,7 +69,6 @@ mozilla::Maybe<MonoOperands> js::jit::MonoOperandsFor(CacheKind kind,
     case CacheKind::GetElemSuper:
     case CacheKind::CheckPrivateField:
     case CacheKind::CloseIter:
-    case CacheKind::Call:
       return mozilla::Nothing();
     default:
       break;
@@ -139,105 +79,130 @@ mozilla::Maybe<MonoOperands> js::jit::MonoOperandsFor(CacheKind kind,
   return mozilla::Nothing();
 }
 
-// Whether a stub field holds a nursery cell, which would need the store buffer
-// to point into the stub data.
-static bool HasNurseryStubField(const CacheIRWriter& writer) {
-  for (size_t i = 0; i < writer.numStubFields(); i++) {
-    const StubField& field = writer.stubField(i);
-    switch (field.type()) {
+// Whether the stub can be copied: it holds no nursery cell, which would need
+// the store buffer to point into the copy, and no ICScript, which trial
+// inlining may free.
+static bool CanCopyStub(ICCacheIRStub* stub) {
+  const CacheIRStubInfo* info = stub->stubInfo();
+  const uint8_t* data = stub->stubDataStart();
+  size_t offset = 0;
+  for (uint32_t field = 0;; field++) {
+    StubField::Type type = info->fieldType(field);
+    switch (type) {
+      case StubField::Type::Limit:
+        return true;
+      case StubField::Type::ICScript:
+        return false;
       case StubField::Type::JSObject:
       case StubField::Type::WeakObject:
       case StubField::Type::String:
-      case StubField::Type::Symbol:
-        if (IsInsideNursery(reinterpret_cast<gc::Cell*>(field.asWord()))) {
-          return true;
+      case StubField::Type::Symbol: {
+        auto* cell =
+            reinterpret_cast<gc::Cell*>(info->getStubRawWord(data, offset));
+        if (IsInsideNursery(cell)) {
+          return false;
         }
         break;
+      }
       case StubField::Type::Value:
       case StubField::Type::WeakValue: {
-        Value v = Value::fromRawBits(field.asInt64());
+        Value v = Value::fromRawBits(info->getStubRawInt64(data, offset));
         if (v.isGCThing() && IsInsideNursery(v.toGCThing())) {
-          return true;
+          return false;
         }
         break;
       }
       default:
         break;
     }
+    offset += StubField::sizeInBytes(type);
   }
-  return false;
 }
 
-bool js::jit::EmitInlinedStub(JSContext* cx, MacroAssembler& masm,
-                              TempAllocator& alloc, ICCacheIRStub* stub,
-                              CacheKind kind, Label* failure,
-                              InlinedStub** inlined) {
-  *inlined = nullptr;
-  const CacheIRStubInfo* stubInfo = stub->stubInfo();
-  if (stubInfo->makesGCCalls()) {
-    return true;
+MonoStub* MonoStub::New(JSContext* cx, ICCacheIRStub* stub, uint32_t pcOffset,
+                        MonoOperands operands, bool* oom) {
+  *oom = false;
+  if (!CanCopyStub(stub)) {
+    return nullptr;
   }
 
-  CacheIRWriter writer(cx);
-  for (size_t i = 0; i < NumInputsForCacheKind(kind); i++) {
-    writer.setInputOperandId(i);
-  }
-  CacheIRReader reader(stubInfo);
-  CacheIRCloner cloner(stub);
-  while (reader.more()) {
-    cloner.cloneOp(reader.readOp(), reader, writer);
-  }
-  if (writer.failed() || HasNurseryStubField(writer)) {
-    return true;
-  }
+  const CacheIRStubInfo* info = stub->stubInfo();
 
   // The copy holds weak edges strongly, so mark them if we are marking.
   Zone* zone = cx->zone();
   if (zone->needsMarkingBarrier()) {
-    TraceWeakCacheIRStub(zone->barrierTracer(), stub, stubInfo);
+    TraceWeakCacheIRStub(zone->barrierTracer(), stub, info);
   }
 
-  InlinedStub* newStub = InlinedStub::New(writer, kind);
-  if (!newStub) {
-    return false;
+  size_t bytes = offsetOfStub() + info->stubDataOffset() + info->stubDataSize();
+  uint8_t* mem = js_pod_malloc<uint8_t>(bytes);
+  if (!mem) {
+    *oom = true;
+    return nullptr;
   }
-  masm.movePtr(ImmPtr(newStub), ICStubReg);
-  BaselineCacheIRCompiler compiler(cx, alloc, writer,
-                                   InlinedStub::stubDataOffset(), &masm);
-  if (!compiler.init(kind) || !compiler.compileInline(failure)) {
-    InlinedStub::Destroy(newStub);
-    return false;
-  }
-  *inlined = newStub;
-  return true;
+  auto* monoStub = new (mem)
+      MonoStub(Exit{cx->runtime()->jitRuntime()->monoStubExit(operands).value,
+                    pcOffset, false});
+  auto* copy = new (monoStub->stub()) ICCacheIRStub(stub->jitCode(), info);
+  CopyCacheIRStubData(info, stub->stubDataStart(), copy->stubDataStart());
+  copy->setNext(reinterpret_cast<ICStub*>(&monoStub->exit_));
+  return monoStub;
 }
 
-void js::jit::EmitMonoExit(MacroAssembler& masm, MonoOperands operands,
-                           uint32_t pcOffset, TrampolinePtr exitStub) {
-  Address top(masm.getStackPointer(), 0);
-  switch (operands) {
-    case MonoOperands::InPlace:
-      break;
-    case MonoOperands::R0:
-      masm.pushValue(R0);
-      break;
-    case MonoOperands::R0R1:
-      masm.pushValue(R0);
-      masm.pushValue(R1);
-      break;
-    case MonoOperands::SetProp:
-      masm.storeValue(R0, top);
-      masm.pushValue(R1);
-      break;
-    case MonoOperands::SetElem:
-      masm.loadValue(top, R2);
-      masm.storeValue(R0, top);
-      masm.pushValue(R1);
-      masm.pushValue(R2);
-      break;
+void MonoStub::DestroyList(MonoStub* list) {
+  while (list) {
+    MonoStub* next = list->next_;
+    js_free(list);
+    list = next;
   }
-  masm.move32(Imm32(pcOffset), ICStubReg);
-  masm.jump(exitStub);
+}
+
+void MonoStub::TraceList(JSTracer* trc, MonoStub* list) {
+  for (MonoStub* monoStub = list; monoStub; monoStub = monoStub->next_) {
+    if (monoStub->exit_.discarded) {
+      continue;
+    }
+    ICCacheIRStub* stub = monoStub->stub();
+    JitCode* code = stub->jitCode();
+    TraceManuallyBarrieredEdge(trc, &code, "mono-stub-code");
+    TraceCacheIRStub(trc, reinterpret_cast<MonoStubCopy*>(stub),
+                     stub->stubInfo());
+  }
+}
+
+void MonoStub::DiscardList(JSRuntime* rt, MonoStub* list) {
+  uint8_t* fail = rt->jitRuntime()->monoStubFail().value;
+  for (MonoStub* monoStub = list; monoStub; monoStub = monoStub->next_) {
+    monoStub->stub()->setStubCode(fail);
+    monoStub->exit_.discarded = true;
+  }
+}
+
+void js::jit::DiscardMonoStubs(JSRuntime* rt, JSScript* script) {
+  BaselineScript* baselineScript = script->baselineScript();
+  MOZ_ASSERT(baselineScript->isMono());
+  baselineScript->discardMonoStubs(rt);
+  if (!baselineScript->monoFailed()) {
+    baselineScript->setMonoFailed();
+    script->updateJitCodeRaw(rt);
+  }
+}
+
+bool js::jit::IsMonomorphicScript(JSScript* script) {
+  ICScript* icScript = script->jitScript()->icScript();
+  bool hasStub = false;
+  for (size_t i = 0; i < icScript->numICEntries(); i++) {
+    if (icScript->icEntry(i).firstStub()->isFallback()) {
+      continue;
+    }
+    const ICState& state = icScript->fallbackStub(i)->state();
+    if (state.mode() != ICState::Mode::Specialized ||
+        state.numOptimizedStubs() != 1 || state.hasFailures()) {
+      return false;
+    }
+    hasStub = true;
+  }
+  return hasStub;
 }
 
 uint8_t* js::jit::MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset) {
@@ -263,10 +228,6 @@ uint8_t* js::jit::MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset) {
       .value;
 }
 
-bool js::jit::HasFailedMonoBaseline(JSScript* script) {
-  return script->hasBaselineScript() && script->baselineScript()->monoFailed();
-}
-
 static bool RunsBaselineCode(JSContext* cx, JSScript* script) {
   for (JitActivationIterator iter(cx); !iter.done(); ++iter) {
     for (OnlyJSJitFrameIter frames(iter); !frames.done(); ++frames) {
@@ -281,7 +242,7 @@ static bool RunsBaselineCode(JSContext* cx, JSScript* script) {
 }
 
 bool js::jit::MaybeDiscardFailedMonoBaseline(JSContext* cx, JSScript* script) {
-  MOZ_ASSERT(HasFailedMonoBaseline(script));
+  MOZ_ASSERT(script->baselineScript()->monoFailed());
   if (RunsBaselineCode(cx, script)) {
     return false;
   }
@@ -295,11 +256,51 @@ bool js::jit::MaybeDiscardFailedMonoBaseline(JSContext* cx, JSScript* script) {
   return true;
 }
 
-void JitRuntime::generateMonoBaselineExitStub(MacroAssembler& masm) {
-  AutoCreatedBy acb(masm, "JitRuntime::generateMonoBaselineExitStub");
-  monoBaselineExitStubOffset_ = startTrampolineCode(masm);
+void JitRuntime::generateMonoStubExits(MacroAssembler& masm) {
+  AutoCreatedBy acb(masm, "JitRuntime::generateMonoStubExits");
 
-  // ICStubReg holds the pc offset of the op.
+  // The code of discarded stubs, which fails right away.
+  monoStubFailOffset_ = startTrampolineCode(masm);
+  EmitStubGuardFailure(masm);
+
+  // Stubs jump to these with the return address of their call on the stack,
+  // their inputs restored and the stub register pointing to the exit.
+  Label exit;
+  for (size_t i = 0; i < size_t(MonoOperands::Count); i++) {
+    monoStubExitOffsets_[MonoOperands(i)] = startTrampolineCode(masm);
+#ifndef JS_USE_LINK_REGISTER
+    masm.addToStackPtr(Imm32(sizeof(void*)));
+#endif
+    Address top(masm.getStackPointer(), 0);
+    switch (MonoOperands(i)) {
+      case MonoOperands::InPlace:
+        break;
+      case MonoOperands::R0:
+        masm.pushValue(R0);
+        break;
+      case MonoOperands::R0R1:
+        masm.pushValue(R0);
+        masm.pushValue(R1);
+        break;
+      case MonoOperands::SetProp:
+        masm.storeValue(R0, top);
+        masm.pushValue(R1);
+        break;
+      case MonoOperands::SetElem:
+        masm.loadValue(top, R2);
+        masm.storeValue(R0, top);
+        masm.pushValue(R1);
+        masm.pushValue(R2);
+        break;
+      case MonoOperands::Count:
+        MOZ_CRASH();
+    }
+    masm.load32(Address(ICStubReg, MonoStub::offsetOfExitPcOffset()),
+                ICStubReg);
+    masm.jump(&exit);
+  }
+
+  masm.bind(&exit);
   AllocatableGeneralRegisterSet regs(GeneralRegisterSet::Volatile());
   regs.takeUnchecked(ICStubReg);
   Register frame = regs.takeAny();

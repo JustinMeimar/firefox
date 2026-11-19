@@ -197,6 +197,7 @@ class ICStub {
     return JitCode::FromExecutable(stubCode_);
   }
   bool hasJitCode() { return !!stubCode_; }
+  void setStubCode(uint8_t* code) { stubCode_ = code; }
 #else  // !ENABLE_PORTABLE_BASELINE_INTERP
   JitCode* jitCode() { return nullptr; }
   bool hasJitCode() { return false; }

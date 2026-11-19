@@ -37,7 +37,7 @@ namespace jit {
 
 class BaselineFrame;
 class ExceptionBailoutInfo;
-class InlinedStub;
+class MonoStub;
 class IonCompileTask;
 class JitActivation;
 class JSJitFrameIter;
@@ -197,8 +197,8 @@ class alignas(uintptr_t) BaselineScript final
   // An ion compilation that is ready, but isn't linked yet.
   MainThreadData<IonCompileTask*> pendingIonCompileTask_{nullptr};
 
-  // The stub data of the stubs that monomorphic code inlines.
-  InlinedStub* inlinedStubs_ = nullptr;
+  // The stubs that monomorphic code calls.
+  MonoStub* monoStubs_ = nullptr;
 
   // Baseline Interpreter can enter Baseline Compiler code at this address. This
   // is right after the warm-up counter check in the prologue.
@@ -319,12 +319,13 @@ class alignas(uintptr_t) BaselineScript final
     return flags_ & HAS_DEBUG_INSTRUMENTATION;
   }
 
-  void setIsMono(InlinedStub* inlinedStubs) {
+  void setIsMono(MonoStub* monoStubs) {
     flags_ |= IS_MONO;
-    inlinedStubs_ = inlinedStubs;
+    monoStubs_ = monoStubs;
   }
   bool isMono() const { return flags_ & IS_MONO; }
   void setMonoFailed() { flags_ |= MONO_FAILED; }
+  void discardMonoStubs(JSRuntime* rt);
   bool monoFailed() const { return flags_ & MONO_FAILED; }
 
   uint8_t* warmUpCheckPrologueAddr() const {

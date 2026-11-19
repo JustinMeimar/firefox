@@ -15,6 +15,7 @@
 #include "jit/Invalidation.h"
 #include "jit/JitScript.h"
 #include "jit/JitZone.h"
+#include "jit/MonoBaseline.h"
 #include "js/shadow/Zone.h"  // JS::shadow::Zone
 #include "vm/Runtime.h"
 #include "vm/Time.h"
@@ -346,6 +347,12 @@ void Zone::forceDiscardJitCode(JS::GCContext* gcx,
         if (jitScript->hasBaselineScript() &&
             !jitScript->icScript()->active()) {
           jit::FinishDiscardBaselineScript(gcx, script);
+        }
+
+        // Monomorphic code runs copies of the stubs we are discarding.
+        if (jitScript->hasBaselineScript() &&
+            jitScript->baselineScript()->isMono()) {
+          jit::DiscardMonoStubs(gcx->runtime(), script);
         }
 
 #ifdef JS_CACHEIR_SPEW

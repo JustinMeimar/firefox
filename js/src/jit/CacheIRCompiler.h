@@ -331,10 +331,6 @@ class MOZ_RAII CacheRegisterAllocator {
   // The number of bytes pushed on the native stack.
   uint32_t stackPushed_;
 
-  // Whether the code is emitted inline in Baseline code, with no return
-  // address on the stack.
-  bool inlined_ = false;
-
 #ifdef DEBUG
   // Flag used to assert individual CacheIR instructions don't allocate
   // registers after calling addFailurePath.
@@ -461,9 +457,6 @@ class MOZ_RAII CacheRegisterAllocator {
 
   uint32_t stackPushed() const { return stackPushed_; }
   void setStackPushed(uint32_t pushed) { stackPushed_ = pushed; }
-
-  bool inlined() const { return inlined_; }
-  void setInlined() { inlined_ = true; }
 
   // Allocates a new register.
   Register allocateRegister(MacroAssembler& masm);
@@ -745,8 +738,7 @@ class MOZ_RAII CacheIRCompiler {
 
   JSContext* cx_;
   const CacheIRWriter& writer_;
-  mozilla::Maybe<StackMacroAssembler> ownMasm_;
-  MacroAssembler& masm;
+  StackMacroAssembler masm;
 
   CacheRegisterAllocator allocator;
   Vector<FailurePath, 4, SystemAllocPolicy> failurePaths;
@@ -768,25 +760,13 @@ class MOZ_RAII CacheIRCompiler {
 
   StubFieldPolicy stubFieldPolicy_;
 
-  static MacroAssembler& InitMasm(mozilla::Maybe<StackMacroAssembler>& own,
-                                  MacroAssembler* external, JSContext* cx,
-                                  TempAllocator& alloc) {
-    if (external) {
-      return *external;
-    }
-    own.emplace(cx, alloc);
-    return *own;
-  }
-
-  // Code is emitted to externalMasm if it is given.
   CacheIRCompiler(JSContext* cx, TempAllocator& alloc,
                   const CacheIRWriter& writer, uint32_t stubDataOffset,
-                  Mode mode, StubFieldPolicy policy,
-                  MacroAssembler* externalMasm = nullptr)
+                  Mode mode, StubFieldPolicy policy)
       : enteredStubFrame_(false),
         cx_(cx),
         writer_(writer),
-        masm(InitMasm(ownMasm_, externalMasm, cx, alloc)),
+        masm(cx, alloc),
         allocator(writer_),
         liveFloatRegs_(FloatRegisterSet::All()),
         mode_(mode),
@@ -1440,6 +1420,10 @@ class CacheIRStubInfo {
 
 template <typename T>
 void TraceCacheIRStub(JSTracer* trc, T* stub, const CacheIRStubInfo* stubInfo);
+
+// Initializes the stub data at dest with the fields of the stub data at src.
+void CopyCacheIRStubData(const CacheIRStubInfo* info, const uint8_t* src,
+                         uint8_t* dest);
 
 template <typename T>
 bool TraceWeakCacheIRStub(JSTracer* trc, T* stub,

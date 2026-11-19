@@ -884,18 +884,22 @@ BaselineScript* BaselineScript::Copy(JSContext* cx, BaselineScript* bs) {
 
 void BaselineScript::trace(JSTracer* trc) {
   TraceEdge(trc, &method_, "baseline-method");
-  TraceInlinedStubs(trc, inlinedStubs_);
+  MonoStub::TraceList(trc, monoStubs_);
+}
+
+void BaselineScript::discardMonoStubs(JSRuntime* rt) {
+  MonoStub::DiscardList(rt, monoStubs_);
 }
 
 void BaselineScript::Destroy(JS::GCContext* gcx, BaselineScript* script) {
   MOZ_ASSERT(!script->hasPendingIonCompileTask());
 
-  if (script->inlinedStubs_) {
+  if (script->monoStubs_) {
     Zone* zone = script->method_->zone();
     if (zone->needsMarkingBarrier()) {
-      TraceInlinedStubs(zone->barrierTracer(), script->inlinedStubs_);
+      MonoStub::TraceList(zone->barrierTracer(), script->monoStubs_);
     }
-    InlinedStub::DestroyList(script->inlinedStubs_);
+    MonoStub::DestroyList(script->monoStubs_);
   }
 
   // Trigger write barrier since we are destroying this outside GC.
