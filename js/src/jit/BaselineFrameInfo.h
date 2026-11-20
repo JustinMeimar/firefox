@@ -155,9 +155,9 @@ class StackValue {
     kind_ = ThisSlot;
     knownType_ = JSVAL_TYPE_UNKNOWN;
   }
-  void setStack() {
+  void setStack(JSValueType knownType = JSVAL_TYPE_UNKNOWN) {
     kind_ = Stack;
-    knownType_ = JSVAL_TYPE_UNKNOWN;
+    knownType_ = knownType;
   }
 };
 
@@ -304,6 +304,21 @@ class CompilerFrameInfo : public FrameInfo {
     sv->setStack();
   }
 
+  // Forgets the types of the stack values, as at jump targets, where other
+  // paths join.
+  void clearKnownTypes();
+
+  // Forgets the type of the synced stack value after code stored another
+  // value to it.
+  void clearKnownType(int32_t depth) {
+    MOZ_ASSERT(peek(depth)->kind() == StackValue::Stack);
+    peek(depth)->setStack();
+  }
+
+  // Moves the synced stack value at one depth to another, shifting the values
+  // in between, after code moved them that way.
+  void moveSyncedValue(int32_t from, int32_t to);
+
   Address addressOfLocal(size_t local) const {
     MOZ_ASSERT(local < nlocals());
     return FrameInfo::addressOfLocal(local);
@@ -353,6 +368,8 @@ class CompilerFrameInfo : public FrameInfo {
     return peek(depth)->hasKnownType(type);
   }
 
+  const StackValue& peekValue(int32_t depth) const { return *peek(depth); }
+
   mozilla::Maybe<Value> knownStackValue(int32_t depth) const {
     StackValue* val = peek(depth);
     if (val->kind() == StackValue::Constant) {
@@ -392,6 +409,7 @@ class InterpreterFrameInfo : public FrameInfo {
   bool stackValueHasKnownType(int32_t depth, JSValueType type) const {
     return false;
   }
+  void clearKnownType(int32_t depth) {}
 
   mozilla::Maybe<Value> knownStackValue(int32_t depth) const {
     return mozilla::Nothing();

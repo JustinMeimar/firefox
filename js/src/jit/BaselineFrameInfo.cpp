@@ -34,6 +34,26 @@ bool CompilerFrameInfo::init(TempAllocator& alloc) {
   return true;
 }
 
+void CompilerFrameInfo::clearKnownTypes() {
+  for (size_t i = 0; i < stackDepth(); i++) {
+    if (stack[i].kind() == StackValue::Stack) {
+      stack[i].setStack();
+    }
+  }
+}
+
+void CompilerFrameInfo::moveSyncedValue(int32_t from, int32_t to) {
+  StackValue* source = peek(from);
+  StackValue* dest = peek(to);
+  MOZ_ASSERT(source->kind() == StackValue::Stack);
+  MOZ_ASSERT(dest->kind() == StackValue::Stack);
+  if (source < dest) {
+    std::rotate(source, source + 1, dest + 1);
+  } else {
+    std::rotate(dest, source, source + 1);
+  }
+}
+
 void CompilerFrameInfo::pushValue(const StackValue& val) {
   switch (val.kind()) {
     case StackValue::Stack:
@@ -60,7 +80,7 @@ void CompilerFrameInfo::pushValue(const StackValue& val) {
 
 void CompilerFrameInfo::sync(StackValue* val) {
   pushValue(*val);
-  val->setStack();
+  val->setStack(val->hasKnownType() ? val->knownType() : JSVAL_TYPE_UNKNOWN);
 }
 
 void CompilerFrameInfo::syncStack(uint32_t uses) {
@@ -140,7 +160,8 @@ void CompilerFrameInfo::popRegsAndSync(uint32_t uses) {
       StackValue* val = peek(-2);
       if (val->kind() == StackValue::Register && val->reg() == R1) {
         masm.moveValue(R1, ValueOperand(R2));
-        val->setRegister(R2);
+        val->setRegister(
+            R2, val->hasKnownType() ? val->knownType() : JSVAL_TYPE_UNKNOWN);
       }
       popValue(R1);
       popValue(R0);

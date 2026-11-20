@@ -2389,21 +2389,24 @@ bool BaselineCompilerCodeGen::emit_Pick() {
   //     after : A B D E C
 
   // First, move value at -(amount + 1) into R0.
-  int32_t depth = -(GET_INT8(handler.pc()) + 1);
-  masm.loadValue(frame.addressOfStackValue(depth), R0);
+  int32_t pickDepth = -(GET_INT8(handler.pc()) + 1);
+  masm.loadValue(frame.addressOfStackValue(pickDepth), R0);
 
   // Move the other values down.
-  depth++;
-  for (; depth < 0; depth++) {
+  for (int32_t depth = pickDepth + 1; depth < 0; depth++) {
     Address source = frame.addressOfStackValue(depth);
     Address dest = frame.addressOfStackValue(depth - 1);
     masm.loadValue(source, R1);
     masm.storeValue(R1, dest);
   }
+  frame.moveSyncedValue(pickDepth, -1);
 
   // Push R0.
+  const StackValue& picked = frame.peekValue(-1);
+  JSValueType type =
+      picked.hasKnownType() ? picked.knownType() : JSVAL_TYPE_UNKNOWN;
   frame.pop();
-  frame.push(R0);
+  frame.push(R0, type);
   return true;
 }
 
@@ -2458,6 +2461,7 @@ bool BaselineCompilerCodeGen::emit_Unpick() {
   // Store R0 under the nth value.
   Address dest = frame.addressOfStackValue(depth);
   masm.storeValue(R0, dest);
+  frame.moveSyncedValue(-1, depth);
   return true;
 }
 
@@ -3807,6 +3811,7 @@ bool BaselineCodeGen<Handler>::emitSetElemSuper(bool strict) {
   frame.popRegsAndSync(1);
   masm.loadValue(frame.addressOfStackValue(-3), R1);
   masm.storeValue(R0, frame.addressOfStackValue(-3));
+  frame.clearKnownType(-3);
 
   prepareVMCall();
 
@@ -4064,6 +4069,7 @@ bool BaselineCodeGen<Handler>::emitSetPropSuper(bool strict) {
   frame.popRegsAndSync(1);
   masm.loadValue(frame.addressOfStackValue(-2), R1);
   masm.storeValue(R0, frame.addressOfStackValue(-2));
+  frame.clearKnownType(-2);
 
   prepareVMCall();
 
@@ -5898,6 +5904,7 @@ bool BaselineCodeGen<Handler>::emit_MaybeExtractAwaitValue() {
   }
 
   masm.storeValue(R0, frame.addressOfStackValue(-2));
+  frame.clearKnownType(-2);
   masm.bind(&cantExtract);
 
   return true;
@@ -7386,6 +7393,7 @@ bool BaselineCompiler::emitBody() {
       // Fully sync the stack if there are incoming jumps.
       frame.syncStack(0);
       frame.setStackDepth(info->stackDepth);
+      frame.clearKnownTypes();
       masm.bind(handler.labelOf(handler.pc()));
     } else if (MOZ_UNLIKELY(compileDebugInstrumentation())) {
       // Also fully sync the stack if the debugger is enabled.
