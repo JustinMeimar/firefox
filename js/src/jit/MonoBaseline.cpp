@@ -435,7 +435,7 @@ void JitRuntime::generateMonoStubExits(MacroAssembler& masm) {
   }
 
   masm.bind(&exit);
-  monoStubExitTailOffset_ = exit.offset();
+  monoStubExitTailOffset_ = uint32_t(exit.offset());
   AllocatableGeneralRegisterSet regs(GeneralRegisterSet::Volatile());
   regs.takeUnchecked(ICStubReg);
   Register frame = regs.takeAny();
