@@ -534,7 +534,7 @@ class BaselineCompilerHandler {
 
   void setOpStart(const CompilerFrameInfo& frame) {
     opStackDepth_ = frame.stackDepth();
-    if (!monoCx_) {
+    if (!monoCx_ || !BytecodeOpHasIC(JSOp(*pc_))) {
       return;
     }
     numOpOperands_ = std::min(opStackDepth_, uint32_t(MonoMaxStackInputs));
