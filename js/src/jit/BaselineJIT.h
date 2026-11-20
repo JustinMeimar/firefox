@@ -207,6 +207,10 @@ class alignas(uintptr_t) BaselineScript final
   // off.
   uint32_t monoStatsId_ = 0;
 
+  // How many times discarding this code after it failed was refused because a
+  // frame still runs it. Counted only when diagnostics are on.
+  uint32_t monoDiscardsBlocked_ = 0;
+
   // Baseline Interpreter can enter Baseline Compiler code at this address. This
   // is right after the warm-up counter check in the prologue.
   uint32_t warmUpCheckPrologueOffset_ = 0;
@@ -340,6 +344,7 @@ class alignas(uintptr_t) BaselineScript final
 
   void setMonoStatsId(uint32_t id) { monoStatsId_ = id; }
   uint32_t monoStatsId() const { return monoStatsId_; }
+  uint32_t addMonoDiscardBlocked() { return ++monoDiscardsBlocked_; }
 
   uint8_t* warmUpCheckPrologueAddr() const {
     return method_->raw() + warmUpCheckPrologueOffset_;

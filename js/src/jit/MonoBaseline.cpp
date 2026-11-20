@@ -4,6 +4,8 @@
 
 #include "jit/MonoBaseline.h"
 
+#include <bit>
+
 #include "gc/GC.h"
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/BaselineFrame.h"
@@ -417,6 +419,30 @@ uint8_t* js::jit::MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset) {
       .value;
 }
 
+static void LogDiscardBlocked(JSContext* cx, JSScript* script) {
+  BaselineScript* baselineScript = script->baselineScript();
+  uint32_t blocked = baselineScript->addMonoDiscardBlocked();
+  if (!std::has_single_bit(blocked)) {
+    return;
+  }
+  uint32_t monoFrames = 0;
+  uint32_t jitFrames = 0;
+  for (JitActivationIterator iter(cx); !iter.done(); ++iter) {
+    for (OnlyJSJitFrameIter frames(iter); !frames.done(); ++frames) {
+      const JSJitFrameIter& frame = frames.frame();
+      if (!frame.isScripted()) {
+        continue;
+      }
+      jitFrames++;
+      if (frame.isBaselineJS() && frame.script() == script &&
+          !frame.baselineFrame()->runningInInterpreter()) {
+        monoFrames++;
+      }
+    }
+  }
+  LogMonoDiscardBlocked(script, baselineScript, blocked, monoFrames, jitFrames);
+}
+
 static bool RunsBaselineCode(JSContext* cx, JSScript* script) {
   for (JitActivationIterator iter(cx); !iter.done(); ++iter) {
     for (OnlyJSJitFrameIter frames(iter); !frames.done(); ++frames) {
@@ -433,6 +459,9 @@ static bool RunsBaselineCode(JSContext* cx, JSScript* script) {
 bool js::jit::MaybeDiscardFailedMonoBaseline(JSContext* cx, JSScript* script) {
   MOZ_ASSERT(script->baselineScript()->monoFailed());
   if (RunsBaselineCode(cx, script)) {
+    if (script->baselineScript()->monoStatsId()) {
+      LogDiscardBlocked(cx, script);
+    }
     return false;
   }
   if (script->hasIonScript()) {

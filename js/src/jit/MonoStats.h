@@ -111,6 +111,9 @@ void LogMonoExit(JSScript* script, BaselineScript* baselineScript,
                  uint32_t pcOffset);
 void LogMonoScriptEvent(const char* event, JSScript* script,
                         BaselineScript* baselineScript);
+void LogMonoDiscardBlocked(JSScript* script, BaselineScript* baselineScript,
+                           uint32_t blocked, uint32_t monoFrames,
+                           uint32_t jitFrames);
 void LogMonoAttach(JSScript* script, ICScript* icScript,
                    ICFallbackStub* fallback, ICCacheIRStub* stub, bool folded);
 

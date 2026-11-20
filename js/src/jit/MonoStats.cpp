@@ -387,6 +387,22 @@ void js::jit::LogMonoScriptEvent(const char* event, JSScript* script,
   WriteMonoEvent(buf);
 }
 
+void js::jit::LogMonoDiscardBlocked(JSScript* script,
+                                    BaselineScript* baselineScript,
+                                    uint32_t blocked, uint32_t monoFrames,
+                                    uint32_t jitFrames) {
+  if (!MonoStatsEnabled()) {
+    return;
+  }
+  MonoEventBuffer buf;
+  buf.printf("{\"ev\":\"blocked\",\"t\":%" PRId64 ",\"id\":%u,",
+             MonoStatsNowNs(), baselineScript->monoStatsId());
+  PrintMonoScript(buf, script);
+  buf.printf(",\"n\":%u,\"frames\":%u,\"depth\":%u}", blocked, monoFrames,
+             jitFrames);
+  WriteMonoEvent(buf);
+}
+
 void js::jit::LogMonoAttach(JSScript* script, ICScript* icScript,
                             ICFallbackStub* fallback, ICCacheIRStub* stub,
                             bool folded) {
