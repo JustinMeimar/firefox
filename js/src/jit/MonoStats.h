@@ -88,6 +88,8 @@ struct MonoStatsIC {
   uint32_t start;
   uint32_t end;
   uint32_t exitBytes;
+  uint32_t emitNs;
+  uint32_t exitNs;
   MonoICDisposition disposition;
   MonoNoInline noInline;
   CacheOp noInlineOp;
@@ -103,9 +105,12 @@ uint64_t* NewMonoCounters(size_t count, int64_t* index);
 
 uint32_t NextMonoCompileId();
 
+int64_t MonoStatsNowNs();
+
 void LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
                     MonoScriptReason reason, int64_t countersIndex,
                     uint32_t exitsStart, uint32_t exitsEnd,
+                    int64_t codegenNs, int64_t linkNs,
                     mozilla::Span<const MonoStatsIC> ics);
 void LogMonoExit(JSScript* script, BaselineScript* baselineScript,
                  uint32_t pcOffset);

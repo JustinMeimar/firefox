@@ -327,6 +327,7 @@ bool BaselineCompiler::compileImpl() {
   }
 
   handler.initMonoStats();
+  int64_t codegenStart = handler.monoStats() ? MonoStatsNowNs() : 0;
   if (handler.monoStats()) {
     int64_t index;
     uint64_t* counters = NewMonoCounters(
@@ -363,6 +364,7 @@ bool BaselineCompiler::compileImpl() {
     MonoStatsIC* statsIC = handler.monoStatsICs().begin();
     for (const auto& exit : handler.monoExits()) {
       uint32_t exitStart = masm.currentOffset();
+      int64_t exitStartNs = handler.monoStats() ? MonoStatsNowNs() : 0;
       if (!handler.addMonoInlineStub(exit.stubOffset, masm.currentOffset())) {
         return false;
       }
@@ -400,6 +402,7 @@ bool BaselineCompiler::compileImpl() {
           statsIC++;
         }
         statsIC->exitBytes = masm.currentOffset() - exitStart;
+        statsIC->exitNs = uint32_t(MonoStatsNowNs() - exitStartNs);
         statsIC++;
       }
     }
@@ -408,10 +411,15 @@ bool BaselineCompiler::compileImpl() {
 
   perfSpewer_.endRecording();
 
+  if (handler.monoStats()) {
+    handler.setMonoCodegenNs(MonoStatsNowNs() - codegenStart);
+  }
+
   return true;
 }
 
 bool BaselineCompiler::finishCompile(JSContext* cx) {
+  int64_t linkStart = handler.monoStats() ? MonoStatsNowNs() : 0;
   Rooted<JSScript*> script(cx, handler.script());
   bool isRealmIndependentJitCodeShared = IsRealmIndependentBaselineCode(script);
 
@@ -489,7 +497,8 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
     baselineScript->setMonoStatsId(NextMonoCompileId());
     LogMonoCompile(script, baselineScript.get(), handler.monoReason(),
                    handler.monoCountersIndex(), handler.monoExitsStart(),
-                   handler.monoExitsEnd(), handler.monoStatsICs());
+                   handler.monoExitsEnd(), handler.monoCodegenNs(),
+                   MonoStatsNowNs() - linkStart, handler.monoStatsICs());
     LogMonoBaselineCode(script, baselineScript.get(), handler.monoExitsStart(),
                         handler.monoExitsEnd(), handler.monoStatsICs());
   }
@@ -996,14 +1005,18 @@ bool BaselineCompilerCodeGen::emitNextIC() {
                     .start = masm.currentOffset(),
                     .end = 0,
                     .exitBytes = 0,
+                    .emitNs = 0,
+                    .exitNs = 0,
                     .disposition = MonoICDisposition::Chain,
                     .noInline = MonoNoInline::None,
                     .noInlineOp = CacheOp(0)};
+  int64_t emitStart = handler.monoStats() ? MonoStatsNowNs() : 0;
   auto recordStats = [&]() {
     if (!handler.monoStats()) {
       return true;
     }
     stats.end = masm.currentOffset();
+    stats.emitNs = uint32_t(MonoStatsNowNs() - emitStart);
     return handler.monoStatsICs().append(stats);
   };
 

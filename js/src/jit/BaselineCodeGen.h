@@ -401,6 +401,7 @@ class BaselineCompilerHandler {
   int64_t monoCountersIndex_ = -1;
   uint32_t monoExitsStart_ = 0;
   uint32_t monoExitsEnd_ = 0;
+  int64_t monoCodegenNs_ = 0;
 
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
 
@@ -514,6 +515,8 @@ class BaselineCompilerHandler {
   }
   uint64_t* monoCounters() const { return monoCounters_; }
   int64_t monoCountersIndex() const { return monoCountersIndex_; }
+  void setMonoCodegenNs(int64_t ns) { monoCodegenNs_ = ns; }
+  int64_t monoCodegenNs() const { return monoCodegenNs_; }
   void setMonoExitsRange(uint32_t start, uint32_t end) {
     monoExitsStart_ = start;
     monoExitsEnd_ = end;

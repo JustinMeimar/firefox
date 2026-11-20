@@ -58,7 +58,7 @@ static int gMonoCodeMap = -1;
 #endif
 static mozilla::Atomic<uint32_t> gMonoCompileId(0);
 
-static int64_t MonoStatsNowNs() {
+int64_t js::jit::MonoStatsNowNs() {
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
   return int64_t(now.tv_sec) * 1000000000 + now.tv_nsec;
@@ -311,6 +311,7 @@ static void PrintMonoStubOps(MonoEventBuffer& buf, ICCacheIRStub* stub) {
 void js::jit::LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
                              MonoScriptReason reason, int64_t countersIndex,
                              uint32_t exitsStart, uint32_t exitsEnd,
+                             int64_t codegenNs, int64_t linkNs,
                              mozilla::Span<const MonoStatsIC> ics) {
   if (!MonoStatsEnabled()) {
     return;
@@ -329,6 +330,7 @@ void js::jit::LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
              code->raw(), code->instructionsSize());
   buf.printf(",\"exits\":[%u,%u],\"ctr\":%" PRId64, exitsStart, exitsEnd,
              countersIndex);
+  buf.printf(",\"ns\":[%" PRId64 ",%" PRId64 "]", codegenNs, linkNs);
   buf.printf(",\"bc\":");
   buf.hex(script->code(), script->length());
 
@@ -347,11 +349,11 @@ void js::jit::LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
                ic.noInline == MonoNoInline::Op ? int(ic.noInlineOp) : -1);
     buf.printf("%d,", int(state.hasFailures()));
     if (firstStub->isFallback()) {
-      buf.printf("\"\"]");
+      buf.printf("\"\"");
     } else {
       PrintMonoStubOps(buf, firstStub->toCacheIRStub());
-      buf.printf("]");
     }
+    buf.printf(",%u,%u]", ic.emitNs, ic.exitNs);
     first = false;
   }
   buf.printf("]}");
