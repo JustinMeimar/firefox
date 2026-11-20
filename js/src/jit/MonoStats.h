@@ -35,6 +35,8 @@ enum class CacheOp : uint16_t;
 //   discard, destroy: failed monomorphic code was discarded, Baseline code was
 //     freed.
 //   attach: an IC stub was attached or folded into a folded stub.
+// Stub CacheIR is written as dot-separated ops, each its CacheOp index and,
+// after a colon, its argument bytes in hex.
 // JS_MONO_COUNTS=1, with JS_MONO_STATS, also has Baseline code count its
 //   entries and the runs of each of its IC ops in DIR/mono-PID.counters, an
 //   array of uint64_t indexed from the ctr field of compile events.

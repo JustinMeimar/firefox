@@ -298,7 +298,12 @@ static void PrintMonoStubOps(MonoEventBuffer& buf, ICCacheIRStub* stub) {
     CacheOp op = reader.readOp();
     buf.printf("%s%u", first ? "" : ".", unsigned(op));
     first = false;
-    reader.skip(CacheIROpInfos[size_t(op)].argLength);
+    uint32_t argLength = CacheIROpInfos[size_t(op)].argLength;
+    const uint8_t* args = reader.currentPosition();
+    for (uint32_t i = 0; i < argLength; i++) {
+      buf.printf("%s%02x", i ? "" : ":", args[i]);
+    }
+    reader.skip(argLength);
   }
   buf.printf("\"");
 }
