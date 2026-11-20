@@ -44,6 +44,7 @@
 #include "jit/Linker.h"
 #include "jit/LIR.h"
 #include "jit/Lowering.h"
+#include "jit/MonoStats.h"
 #include "jit/PerfSpewer.h"
 #include "jit/RangeAnalysis.h"
 #include "jit/ScalarReplacement.h"
@@ -204,7 +205,9 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   rangeRecorder.recordOffset("Trampoline: Interpreter");
 
   JitSpew(JitSpew_Codegen, "# Emitting mono stub exits");
+  uint32_t monoExitsStart = masm.currentOffset();
   generateMonoStubExits(masm);
+  uint32_t monoExitsEnd = masm.currentOffset();
   rangeRecorder.recordOffset("Trampoline: MonoStubExits");
 
   JitSpew(JitSpew_Codegen, "# Emitting double-to-int32-value stub");
@@ -252,6 +255,10 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   }
 
   rangeRecorder.collectRangesForJitCode(trampolineCode_);
+  LogMonoCode(trampolineCode_->raw(), trampolineCode_->instructionsSize(),
+              "trampolines", "-");
+  LogMonoCode(trampolineCode_->raw() + monoExitsStart,
+              monoExitsEnd - monoExitsStart, "mono-exit-trampolines", "-");
 #ifdef MOZ_VTUNE
   vtune::MarkStub(trampolineCode_, "Trampolines");
 #endif

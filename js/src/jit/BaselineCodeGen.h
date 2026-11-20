@@ -11,6 +11,7 @@
 #include "jit/FixedList.h"
 #include "jit/MacroAssembler.h"
 #include "jit/MonoBaseline.h"
+#include "jit/MonoStats.h"
 #include "jit/PerfSpewer.h"
 
 namespace js {
@@ -206,7 +207,8 @@ class BaselineCodeGen {
   [[nodiscard]] bool emitGetAliasedDebugVar(ValueOperand dest);
 
   [[nodiscard]] bool emitNextIC();
-  [[nodiscard]] bool emitMonoIC(uint32_t entryIndex, bool* emitted);
+  [[nodiscard]] bool emitMonoIC(uint32_t entryIndex, MonoStatsIC& stats,
+                                bool* emitted);
   [[nodiscard]] bool emitInterruptCheck();
   [[nodiscard]] bool emitWarmUpCounterIncrement();
 
@@ -384,6 +386,15 @@ class BaselineCompilerHandler {
   InlinedFailureVector monoExitFailures_;
   Vector<MonoInlineStub, 0, SystemAllocPolicy> monoInlineStubs_;
 
+  // Diagnostics, see MonoStats.h.
+  bool monoStats_ = false;
+  MonoScriptReason monoReason_ = MonoScriptReason::OptionOff;
+  Vector<MonoStatsIC, 0, SystemAllocPolicy> monoStatsICs_;
+  uint64_t* monoCounters_ = nullptr;
+  int64_t monoCountersIndex_ = -1;
+  uint32_t monoExitsStart_ = 0;
+  uint32_t monoExitsEnd_ = 0;
+
   const SourceLocationIterator& sourceLocationIterAtCurrentPc() const;
 
  public:
@@ -480,6 +491,28 @@ class BaselineCompilerHandler {
   TempAllocator& alloc() const { return alloc_; }
 
   void setMono(JSContext* cx) { monoCx_ = cx; }
+
+  void initMonoStats() {
+    monoStats_ = MonoStatsEnabled() || MonoCodeMapEnabled();
+  }
+  bool monoStats() const { return monoStats_; }
+  void setMonoReason(MonoScriptReason reason) { monoReason_ = reason; }
+  MonoScriptReason monoReason() const { return monoReason_; }
+  Vector<MonoStatsIC, 0, SystemAllocPolicy>& monoStatsICs() {
+    return monoStatsICs_;
+  }
+  void setMonoCounters(uint64_t* counters, int64_t index) {
+    monoCounters_ = counters;
+    monoCountersIndex_ = index;
+  }
+  uint64_t* monoCounters() const { return monoCounters_; }
+  int64_t monoCountersIndex() const { return monoCountersIndex_; }
+  void setMonoExitsRange(uint32_t start, uint32_t end) {
+    monoExitsStart_ = start;
+    monoExitsEnd_ = end;
+  }
+  uint32_t monoExitsStart() const { return monoExitsStart_; }
+  uint32_t monoExitsEnd() const { return monoExitsEnd_; }
   JSContext* monoCx() const { return monoCx_; }
 
   void setOpStackDepth(uint32_t depth) { opStackDepth_ = depth; }

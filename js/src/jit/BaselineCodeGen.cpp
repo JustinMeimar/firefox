@@ -270,11 +270,26 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
 
   MOZ_ASSERT(!script->hasBaselineScript());
 
-  if (JitOptions.baselineMono && !compileDebugInstrumentation() &&
-      !runtime->geckoProfiler().enabled() &&
-      !script->jitScript()->monoFailed() &&
-      !IsRealmIndependentBaselineCode(script) && !script->isGenerator() &&
-      !script->isAsync() && IsMonomorphicScript(script)) {
+  MonoScriptReason reason = MonoScriptReason::Mono;
+  if (!JitOptions.baselineMono) {
+    reason = MonoScriptReason::OptionOff;
+  } else if (compileDebugInstrumentation()) {
+    reason = MonoScriptReason::Debug;
+  } else if (runtime->geckoProfiler().enabled()) {
+    reason = MonoScriptReason::Profiler;
+  } else if (script->jitScript()->monoFailed()) {
+    reason = MonoScriptReason::Failed;
+  } else if (IsRealmIndependentBaselineCode(script)) {
+    reason = MonoScriptReason::RealmIndependent;
+  } else if (script->isGenerator()) {
+    reason = MonoScriptReason::Generator;
+  } else if (script->isAsync()) {
+    reason = MonoScriptReason::Async;
+  } else if (!IsMonomorphicScript(script)) {
+    reason = MonoScriptReason::NotMonomorphic;
+  }
+  handler.setMonoReason(reason);
+  if (reason == MonoScriptReason::Mono) {
     handler.setMono(cx);
   }
 
@@ -292,6 +307,9 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
 
 MethodStatus BaselineCompiler::compileOffThread() {
   handler.setCompilingOffThread();
+  if (JitOptions.baselineMono) {
+    handler.setMonoReason(MonoScriptReason::OffThread);
+  }
   if (!compileImpl()) {
     return Method_Error;
   }
@@ -304,10 +322,22 @@ bool BaselineCompiler::compileImpl() {
 
   AutoCreatedBy acb(masm, "BaselineCompiler::compile");
 
+  handler.initMonoStats();
+  if (handler.monoStats()) {
+    int64_t index;
+    uint64_t* counters = NewMonoCounters(
+        handler.script()->jitScript()->numICEntries() + 1, &index);
+    handler.setMonoCounters(counters, index);
+  }
+
   perfSpewer_.startRecording(runtime);
   perfSpewer_.recordOffset(masm, "Prologue");
   if (!emitPrologue()) {
     return false;
+  }
+
+  if (handler.monoCounters()) {
+    masm.inc64(AbsoluteAddress(handler.monoCounters()));
   }
 
   if (!emitBody()) {
@@ -325,7 +355,10 @@ bool BaselineCompiler::compileImpl() {
   if (!handler.monoExits().empty()) {
     perfSpewer_.recordOffset(masm, "MonoExits");
     TrampolinePtr exitTail = runtime->jitRuntime()->monoStubExitTail();
+    uint32_t exitsStart = masm.currentOffset();
+    MonoStatsIC* statsIC = handler.monoStatsICs().begin();
     for (const auto& exit : handler.monoExits()) {
+      uint32_t exitStart = masm.currentOffset();
       if (!handler.addMonoInlineStub(exit.stubOffset, masm.currentOffset())) {
         return false;
       }
@@ -358,7 +391,15 @@ bool BaselineCompiler::compileImpl() {
           masm.jump(&exitLabel);
         }
       }
+      if (handler.monoStats()) {
+        while (statsIC->disposition != MonoICDisposition::Inline) {
+          statsIC++;
+        }
+        statsIC->exitBytes = masm.currentOffset() - exitStart;
+        statsIC++;
+      }
     }
+    handler.setMonoExitsRange(exitsStart, masm.currentOffset());
   }
 
   perfSpewer_.endRecording();
@@ -438,6 +479,15 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
     }
     baselineScript->setIsMono(handler.releaseMonoStubs(), inlineStubsCopy,
                               inlineStubs.length());
+  }
+
+  if (handler.monoStats()) {
+    baselineScript->setMonoStatsId(NextMonoCompileId());
+    LogMonoCompile(script, baselineScript.get(), handler.monoReason(),
+                   handler.monoCountersIndex(), handler.monoExitsStart(),
+                   handler.monoExitsEnd(), handler.monoStatsICs());
+    LogMonoBaselineCode(script, baselineScript.get(), handler.monoExitsStart(),
+                        handler.monoExitsEnd(), handler.monoStatsICs());
   }
 
   // If BytecodeAnalysis indicated that we should disable Ion or inlining,
@@ -790,8 +840,10 @@ void BaselineCompilerHandler::createAllocSites() {
 }
 
 template <>
-bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex, bool* emitted) {
+bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
+                                         MonoStatsIC& stats, bool* emitted) {
   *emitted = false;
+  stats.disposition = MonoICDisposition::Empty;
 
   JSScript* script = handler.script();
   ICStub* firstStub =
@@ -802,12 +854,14 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex, bool* emitted) {
   ICCacheIRStub* stub = firstStub->toCacheIRStub();
 
   if (frame.stackDepth() > handler.opStackDepth()) {
+    stats.disposition = MonoICDisposition::Pushed;
     return true;
   }
   uint32_t popped = handler.opStackDepth() - frame.stackDepth();
   mozilla::Maybe<MonoOperands> operands =
       MonoOperandsFor(stub->stubInfo()->kind(), popped);
   if (!operands) {
+    stats.disposition = MonoICDisposition::Operands;
     return true;
   }
   uint32_t pcOffset = script->pcToOffset(handler.pc());
@@ -819,7 +873,8 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex, bool* emitted) {
     CreateAllocSitesForICChain(script, entryIndex, lock);
   }
 
-  if (CanInlineMonoStub(stub)) {
+  stats.noInline = WhyNotInlineMonoStub(stub, &stats.noInlineOp);
+  if (stats.noInline == MonoNoInline::None) {
     uint32_t inputsStart = handler.monoExitInputs().length();
     uint32_t failuresStart = handler.monoExitFailures().length();
     uint32_t stubOffset = masm.nopPatchableToCall().offset();
@@ -834,9 +889,11 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex, bool* emitted) {
                                failuresStart, frame)) {
         return false;
       }
+      stats.disposition = MonoICDisposition::Inline;
       *emitted = true;
       return true;
     }
+    stats.noInline = MonoNoInline::Failed;
   }
 
   frame.syncStack(0);
@@ -845,6 +902,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex, bool* emitted) {
   MonoStub* monoStub =
       MonoStub::New(handler.monoCx(), stub, pcOffset, *operands, &oom);
   if (!monoStub) {
+    stats.disposition = MonoICDisposition::NoCopy;
     return !oom;
   }
   handler.addMonoStub(monoStub);
@@ -856,13 +914,14 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex, bool* emitted) {
                                             returnOffset)) {
     return false;
   }
+  stats.disposition = MonoICDisposition::Copy;
   *emitted = true;
   return true;
 }
 
 template <>
 bool BaselineInterpreterCodeGen::emitMonoIC(uint32_t entryIndex,
-                                            bool* emitted) {
+                                            MonoStatsIC& stats, bool* emitted) {
   MOZ_CRASH("Unexpected mono IC in the Baseline Interpreter");
 }
 
@@ -895,13 +954,33 @@ bool BaselineCompilerCodeGen::emitNextIC() {
     return false;
   }
 
+  if (handler.monoCounters()) {
+    masm.inc64(AbsoluteAddress(handler.monoCounters() + 1 + entryIndex));
+  }
+
+  MonoStatsIC stats{.entryIndex = entryIndex,
+                    .pcOffset = pcOffset,
+                    .start = masm.currentOffset(),
+                    .end = 0,
+                    .exitBytes = 0,
+                    .disposition = MonoICDisposition::Chain,
+                    .noInline = MonoNoInline::None,
+                    .noInlineOp = CacheOp(0)};
+  auto recordStats = [&]() {
+    if (!handler.monoStats()) {
+      return true;
+    }
+    stats.end = masm.currentOffset();
+    return handler.monoStatsICs().append(stats);
+  };
+
   if (handler.monoCx()) {
     bool emitted;
-    if (!emitMonoIC(entryIndex, &emitted)) {
+    if (!emitMonoIC(entryIndex, stats, &emitted)) {
       return false;
     }
     if (emitted) {
-      return true;
+      return recordStats();
     }
     frame.syncStack(0);
   }
@@ -919,7 +998,7 @@ bool BaselineCompilerCodeGen::emitNextIC() {
     return false;
   }
 
-  return true;
+  return recordStats();
 }
 
 template <>
@@ -7645,6 +7724,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
     if (!code) {
       return false;
     }
+    LogMonoCode(code->raw(), code->instructionsSize(), "blinterp", "-");
 
     // Register BaselineInterpreter code with the profiler's JitCode table.
     {

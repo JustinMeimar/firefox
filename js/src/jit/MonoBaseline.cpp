@@ -149,20 +149,28 @@ static bool CanInlineOp(CacheOp op) {
   }
 }
 
-bool js::jit::CanInlineMonoStub(ICCacheIRStub* stub) {
+MonoNoInline js::jit::WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op) {
   const CacheIRStubInfo* info = stub->stubInfo();
-  if (info->makesGCCalls() || !CanCopyStub(stub)) {
-    return false;
+  if (info->makesGCCalls()) {
+    return MonoNoInline::GCCalls;
+  }
+  if (!CanCopyStub(stub)) {
+    return MonoNoInline::NoCopy;
   }
   CacheIRReader reader(info);
   while (reader.more()) {
-    CacheOp op = reader.readOp();
-    if (!CanInlineOp(op)) {
-      return false;
+    *op = reader.readOp();
+    if (!CanInlineOp(*op)) {
+      return MonoNoInline::Op;
     }
-    reader.skip(CacheIROpInfos[size_t(op)].argLength);
+    reader.skip(CacheIROpInfos[size_t(*op)].argLength);
   }
-  return true;
+  return MonoNoInline::None;
+}
+
+bool js::jit::CanInlineMonoStub(ICCacheIRStub* stub) {
+  CacheOp op;
+  return WhyNotInlineMonoStub(stub, &op) == MonoNoInline::None;
 }
 
 bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
@@ -295,6 +303,9 @@ void MonoStub::DiscardList(JSRuntime* rt, MonoStub* list) {
 void js::jit::DiscardMonoStubs(JSRuntime* rt, JSScript* script) {
   BaselineScript* baselineScript = script->baselineScript();
   MOZ_ASSERT(baselineScript->isMono());
+  if (baselineScript->monoStatsId()) {
+    LogMonoScriptEvent("invalidate", script, baselineScript);
+  }
   baselineScript->discardMonoStubs(rt);
   if (!baselineScript->monoFailed()) {
     baselineScript->setMonoFailed();
@@ -326,6 +337,10 @@ uint8_t* js::jit::MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset) {
   JitScript* jitScript = script->jitScript();
   BaselineScript* baselineScript = script->baselineScript();
   MOZ_ASSERT(baselineScript->isMono());
+
+  if (baselineScript->monoStatsId()) {
+    LogMonoExit(script, baselineScript, pcOffset);
+  }
 
   if (!baselineScript->monoFailed()) {
     baselineScript->setMonoFailed();
@@ -364,6 +379,9 @@ bool js::jit::MaybeDiscardFailedMonoBaseline(JSContext* cx, JSScript* script) {
     Invalidate(cx, script, /* resetUses = */ false);
   }
   CancelOffThreadIonCompile(script);
+  if (script->baselineScript()->monoStatsId()) {
+    LogMonoScriptEvent("discard", script, script->baselineScript());
+  }
   BaselineScript* baselineScript =
       script->jitScript()->clearBaselineScript(cx->gcContext(), script);
   BaselineScript::Destroy(cx->gcContext(), baselineScript);

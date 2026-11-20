@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "jit/CacheIRCompiler.h"
+#include "jit/MonoStats.h"
 #include "util/Memory.h"
 
 class JSScript;
@@ -160,6 +161,9 @@ struct MonoInlineStub {
 
 // Whether the stub can be emitted inline.
 bool CanInlineMonoStub(ICCacheIRStub* stub);
+
+// Why the stub can't be emitted inline, with the op that can't be in *op.
+MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
 
 // Emits the stub inline, appending its original input locations and its
 // failure paths for emitting out of line. Returns false on OOM, with *inlined

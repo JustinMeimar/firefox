@@ -203,6 +203,10 @@ class alignas(uintptr_t) BaselineScript final
   MonoInlineStub* monoInlineStubs_ = nullptr;
   size_t numMonoInlineStubs_ = 0;
 
+  // Identifies this code in diagnostics, see MonoStats.h. Zero when they are
+  // off.
+  uint32_t monoStatsId_ = 0;
+
   // Baseline Interpreter can enter Baseline Compiler code at this address. This
   // is right after the warm-up counter check in the prologue.
   uint32_t warmUpCheckPrologueOffset_ = 0;
@@ -333,6 +337,9 @@ class alignas(uintptr_t) BaselineScript final
   void setMonoFailed() { flags_ |= MONO_FAILED; }
   void discardMonoStubs(JSRuntime* rt);
   bool monoFailed() const { return flags_ & MONO_FAILED; }
+
+  void setMonoStatsId(uint32_t id) { monoStatsId_ = id; }
+  uint32_t monoStatsId() const { return monoStatsId_; }
 
   uint8_t* warmUpCheckPrologueAddr() const {
     return method_->raw() + warmUpCheckPrologueOffset_;

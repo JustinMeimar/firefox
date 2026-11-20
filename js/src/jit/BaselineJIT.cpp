@@ -28,6 +28,7 @@
 #include "jit/JitSpewer.h"
 #include "jit/MacroAssembler.h"
 #include "jit/MonoBaseline.h"
+#include "jit/MonoStats.h"
 #include "js/friend/StackLimits.h"  // js::AutoCheckRecursionLimit
 #include "vm/Interpreter.h"
 
@@ -902,6 +903,10 @@ void BaselineScript::discardMonoStubs(JSRuntime* rt) {
 
 void BaselineScript::Destroy(JS::GCContext* gcx, BaselineScript* script) {
   MOZ_ASSERT(!script->hasPendingIonCompileTask());
+
+  if (script->monoStatsId_) {
+    LogMonoScriptEvent("destroy", nullptr, script);
+  }
 
   if (script->monoStubs_) {
     Zone* zone = script->method_->zone();

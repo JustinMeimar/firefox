@@ -16,6 +16,7 @@
 #include "jit/JitRuntime.h"
 #include "jit/JitZone.h"
 #include "jit/Linker.h"
+#include "jit/MonoStats.h"
 #include "jit/MoveEmitter.h"
 #include "jit/RegExpStubConstants.h"
 #include "jit/SharedICHelpers.h"
@@ -2291,6 +2292,8 @@ static bool LookupOrCompileStub(JSContext* cx, CacheKind kind,
     }
 
     comp.perfSpewer().saveProfile(code, name);
+    LogMonoCode(code->raw(), code->instructionsSize(), "stub",
+                name ? name : CacheKindNames[size_t(kind)]);
 
     // Allocate the shared CacheIRStubInfo. Note that the
     // putBaselineCacheIRStubCode call below will transfer ownership
@@ -2483,6 +2486,8 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
                            : outerScript;
       }
       cx->zone()->jitZone()->clearStubFoldingBailoutData();
+      LogMonoAttach(outerScript, icScript, stub,
+                    icEntry->firstStub()->toCacheIRStub(), /* folded = */ true);
       if (stub->usedByTranspiler() && hadGuardMultipleShapesBailout) {
         if (owningScript->hasIonScript()) {
           owningScript->ionScript()->resetNumFixableBailouts();
@@ -2547,6 +2552,7 @@ ICAttachResult js::jit::AttachBaselineCacheIRStubLocked(
   }
 
   stub->addNewStub(icEntry, newStub);
+  LogMonoAttach(outerScript, icScript, stub, newStub, /* folded = */ false);
 
   JSScript* owningScript = icScript->isInlined()
                                ? icScript->inliningRoot()->owningScript()

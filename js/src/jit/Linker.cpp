@@ -5,6 +5,7 @@
 #include "jit/Linker.h"
 
 #include "jit/JitZone.h"
+#include "jit/MonoStats.h"
 #include "util/Memory.h"
 
 #include "gc/StoreBuffer-inl.h"
@@ -69,6 +70,11 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
   masm.link(code);
   if (masm.embedsNurseryPointers()) {
     cx->runtime()->gc.storeBuffer().putWholeCell(code);
+  }
+  if (MonoCodeMapEnabled()) {
+    static const char* const kinds[] = {"ion", "baseline", "regexp", "other"};
+    LogMonoCode(code->raw(), code->instructionsSize(), "code",
+                kinds[size_t(kind)]);
   }
   return code;
 }
