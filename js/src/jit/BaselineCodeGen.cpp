@@ -289,8 +289,10 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
     reason = MonoScriptReason::NotMonomorphic;
   }
   handler.setMonoReason(reason);
-  if (reason == MonoScriptReason::Mono) {
-    handler.setMono(cx);
+  if (reason == MonoScriptReason::Mono &&
+      !handler.setMono(cx, script->jitScript()->icScript()->numICEntries())) {
+    ReportOutOfMemory(cx);
+    return Method_Error;
   }
 
   if (!compileImpl()) {

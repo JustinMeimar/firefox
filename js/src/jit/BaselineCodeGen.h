@@ -498,7 +498,14 @@ class BaselineCompilerHandler {
 
   TempAllocator& alloc() const { return alloc_; }
 
-  void setMono(JSContext* cx) { monoCx_ = cx; }
+  [[nodiscard]] bool setMono(JSContext* cx, size_t numICEntries) {
+    monoCx_ = cx;
+    return monoExits_.reserve(numICEntries) &&
+           monoExitValues_.reserve(numICEntries) &&
+           monoExitInputs_.reserve(2 * numICEntries) &&
+           monoExitFailures_.reserve(2 * numICEntries) &&
+           monoInlineStubs_.reserve(numICEntries);
+  }
 
   void initMonoStats() {
     monoStats_ = MonoStatsEnabled() || MonoCodeMapEnabled();
