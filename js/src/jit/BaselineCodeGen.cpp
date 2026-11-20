@@ -322,6 +322,10 @@ bool BaselineCompiler::compileImpl() {
 
   AutoCreatedBy acb(masm, "BaselineCompiler::compile");
 
+  if (handler.monoCx() && !frame.initSlotTypes(handler.alloc())) {
+    return false;
+  }
+
   handler.initMonoStats();
   if (handler.monoStats()) {
     int64_t index;
@@ -873,30 +877,41 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
     CreateAllocSitesForICChain(script, entryIndex, lock);
   }
 
+  // The inputs of a stub whose op takes operands off the stack are the top
+  // stack values before the op, from the deepest, which its exit puts back.
+  size_t numStackInputs = 0;
+  if (*operands != MonoOperands::InPlace) {
+    numStackInputs = NumInputsForCacheKind(stub->stubInfo()->kind());
+    MOZ_ASSERT(numStackInputs <= handler.numOpOperands());
+  }
+  auto stackInput = [&](size_t i) -> const StackValue& {
+    return handler.opOperand(int32_t(i) - int32_t(numStackInputs));
+  };
+  JSValueType inputTypes[MonoMaxStackInputs];
+  for (size_t i = 0; i < numStackInputs; i++) {
+    const StackValue& input = stackInput(i);
+    inputTypes[i] =
+        input.hasKnownType() ? input.knownType() : JSVAL_TYPE_UNKNOWN;
+  }
+  mozilla::Span<JSValueType> stackInputTypes(inputTypes, numStackInputs);
+
+  // Once the stub ran, the locals, arguments and |this| it took as inputs
+  // have the types it guarded until they are stored to.
+  auto narrowSlotTypes = [&]() {
+    NarrowMonoStubInputTypes(stub->stubInfo(), stackInputTypes);
+    for (size_t i = 0; i < numStackInputs; i++) {
+      frame.setSlotType(stackInput(i), inputTypes[i]);
+    }
+  };
+
   stats.noInline = WhyNotInlineMonoStub(stub, &stats.noInlineOp);
   if (stats.noInline == MonoNoInline::None) {
-    // The inputs of a stub whose op takes operands off the stack are the top
-    // stack values before the op, from the deepest, which its exit puts back.
-    JSValueType inputTypes[MonoMaxStackInputs];
-    size_t numInputTypes = 0;
-    if (*operands != MonoOperands::InPlace) {
-      numInputTypes = NumInputsForCacheKind(stub->stubInfo()->kind());
-      MOZ_ASSERT(numInputTypes <= handler.numOpOperands());
-      for (size_t i = 0; i < numInputTypes; i++) {
-        const StackValue& operand =
-            handler.opOperand(int32_t(i) - int32_t(numInputTypes));
-        inputTypes[i] =
-            operand.hasKnownType() ? operand.knownType() : JSVAL_TYPE_UNKNOWN;
-      }
-    }
-
     uint32_t inputsStart = handler.monoExitInputs().length();
     uint32_t failuresStart = handler.monoExitFailures().length();
     uint32_t stubOffset = masm.nopPatchableToCall().offset();
     bool inlined;
     if (!EmitInlinedMonoStub(handler.monoCx(), masm, handler.alloc(), stub,
-                             mozilla::Span(inputTypes, numInputTypes),
-                             handler.monoExitInputs(),
+                             stackInputTypes, handler.monoExitInputs(),
                              handler.monoExitFailures(), &inlined)) {
       return false;
     }
@@ -905,6 +920,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
                                failuresStart, frame)) {
         return false;
       }
+      narrowSlotTypes();
       stats.disposition = MonoICDisposition::Inline;
       *emitted = true;
       return true;
@@ -930,6 +946,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
                                             returnOffset)) {
     return false;
   }
+  narrowSlotTypes();
   stats.disposition = MonoICDisposition::Copy;
   *emitted = true;
   return true;
@@ -4702,6 +4719,7 @@ bool BaselineCompilerCodeGen::emit_SetLocal() {
   frame.syncStack(1);
 
   uint32_t local = GET_LOCALNO(handler.pc());
+  frame.storeLocalType(local);
   frame.storeStackValue(-1, frame.addressOfLocal(local), R0);
   return true;
 }
@@ -4730,6 +4748,7 @@ bool BaselineCompilerCodeGen::emitFormalArgAccess(JSOp op) {
     } else {
       // See the comment in emit_SetLocal.
       frame.syncStack(1);
+      frame.storeArgType(arg);
       frame.storeStackValue(-1, frame.addressOfArg(arg), R0);
     }
 

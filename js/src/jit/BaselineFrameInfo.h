@@ -141,19 +141,19 @@ class StackValue {
     new (&data.reg) ValueOperand(val);
     knownType_ = knownType;
   }
-  void setLocalSlot(uint32_t slot) {
+  void setLocalSlot(uint32_t slot, JSValueType knownType = JSVAL_TYPE_UNKNOWN) {
     kind_ = LocalSlot;
     new (&data.localSlot) uint32_t(slot);
-    knownType_ = JSVAL_TYPE_UNKNOWN;
+    knownType_ = knownType;
   }
-  void setArgSlot(uint32_t slot) {
+  void setArgSlot(uint32_t slot, JSValueType knownType = JSVAL_TYPE_UNKNOWN) {
     kind_ = ArgSlot;
     new (&data.argSlot) uint32_t(slot);
-    knownType_ = JSVAL_TYPE_UNKNOWN;
+    knownType_ = knownType;
   }
-  void setThis() {
+  void setThis(JSValueType knownType = JSVAL_TYPE_UNKNOWN) {
     kind_ = ThisSlot;
-    knownType_ = JSVAL_TYPE_UNKNOWN;
+    knownType_ = knownType;
   }
   void setStack(JSValueType knownType = JSVAL_TYPE_UNKNOWN) {
     kind_ = Stack;
@@ -233,6 +233,24 @@ class CompilerFrameInfo : public FrameInfo {
   // Whether syncing the stack only syncs up to the last value in a register.
   bool deferSync_ = false;
 
+  // The type a local, argument or |this| is known to have in the block it was
+  // set in. Blocks end at jump targets.
+  struct SlotType {
+    uint32_t block;
+    JSValueType type;
+  };
+
+  // The current block, or 0 if slot types are not tracked.
+  uint32_t block_ = 0;
+  FixedList<SlotType> localTypes_;
+  FixedList<SlotType> argTypes_;
+  SlotType thisType_ = {0, JSVAL_TYPE_UNKNOWN};
+
+  JSValueType knownType(const SlotType& slot) const {
+    return block_ && slot.block == block_ ? slot.type : JSVAL_TYPE_UNKNOWN;
+  }
+  void setKnownType(SlotType& slot, JSValueType type) { slot = {block_, type}; }
+
  public:
   CompilerFrameInfo(JSScript* script, MacroAssembler& masm)
       : FrameInfo(masm), script(script), spIndex(0) {}
@@ -287,25 +305,26 @@ class CompilerFrameInfo : public FrameInfo {
   inline void pushLocal(uint32_t local) {
     MOZ_ASSERT(local < nlocals());
     StackValue* sv = rawPush();
-    sv->setLocalSlot(local);
+    sv->setLocalSlot(
+        local, block_ ? knownType(localTypes_[local]) : JSVAL_TYPE_UNKNOWN);
   }
   inline void pushArg(uint32_t arg) {
     StackValue* sv = rawPush();
-    sv->setArgSlot(arg);
+    sv->setArgSlot(arg,
+                   block_ ? knownType(argTypes_[arg]) : JSVAL_TYPE_UNKNOWN);
   }
   inline void pushThis() {
     StackValue* sv = rawPush();
-    sv->setThis();
+    sv->setThis(knownType(thisType_));
   }
 
-  inline void pushScratchValue() {
-    masm.pushValue(addressOfScratchValue());
-    StackValue* sv = rawPush();
-    sv->setStack();
-  }
+  // Tracks the types of the locals, arguments and |this|. They must not
+  // change without the compiler knowing, so the debugger must not be able to
+  // change them.
+  [[nodiscard]] bool initSlotTypes(TempAllocator& alloc);
 
-  // Forgets the types of the stack values, as at jump targets, where other
-  // paths join.
+  // Forgets the types of the stack values, locals, arguments and |this|, as
+  // at jump targets, where other paths join.
   void clearKnownTypes();
 
   // Forgets the type of the synced stack value after code stored another
@@ -318,6 +337,21 @@ class CompilerFrameInfo : public FrameInfo {
   // Moves the synced stack value at one depth to another, shifting the values
   // in between, after code moved them that way.
   void moveSyncedValue(int32_t from, int32_t to);
+
+  // Sets the type the local or argument is known to have once the top stack
+  // value is stored to it.
+  void storeLocalType(uint32_t local);
+  void storeArgType(uint32_t arg);
+
+  // Sets the type the slot the stack value was pushed for, if any, is known
+  // to have.
+  void setSlotType(const StackValue& val, JSValueType type);
+
+  inline void pushScratchValue() {
+    masm.pushValue(addressOfScratchValue());
+    StackValue* sv = rawPush();
+    sv->setStack();
+  }
 
   Address addressOfLocal(size_t local) const {
     MOZ_ASSERT(local < nlocals());

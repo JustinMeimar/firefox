@@ -179,6 +179,11 @@ MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
     InlinedInputVector& origInputs, InlinedFailureVector& failures,
     bool* inlined);
 
+// Narrows the types of the first inputs of the stub to the types its guards
+// check, which they have once it ran without failing.
+void NarrowMonoStubInputTypes(const CacheIRStubInfo* info,
+                              mozilla::Span<JSValueType> types);
+
 // Puts back the operands of an inline stub and continues at the op in the
 // Baseline Interpreter.
 void EmitMonoExit(MacroAssembler& masm, MonoOperands operands,

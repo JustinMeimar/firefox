@@ -214,6 +214,62 @@ bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
   return true;
 }
 
+void js::jit::NarrowMonoStubInputTypes(const CacheIRStubInfo* info,
+                                       mozilla::Span<JSValueType> types) {
+  CacheIRReader reader(info);
+  while (reader.more()) {
+    CacheOp op = reader.readOp();
+    ValOperandId input;
+    JSValueType type;
+    switch (op) {
+      case CacheOp::GuardToObject:
+        input = reader.argsForGuardToObject().inputId;
+        type = JSVAL_TYPE_OBJECT;
+        break;
+      case CacheOp::GuardToInt32:
+        input = reader.argsForGuardToInt32().inputId;
+        type = JSVAL_TYPE_INT32;
+        break;
+      case CacheOp::GuardToString:
+        input = reader.argsForGuardToString().inputId;
+        type = JSVAL_TYPE_STRING;
+        break;
+      case CacheOp::GuardToSymbol:
+        input = reader.argsForGuardToSymbol().inputId;
+        type = JSVAL_TYPE_SYMBOL;
+        break;
+      case CacheOp::GuardToBigInt:
+        input = reader.argsForGuardToBigInt().inputId;
+        type = JSVAL_TYPE_BIGINT;
+        break;
+      case CacheOp::GuardToBoolean:
+        input = reader.argsForGuardToBoolean().inputId;
+        type = JSVAL_TYPE_BOOLEAN;
+        break;
+      case CacheOp::GuardIsNull:
+        input = reader.argsForGuardIsNull().inputId;
+        type = JSVAL_TYPE_NULL;
+        break;
+      case CacheOp::GuardIsUndefined:
+        input = reader.argsForGuardIsUndefined().inputId;
+        type = JSVAL_TYPE_UNDEFINED;
+        break;
+      case CacheOp::GuardNonDoubleType: {
+        auto args = reader.argsForGuardNonDoubleType();
+        input = args.inputId;
+        type = JSValueType(args.type);
+        break;
+      }
+      default:
+        reader.skip(CacheIROpInfos[size_t(op)].argLength);
+        continue;
+    }
+    if (input.id() < types.size()) {
+      types[input.id()] = type;
+    }
+  }
+}
+
 void js::jit::EmitMonoExit(MacroAssembler& masm, MonoOperands operands,
                            uint32_t pcOffset, TrampolinePtr exitTail) {
   Address top(masm.getStackPointer(), 0);
