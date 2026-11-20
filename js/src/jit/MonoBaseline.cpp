@@ -28,6 +28,7 @@
 #include "jit/JSJitFrameIter-inl.h"
 #include "jit/MacroAssembler-inl.h"
 #include "jit/SharedICHelpers-inl.h"
+#include "vm/GeckoProfiler-inl.h"
 #include "vm/JSScript-inl.h"
 
 using namespace js;
@@ -349,6 +350,7 @@ uint8_t* js::jit::MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset) {
     jitScript->resetWarmUpCount(0);
   }
 
+  AutoSuppressProfilerSampling suppressProfilerSampling(cx);
   frame->switchFromJitToInterpreter(cx, script->offsetToPC(pcOffset));
   return cx->runtime()
       ->jitRuntime()
