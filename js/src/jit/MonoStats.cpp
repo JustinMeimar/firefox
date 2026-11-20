@@ -41,7 +41,8 @@ static const char* const MonoScriptReasonNames[] = {
     "failed",    "realm-ind", "generator", "async",          "not-mono"};
 
 static const char* const MonoICDispositionNames[] = {
-    "chain", "empty", "inline", "copy", "pushed", "operands", "nocopy"};
+    "chain", "empty",  "polymorphic", "inline",
+    "copy",  "pushed", "operands",    "nocopy"};
 
 static const char* const MonoNoInlineNames[] = {"", "gc", "nocopy", "op"};
 

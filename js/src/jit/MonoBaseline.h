@@ -25,6 +25,7 @@ namespace jit {
 
 class BaselineFrame;
 class ICCacheIRStub;
+class ICScript;
 class Label;
 class MacroAssembler;
 class TempAllocator;
@@ -33,13 +34,14 @@ enum class CacheKind : uint8_t;
 
 // [SMDOC] Monomorphic Baseline
 //
-// A script whose IC ops each have at most one stub when Baseline compiles it
-// is compiled monomorphic. Each IC op with a stub that makes no calls has the
-// stub emitted inline, with its stub fields as constants and its failure paths
-// out of line next to its exit. Each other IC op with a stub calls a copy of
-// that stub instead of the first stub of its IC chain, so it runs the same
-// shared stub code. The copy is owned by the BaselineScript, which traces its
-// edges strongly, and its next stub is an exit for the op.
+// A script with an IC op that has exactly one stub when Baseline compiles it
+// is compiled monomorphic. IC ops with more stubs or none call their IC chain.
+// Each IC op with one stub that makes no calls has the stub emitted inline,
+// with its stub fields as constants and its failure paths out of line next to
+// its exit. Each other IC op with one stub calls a copy of that stub instead
+// of the first stub of its IC chain, so it runs the same shared stub code. The
+// copy is owned by the BaselineScript, which traces its edges strongly, and
+// its next stub is an exit for the op.
 //
 // Stubs fail only before they have effects, so when a stub fails the exit
 // only has to rebuild the frame the Baseline Interpreter expects at the op: it
@@ -187,9 +189,11 @@ void NarrowMonoStubInputTypes(const CacheIRStubInfo* info,
 void EmitMonoExit(MacroAssembler& masm, MonoOperands operands,
                   uint32_t pcOffset, TrampolinePtr exitTail);
 
-// Whether every IC op of the script that has a stub has exactly one and has
-// never failed to attach another.
-bool IsMonomorphicScript(JSScript* script);
+// Whether the IC has exactly one stub and has never failed to attach another.
+bool IsMonomorphicIC(ICScript* icScript, size_t entryIndex);
+
+// Whether any IC of the script is monomorphic.
+bool HasMonomorphicIC(JSScript* script);
 
 // Called by the exits with the pc offset of the op. Returns the address at
 // which the Baseline Interpreter continues.

@@ -285,7 +285,7 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
     reason = MonoScriptReason::Generator;
   } else if (script->isAsync()) {
     reason = MonoScriptReason::Async;
-  } else if (!IsMonomorphicScript(script)) {
+  } else if (!HasMonomorphicIC(script)) {
     reason = MonoScriptReason::NotMonomorphic;
   }
   handler.setMonoReason(reason);
@@ -861,9 +861,13 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
   stats.disposition = MonoICDisposition::Empty;
 
   JSScript* script = handler.script();
-  ICStub* firstStub =
-      script->jitScript()->icScript()->icEntry(entryIndex).firstStub();
+  ICScript* icScript = script->jitScript()->icScript();
+  ICStub* firstStub = icScript->icEntry(entryIndex).firstStub();
   if (firstStub->isFallback()) {
+    return true;
+  }
+  if (!IsMonomorphicIC(icScript, entryIndex)) {
+    stats.disposition = MonoICDisposition::Polymorphic;
     return true;
   }
   ICCacheIRStub* stub = firstStub->toCacheIRStub();
@@ -883,7 +887,6 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
 
   // The stub needs the alloc sites it gets when Baseline compiles.
   if (BytecodeOpCanHaveAllocSite(JSOp(*handler.pc()))) {
-    ICScript* icScript = script->jitScript()->icScript();
     gc::AutoMarkingLock lock(script->zone(), icScript->markingLock());
     CreateAllocSitesForICChain(script, entryIndex, lock);
   }

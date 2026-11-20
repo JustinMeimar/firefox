@@ -356,21 +356,23 @@ void js::jit::DiscardMonoStubs(JSRuntime* rt, JSScript* script) {
   }
 }
 
-bool js::jit::IsMonomorphicScript(JSScript* script) {
-  ICScript* icScript = script->jitScript()->icScript();
-  bool hasStub = false;
-  for (size_t i = 0; i < icScript->numICEntries(); i++) {
-    if (icScript->icEntry(i).firstStub()->isFallback()) {
-      continue;
-    }
-    const ICState& state = icScript->fallbackStub(i)->state();
-    if (state.mode() != ICState::Mode::Specialized ||
-        state.numOptimizedStubs() != 1 || state.hasFailures()) {
-      return false;
-    }
-    hasStub = true;
+bool js::jit::IsMonomorphicIC(ICScript* icScript, size_t entryIndex) {
+  if (icScript->icEntry(entryIndex).firstStub()->isFallback()) {
+    return false;
   }
-  return hasStub;
+  const ICState& state = icScript->fallbackStub(entryIndex)->state();
+  return state.mode() == ICState::Mode::Specialized &&
+         state.numOptimizedStubs() == 1 && !state.hasFailures();
+}
+
+bool js::jit::HasMonomorphicIC(JSScript* script) {
+  ICScript* icScript = script->jitScript()->icScript();
+  for (size_t i = 0; i < icScript->numICEntries(); i++) {
+    if (IsMonomorphicIC(icScript, i)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 uint8_t* js::jit::MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset) {

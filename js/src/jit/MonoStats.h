@@ -63,6 +63,8 @@ enum class MonoICDisposition : uint8_t {
   Chain,
   // Monomorphic code, but the IC has no stub, so its chain is called.
   Empty,
+  // Monomorphic code, but the IC isn't monomorphic, so its chain is called.
+  Polymorphic,
   Inline,
   Copy,
   // Monomorphic code, but the op pushed values before its IC.
