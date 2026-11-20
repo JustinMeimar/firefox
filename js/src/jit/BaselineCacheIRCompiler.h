@@ -7,6 +7,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Span.h"
 
 #include <stdint.h>
 
@@ -187,10 +188,12 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
 
   JitCode* compile();
 
-  // Emits the stub inline in Baseline code, with its stub fields as constants.
-  // Appends the original input locations and the failure paths, which are
-  // left unbound for emitting out of line.
-  [[nodiscard]] bool compileInline(InlinedInputVector& origInputs,
+  // Emits the stub inline in Baseline code, with its stub fields as constants
+  // and its inputs known to have the given types, if any. Appends the
+  // original input locations and the failure paths, which are left unbound
+  // for emitting out of line.
+  [[nodiscard]] bool compileInline(mozilla::Span<const JSValueType> inputTypes,
+                                   InlinedInputVector& origInputs,
                                    InlinedFailureVector& failures);
 
   bool makesGCCalls() const;

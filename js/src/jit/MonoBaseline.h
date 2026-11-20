@@ -6,6 +6,7 @@
 #define jit_MonoBaseline_h
 
 #include "mozilla/Maybe.h"
+#include "mozilla/Span.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -101,6 +102,9 @@ enum class MonoOperands : uint8_t {
 
 mozilla::Maybe<MonoOperands> MonoOperandsFor(CacheKind kind, uint32_t popped);
 
+// The most inputs a stub takes from the stack.
+static constexpr size_t MonoMaxStackInputs = 3;
+
 // The type through which the edges of copied stubs are traced.
 class MonoStubCopy;
 
@@ -165,15 +169,15 @@ bool CanInlineMonoStub(ICCacheIRStub* stub);
 // Why the stub can't be emitted inline, with the op that can't be in *op.
 MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
 
-// Emits the stub inline, appending its original input locations and its
-// failure paths for emitting out of line. Returns false on OOM, with *inlined
-// false if the stub could not be emitted.
-[[nodiscard]] bool EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
-                                       TempAllocator& alloc,
-                                       ICCacheIRStub* stub,
-                                       InlinedInputVector& origInputs,
-                                       InlinedFailureVector& failures,
-                                       bool* inlined);
+// Emits the stub inline, with its inputs known to have the given types, if
+// any, appending its original input locations and its failure paths for
+// emitting out of line. Returns false on OOM, with *inlined false if the stub
+// could not be emitted.
+[[nodiscard]] bool EmitInlinedMonoStub(
+    JSContext* cx, MacroAssembler& masm, TempAllocator& alloc,
+    ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes,
+    InlinedInputVector& origInputs, InlinedFailureVector& failures,
+    bool* inlined);
 
 // Puts back the operands of an inline stub and continues at the op in the
 // Baseline Interpreter.

@@ -317,12 +317,24 @@ bool BaselineCacheIRCompiler::emitOps() {
   return true;
 }
 
-bool BaselineCacheIRCompiler::compileInline(InlinedInputVector& origInputs,
-                                            InlinedFailureVector& failures) {
+bool BaselineCacheIRCompiler::compileInline(
+    mozilla::Span<const JSValueType> inputTypes, InlinedInputVector& origInputs,
+    InlinedFailureVector& failures) {
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compileInline");
   MOZ_ASSERT(!JitOptions.enableICFramePointers);
+  MOZ_ASSERT(inputTypes.size() <= writer_.numInputOperands());
 
   allocator.setInlined();
+  for (size_t i = 0; i < inputTypes.size(); i++) {
+    if (inputTypes[i] == JSVAL_TYPE_UNKNOWN) {
+      continue;
+    }
+    allocator.setInputKnownType(i, inputTypes[i]);
+    OperandLocation loc = allocator.origInputLocation(i);
+    if (loc.kind() == OperandLocation::ValueReg) {
+      masm.debugAssertValueType(loc.valueReg(), inputTypes[i]);
+    }
+  }
   if (!emitOps()) {
     return false;
   }

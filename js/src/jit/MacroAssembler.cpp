@@ -9122,6 +9122,20 @@ void MacroAssembler::debugAssertIsObject(const ValueOperand& val) {
 #endif
 }
 
+void MacroAssembler::debugAssertValueType(const ValueOperand& val,
+                                          JSValueType type) {
+#ifdef DEBUG
+  Label ok;
+  {
+    ScratchTagScope tag(*this, val);
+    splitTagForTest(val, tag);
+    branchTestType(Assembler::Equal, tag, type, &ok);
+  }
+  assumeUnreachable("Unexpected value type");
+  bind(&ok);
+#endif
+}
+
 void MacroAssembler::debugAssertObjHasFixedSlots(Register obj,
                                                  Register scratch) {
 #ifdef DEBUG

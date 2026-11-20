@@ -5396,6 +5396,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                         LiveRegisterSet volatileLiveRegs);
 
   void debugAssertIsObject(const ValueOperand& val);
+  void debugAssertValueType(const ValueOperand& val, JSValueType type);
   void debugAssertObjHasFixedSlots(Register obj, Register scratch);
 
   void debugAssertObjectHasClass(Register obj, Register scratch,

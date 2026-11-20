@@ -626,6 +626,10 @@ bool CacheRegisterAllocator::init() {
   if (!origInputLocations_.resize(writer_.numInputOperands())) {
     return false;
   }
+  if (!inputKnownTypes_.appendN(JSVAL_TYPE_UNKNOWN,
+                                writer_.numInputOperands())) {
+    return false;
+  }
   if (!operandLocations_.resize(writer_.numOperandIds())) {
     return false;
   }
@@ -719,7 +723,8 @@ JSValueType CacheRegisterAllocator::knownType(ValOperandId val) const {
     case OperandLocation::ValueReg:
     case OperandLocation::ValueStack:
     case OperandLocation::BaselineFrame:
-      return JSVAL_TYPE_UNKNOWN;
+      return val.id() < inputKnownTypes_.length() ? inputKnownTypes_[val.id()]
+                                                  : JSVAL_TYPE_UNKNOWN;
 
     case OperandLocation::PayloadStack:
     case OperandLocation::PayloadReg:
@@ -2242,6 +2247,8 @@ bool CacheIRCompiler::emitGuardToInt32ModUint32(ValOperandId inputId,
     ConstantOrRegister input = allocator.useConstantOrRegister(masm, inputId);
     if (input.constant()) {
       masm.move32(Imm32(input.value().toInt32()), output);
+    } else if (input.reg().hasValue()) {
+      masm.unboxInt32(input.reg().valueReg(), output);
     } else {
       MOZ_ASSERT(input.reg().type() == MIRType::Int32);
       masm.move32(input.reg().typedReg().gpr(), output);
@@ -2278,8 +2285,12 @@ bool CacheIRCompiler::emitGuardToUint8Clamped(ValOperandId inputId,
     if (input.constant()) {
       masm.move32(Imm32(ClampDoubleToUint8(input.value().toInt32())), output);
     } else {
-      MOZ_ASSERT(input.reg().type() == MIRType::Int32);
-      masm.move32(input.reg().typedReg().gpr(), output);
+      if (input.reg().hasValue()) {
+        masm.unboxInt32(input.reg().valueReg(), output);
+      } else {
+        MOZ_ASSERT(input.reg().type() == MIRType::Int32);
+        masm.move32(input.reg().typedReg().gpr(), output);
+      }
       masm.clampIntToUint8(output);
     }
     return true;

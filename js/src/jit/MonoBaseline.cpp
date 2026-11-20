@@ -176,6 +176,7 @@ bool js::jit::CanInlineMonoStub(ICCacheIRStub* stub) {
 
 bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
                                   TempAllocator& alloc, ICCacheIRStub* stub,
+                                  mozilla::Span<const JSValueType> inputTypes,
                                   InlinedInputVector& origInputs,
                                   InlinedFailureVector& failures,
                                   bool* inlined) {
@@ -205,7 +206,8 @@ bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
   }
 
   BaselineCacheIRCompiler compiler(cx, alloc, writer, 0, &masm);
-  if (!compiler.init(kind) || !compiler.compileInline(origInputs, failures)) {
+  if (!compiler.init(kind) ||
+      !compiler.compileInline(inputTypes, origInputs, failures)) {
     return false;
   }
   *inlined = true;

@@ -5,6 +5,8 @@
 #ifndef jit_BaselineCodeGen_h
 #define jit_BaselineCodeGen_h
 
+#include <algorithm>
+
 #include "jit/BaselineFrameInfo.h"
 #include "jit/BytecodeAnalysis.h"
 #include "jit/CompileWrappers.h"
@@ -362,6 +364,11 @@ class BaselineCompilerHandler {
   // The stack depth before the current op.
   uint32_t opStackDepth_ = 0;
 
+  // When compiling monomorphic code, the top stack values before the current
+  // op, from the deepest.
+  StackValue opOperands_[MonoMaxStackInputs];
+  uint32_t numOpOperands_ = 0;
+
   MonoStub* monoStubs_ = nullptr;
 
  public:
@@ -515,8 +522,24 @@ class BaselineCompilerHandler {
   uint32_t monoExitsEnd() const { return monoExitsEnd_; }
   JSContext* monoCx() const { return monoCx_; }
 
-  void setOpStackDepth(uint32_t depth) { opStackDepth_ = depth; }
+  void setOpStart(const CompilerFrameInfo& frame) {
+    opStackDepth_ = frame.stackDepth();
+    if (!monoCx_) {
+      return;
+    }
+    numOpOperands_ = std::min(opStackDepth_, uint32_t(MonoMaxStackInputs));
+    for (uint32_t i = 0; i < numOpOperands_; i++) {
+      opOperands_[i] = frame.peekValue(int32_t(i) - int32_t(numOpOperands_));
+    }
+  }
   uint32_t opStackDepth() const { return opStackDepth_; }
+  uint32_t numOpOperands() const { return numOpOperands_; }
+
+  // The stack value at the given depth before the current op.
+  const StackValue& opOperand(int32_t depth) const {
+    MOZ_ASSERT(depth < 0 && uint32_t(-depth) <= numOpOperands_);
+    return opOperands_[numOpOperands_ + depth];
+  }
 
   void addMonoStub(MonoStub* stub) {
     stub->setNext(monoStubs_);

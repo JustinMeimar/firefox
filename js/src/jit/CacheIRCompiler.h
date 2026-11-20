@@ -307,6 +307,10 @@ class MOZ_RAII CacheRegisterAllocator {
   // The original location of the inputs to the cache.
   Vector<OperandLocation, 4, SystemAllocPolicy> origInputLocations_;
 
+  // The types the inputs are known to have, which boxed inputs don't carry
+  // in their location.
+  Vector<JSValueType, 4, SystemAllocPolicy> inputKnownTypes_;
+
   // The current location of each operand.
   Vector<OperandLocation, 8, SystemAllocPolicy> operandLocations_;
 
@@ -428,6 +432,10 @@ class MOZ_RAII CacheRegisterAllocator {
 
   void initInputLocation(size_t i, const TypedOrValueRegister& reg);
   void initInputLocation(size_t i, const ConstantOrRegister& value);
+
+  void setInputKnownType(size_t i, JSValueType type) {
+    inputKnownTypes_[i] = type;
+  }
 
   const SpilledRegisterVector& spilledRegs() const { return spilledRegs_; }
 
