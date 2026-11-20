@@ -421,6 +421,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     }
     return currentInstruction > operandLastUsed_[operandId];
   }
+  size_t numOperandLastUsed() const { return operandLastUsed_.length(); }
   uint32_t operandLastUsed(uint32_t operandId) const {
     return operandLastUsed_[operandId];
   }

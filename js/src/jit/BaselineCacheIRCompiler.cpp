@@ -92,11 +92,11 @@ BaseValueIndex CacheRegisterAllocator::addressOf(MacroAssembler& masm,
 // BaselineCacheIRCompiler compiles CacheIR to BaselineIC native code.
 BaselineCacheIRCompiler::BaselineCacheIRCompiler(JSContext* cx,
                                                  TempAllocator& alloc,
-                                                 const CacheIRWriter& writer,
+                                                 const CacheIRSource& source,
                                                  uint32_t stubDataOffset,
                                                  MacroAssembler* externalMasm)
     : CacheIRCompiler(
-          cx, alloc, writer, stubDataOffset, Mode::Baseline,
+          cx, alloc, source, stubDataOffset, Mode::Baseline,
           externalMasm ? StubFieldPolicy::Constant : StubFieldPolicy::Address,
           externalMasm),
       makesGCCalls_(false) {}
@@ -289,7 +289,7 @@ JitCode* BaselineCacheIRCompiler::compile() {
 }
 
 bool BaselineCacheIRCompiler::emitOps() {
-  CacheIRReader reader(writer_);
+  CacheIRReader reader(source_.codeStart(), source_.codeEnd());
   do {
     CacheOp op = reader.readOp();
     if (!allocator.inlined()) {
@@ -322,7 +322,7 @@ bool BaselineCacheIRCompiler::compileInline(
     InlinedFailureVector& failures) {
   AutoCreatedBy acb(masm, "BaselineCacheIRCompiler::compileInline");
   MOZ_ASSERT(!JitOptions.enableICFramePointers);
-  MOZ_ASSERT(inputTypes.size() <= writer_.numInputOperands());
+  MOZ_ASSERT(inputTypes.size() <= source_.numInputOperands());
 
   allocator.setInlined();
   for (size_t i = 0; i < inputTypes.size(); i++) {
@@ -342,7 +342,7 @@ bool BaselineCacheIRCompiler::compileInline(
   MOZ_ASSERT(!makesGCCalls_);
   allocator.discardStack(masm);
 
-  for (size_t i = 0; i < writer_.numInputOperands(); i++) {
+  for (size_t i = 0; i < source_.numInputOperands(); i++) {
     if (!origInputs.append(allocator.origInputLocation(i))) {
       return false;
     }
@@ -2094,7 +2094,7 @@ bool BaselineCacheIRCompiler::init(CacheKind kind) {
     return false;
   }
 
-  size_t numInputs = writer_.numInputOperands();
+  size_t numInputs = source_.numInputOperands();
   MOZ_ASSERT(numInputs == NumInputsForCacheKind(kind));
 
   // Baseline passes the first 2 inputs in R0/R1, other Values are stored on

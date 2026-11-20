@@ -30,6 +30,7 @@ enum class UnaryMathFunction : uint8_t;
 namespace jit {
 
 class BaselineCacheIRCompiler;
+class CacheIRStubInfo;
 class ICCacheIRStub;
 class IonCacheIRCompiler;
 class IonScript;
@@ -302,6 +303,27 @@ struct SpilledRegister {
 
 using SpilledRegisterVector = Vector<SpilledRegister, 2, SystemAllocPolicy>;
 
+// The CacheIR a CacheIRCompiler compiles: a CacheIRWriter, or the
+// CacheIRStubInfo and stub data of a stub.
+class CacheIRSource {
+  const CacheIRWriter* writer_ = nullptr;
+  const CacheIRStubInfo* stubInfo_ = nullptr;
+  const uint8_t* stubData_ = nullptr;
+
+ public:
+  MOZ_IMPLICIT CacheIRSource(const CacheIRWriter& writer);
+  CacheIRSource(const CacheIRStubInfo* stubInfo, const uint8_t* stubData)
+      : stubInfo_(stubInfo), stubData_(stubData) {}
+
+  uint32_t numInputOperands() const;
+  uint32_t numOperandIds() const;
+  bool operandIsDead(uint32_t operandId, uint32_t currentInstruction) const;
+  const uint8_t* codeStart() const;
+  const uint8_t* codeEnd() const;
+  uintptr_t readStubWord(uint32_t offset, StubField::Type type) const;
+  uint64_t readStubInt64(uint32_t offset, StubField::Type type) const;
+};
+
 // Class to track and allocate registers while emitting IC code.
 class MOZ_RAII CacheRegisterAllocator {
   // The original location of the inputs to the cache.
@@ -352,7 +374,7 @@ class MOZ_RAII CacheRegisterAllocator {
   // Whether the stack contains a double spilled by AutoScratchFloatRegister.
   bool hasAutoScratchFloatRegisterSpill_ = false;
 
-  const CacheIRWriter& writer_;
+  const CacheIRSource& source_;
 
   void freeDeadOperandLocations(MacroAssembler& masm);
 
@@ -374,14 +396,15 @@ class MOZ_RAII CacheRegisterAllocator {
   friend class AutoScratchRegister;
   friend class AutoScratchRegisterExcluding;
 
-  explicit CacheRegisterAllocator(const CacheIRWriter& writer)
+  explicit CacheRegisterAllocator(const CacheIRSource& source)
       : stackPushed_(0),
 #ifdef DEBUG
         addedFailurePath_(false),
 #endif
         currentInstruction_(0),
-        writer_(writer) {
+        source_(source) {
   }
+  explicit CacheRegisterAllocator(CacheIRSource&& source) = delete;
 
   CacheRegisterAllocator(const CacheRegisterAllocator&) = delete;
   CacheRegisterAllocator& operator=(const CacheRegisterAllocator&) = delete;
@@ -469,7 +492,7 @@ class MOZ_RAII CacheRegisterAllocator {
 #endif
 
   bool isDeadAfterInstruction(OperandId opId) const {
-    return writer_.operandIsDead(opId.id(), currentInstruction_ + 1);
+    return source_.operandIsDead(opId.id(), currentInstruction_ + 1);
   }
 
   uint32_t stackPushed() const { return stackPushed_; }
@@ -769,7 +792,7 @@ class MOZ_RAII CacheIRCompiler {
   IonCacheIRCompiler* asIon();
 
   JSContext* cx_;
-  const CacheIRWriter& writer_;
+  CacheIRSource source_;
   mozilla::Maybe<StackMacroAssembler> ownMasm_;
   MacroAssembler& masm;
 
@@ -805,20 +828,18 @@ class MOZ_RAII CacheIRCompiler {
 
   // Code is emitted to the given assembler if there is one.
   CacheIRCompiler(JSContext* cx, TempAllocator& alloc,
-                  const CacheIRWriter& writer, uint32_t stubDataOffset,
+                  const CacheIRSource& source, uint32_t stubDataOffset,
                   Mode mode, StubFieldPolicy policy,
                   MacroAssembler* externalMasm = nullptr)
       : enteredStubFrame_(false),
         cx_(cx),
-        writer_(writer),
+        source_(source),
         masm(InitMasm(ownMasm_, externalMasm, cx, alloc)),
-        allocator(writer_),
+        allocator(source_),
         liveFloatRegs_(FloatRegisterSet::All()),
         mode_(mode),
         stubDataOffset_(stubDataOffset),
-        stubFieldPolicy_(policy) {
-    MOZ_ASSERT(!writer.failed());
-  }
+        stubFieldPolicy_(policy) {}
 
   [[nodiscard]] bool addFailurePath(FailurePath** failure);
   [[nodiscard]] bool emitFailurePath(size_t i);
@@ -931,12 +952,12 @@ class MOZ_RAII CacheIRCompiler {
   uintptr_t readStubWord(uint32_t offset, StubField::Type type) {
     MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
     MOZ_ASSERT((offset % sizeof(uintptr_t)) == 0);
-    return writer_.readStubField(offset, type).asWord();
+    return source_.readStubWord(offset, type);
   }
   uint64_t readStubInt64(uint32_t offset, StubField::Type type) {
     MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
     MOZ_ASSERT((offset % sizeof(uintptr_t)) == 0);
-    return writer_.readStubField(offset, type).asInt64();
+    return source_.readStubInt64(offset, type);
   }
   int32_t int32StubField(uint32_t offset) {
     MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
@@ -1364,11 +1385,12 @@ struct MapStubFieldToType<StubField::Type::WeakValue> {
 // CacheIRStubInfo has a trailing variable-length array of bytes. The memory
 // layout is as follows:
 //
-//   Item             | Offset
-//   -----------------+--------------------------------------
-//   CacheIRStubInfo  | 0
-//   CacheIR bytecode | sizeof(CacheIRStubInfo)
-//   Stub field types | sizeof(CacheIRStubInfo) + codeLength_
+//   Item              | Offset
+//   ------------------+--------------------------------------
+//   CacheIRStubInfo   | 0
+//   Operand last uses | sizeof(CacheIRStubInfo)
+//   CacheIR bytecode  | operand last uses + numOperandLastUsed_ * 4
+//   Stub field types  | CacheIR bytecode + codeLength_
 //
 // The array of stub field types is terminated by StubField::Type::Limit.
 class CacheIRStubInfo {
@@ -1377,14 +1399,22 @@ class CacheIRStubInfo {
   ICStubEngine engine_;
   uint8_t stubDataOffset_;
   bool makesGCCalls_;
+  uint8_t numInputOperands_;
+  uint8_t numOperandIds_;
+  uint8_t numOperandLastUsed_;
 
   CacheIRStubInfo(CacheKind kind, ICStubEngine engine, bool makesGCCalls,
-                  uint32_t stubDataOffset, uint32_t codeLength)
+                  uint32_t stubDataOffset, uint32_t codeLength,
+                  uint8_t numInputOperands, uint8_t numOperandIds,
+                  uint8_t numOperandLastUsed)
       : codeLength_(codeLength),
         kind_(kind),
         engine_(engine),
         stubDataOffset_(stubDataOffset),
-        makesGCCalls_(makesGCCalls) {
+        makesGCCalls_(makesGCCalls),
+        numInputOperands_(numInputOperands),
+        numOperandIds_(numOperandIds),
+        numOperandLastUsed_(numOperandLastUsed) {
     MOZ_ASSERT(kind_ == kind, "Kind must fit in bitfield");
     MOZ_ASSERT(engine_ == engine, "Engine must fit in bitfield");
     MOZ_ASSERT(stubDataOffset_ == stubDataOffset,
@@ -1399,8 +1429,23 @@ class CacheIRStubInfo {
   CacheIRStubInfo(const CacheIRStubInfo&) = delete;
   CacheIRStubInfo& operator=(const CacheIRStubInfo&) = delete;
 
+  // The operand counts and last uses of the CacheIRWriter of the code.
+  uint32_t numInputOperands() const { return numInputOperands_; }
+  uint32_t numOperandIds() const { return numOperandIds_; }
+  bool operandIsDead(uint32_t operandId, uint32_t currentInstruction) const {
+    if (operandId >= numOperandLastUsed_) {
+      return false;
+    }
+    return currentInstruction > operandLastUsed()[operandId];
+  }
+
+  const uint32_t* operandLastUsed() const {
+    return reinterpret_cast<const uint32_t*>(
+        reinterpret_cast<const uint8_t*>(this) + sizeof(CacheIRStubInfo));
+  }
   const uint8_t* code() const {
-    return reinterpret_cast<const uint8_t*>(this) + sizeof(CacheIRStubInfo);
+    return reinterpret_cast<const uint8_t*>(operandLastUsed() +
+                                            numOperandLastUsed_);
   }
   uint32_t codeLength() const { return codeLength_; }
   uint32_t stubDataOffset() const { return stubDataOffset_; }

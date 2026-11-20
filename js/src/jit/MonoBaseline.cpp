@@ -180,25 +180,10 @@ bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
                                   TempAllocator& alloc, ICCacheIRStub* stub,
                                   mozilla::Span<const JSValueType> inputTypes,
                                   InlinedInputVector& origInputs,
-                                  InlinedFailureVector& failures,
-                                  bool* inlined) {
-  *inlined = false;
+                                  InlinedFailureVector& failures) {
   MOZ_ASSERT(CanInlineMonoStub(stub));
   const CacheIRStubInfo* info = stub->stubInfo();
   CacheKind kind = info->kind();
-
-  CacheIRWriter writer(cx);
-  for (size_t i = 0; i < NumInputsForCacheKind(kind); i++) {
-    writer.setInputOperandId(i);
-  }
-  CacheIRReader reader(info);
-  CacheIRCloner cloner(stub);
-  while (reader.more()) {
-    cloner.cloneOp(reader.readOp(), reader, writer);
-  }
-  if (writer.failed()) {
-    return true;
-  }
 
   // The code holds weak edges strongly, so mark them if we are marking.
   Zone* zone = cx->zone();
@@ -207,13 +192,10 @@ bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
                      reinterpret_cast<MonoStubCopy*>(stub), info);
   }
 
-  BaselineCacheIRCompiler compiler(cx, alloc, writer, 0, &masm);
-  if (!compiler.init(kind) ||
-      !compiler.compileInline(inputTypes, origInputs, failures)) {
-    return false;
-  }
-  *inlined = true;
-  return true;
+  BaselineCacheIRCompiler compiler(
+      cx, alloc, CacheIRSource(info, stub->stubDataStart()), 0, &masm);
+  return compiler.init(kind) &&
+         compiler.compileInline(inputTypes, origInputs, failures);
 }
 
 void js::jit::NarrowMonoStubInputTypes(const CacheIRStubInfo* info,

@@ -43,8 +43,7 @@ static const char* const MonoScriptReasonNames[] = {
 static const char* const MonoICDispositionNames[] = {
     "chain", "empty", "inline", "copy", "pushed", "operands", "nocopy"};
 
-static const char* const MonoNoInlineNames[] = {"", "gc", "nocopy", "op",
-                                                "failed"};
+static const char* const MonoNoInlineNames[] = {"", "gc", "nocopy", "op"};
 
 #ifdef XP_UNIX
 static constexpr size_t MaxMonoCounters = size_t(1) << 24;

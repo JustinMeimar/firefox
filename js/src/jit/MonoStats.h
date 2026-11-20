@@ -79,7 +79,6 @@ enum class MonoNoInline : uint8_t {
   GCCalls,
   NoCopy,
   Op,
-  Failed,
 };
 
 struct MonoStatsIC {

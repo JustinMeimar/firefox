@@ -920,23 +920,17 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
     uint32_t inputsStart = handler.monoExitInputs().length();
     uint32_t failuresStart = handler.monoExitFailures().length();
     uint32_t stubOffset = masm.nopPatchableToCall().offset();
-    bool inlined;
     if (!EmitInlinedMonoStub(handler.monoCx(), masm, handler.alloc(), stub,
                              stackInputTypes, handler.monoExitInputs(),
-                             handler.monoExitFailures(), &inlined)) {
+                             handler.monoExitFailures()) ||
+        !handler.addMonoExit(stubOffset, pcOffset, *operands, inputsStart,
+                             failuresStart, frame)) {
       return false;
     }
-    if (inlined) {
-      if (!handler.addMonoExit(stubOffset, pcOffset, *operands, inputsStart,
-                               failuresStart, frame)) {
-        return false;
-      }
-      narrowSlotTypes();
-      stats.disposition = MonoICDisposition::Inline;
-      *emitted = true;
-      return true;
-    }
-    stats.noInline = MonoNoInline::Failed;
+    narrowSlotTypes();
+    stats.disposition = MonoICDisposition::Inline;
+    *emitted = true;
+    return true;
   }
 
   frame.syncStack(0);

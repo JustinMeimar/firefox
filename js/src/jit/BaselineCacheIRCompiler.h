@@ -178,7 +178,7 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
   friend class AutoStubFrame;
 
   BaselineCacheIRCompiler(JSContext* cx, TempAllocator& alloc,
-                          const CacheIRWriter& writer, uint32_t stubDataOffset,
+                          const CacheIRSource& source, uint32_t stubDataOffset,
                           MacroAssembler* externalMasm = nullptr);
 
   [[nodiscard]] bool init(CacheKind kind);

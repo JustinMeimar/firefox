@@ -126,7 +126,7 @@ void CacheRegisterAllocator::saveIonLiveRegisters(MacroAssembler& masm,
   MOZ_ASSERT(sizeOfLiveRegsInBytes > 0);
 
   // Step 3. Ensure all non-input operands are on the stack.
-  size_t numInputs = writer_.numInputOperands();
+  size_t numInputs = source_.numInputOperands();
   for (size_t i = numInputs; i < operandLocations_.length(); i++) {
     OperandLocation& loc = operandLocations_[i];
     if (loc.isInRegister()) {

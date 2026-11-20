@@ -171,13 +171,11 @@ MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
 
 // Emits the stub inline, with its inputs known to have the given types, if
 // any, appending its original input locations and its failure paths for
-// emitting out of line. Returns false on OOM, with *inlined false if the stub
-// could not be emitted.
+// emitting out of line. Returns false on OOM.
 [[nodiscard]] bool EmitInlinedMonoStub(
     JSContext* cx, MacroAssembler& masm, TempAllocator& alloc,
     ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes,
-    InlinedInputVector& origInputs, InlinedFailureVector& failures,
-    bool* inlined);
+    InlinedInputVector& origInputs, InlinedFailureVector& failures);
 
 // Narrows the types of the first inputs of the stub to the types its guards
 // check, which they have once it ran without failing.

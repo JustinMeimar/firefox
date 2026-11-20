@@ -438,9 +438,9 @@ void CacheRegisterAllocator::freeDeadOperandLocations(MacroAssembler& masm) {
   // See if any operands are dead so we can reuse their registers. Note that
   // we skip the input operands, as those are also used by failure paths, and
   // we currently don't track those uses.
-  for (size_t i = writer_.numInputOperands(); i < operandLocations_.length();
+  for (size_t i = source_.numInputOperands(); i < operandLocations_.length();
        i++) {
-    if (!writer_.operandIsDead(i, currentInstruction_)) {
+    if (!source_.operandIsDead(i, currentInstruction_)) {
       continue;
     }
 
@@ -623,14 +623,14 @@ ValueOperand CacheRegisterAllocator::allocateValueRegister(
 }
 
 bool CacheRegisterAllocator::init() {
-  if (!origInputLocations_.resize(writer_.numInputOperands())) {
+  if (!origInputLocations_.resize(source_.numInputOperands())) {
     return false;
   }
   if (!inputKnownTypes_.appendN(JSVAL_TYPE_UNKNOWN,
-                                writer_.numInputOperands())) {
+                                source_.numInputOperands())) {
     return false;
   }
-  if (!operandLocations_.resize(writer_.numOperandIds())) {
+  if (!operandLocations_.resize(source_.numOperandIds())) {
     return false;
   }
   return true;
@@ -652,7 +652,7 @@ void CacheRegisterAllocator::fixupAliasedInputs(MacroAssembler& masm) {
   // Note that this can happen in IonMonkey with something like |o.foo = o|
   // or |o[i] = i|.
 
-  size_t numInputs = writer_.numInputOperands();
+  size_t numInputs = source_.numInputOperands();
   MOZ_ASSERT(origInputLocations_.length() == numInputs);
 
   for (size_t i = 1; i < numInputs; i++) {
@@ -687,10 +687,10 @@ void CacheRegisterAllocator::fixupAliasedInputs(MacroAssembler& masm) {
 }
 
 GeneralRegisterSet CacheRegisterAllocator::inputRegisterSet() const {
-  MOZ_ASSERT(origInputLocations_.length() == writer_.numInputOperands());
+  MOZ_ASSERT(origInputLocations_.length() == source_.numInputOperands());
 
   AllocatableGeneralRegisterSet result;
-  for (size_t i = 0; i < writer_.numInputOperands(); i++) {
+  for (size_t i = 0; i < source_.numInputOperands(); i++) {
     const OperandLocation& loc = operandLocations_[i];
     MOZ_ASSERT(loc == origInputLocations_[i]);
 
@@ -929,7 +929,7 @@ bool OperandLocation::aliasesReg(const OperandLocation& other) const {
 void CacheRegisterAllocator::restoreInputState(MacroAssembler& masm,
                                                bool shouldDiscardStack) {
   size_t numInputOperands = origInputLocations_.length();
-  MOZ_ASSERT(writer_.numInputOperands() == numInputOperands);
+  MOZ_ASSERT(source_.numInputOperands() == numInputOperands);
 
   for (size_t j = 0; j < numInputOperands; j++) {
     const OperandLocation& dest = origInputLocations_[j];
@@ -1635,21 +1635,74 @@ CacheIRReader::CacheIRReader(const CacheIRStubInfo* stubInfo)
     : CacheIRReader(stubInfo->code(),
                     stubInfo->code() + stubInfo->codeLength()) {}
 
+CacheIRSource::CacheIRSource(const CacheIRWriter& writer) : writer_(&writer) {
+  MOZ_ASSERT(!writer.failed());
+}
+
+uint32_t CacheIRSource::numInputOperands() const {
+  return writer_ ? writer_->numInputOperands() : stubInfo_->numInputOperands();
+}
+
+uint32_t CacheIRSource::numOperandIds() const {
+  return writer_ ? writer_->numOperandIds() : stubInfo_->numOperandIds();
+}
+
+bool CacheIRSource::operandIsDead(uint32_t operandId,
+                                  uint32_t currentInstruction) const {
+  return writer_ ? writer_->operandIsDead(operandId, currentInstruction)
+                 : stubInfo_->operandIsDead(operandId, currentInstruction);
+}
+
+const uint8_t* CacheIRSource::codeStart() const {
+  return writer_ ? writer_->codeStart() : stubInfo_->code();
+}
+
+const uint8_t* CacheIRSource::codeEnd() const {
+  return writer_ ? writer_->codeEnd()
+                 : stubInfo_->code() + stubInfo_->codeLength();
+}
+
+uintptr_t CacheIRSource::readStubWord(uint32_t offset,
+                                      StubField::Type type) const {
+  if (writer_) {
+    return writer_->readStubField(offset, type).asWord();
+  }
+  return stubInfo_->getStubRawWord(stubData_, offset);
+}
+
+uint64_t CacheIRSource::readStubInt64(uint32_t offset,
+                                      StubField::Type type) const {
+  if (writer_) {
+    return writer_->readStubField(offset, type).asInt64();
+  }
+  return stubInfo_->getStubRawInt64(stubData_, offset);
+}
+
 CacheIRStubInfo* CacheIRStubInfo::New(CacheKind kind, ICStubEngine engine,
                                       bool makesGCCalls,
                                       uint32_t stubDataOffset,
                                       const CacheIRWriter& writer) {
   size_t numStubFields = writer.numStubFields();
+  size_t numOperandLastUsed = writer.numOperandLastUsed();
+  MOZ_ASSERT(writer.numOperandIds() <= UINT8_MAX);
   size_t bytesNeeded =
-      sizeof(CacheIRStubInfo) + writer.codeLength() +
+      sizeof(CacheIRStubInfo) + numOperandLastUsed * sizeof(uint32_t) +
+      writer.codeLength() +
       (numStubFields + 1);  // +1 for the GCType::Limit terminator.
   uint8_t* p = js_pod_malloc<uint8_t>(bytesNeeded);
   if (!p) {
     return nullptr;
   }
 
+  uint32_t* operandLastUsed =
+      reinterpret_cast<uint32_t*>(p + sizeof(CacheIRStubInfo));
+  for (size_t i = 0; i < numOperandLastUsed; i++) {
+    operandLastUsed[i] = writer.operandLastUsed(i);
+  }
+
   // Copy the CacheIR code.
-  uint8_t* codeStart = p + sizeof(CacheIRStubInfo);
+  uint8_t* codeStart =
+      reinterpret_cast<uint8_t*>(operandLastUsed + numOperandLastUsed);
   mozilla::PodCopy(codeStart, writer.codeStart(), writer.codeLength());
 
   static_assert(sizeof(StubField::Type) == sizeof(uint8_t),
@@ -1663,7 +1716,8 @@ CacheIRStubInfo* CacheIRStubInfo::New(CacheKind kind, ICStubEngine engine,
   fieldTypes[numStubFields] = uint8_t(StubField::Type::Limit);
 
   return new (p) CacheIRStubInfo(kind, engine, makesGCCalls, stubDataOffset,
-                                 writer.codeLength());
+                                 writer.codeLength(), writer.numInputOperands(),
+                                 writer.numOperandIds(), numOperandLastUsed);
 }
 
 bool OperandLocation::operator==(const OperandLocation& other) const {
@@ -1758,7 +1812,8 @@ bool js::jit::EmitInlinedFailurePath(
   for (size_t i = 0; i < origInputs.size(); i++) {
     writer.setInputOperandId(i);
   }
-  CacheRegisterAllocator allocator(writer);
+  CacheIRSource source(writer);
+  CacheRegisterAllocator allocator(source);
   if (!allocator.init()) {
     return false;
   }
@@ -1784,7 +1839,7 @@ bool CacheIRCompiler::addFailurePath(FailurePath** failure) {
   MOZ_ASSERT(!allocator.hasAutoScratchFloatRegisterSpill());
 
   FailurePath newFailure;
-  for (size_t i = 0; i < writer_.numInputOperands(); i++) {
+  for (size_t i = 0; i < source_.numInputOperands(); i++) {
     if (!newFailure.appendInput(allocator.operandLocation(i))) {
       return false;
     }
@@ -1816,7 +1871,7 @@ bool CacheIRCompiler::emitFailurePath(size_t index) {
 
   allocator.setStackPushed(failure.stackPushed());
 
-  for (size_t i = 0; i < writer_.numInputOperands(); i++) {
+  for (size_t i = 0; i < source_.numInputOperands(); i++) {
     allocator.setOperandLocation(i, failure.input(i));
   }
 
