@@ -196,6 +196,14 @@ class MOZ_RAII BaselineCacheIRCompiler : public CacheIRCompiler {
                                    InlinedInputVector& origInputs,
                                    InlinedFailureVector& failures);
 
+  // Compiles inline from a source whose stub data holds the sentinels of a
+  // template, falling back on the stub's own data for ops whose stub fields
+  // can't be templated, which rejects the template.
+  void setTemplateStubData(const uint8_t* stubData) {
+    templateStubData_ = stubData;
+  }
+  bool templateRejected() const { return templateRejected_; }
+
   bool makesGCCalls() const;
   bool localTracingSlots() const { return localTracingSlots_; }
 

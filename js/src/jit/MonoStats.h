@@ -83,6 +83,18 @@ enum class MonoNoInline : uint8_t {
   Op,
 };
 
+// How an inline stub was emitted. See MonoTemplates.h.
+enum class MonoTemplateUse : uint8_t {
+  // Compiled, with templates off or fields no template can hold.
+  None,
+  // Copied from a template in the cache.
+  Hit,
+  // Copied from a template built for it.
+  Built,
+  // Compiled, since no template can be built for its key.
+  Rejected,
+};
+
 struct MonoStatsIC {
   uint32_t entryIndex;
   uint32_t pcOffset;
@@ -94,6 +106,7 @@ struct MonoStatsIC {
   MonoICDisposition disposition;
   MonoNoInline noInline;
   CacheOp noInlineOp;
+  MonoTemplateUse templateUse;
 };
 
 bool MonoStatsEnabled();

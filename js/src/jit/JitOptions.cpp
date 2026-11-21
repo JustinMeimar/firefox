@@ -177,6 +177,10 @@ DefaultJitOptions::DefaultJitOptions() {
   // stubs inlined. See MonoBaseline.h.
   SET_DEFAULT(baselineMono, false);
 
+  // Whether monomorphic Baseline code copies its inline stubs from templates.
+  // See MonoTemplates.h.
+  SET_DEFAULT(baselineMonoTemplates, true);
+
   // Whether Warp should use ICs instead of transpiling Baseline CacheIR.
   SET_DEFAULT(forceInlineCaches, false);
 

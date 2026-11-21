@@ -173,11 +173,13 @@ MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
 
 // Emits the stub inline, with its inputs known to have the given types, if
 // any, appending its original input locations and its failure paths for
-// emitting out of line. Returns false on OOM.
+// emitting out of line. Sets *templateUse to whether it was copied from a
+// template. Returns false on OOM.
 [[nodiscard]] bool EmitInlinedMonoStub(
     JSContext* cx, MacroAssembler& masm, TempAllocator& alloc,
     ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes,
-    InlinedInputVector& origInputs, InlinedFailureVector& failures);
+    InlinedInputVector& origInputs, InlinedFailureVector& failures,
+    MonoTemplateUse* templateUse);
 
 // Narrows the types of the first inputs of the stub to the types its guards
 // check, which they have once it ran without failing.

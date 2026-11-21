@@ -295,6 +295,7 @@ bool BaselineCacheIRCompiler::emitOps() {
     if (!allocator.inlined()) {
       perfSpewer_.recordInstruction(masm, op);
     }
+    currentOp_ = op;
     bool makesGCCallsBefore = makesGCCalls_;
     makesGCCalls_ = false;
     switch (op) {

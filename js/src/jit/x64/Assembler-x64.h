@@ -362,6 +362,55 @@ class Assembler : public AssemblerX86Shared {
 #endif
   }
 
+  // Copying code emitted by another assembler into this one, as the templates
+  // of monomorphic Baseline code do. Offsets of jumps and data relocations
+  // are at the end of the instruction or pointer they refer to.
+  const uint8_t* rawCode() { return masm.data(); }
+  void patchRawCode(uint32_t offset, const void* bytes, size_t numBytes) {
+    memcpy(masm.data() + offset, bytes, numBytes);
+  }
+  const CompactBufferWriter& dataRelocations() const {
+    return dataRelocations_;
+  }
+  void addDataRelocationAt(uint32_t offset) {
+    dataRelocations_.writeUnsigned(offset);
+  }
+  template <typename F>
+  void forEachPendingJump(F f) const {
+    for (const RelativePatch& jump : codeJumps_) {
+      f(uint32_t(jump.offset), jump.target, jump.kind);
+    }
+    for (const RelativePatch& jump : extendedJumps_) {
+      f(uint32_t(jump.offset), jump.target, jump.kind);
+    }
+  }
+  void addPendingJumpAt(uint32_t offset, void* target, RelocationKind kind) {
+    addPendingJump(JmpSrc(offset), ImmPtr(target), kind);
+  }
+  template <typename F>
+  void forEachLabelUse(const Label* label, F f) {
+    if (!label->used()) {
+      return;
+    }
+    bool more;
+    JmpSrc jump(label->offset());
+    do {
+      JmpSrc next;
+      more = masm.nextJump(jump, &next);
+      f(uint32_t(jump.offset()));
+      jump = next;
+    } while (more);
+  }
+  void useLabelAt(Label* label, uint32_t offset) {
+    JmpSrc jump(offset);
+    JmpSrc prev;
+    if (label->used()) {
+      prev = JmpSrc(label->offset());
+    }
+    label->use(offset);
+    masm.setNextJump(jump, prev);
+  }
+
   // Actual assembly emitting functions.
 
   void push(const ImmGCPtr ptr) {

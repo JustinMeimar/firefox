@@ -24,6 +24,7 @@
 #include "jit/JitCode.h"
 #include "jit/JitHints.h"
 #include "jit/MonoBaseline.h"
+#include "jit/MonoTemplates.h"
 #include "jit/shared/Assembler-shared.h"
 #include "jit/TrampolineNatives.h"
 #include "js/AllocPolicy.h"
@@ -169,6 +170,9 @@ class JitRuntime {
       monoStubExitOffsets_;
   WriteOnceData<uint32_t> monoStubFailOffset_{0};
   WriteOnceData<uint32_t> monoStubExitTailOffset_{0};
+
+  // Templates of the inline stubs of monomorphic Baseline code.
+  MainThreadData<MonoStubTemplates> monoStubTemplates_;
 
   // Thunk to convert the value in R0 to int32 if it's a double.
   // Note: this stub treats -0 as +0 and may clobber R1.scratchReg().
@@ -466,6 +470,7 @@ class JitRuntime {
   TrampolinePtr monoStubFail() const {
     return trampolineCode(monoStubFailOffset_);
   }
+  MonoStubTemplates& monoStubTemplates() { return monoStubTemplates_.ref(); }
 
   TrampolinePtr getDoubleToInt32ValueStub() const {
     return trampolineCode(doubleToInt32ValueStubOffset_);

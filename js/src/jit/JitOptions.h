@@ -77,6 +77,7 @@ struct DefaultJitOptions {
   bool baselineJit;
   bool baselineBatching;
   bool baselineMono;
+  bool baselineMonoTemplates;
   bool ion;
   bool jitForTrustedPrincipals;
   bool nativeRegExp;

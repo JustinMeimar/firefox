@@ -22,6 +22,7 @@
 #include "jit/JitScript.h"
 #include "jit/JSJitFrameIter.h"
 #include "jit/MacroAssembler.h"
+#include "jit/MonoTemplates.h"
 #include "jit/SharedICHelpers.h"
 #include "util/Memory.h"
 #include "vm/HelperThreads.h"
@@ -180,7 +181,8 @@ bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
                                   TempAllocator& alloc, ICCacheIRStub* stub,
                                   mozilla::Span<const JSValueType> inputTypes,
                                   InlinedInputVector& origInputs,
-                                  InlinedFailureVector& failures) {
+                                  InlinedFailureVector& failures,
+                                  MonoTemplateUse* templateUse) {
   MOZ_ASSERT(CanInlineMonoStub(stub));
   const CacheIRStubInfo* info = stub->stubInfo();
   CacheKind kind = info->kind();
@@ -190,6 +192,20 @@ bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
   if (zone->needsMarkingBarrier()) {
     TraceCacheIRStub(zone->barrierTracer(),
                      reinterpret_cast<MonoStubCopy*>(stub), info);
+  }
+
+  *templateUse = MonoTemplateUse::None;
+  if (JitOptions.baselineMonoTemplates) {
+    MonoStubTemplates& templates =
+        cx->runtime()->jitRuntime()->monoStubTemplates();
+    if (!templates.emitStub(cx, masm, stub, inputTypes, origInputs, failures,
+                            templateUse)) {
+      return false;
+    }
+    if (*templateUse == MonoTemplateUse::Hit ||
+        *templateUse == MonoTemplateUse::Built) {
+      return true;
+    }
   }
 
   BaselineCacheIRCompiler compiler(

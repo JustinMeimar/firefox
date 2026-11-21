@@ -925,7 +925,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
     uint32_t stubOffset = masm.nopPatchableToCall().offset();
     if (!EmitInlinedMonoStub(handler.monoCx(), masm, handler.alloc(), stub,
                              stackInputTypes, handler.monoExitInputs(),
-                             handler.monoExitFailures()) ||
+                             handler.monoExitFailures(), &stats.templateUse) ||
         !handler.addMonoExit(stubOffset, pcOffset, *operands, inputsStart,
                              failuresStart, frame)) {
       return false;
@@ -1008,7 +1008,8 @@ bool BaselineCompilerCodeGen::emitNextIC() {
                     .exitNs = 0,
                     .disposition = MonoICDisposition::Chain,
                     .noInline = MonoNoInline::None,
-                    .noInlineOp = CacheOp(0)};
+                    .noInlineOp = CacheOp(0),
+                    .templateUse = MonoTemplateUse::None};
   int64_t emitStart = handler.monoStats() ? MonoStatsNowNs() : 0;
   auto recordStats = [&]() {
     if (!handler.monoStats()) {

@@ -93,6 +93,10 @@ class MacroAssemblerX86Shared : public Assembler {
     return masm.appendRawCode(code, numBytes);
   }
 
+  bool hasConstantPoolEntries() const {
+    return !doubles_.empty() || !floats_.empty() || !simds_.empty();
+  }
+
   void addToPCRel4(uint32_t offset, int32_t bias) {
     return masm.addToPCRel4(offset, bias);
   }

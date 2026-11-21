@@ -772,6 +772,11 @@ class StubFieldOffset {
 
 class AutoOutputRegister;
 
+// Whether the code of the op embeds the stub fields it reads only as
+// immediates, so that a template of monomorphic Baseline code can hold them as
+// holes. See MonoTemplates.h.
+bool CanTemplateStubFieldsOf(CacheOp op);
+
 // Base class for BaselineCacheIRCompiler and IonCacheIRCompiler.
 class MOZ_RAII CacheIRCompiler {
  protected:
@@ -815,6 +820,14 @@ class MOZ_RAII CacheIRCompiler {
   enum class StubFieldPolicy { Address, Constant };
 
   StubFieldPolicy stubFieldPolicy_;
+
+  // When emitting a template of monomorphic Baseline code, the stub data of
+  // the source holds sentinels, and this is the data of the stub itself, which
+  // ops whose stub fields can't be templated read instead. See
+  // MonoTemplates.h.
+  const uint8_t* templateStubData_ = nullptr;
+  bool templateRejected_ = false;
+  CacheOp currentOp_ = CacheOp(0);
 
   static MacroAssembler& InitMasm(mozilla::Maybe<StackMacroAssembler>& own,
                                   MacroAssembler* external, JSContext* cx,
@@ -949,14 +962,27 @@ class MOZ_RAII CacheIRCompiler {
   void emitLoadDoubleValueStubField(StubFieldOffset val, ValueOperand dest,
                                     FloatRegister scratch);
 
+  bool readsOwnStubData() {
+    if (!templateStubData_ || CanTemplateStubFieldsOf(currentOp_)) {
+      return false;
+    }
+    templateRejected_ = true;
+    return true;
+  }
   uintptr_t readStubWord(uint32_t offset, StubField::Type type) {
     MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
     MOZ_ASSERT((offset % sizeof(uintptr_t)) == 0);
+    if (MOZ_UNLIKELY(readsOwnStubData())) {
+      return *reinterpret_cast<const uintptr_t*>(templateStubData_ + offset);
+    }
     return source_.readStubWord(offset, type);
   }
   uint64_t readStubInt64(uint32_t offset, StubField::Type type) {
     MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
     MOZ_ASSERT((offset % sizeof(uintptr_t)) == 0);
+    if (MOZ_UNLIKELY(readsOwnStubData())) {
+      return *reinterpret_cast<const uint64_t*>(templateStubData_ + offset);
+    }
     return source_.readStubInt64(offset, type);
   }
   int32_t int32StubField(uint32_t offset) {
@@ -974,7 +1000,9 @@ class MOZ_RAII CacheIRCompiler {
   Shape* weakShapeStubField(uint32_t offset) {
     MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
     Shape* shape = (Shape*)readStubWord(offset, StubField::Type::WeakShape);
-    gc::ReadBarrier(shape);
+    if (!templateStubData_) {
+      gc::ReadBarrier(shape);
+    }
     return shape;
   }
   JSObject* objectStubField(uint32_t offset) {
@@ -985,7 +1013,9 @@ class MOZ_RAII CacheIRCompiler {
     MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
     JSObject* obj =
         (JSObject*)readStubWord(offset, StubField::Type::WeakObject);
-    gc::ReadBarrier(obj);
+    if (!templateStubData_) {
+      gc::ReadBarrier(obj);
+    }
     return obj;
   }
   Value valueStubField(uint32_t offset) {
@@ -997,7 +1027,9 @@ class MOZ_RAII CacheIRCompiler {
     MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
     uint64_t raw = readStubInt64(offset, StubField::Type::WeakValue);
     Value v = Value::fromRawBits(raw);
-    gc::ValueReadBarrier(v);
+    if (!templateStubData_) {
+      gc::ValueReadBarrier(v);
+    }
     return v;
   }
   double doubleStubField(uint32_t offset) {
@@ -1021,7 +1053,9 @@ class MOZ_RAII CacheIRCompiler {
     MOZ_ASSERT(stubFieldPolicy_ == StubFieldPolicy::Constant);
     BaseScript* script =
         (BaseScript*)readStubWord(offset, StubField::Type::WeakBaseScript);
-    gc::ReadBarrier(script);
+    if (!templateStubData_) {
+      gc::ReadBarrier(script);
+    }
     return script;
   }
   const JSClass* classStubField(uintptr_t offset) {
@@ -1432,6 +1466,7 @@ class CacheIRStubInfo {
   // The operand counts and last uses of the CacheIRWriter of the code.
   uint32_t numInputOperands() const { return numInputOperands_; }
   uint32_t numOperandIds() const { return numOperandIds_; }
+  uint32_t numOperandLastUsed() const { return numOperandLastUsed_; }
   bool operandIsDead(uint32_t operandId, uint32_t currentInstruction) const {
     if (operandId >= numOperandLastUsed_) {
       return false;

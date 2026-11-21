@@ -45,6 +45,8 @@ static const char* const MonoICDispositionNames[] = {
     "copy",  "pushed", "operands",    "nocopy"};
 
 static const char* const MonoNoInlineNames[] = {"", "gc", "nocopy", "op"};
+static const char* const MonoTemplateUseNames[] = {"", "hit", "built",
+                                                   "rejected"};
 
 #ifdef XP_UNIX
 static constexpr size_t MaxMonoCounters = size_t(1) << 24;
@@ -353,7 +355,8 @@ void js::jit::LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
     } else {
       PrintMonoStubOps(buf, firstStub->toCacheIRStub());
     }
-    buf.printf(",%u,%u]", ic.emitNs, ic.exitNs);
+    buf.printf(",%u,%u,\"%s\"]", ic.emitNs, ic.exitNs,
+               MonoTemplateUseNames[size_t(ic.templateUse)]);
     first = false;
   }
   buf.printf("]}");
