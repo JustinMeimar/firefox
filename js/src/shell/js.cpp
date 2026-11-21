@@ -13164,6 +13164,9 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "baseline-mono",
                         "Compile scripts whose ICs are monomorphic with their "
                         "stubs inlined in Baseline code") ||
+      !op.addBoolOption('\0', "baseline-mono-mixed",
+                        "Compile scripts with any monomorphic IC as "
+                        "monomorphic Baseline code") ||
       !op.addBoolOption('\0', "no-baseline-mono-templates",
                         "Compile the inline stubs of monomorphic Baseline "
                         "code instead of copying them from templates") ||
@@ -14411,6 +14414,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
 
   if (op.getBoolOption("baseline-mono")) {
     jit::JitOptions.baselineMono = true;
+  }
+  if (op.getBoolOption("baseline-mono-mixed")) {
+    jit::JitOptions.baselineMonoMixed = true;
   }
   if (op.getBoolOption("no-baseline-mono-templates")) {
     jit::JitOptions.baselineMonoTemplates = false;

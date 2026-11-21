@@ -1,3 +1,4 @@
+// |jit-test| --baseline-mono-mixed
 function f(o, p) { return o.x + p.y; }
 
 var a = { x: 1 };

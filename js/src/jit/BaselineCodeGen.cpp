@@ -285,7 +285,8 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
     reason = MonoScriptReason::Generator;
   } else if (script->isAsync()) {
     reason = MonoScriptReason::Async;
-  } else if (!HasMonomorphicIC(script)) {
+  } else if (JitOptions.baselineMonoMixed ? !HasMonomorphicIC(script)
+                                           : !IsMonomorphicScript(script)) {
     reason = MonoScriptReason::NotMonomorphic;
   }
   handler.setMonoReason(reason);

@@ -177,6 +177,10 @@ DefaultJitOptions::DefaultJitOptions() {
   // stubs inlined. See MonoBaseline.h.
   SET_DEFAULT(baselineMono, false);
 
+  // Whether monomorphic Baseline code is compiled for scripts with any
+  // monomorphic IC, not only for those whose ICs are all monomorphic.
+  SET_DEFAULT(baselineMonoMixed, false);
+
   // Whether monomorphic Baseline code copies its inline stubs from templates.
   // See MonoTemplates.h.
   SET_DEFAULT(baselineMonoTemplates, true);

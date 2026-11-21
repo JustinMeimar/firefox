@@ -35,8 +35,9 @@ enum class CacheKind : uint8_t;
 
 // [SMDOC] Monomorphic Baseline
 //
-// A script with an IC op that has exactly one stub when Baseline compiles it
-// is compiled monomorphic. IC ops with more stubs or none call their IC chain.
+// A script whose IC ops each have at most one stub when Baseline compiles it,
+// or with the mixed option, a script with any IC op that has exactly one, is
+// compiled monomorphic. IC ops with more stubs or none call their IC chain.
 // Each IC op with one stub that makes no calls has the stub emitted inline,
 // with its stub fields as constants and its failure paths out of line next to
 // its exit. Each other IC op with one stub calls a copy of that stub instead
@@ -281,6 +282,9 @@ void EmitMonoExit(MacroAssembler& masm, MonoOperands operands,
 
 // Whether the IC has exactly one stub and has never failed to attach another.
 bool IsMonomorphicIC(ICScript* icScript, size_t entryIndex);
+
+// Whether every IC of the script that has a stub is monomorphic, and one has.
+bool IsMonomorphicScript(JSScript* script);
 
 // Whether any IC of the script is monomorphic.
 bool HasMonomorphicIC(JSScript* script);

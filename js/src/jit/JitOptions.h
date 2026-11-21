@@ -77,6 +77,7 @@ struct DefaultJitOptions {
   bool baselineJit;
   bool baselineBatching;
   bool baselineMono;
+  bool baselineMonoMixed;
   bool baselineMonoTemplates;
   bool baselineMonoExitTables;
   bool ion;

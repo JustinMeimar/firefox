@@ -381,6 +381,21 @@ bool js::jit::IsMonomorphicIC(ICScript* icScript, size_t entryIndex) {
          state.numOptimizedStubs() == 1 && !state.hasFailures();
 }
 
+bool js::jit::IsMonomorphicScript(JSScript* script) {
+  ICScript* icScript = script->jitScript()->icScript();
+  bool hasStub = false;
+  for (size_t i = 0; i < icScript->numICEntries(); i++) {
+    if (icScript->icEntry(i).firstStub()->isFallback()) {
+      continue;
+    }
+    if (!IsMonomorphicIC(icScript, i)) {
+      return false;
+    }
+    hasStub = true;
+  }
+  return hasStub;
+}
+
 bool js::jit::HasMonomorphicIC(JSScript* script) {
   ICScript* icScript = script->jitScript()->icScript();
   for (size_t i = 0; i < icScript->numICEntries(); i++) {
