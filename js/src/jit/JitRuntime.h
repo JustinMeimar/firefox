@@ -171,6 +171,9 @@ class JitRuntime {
   WriteOnceData<uint32_t> monoStubFailOffset_{0};
   WriteOnceData<uint32_t> monoStubExitTailOffset_{0};
 
+  // Thunk that the exits of monomorphic Baseline code with an exit table call.
+  WriteOnceData<uint32_t> monoBailoutOffset_{0};
+
   // Templates of the inline stubs of monomorphic Baseline code.
   MainThreadData<MonoStubTemplates> monoStubTemplates_;
 
@@ -469,6 +472,9 @@ class JitRuntime {
   }
   TrampolinePtr monoStubFail() const {
     return trampolineCode(monoStubFailOffset_);
+  }
+  TrampolinePtr monoBailout() const {
+    return trampolineCode(monoBailoutOffset_);
   }
   MonoStubTemplates& monoStubTemplates() { return monoStubTemplates_.ref(); }
 

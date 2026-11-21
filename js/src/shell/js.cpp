@@ -13167,6 +13167,9 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "no-baseline-mono-templates",
                         "Compile the inline stubs of monomorphic Baseline "
                         "code instead of copying them from templates") ||
+      !op.addBoolOption('\0', "no-baseline-mono-exit-tables",
+                        "Give the inline stubs of monomorphic Baseline code "
+                        "exits of their own instead of an exit table") ||
       !op.addStringOption('\0', "ion-offthread-compile", "on/off",
                           "Compile Ion scripts offthread (default: on)") ||
       !op.addStringOption('\0', "ion-parallel-compile", "on/off",
@@ -14411,6 +14414,9 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   }
   if (op.getBoolOption("no-baseline-mono-templates")) {
     jit::JitOptions.baselineMonoTemplates = false;
+  }
+  if (op.getBoolOption("no-baseline-mono-exit-tables")) {
+    jit::JitOptions.baselineMonoExitTables = false;
   }
 
   int32_t queueCapacity = op.getIntOption("baseline-queue-capacity");

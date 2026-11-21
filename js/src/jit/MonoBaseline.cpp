@@ -391,8 +391,8 @@ bool js::jit::HasMonomorphicIC(JSScript* script) {
   return false;
 }
 
-uint8_t* js::jit::MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset) {
-  AutoUnsafeCallWithABI unsafe;
+static uint8_t* ContinueInInterpreter(BaselineFrame* frame,
+                                      uint32_t pcOffset) {
   JSContext* cx = TlsContext.get();
   JSScript* script = frame->script();
   JitScript* jitScript = script->jitScript();
@@ -417,6 +417,302 @@ uint8_t* js::jit::MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset) {
       ->baselineInterpreter()
       .interpretOpAddr()
       .value;
+}
+
+uint8_t* js::jit::MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset) {
+  AutoUnsafeCallWithABI unsafe;
+  return ContinueInInterpreter(frame, pcOffset);
+}
+
+MonoExitTable* MonoExitTable::New(mozilla::Span<const uint64_t> constants,
+                                  const CompactBufferWriter& sites) {
+  size_t bytes = sizeof(MonoExitTable) + constants.size() * sizeof(Value) +
+                 sites.length();
+  uint8_t* mem = js_pod_malloc<uint8_t>(bytes);
+  if (!mem) {
+    return nullptr;
+  }
+  auto* table = new (mem) MonoExitTable(constants.size(), sites.length());
+  for (size_t i = 0; i < constants.size(); i++) {
+    table->constants()[i] = Value::fromRawBits(constants[i]);
+  }
+  if (sites.length() != 0) {
+    memcpy(const_cast<uint8_t*>(table->data()), sites.buffer(),
+           sites.length());
+  }
+  return table;
+}
+
+void MonoExitTable::trace(JSTracer* trc) {
+  for (uint32_t i = 0; i < numConstants_; i++) {
+    TraceManuallyBarrieredEdge(trc, &constants()[i], "mono-exit-constant");
+  }
+}
+
+void MonoExitTableWriter::writeSite(uint32_t stubOffset, uint32_t pcOffset,
+                                    uint32_t drop, uint32_t numValues) {
+  MOZ_ASSERT(stubOffset > lastStubOffset_);
+  MOZ_ASSERT(drop <= 1);
+  MOZ_RELEASE_ASSERT(numValues <= MonoExitMaxValues);
+  sites_.writeUnsigned(stubOffset - lastStubOffset_);
+  lastStubOffset_ = stubOffset;
+  sites_.writeUnsigned(pcOffset);
+  sites_.writeByte(drop);
+  sites_.writeByte(numValues);
+}
+
+void MonoExitTableWriter::writeValue(MonoExitValue kind, uint32_t index) {
+  MOZ_ASSERT(kind != MonoExitValue::Constant);
+  sites_.writeByte(uint32_t(kind));
+  if (kind != MonoExitValue::This) {
+    sites_.writeUnsigned(index);
+  }
+}
+
+bool MonoExitTableWriter::writeConstant(const Value& value) {
+  sites_.writeByte(uint32_t(MonoExitValue::Constant));
+  sites_.writeUnsigned(constants_.length());
+  return constants_.append(value.asRawBits());
+}
+
+void MonoExitTableWriter::writeStates(uint32_t numInputs, uint32_t numStates) {
+  MOZ_ASSERT(numInputs <= MonoMaxStackInputs);
+  sites_.writeByte(numInputs);
+  sites_.writeByte(numStates);
+}
+
+static void WriteOperandLocation(CompactBufferWriter& writer,
+                                 const OperandLocation& loc) {
+  writer.writeByte(uint32_t(loc.kind()));
+  switch (loc.kind()) {
+    case OperandLocation::ValueReg:
+#ifdef JS_PUNBOX64
+      writer.writeByte(loc.valueReg().valueReg().code());
+      return;
+#else
+      break;
+#endif
+    case OperandLocation::PayloadReg:
+      writer.writeByte(loc.payloadReg().code());
+      writer.writeByte(uint32_t(loc.payloadType()));
+      return;
+    case OperandLocation::PayloadStack:
+      writer.writeUnsigned(loc.payloadStack());
+      writer.writeByte(uint32_t(loc.payloadType()));
+      return;
+    case OperandLocation::ValueStack:
+      writer.writeUnsigned(loc.valueStack());
+      return;
+    case OperandLocation::BaselineFrame:
+      writer.writeUnsigned(loc.baselineFrameSlot().slot());
+      return;
+    case OperandLocation::Uninitialized:
+    case OperandLocation::DoubleReg:
+    case OperandLocation::Constant:
+      break;
+  }
+  MOZ_CRASH("Unexpected location of an inline stub input");
+}
+
+void MonoExitTableWriter::writeState(mozilla::Maybe<uint32_t> padOffset,
+                                     uint32_t stackPushed,
+                                     mozilla::Span<const OperandLocation> inputs) {
+  if (padOffset) {
+    MOZ_ASSERT(*padOffset > lastPadOffset_);
+    sites_.writeUnsigned(*padOffset - lastPadOffset_);
+    lastPadOffset_ = *padOffset;
+  } else {
+    sites_.writeUnsigned(0);
+  }
+  sites_.writeUnsigned(stackPushed);
+  for (const OperandLocation& loc : inputs) {
+    WriteOperandLocation(sites_, loc);
+  }
+}
+
+MonoExitTable* MonoExitTableWriter::finish() {
+  return MonoExitTable::New(constants_, sites_);
+}
+
+namespace {
+
+struct MonoExitInput {
+  OperandLocation::Kind kind;
+  uint32_t reg;
+  uint32_t offset;
+  JSValueType type;
+};
+
+struct MonoExitValueSource {
+  MonoExitValue kind;
+  uint32_t index;
+};
+
+// An exit decoded from the exit table.
+struct MonoExit {
+  uint32_t pcOffset;
+  uint32_t drop;
+  uint32_t numValues;
+  MonoExitValueSource values[MonoExitMaxValues];
+  uint32_t stackPushed;
+  MonoExitInput inputs[MonoMaxStackInputs];
+};
+
+}  // namespace
+
+static MonoExitInput ReadOperandLocation(CompactBufferReader& reader) {
+  MonoExitInput input{};
+  input.kind = OperandLocation::Kind(reader.readByte());
+  switch (input.kind) {
+    case OperandLocation::ValueReg:
+      input.reg = reader.readByte();
+      break;
+    case OperandLocation::PayloadReg:
+      input.reg = reader.readByte();
+      input.type = JSValueType(reader.readByte());
+      break;
+    case OperandLocation::PayloadStack:
+      input.offset = reader.readUnsigned();
+      input.type = JSValueType(reader.readByte());
+      break;
+    case OperandLocation::ValueStack:
+    case OperandLocation::BaselineFrame:
+      input.offset = reader.readUnsigned();
+      break;
+    default:
+      MOZ_CRASH("Unexpected location of an inline stub input");
+  }
+  return input;
+}
+
+// Finds the exit whose call returns to the code offset.
+static MonoExit FindMonoExit(MonoExitTable* table, uint32_t returnOffset) {
+  CompactBufferReader reader(table->dataStart(), table->dataEnd());
+  uint32_t stubOffset = 0;
+  uint32_t padOffset = 0;
+  while (reader.more()) {
+    MonoExit exit;
+    stubOffset += reader.readUnsigned();
+    exit.pcOffset = reader.readUnsigned();
+    exit.drop = reader.readByte();
+    exit.numValues = reader.readByte();
+    for (uint32_t i = 0; i < exit.numValues; i++) {
+      MonoExitValueSource& value = exit.values[i];
+      value.kind = MonoExitValue(reader.readByte());
+      value.index =
+          value.kind == MonoExitValue::This ? 0 : reader.readUnsigned();
+    }
+    uint32_t numInputs = reader.readByte();
+    uint32_t numStates = reader.readByte();
+    MOZ_RELEASE_ASSERT(numInputs <= MonoMaxStackInputs);
+    for (uint32_t state = 0; state < numStates; state++) {
+      uint32_t padDelta = reader.readUnsigned();
+      padOffset += padDelta;
+      exit.stackPushed = reader.readUnsigned();
+      for (uint32_t i = 0; i < numInputs; i++) {
+        exit.inputs[i] = ReadOperandLocation(reader);
+      }
+      // The nop of a discarded stub calls the trampoline before the stub ran,
+      // with its inputs where they are in the first state.
+      bool discarded = state == 0 && returnOffset == stubOffset;
+      if (discarded || (padDelta != 0 && returnOffset == padOffset)) {
+        return exit;
+      }
+    }
+  }
+  MOZ_CRASH("No monomorphic exit for the return address");
+}
+
+static Value BoxPayload(JSValueType type, uintptr_t payload) {
+  switch (type) {
+    case JSVAL_TYPE_INT32:
+      return Int32Value(int32_t(payload));
+    case JSVAL_TYPE_BOOLEAN:
+      return BooleanValue(payload & 1);
+    case JSVAL_TYPE_OBJECT:
+      return ObjectValue(*reinterpret_cast<JSObject*>(payload));
+    case JSVAL_TYPE_STRING:
+      return StringValue(reinterpret_cast<JSString*>(payload));
+    case JSVAL_TYPE_SYMBOL:
+      return SymbolValue(reinterpret_cast<JS::Symbol*>(payload));
+    case JSVAL_TYPE_BIGINT:
+      return BigIntValue(reinterpret_cast<JS::BigInt*>(payload));
+    default:
+      MOZ_CRASH("Unexpected type of an unboxed input");
+  }
+}
+
+static Value ReadMonoExitInput(const MonoExitInput& input, uintptr_t* regs,
+                               uint8_t* stackTop) {
+  switch (input.kind) {
+    case OperandLocation::ValueReg:
+      return Value::fromRawBits(regs[input.reg]);
+    case OperandLocation::PayloadReg:
+      return BoxPayload(input.type, regs[input.reg]);
+    case OperandLocation::PayloadStack:
+      return BoxPayload(input.type, *reinterpret_cast<uintptr_t*>(
+                                        stackTop - input.offset));
+    case OperandLocation::ValueStack:
+      return *reinterpret_cast<Value*>(stackTop - input.offset);
+    case OperandLocation::BaselineFrame:
+      return reinterpret_cast<Value*>(stackTop)[input.offset];
+    default:
+      MOZ_CRASH("Unexpected location of an inline stub input");
+  }
+}
+
+uint8_t* js::jit::MonoBailout(BaselineFrame* frame, uintptr_t* regs) {
+#ifdef JS_CODEGEN_X64
+  AutoUnsafeCallWithABI unsafe;
+  BaselineScript* baselineScript = frame->script()->baselineScript();
+  MOZ_ASSERT(baselineScript->monoExitTable());
+
+  uint8_t* returnAddress = reinterpret_cast<uint8_t*>(regs[Registers::Total]);
+  uint32_t returnOffset = returnAddress - baselineScript->method()->raw();
+  MonoExit exit = FindMonoExit(baselineScript->monoExitTable(), returnOffset);
+
+  // The stack as the compiler left it at the op, past what the stub pushed.
+  uint8_t* stackTop = reinterpret_cast<uint8_t*>(regs + Registers::Total + 1) +
+                      exit.stackPushed;
+
+  Value values[MonoExitMaxValues];
+  for (uint32_t i = 0; i < exit.numValues; i++) {
+    const MonoExitValueSource& source = exit.values[i];
+    switch (source.kind) {
+      case MonoExitValue::Input:
+        values[i] = ReadMonoExitInput(exit.inputs[source.index], regs,
+                                      stackTop);
+        break;
+      case MonoExitValue::Local:
+        values[i] = *reinterpret_cast<Value*>(
+            reinterpret_cast<uint8_t*>(frame) + BaselineFrame::Size() +
+            BaselineFrame::reverseOffsetOfLocal(source.index));
+        break;
+      case MonoExitValue::Arg:
+        values[i] = frame->argv()[source.index];
+        break;
+      case MonoExitValue::This:
+        values[i] = frame->thisArgument();
+        break;
+      case MonoExitValue::Register:
+        values[i] = Value::fromRawBits(regs[source.index]);
+        break;
+      case MonoExitValue::Constant:
+        values[i] = baselineScript->monoExitTable()->constant(source.index);
+        break;
+    }
+  }
+
+  Value* sp = reinterpret_cast<Value*>(stackTop) + exit.drop;
+  for (uint32_t i = 0; i < exit.numValues; i++) {
+    *--sp = values[i];
+  }
+  regs[StackPointer.code()] = uintptr_t(sp);
+
+  return ContinueInInterpreter(frame, exit.pcOffset);
+#else
+  MOZ_CRASH("Monomorphic exit tables are x64 only");
+#endif
 }
 
 static void LogDiscardBlocked(JSContext* cx, JSScript* script) {
@@ -537,4 +833,31 @@ void JitRuntime::generateMonoStubExits(MacroAssembler& masm) {
   masm.passABIArg(ICStubReg);
   masm.callWithABI<Fn, MonoBaselineExit>();
   masm.jump(ReturnReg);
+
+#ifdef JS_CODEGEN_X64
+  // The exits of code with an exit table call this, with the return address
+  // of the call telling the exit.
+  monoBailoutOffset_ = startTrampolineCode(masm);
+  masm.subFromStackPtr(Imm32(Registers::Total * sizeof(uintptr_t)));
+  for (GeneralRegisterIterator iter(GeneralRegisterSet::All()); iter.more();
+       ++iter) {
+    Register reg = *iter;
+    masm.storePtr(reg, Address(StackPointer, reg.code() * sizeof(uintptr_t)));
+  }
+
+  AllocatableGeneralRegisterSet bailoutRegs(GeneralRegisterSet::Volatile());
+  Register bailoutFrame = bailoutRegs.takeAny();
+  Register bailoutRegsPtr = bailoutRegs.takeAny();
+  Register bailoutTemp = bailoutRegs.takeAny();
+  masm.moveStackPtrTo(bailoutRegsPtr);
+  masm.loadBaselineFramePtr(FramePointer, bailoutFrame);
+  using BailoutFn = uint8_t* (*)(BaselineFrame*, uintptr_t*);
+  masm.setupUnalignedABICall(bailoutTemp);
+  masm.passABIArg(bailoutFrame);
+  masm.passABIArg(bailoutRegsPtr);
+  masm.callWithABI<BailoutFn, MonoBailout>();
+  masm.loadStackPtr(
+      Address(StackPointer, StackPointer.code() * sizeof(uintptr_t)));
+  masm.jump(ReturnReg);
+#endif
 }

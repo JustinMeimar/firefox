@@ -393,6 +393,11 @@ class BaselineCompilerHandler {
   InlinedFailureVector monoExitFailures_;
   Vector<MonoInlineStub, 0, SystemAllocPolicy> monoInlineStubs_;
 
+  // Set when inline stubs exit through the shared trampoline, as this table
+  // encodes.
+  bool monoExitTable_ = false;
+  MonoExitTableWriter monoExitTableWriter_;
+
   // Diagnostics, see MonoStats.h.
   bool monoStats_ = false;
   MonoScriptReason monoReason_ = MonoScriptReason::OptionOff;
@@ -500,6 +505,9 @@ class BaselineCompilerHandler {
 
   [[nodiscard]] bool setMono(JSContext* cx, size_t numICEntries) {
     monoCx_ = cx;
+#ifdef JS_CODEGEN_X64
+    monoExitTable_ = JitOptions.baselineMonoExitTables;
+#endif
     return monoExits_.reserve(numICEntries) &&
            monoExitValues_.reserve(numICEntries) &&
            monoExitInputs_.reserve(2 * numICEntries) &&
@@ -588,6 +596,8 @@ class BaselineCompilerHandler {
     return monoExitValues_[index];
   }
   bool hasMonoCode() const { return monoStubs_ || !monoExits_.empty(); }
+  bool monoExitTable() const { return monoExitTable_; }
+  MonoExitTableWriter& monoExitTableWriter() { return monoExitTableWriter_; }
   MonoStub* releaseMonoStubs() {
     MonoStub* list = monoStubs_;
     monoStubs_ = nullptr;
@@ -645,6 +655,10 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
 
   bool emitBody();
   bool monoInlinesIC(JSOp op);
+  [[nodiscard]] bool emitMonoExit(
+      const BaselineCompilerHandler::MonoExit& exit);
+  [[nodiscard]] bool emitMonoExitStates(
+      const BaselineCompilerHandler::MonoExit& exit);
 
   [[nodiscard]] bool emitDebugTrap();
 };

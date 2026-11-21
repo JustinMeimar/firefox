@@ -35,7 +35,7 @@
 #include "jit/ICTrace.h"      // js::jit::ICTraceStubEntry
 #include "jit/Ion.h"          // js::jit::LazyLinkTopActivation
 #include "jit/JitFrames.h"    // HandleException
-#include "jit/MonoBaseline.h"  // js::jit::MonoBaselineExit
+#include "jit/MonoBaseline.h"  // js::jit::MonoBailout, MonoBaselineExit
 #include "jit/VMFunctions.h"  // Rest of js::jit::* functions.
 #include "js/CallArgs.h"      // JSNative
 #include "js/Conversions.h"   // JS::ToInt32
@@ -173,6 +173,7 @@ namespace jit {
   _(js::jit::InvokeFromInterpreterStub)                                        \
   _(js::jit::LazyLinkTopActivation)                                            \
   _(js::jit::LinearizeForCharAccessPure)                                       \
+  _(js::jit::MonoBailout)                                                      \
   _(js::jit::MonoBaselineExit)                                                 \
   _(js::jit::ObjectHasGetterSetterPure)                                        \
   _(js::jit::ObjectIsCallable)                                                 \

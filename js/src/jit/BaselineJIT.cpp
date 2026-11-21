@@ -886,6 +886,9 @@ BaselineScript* BaselineScript::Copy(JSContext* cx, BaselineScript* bs) {
 void BaselineScript::trace(JSTracer* trc) {
   TraceEdge(trc, &method_, "baseline-method");
   MonoStub::TraceList(trc, monoStubs_);
+  if (monoExitTable_) {
+    monoExitTable_->trace(trc);
+  }
 }
 
 void BaselineScript::discardMonoStubs(JSRuntime* rt) {
@@ -894,10 +897,11 @@ void BaselineScript::discardMonoStubs(JSRuntime* rt) {
     return;
   }
   AutoWritableJitCode awjc(method_);
+  uint8_t* bailout = rt->jitRuntime()->monoBailout().value;
   for (uint32_t i = 0; i < numMonoInlineStubs_; i++) {
     const MonoInlineStub& stub = monoInlineStubs_[i];
-    MacroAssembler::patchNopToCall(method_->raw() + stub.stubOffset,
-                                   method_->raw() + stub.exitOffset);
+    uint8_t* exit = stub.exitOffset ? method_->raw() + stub.exitOffset : bailout;
+    MacroAssembler::patchNopToCall(method_->raw() + stub.stubOffset, exit);
   }
 }
 
@@ -916,6 +920,13 @@ void BaselineScript::Destroy(JS::GCContext* gcx, BaselineScript* script) {
     MonoStub::DestroyList(script->monoStubs_);
   }
   js_free(script->monoInlineStubs_);
+  if (script->monoExitTable_) {
+    Zone* zone = script->method_->zone();
+    if (zone->needsMarkingBarrier()) {
+      script->monoExitTable_->trace(zone->barrierTracer());
+    }
+    js_free(script->monoExitTable_);
+  }
 
   // Trigger write barrier since we are destroying this outside GC.
   script->method_ = nullptr;

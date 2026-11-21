@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "jit/CacheIRCompiler.h"
+#include "jit/CompactBuffer.h"
 #include "jit/MonoStats.h"
 #include "util/Memory.h"
 
@@ -82,6 +83,29 @@ enum class CacheKind : uint8_t;
 //   restore:
 //     box   Object, R0 -> R0
 //     jmp   exit
+//
+// On x64, inline stubs exit through a shared trampoline instead, as Ion code
+// bails out: each state of the inputs that failures leave gets a call to the
+// trampoline out of line, and discarding the stubs makes their nops calls to
+// it too. The trampoline stores the registers and finds the exit by the
+// return address of the call in the exit table of the script, which encodes
+// for each inline stub its pc, the values to push and, for each state, where
+// the inputs are. Code then only has a call per state:
+//
+//     nop5                         ; becomes a call to the trampoline
+//     cmp   tag(R0), Object
+//     jne   state0
+//     unbox R0 -> R0
+//     cmp   shape(R0), $shape
+//     jne   state1
+//     ...
+//
+//   Out of line, after the epilogue:
+//
+//   state0:
+//     call  trampoline             ; the input in R0
+//   state1:
+//     call  trampoline             ; the input in R0, unboxed as an object
 
 // Where the operands an op took off the stack before its IC are when its stub
 // fails.
@@ -157,12 +181,76 @@ class MonoStub {
 };
 
 // An inline stub, by the code offsets of the end of the nop it starts with and
-// of an entry to its exit that drops a return address. Discarding the stubs of
-// the script makes the nop a call to the exit, so that the stub exits when it
-// runs next.
+// of an entry to its exit that drops a return address, or zero if it exits
+// through the trampoline. Discarding the stubs of the script makes the nop a
+// call to the exit, so that the stub exits when it runs next.
 struct MonoInlineStub {
   uint32_t stubOffset;
   uint32_t exitOffset;
+};
+
+// Where a value an exit pushes comes from.
+enum class MonoExitValue : uint8_t {
+  // An input of the stub, from where it is in the state of the exit.
+  Input,
+  Local,
+  Arg,
+  This,
+  Register,
+  Constant,
+};
+
+// The most values an exit pushes.
+static constexpr size_t MonoExitMaxValues = 8;
+
+// The exits of the inline stubs of monomorphic code, with the constants they
+// push. See the SMDOC above.
+class MonoExitTable {
+  uint32_t numConstants_;
+  uint32_t length_;
+
+  MonoExitTable(uint32_t numConstants, uint32_t length)
+      : numConstants_(numConstants), length_(length) {}
+
+  Value* constants() { return reinterpret_cast<Value*>(this + 1); }
+  const uint8_t* data() const {
+    return reinterpret_cast<const uint8_t*>(this + 1) +
+           numConstants_ * sizeof(Value);
+  }
+
+ public:
+  static MonoExitTable* New(mozilla::Span<const uint64_t> constants,
+                            const CompactBufferWriter& sites);
+
+  const Value& constant(uint32_t index) {
+    MOZ_ASSERT(index < numConstants_);
+    return constants()[index];
+  }
+  const uint8_t* dataStart() const { return data(); }
+  const uint8_t* dataEnd() const { return data() + length_; }
+
+  void trace(JSTracer* trc);
+};
+
+// Encodes the exit table of monomorphic code, an inline stub at a time: its
+// site, then the values its exits push, then its states.
+class MonoExitTableWriter {
+  CompactBufferWriter sites_;
+  Vector<uint64_t, 0, SystemAllocPolicy> constants_;
+  uint32_t lastStubOffset_ = 0;
+  uint32_t lastPadOffset_ = 0;
+
+ public:
+  void writeSite(uint32_t stubOffset, uint32_t pcOffset, uint32_t drop,
+                 uint32_t numValues);
+  void writeValue(MonoExitValue kind, uint32_t index);
+  [[nodiscard]] bool writeConstant(const Value& value);
+  void writeStates(uint32_t numInputs, uint32_t numStates);
+  void writeState(mozilla::Maybe<uint32_t> padOffset, uint32_t stackPushed,
+                  mozilla::Span<const OperandLocation> inputs);
+
+  bool oom() const { return sites_.oom(); }
+  MonoExitTable* finish();
 };
 
 // Whether the stub can be emitted inline.
@@ -200,6 +288,13 @@ bool HasMonomorphicIC(JSScript* script);
 // Called by the exits with the pc offset of the op. Returns the address at
 // which the Baseline Interpreter continues.
 uint8_t* MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset);
+
+// Called by the trampoline that the exits of code with an exit table call,
+// with the general purpose registers, indexed by their code, stored below the
+// return address of the call. Pushes the values of the exit, stores the stack pointer from which
+// to continue in place of the stored stack pointer, and returns the address at
+// which the Baseline Interpreter continues.
+uint8_t* MonoBailout(BaselineFrame* frame, uintptr_t* regs);
 
 // Makes the monomorphic code of a script whose IC stubs are discarded exit
 // without running its stubs, and stops entering it.

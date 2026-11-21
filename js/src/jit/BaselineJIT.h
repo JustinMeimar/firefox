@@ -37,6 +37,7 @@ namespace jit {
 
 class BaselineFrame;
 class ExceptionBailoutInfo;
+class MonoExitTable;
 class MonoStub;
 struct MonoInlineStub;
 class IonCompileTask;
@@ -203,6 +204,10 @@ class alignas(uintptr_t) BaselineScript final
   MonoInlineStub* monoInlineStubs_ = nullptr;
   size_t numMonoInlineStubs_ = 0;
 
+  // The exits of the inline stubs of monomorphic code, if they call the
+  // shared trampoline.
+  MonoExitTable* monoExitTable_ = nullptr;
+
   // Identifies this code in diagnostics, see MonoStats.h. Zero when they are
   // off.
   uint32_t monoStatsId_ = 0;
@@ -331,12 +336,14 @@ class alignas(uintptr_t) BaselineScript final
   }
 
   void setIsMono(MonoStub* monoStubs, MonoInlineStub* inlineStubs,
-                 uint32_t numInlineStubs) {
+                 uint32_t numInlineStubs, MonoExitTable* exitTable) {
     flags_ |= IS_MONO;
     monoStubs_ = monoStubs;
     monoInlineStubs_ = inlineStubs;
     numMonoInlineStubs_ = numInlineStubs;
+    monoExitTable_ = exitTable;
   }
+  MonoExitTable* monoExitTable() const { return monoExitTable_; }
   bool isMono() const { return flags_ & IS_MONO; }
   void setMonoFailed() { flags_ |= MONO_FAILED; }
   void discardMonoStubs(JSRuntime* rt);
