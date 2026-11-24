@@ -1097,6 +1097,10 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
   }
 
   frame.syncStack(0);
+  if (stats.noInline == MonoNoInline::NoCopy) {
+    stats.disposition = MonoICDisposition::NoCopy;
+    return true;
+  }
 
   bool oom;
   MonoStub* monoStub =

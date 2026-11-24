@@ -161,15 +161,23 @@ MonoNoInline js::jit::WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op) {
   if (!CanCopyStub(stub)) {
     return MonoNoInline::NoCopy;
   }
-  CacheIRReader reader(info);
-  while (reader.more()) {
-    *op = reader.readOp();
-    if (!CanInlineOp(*op)) {
-      return MonoNoInline::Op;
+  CacheIRStubInfo::MonoBaselineCache& cache = info->monoBaselineCache();
+  if (!cache.cacheIRScanned) {
+    cache.allOpsInlinable = true;
+    CacheIRReader reader(info);
+    while (reader.more()) {
+      CacheOp op = reader.readOp();
+      if (!CanInlineOp(op)) {
+        cache.allOpsInlinable = false;
+        cache.noInlineOp = op;
+        break;
+      }
+      reader.skip(CacheIROpInfos[size_t(op)].argLength);
     }
-    reader.skip(CacheIROpInfos[size_t(*op)].argLength);
+    cache.cacheIRScanned = true;
   }
-  return MonoNoInline::None;
+  *op = cache.noInlineOp;
+  return cache.allOpsInlinable ? MonoNoInline::None : MonoNoInline::Op;
 }
 
 bool js::jit::CanInlineMonoStub(ICCacheIRStub* stub) {

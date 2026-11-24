@@ -34,6 +34,7 @@ class CacheIRStubInfo;
 class ICCacheIRStub;
 class IonCacheIRCompiler;
 class IonScript;
+class MonoStubTemplate;
 
 enum class ICStubEngine : uint8_t;
 
@@ -1428,6 +1429,24 @@ struct MapStubFieldToType<StubField::Type::WeakValue> {
 //
 // The array of stub field types is terminated by StubField::Type::Limit.
 class CacheIRStubInfo {
+ public:
+  // What monomorphic Baseline compiles found out about the stubs of an info,
+  // on the main thread.
+  struct MonoBaselineCache {
+    static constexpr size_t NumRecentTemplates = 2;
+
+    // The templates last used for stubs of the info, most recent first.
+    const MonoStubTemplate* recentTemplates[NumRecentTemplates] = {};
+
+    bool cacheIRScanned = false;
+    bool allOpsInlinable = false;
+
+    // The first op that can't be inlined, if any.
+    CacheOp noInlineOp = CacheOp(0);
+  };
+
+ private:
+  mutable MonoBaselineCache monoBaselineCache_;
   uint32_t codeLength_;
   CacheKind kind_;
   ICStubEngine engine_;
@@ -1459,6 +1478,7 @@ class CacheIRStubInfo {
   CacheKind kind() const { return kind_; }
   ICStubEngine engine() const { return engine_; }
   bool makesGCCalls() const { return makesGCCalls_; }
+  MonoBaselineCache& monoBaselineCache() const { return monoBaselineCache_; }
 
   CacheIRStubInfo(const CacheIRStubInfo&) = delete;
   CacheIRStubInfo& operator=(const CacheIRStubInfo&) = delete;

@@ -42,6 +42,9 @@ class MonoStubTemplateBuilder;
 // as 8. Values whose encoding depends on their bits, like doubles, are part of
 // the key instead.
 //
+// Each stub info remembers the templates last used for its stubs, so that
+// most lookups compare the ends of keys instead of hashing the CacheIR.
+//
 // A template is built by compiling the stub inline three times with its hole
 // fields replaced by different sentinels. The sentinels are wide enough that
 // the assembler can't pick a shorter encoding for them, so writing any value
@@ -89,6 +92,9 @@ class MonoStubTemplate {
   Vector<uint8_t, 0, SystemAllocPolicy> key_;
   HashNumber hash_;
 
+  // The end of the key, in which stubs of the same stub info differ.
+  uint32_t keySuffixLength_ = 0;
+
   // Set when no template can be built for the key.
   bool rejected_ = false;
 
@@ -110,6 +116,9 @@ class MonoStubTemplate {
   explicit MonoStubTemplate(HashNumber hash) : hash_(hash) {}
 
   mozilla::Span<const uint8_t> key() const { return key_; }
+  mozilla::Span<const uint8_t> keySuffix() const {
+    return mozilla::Span<const uint8_t>(key_).Last(keySuffixLength_);
+  }
   HashNumber hash() const { return hash_; }
   bool rejected() const { return rejected_; }
   size_t codeLength() const { return code_.length(); }

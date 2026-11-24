@@ -5,6 +5,7 @@
 #include "jit/MonoTemplates.h"
 
 #include <algorithm>
+#include <iterator>
 #include <string.h>
 
 #include "ds/LifoAlloc.h"
@@ -170,12 +171,15 @@ static bool AppendBytes(TemplateKey& key, const T& value) {
   return key.append(reinterpret_cast<const uint8_t*>(&value), sizeof(T));
 }
 
-// Builds the key of the stub and the uses of its fields. Returns false on OOM,
-// and true with *supported false if no template can hold its fields.
-static bool BuildKey(ICCacheIRStub* stub,
-                     mozilla::Span<const JSValueType> inputTypes,
-                     TemplateFieldVector& fields, TemplateKey& key,
-                     bool* supported) {
+using TemplateKeySuffix = Vector<uint8_t, 64, SystemAllocPolicy>;
+
+// Builds the end of the key of the stub, in which stubs of the same stub info
+// differ, and the uses of its fields. Returns false on OOM, and true with
+// *supported false if no template can hold its fields.
+static bool BuildKeySuffix(ICCacheIRStub* stub,
+                           mozilla::Span<const JSValueType> inputTypes,
+                           TemplateFieldVector& fields,
+                           TemplateKeySuffix& suffix, bool* supported) {
   *supported = false;
   const CacheIRStubInfo* info = stub->stubInfo();
   const uint8_t* data = stub->stubDataStart();
@@ -197,45 +201,72 @@ static bool BuildKey(ICCacheIRStub* stub,
   }
   *supported = true;
 
-  // The CacheIR: its kind, operand counts and last uses, code and field
-  // types.
-  const uint8_t* start =
-      reinterpret_cast<const uint8_t*>(info->operandLastUsed());
-  const uint8_t* end = info->code() + info->codeLength() + fields.length() + 1;
-  if (!key.append(uint8_t(info->kind())) ||
-      !key.append(uint8_t(info->numInputOperands())) ||
-      !key.append(uint8_t(info->numOperandIds())) ||
-      !key.append(uint8_t(info->numOperandLastUsed())) ||
-      !AppendBytes(key, info->codeLength()) || !key.append(start, end)) {
-    return false;
-  }
-
-  if (!key.append(uint8_t(inputTypes.size()))) {
+  if (!suffix.append(uint8_t(inputTypes.size()))) {
     return false;
   }
   for (JSValueType type : inputTypes) {
-    if (!key.append(uint8_t(type))) {
+    if (!suffix.append(uint8_t(type))) {
       return false;
     }
   }
 
   for (const TemplateField& field : fields) {
-    if (!key.append(uint8_t(field.use))) {
+    if (!suffix.append(uint8_t(field.use))) {
       return false;
     }
     const uint8_t* bits = data + field.offset;
     if (IsValueField(field.type)) {
       Value v = Value::fromRawBits(*reinterpret_cast<const uint64_t*>(bits));
-      if (!key.append(uint8_t(v.type()))) {
+      if (!suffix.append(uint8_t(v.type()))) {
         return false;
       }
     }
     if (field.use == FieldUse::Key &&
-        !key.append(bits, StubField::sizeInBytes(field.type))) {
+        !suffix.append(bits, StubField::sizeInBytes(field.type))) {
       return false;
     }
   }
   return true;
+}
+
+// Builds the key of a stub of the info: the CacheIR, with its kind, operand
+// counts and last uses, code and field types, then the end of the key. Returns
+// false on OOM.
+static bool BuildKey(const CacheIRStubInfo* info, size_t numFields,
+                     const TemplateKeySuffix& suffix, TemplateKey& key) {
+  const uint8_t* start =
+      reinterpret_cast<const uint8_t*>(info->operandLastUsed());
+  const uint8_t* end = info->code() + info->codeLength() + numFields + 1;
+  return key.append(uint8_t(info->kind())) &&
+         key.append(uint8_t(info->numInputOperands())) &&
+         key.append(uint8_t(info->numOperandIds())) &&
+         key.append(uint8_t(info->numOperandLastUsed())) &&
+         AppendBytes(key, info->codeLength()) && key.append(start, end) &&
+         key.appendAll(suffix);
+}
+
+static const MonoStubTemplate* FindRecentTemplate(
+    const CacheIRStubInfo::MonoBaselineCache& cache,
+    const TemplateKeySuffix& suffix) {
+  for (const MonoStubTemplate* templ : cache.recentTemplates) {
+    if (!templ) {
+      break;
+    }
+    mozilla::Span<const uint8_t> templSuffix = templ->keySuffix();
+    if (templSuffix.size() == suffix.length() &&
+        memcmp(templSuffix.data(), suffix.begin(), suffix.length()) == 0) {
+      return templ;
+    }
+  }
+  return nullptr;
+}
+
+static void AddRecentTemplate(CacheIRStubInfo::MonoBaselineCache& cache,
+                              const MonoStubTemplate* templ) {
+  for (size_t i = std::size(cache.recentTemplates) - 1; i > 0; i--) {
+    cache.recentTemplates[i] = cache.recentTemplates[i - 1];
+  }
+  cache.recentTemplates[0] = templ;
 }
 
 bool MonoStubTemplates::Hasher::match(const UniquePtr<MonoStubTemplate>& entry,
@@ -775,43 +806,57 @@ bool MonoStubTemplates::emitStub(JSContext* cx, MacroAssembler& masm,
                                  MonoTemplateUse* use) {
   *use = MonoTemplateUse::None;
 #ifdef JS_CODEGEN_X64
+  const CacheIRStubInfo* info = stub->stubInfo();
   TemplateFieldVector fields;
-  TemplateKey key;
+  TemplateKeySuffix suffix;
   bool supported;
-  if (!BuildKey(stub, inputTypes, fields, key, &supported)) {
+  if (!BuildKeySuffix(stub, inputTypes, fields, suffix, &supported)) {
     return false;
   }
   if (!supported) {
     return true;
   }
 
-  HashNumber hash = mozilla::HashBytes(key.begin(), key.length());
-  Hasher::Lookup lookup{mozilla::Span<const uint8_t>(key.begin(), key.length()),
-                        hash};
-  auto p = templates_.lookupForAdd(lookup);
-  if (p) {
+  CacheIRStubInfo::MonoBaselineCache& cache = info->monoBaselineCache();
+  const MonoStubTemplate* found = FindRecentTemplate(cache, suffix);
+  if (found) {
     *use = MonoTemplateUse::Hit;
   } else {
-    auto templ = MakeUnique<MonoStubTemplate>(hash);
-    if (!templ || !templ->key_.appendAll(key)) {
+    TemplateKey key;
+    if (!BuildKey(info, fields.length(), suffix, key)) {
       return false;
     }
-    bool rejected;
-    MonoStubTemplateBuilder builder(cx, stub, inputTypes, fields, *templ);
-    if (!builder.build(&rejected)) {
-      return false;
+    HashNumber hash = mozilla::HashBytes(key.begin(), key.length());
+    Hasher::Lookup lookup{
+        mozilla::Span<const uint8_t>(key.begin(), key.length()), hash};
+    auto p = templates_.lookupForAdd(lookup);
+    if (p) {
+      *use = MonoTemplateUse::Hit;
+    } else {
+      auto templ = MakeUnique<MonoStubTemplate>(hash);
+      if (!templ || !templ->key_.appendAll(key)) {
+        return false;
+      }
+      templ->keySuffixLength_ = suffix.length();
+      bool rejected;
+      MonoStubTemplateBuilder builder(cx, stub, inputTypes, fields, *templ);
+      if (!builder.build(&rejected)) {
+        return false;
+      }
+      if (rejected) {
+        templ->rejected_ = true;
+        templ->holes_.clearAndFree();
+      }
+      if (!templates_.add(p, std::move(templ))) {
+        return false;
+      }
+      *use = MonoTemplateUse::Built;
     }
-    if (rejected) {
-      templ->rejected_ = true;
-      templ->holes_.clearAndFree();
-    }
-    if (!templates_.add(p, std::move(templ))) {
-      return false;
-    }
-    *use = MonoTemplateUse::Built;
+    found = p->get();
+    AddRecentTemplate(cache, found);
   }
 
-  const MonoStubTemplate& templ = **p;
+  const MonoStubTemplate& templ = *found;
   if (templ.rejected()) {
     *use = MonoTemplateUse::Rejected;
     return true;
