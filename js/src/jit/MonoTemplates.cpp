@@ -4,6 +4,8 @@
 
 #include "jit/MonoTemplates.h"
 
+#include "mozilla/CheckedInt.h"
+
 #include <algorithm>
 #include <iterator>
 #include <string.h>
@@ -24,6 +26,8 @@
 
 using namespace js;
 using namespace js::jit;
+
+using mozilla::CheckedInt;
 
 bool js::jit::CanTemplateStubFieldsOf(CacheOp op) {
   switch (op) {
@@ -269,6 +273,41 @@ static void AddRecentTemplate(CacheIRStubInfo::MonoBaselineCache& cache,
   cache.recentTemplates[0] = templ;
 }
 
+MonoStubTemplate* MonoStubTemplate::New(const Parts& parts) {
+  CheckedInt<Offset> size = sizeof(MonoStubTemplate);
+  size += CheckedInt<Offset>(parts.jumps.size()) * sizeof(PendingJump);
+  size += CheckedInt<Offset>(parts.holes.size()) * sizeof(Hole);
+  size += CheckedInt<Offset>(parts.exitJumps.size()) * sizeof(MonoExitJump);
+  size += parts.key.size();
+  size += parts.code.size();
+  size += parts.exitStates.size();
+  if (!size.isValid()) {
+    return nullptr;
+  }
+
+  void* raw = js_pod_malloc<uint8_t>(size.value());
+  if (!raw) {
+    return nullptr;
+  }
+  auto* templ = new (raw)
+      MonoStubTemplate(parts.hash, parts.keySuffixLength, parts.rejected);
+
+  Offset cursor = templ->initElements(jumpsOffset(), parts.jumps);
+  templ->holesOffset_ = cursor;
+  cursor = templ->initElements(cursor, parts.holes);
+  templ->exitJumpsOffset_ = cursor;
+  cursor = templ->initElements(cursor, parts.exitJumps);
+  templ->keyOffset_ = cursor;
+  cursor = templ->initElements(cursor, parts.key);
+  templ->codeOffset_ = cursor;
+  cursor = templ->initElements(cursor, parts.code);
+  templ->exitStatesOffset_ = cursor;
+  cursor = templ->initElements(cursor, parts.exitStates);
+  templ->endOffset_ = cursor;
+  MOZ_ASSERT(templ->endOffset_ == size.value());
+  return templ;
+}
+
 bool MonoStubTemplates::Hasher::match(const UniquePtr<MonoStubTemplate>& entry,
                                       const Lookup& lookup) {
   mozilla::Span<const uint8_t> key = entry->key();
@@ -303,16 +342,16 @@ static void ReadBarrierWeakFields(const TemplateFieldVector& fields,
 
 bool MonoStubTemplate::instantiate(MacroAssembler& masm, JS::Zone* zone,
                                    const uint8_t* stubData,
-                                   CompactBufferWriter& exitStates,
-                                   MonoExitJumpVector& exitJumps) const {
+                                   CompactBufferWriter& states,
+                                   MonoExitJumpVector& stateJumps) const {
 #ifdef JS_CODEGEN_X64
   MOZ_ASSERT(!rejected_);
   uint32_t base = masm.currentOffset();
-  if (!masm.appendRawCode(code_.begin(), code_.length())) {
+  if (!masm.appendRawCode(code().data(), code().size())) {
     return false;
   }
 
-  for (const Hole& hole : holes_) {
+  for (const Hole& hole : holes()) {
     uint32_t offset = base + hole.offset;
     switch (hole.kind) {
       case HoleKind::Int32Field:
@@ -344,17 +383,17 @@ bool MonoStubTemplate::instantiate(MacroAssembler& masm, JS::Zone* zone,
     }
   }
 
-  for (const PendingJump& jump : jumps_) {
+  for (const PendingJump& jump : jumps()) {
     masm.addPendingJumpAt(base + jump.offset, jump.target, jump.kind);
   }
 
-  exitStates.writeBytes(exitStates_.begin(), exitStates_.length());
-  for (const MonoExitJump& jump : exitJumps_) {
-    if (!exitJumps.append(MonoExitJump{base + jump.offset, jump.state})) {
+  states.writeBytes(exitStates().data(), exitStates().size());
+  for (const MonoExitJump& jump : exitJumps()) {
+    if (!stateJumps.append(MonoExitJump{base + jump.offset, jump.state})) {
       return false;
     }
   }
-  return !masm.oom() && !exitStates.oom();
+  return !masm.oom() && !states.oom();
 #else
   MOZ_CRASH("Monomorphic Baseline templates are x64 only");
 #endif
@@ -407,7 +446,6 @@ class MOZ_RAII js::jit::MonoStubTemplateBuilder {
   ICCacheIRStub* stub_;
   mozilla::Span<const JSValueType> inputTypes_;
   const TemplateFieldVector& fields_;
-  MonoStubTemplate& template_;
 
   struct Compile {
     MacroAssembler* masm;
@@ -418,6 +456,8 @@ class MOZ_RAII js::jit::MonoStubTemplateBuilder {
     MonoExitJumpVector exitJumps;
   };
   Compile compiles_[NumTemplateCompiles];
+
+  Vector<MonoStubTemplate::Hole, 8, SystemAllocPolicy> holes_;
 
   // The hole covering each byte of the code, if any.
   Vector<bool, 256, SystemAllocPolicy> inHole_;
@@ -431,20 +471,20 @@ class MOZ_RAII js::jit::MonoStubTemplateBuilder {
   [[nodiscard]] bool findZoneHoles(bool* rejected);
   bool pointsIntoContext(uint64_t word) const;
 
+  // Fills in the parts of the template besides its key, or sets their
+  // rejected flag. Returns false on OOM.
+  [[nodiscard]] bool buildParts(TempAllocator& alloc,
+                                MonoStubTemplate::Parts* parts);
+
  public:
   MonoStubTemplateBuilder(JSContext* cx, ICCacheIRStub* stub,
                           mozilla::Span<const JSValueType> inputTypes,
-                          const TemplateFieldVector& fields,
-                          MonoStubTemplate& templ)
-      : cx_(cx),
-        stub_(stub),
-        inputTypes_(inputTypes),
-        fields_(fields),
-        template_(templ) {}
+                          const TemplateFieldVector& fields)
+      : cx_(cx), stub_(stub), inputTypes_(inputTypes), fields_(fields) {}
 
-  // Builds the template, or returns true with *rejected set if no template
-  // can be built. Returns false on OOM.
-  [[nodiscard]] bool build(bool* rejected);
+  // Builds the template whose key the parts hold, or a rejected one if no
+  // template can be built for the key. Returns nullptr on OOM.
+  MonoStubTemplate* build(const MonoStubTemplate::Parts& key);
 };
 
 bool MonoStubTemplateBuilder::compile(size_t index, TempAllocator& alloc,
@@ -531,7 +571,7 @@ bool MonoStubTemplateBuilder::findHoles(const uint64_t* sentinels, size_t width,
     }
     MonoStubTemplate::Hole found = hole;
     found.offset = offset;
-    if (!template_.holes_.append(found)) {
+    if (!holes_.append(found)) {
       return false;
     }
   }
@@ -634,7 +674,7 @@ bool MonoStubTemplateBuilder::findZoneHoles(bool* rejected) {
       for (size_t j = offset; j < offset + sizeof(uint64_t); j++) {
         inHole_[j] = true;
       }
-      if (!template_.holes_.append(MonoStubTemplate::Hole{
+      if (!holes_.append(MonoStubTemplate::Hole{
               uint32_t(offset), 0,
               MonoStubTemplate::HoleKind::ZoneNeedsMarkingBarrier,
               JSVAL_TYPE_UNKNOWN})) {
@@ -648,9 +688,8 @@ bool MonoStubTemplateBuilder::findZoneHoles(bool* rejected) {
   return true;
 }
 
-bool MonoStubTemplateBuilder::build(bool* rejected) {
-  *rejected = false;
-
+MonoStubTemplate* MonoStubTemplateBuilder::build(
+    const MonoStubTemplate::Parts& key) {
   LifoAlloc lifo(TempAllocator::PreferredLifoChunkSize, js::MallocArena);
   TempAllocator alloc(&lifo);
   StackMacroAssembler masm0(cx_, alloc);
@@ -659,6 +698,19 @@ bool MonoStubTemplateBuilder::build(bool* rejected) {
   MacroAssembler* masms[NumTemplateCompiles] = {&masm0, &masm1, &masm2};
   for (size_t i = 0; i < NumTemplateCompiles; i++) {
     compiles_[i].masm = masms[i];
+  }
+
+  MonoStubTemplate::Parts parts = key;
+  if (!buildParts(alloc, &parts)) {
+    return nullptr;
+  }
+  return MonoStubTemplate::New(parts);
+}
+
+bool MonoStubTemplateBuilder::buildParts(TempAllocator& alloc,
+                                         MonoStubTemplate::Parts* parts) {
+  bool* rejected = &parts->rejected;
+  for (size_t i = 0; i < NumTemplateCompiles; i++) {
     if (!compile(i, alloc, rejected)) {
       return false;
     }
@@ -715,7 +767,7 @@ bool MonoStubTemplateBuilder::build(bool* rejected) {
   // Every GC thing in the code is a hole, so that its instances relocate the
   // stub's things.
   Vector<uint32_t, 8, SystemAllocPolicy> gcThingEnds;
-  for (const MonoStubTemplate::Hole& hole : template_.holes_) {
+  for (const MonoStubTemplate::Hole& hole : holes_) {
     bool gcThing =
         hole.kind == MonoStubTemplate::HoleKind::GCThingField ||
         hole.kind == MonoStubTemplate::HoleKind::BoxedGCThingField;
@@ -753,11 +805,13 @@ bool MonoStubTemplateBuilder::build(bool* rejected) {
     }
   }
 
-  return template_.code_.append(first.masm->rawCode(), length) &&
-         template_.jumps_.appendAll(first.jumps) &&
-         template_.exitStates_.append(first.exitStates.buffer(),
-                                      first.exitStates.length()) &&
-         template_.exitJumps_.appendAll(first.exitJumps);
+  parts->jumps = first.jumps;
+  parts->holes = holes_;
+  parts->exitJumps = first.exitJumps;
+  parts->code = mozilla::Span(first.masm->rawCode(), length);
+  parts->exitStates =
+      mozilla::Span(first.exitStates.buffer(), first.exitStates.length());
+  return true;
 }
 
 #endif  // JS_CODEGEN_X64
@@ -797,21 +851,12 @@ bool MonoStubTemplates::emitStub(JSContext* cx, MacroAssembler& masm,
     if (p) {
       *use = MonoTemplateUse::Hit;
     } else {
-      auto templ = MakeUnique<MonoStubTemplate>(hash);
-      if (!templ || !templ->key_.appendAll(key)) {
-        return false;
-      }
-      templ->keySuffixLength_ = suffix.length();
-      bool rejected;
-      MonoStubTemplateBuilder builder(cx, stub, inputTypes, fields, *templ);
-      if (!builder.build(&rejected)) {
-        return false;
-      }
-      if (rejected) {
-        templ->rejected_ = true;
-        templ->holes_.clearAndFree();
-      }
-      if (!templates_.add(p, std::move(templ))) {
+      MonoStubTemplateBuilder builder(cx, stub, inputTypes, fields);
+      UniquePtr<MonoStubTemplate> templ(
+          builder.build({.key = lookup.key,
+                         .keySuffixLength = uint32_t(suffix.length()),
+                         .hash = hash}));
+      if (!templ || !templates_.add(p, std::move(templ))) {
         return false;
       }
       *use = MonoTemplateUse::Built;

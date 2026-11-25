@@ -8,6 +8,7 @@
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Span.h"
 
+#include <memory>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -18,6 +19,7 @@
 #include "js/HashTable.h"
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
+#include "util/TrailingArray.h"
 
 struct JSContext;
 
@@ -65,7 +67,16 @@ class MonoStubTemplateBuilder;
 //
 // Templates are only built on x64, for code with an exit table.
 
-class MonoStubTemplate {
+// A template is a single allocation, holding these arrays after the header:
+//
+//    PendingJump[]   jumps()
+//    Hole[]          holes()
+//    MonoExitJump[]  exitJumps()
+//    uint8_t[]       key()
+//    uint8_t[]       code()
+//    uint8_t[]       exitStates()
+class alignas(uintptr_t) MonoStubTemplate final
+    : public TrailingArray<MonoStubTemplate> {
  public:
   enum class HoleKind : uint8_t {
     Int32Field,
@@ -89,42 +100,87 @@ class MonoStubTemplate {
     RelocationKind kind;
   };
 
+  // What a template is made of, which it copies.
+  struct Parts {
+    mozilla::Span<const uint8_t> key;
+    // The end of the key, in which stubs of the same stub info differ.
+    uint32_t keySuffixLength;
+    HashNumber hash;
+    // Set when no template can be built for the key, which leaves the rest
+    // empty.
+    bool rejected;
+    mozilla::Span<const PendingJump> jumps;
+    mozilla::Span<const Hole> holes;
+    mozilla::Span<const MonoExitJump> exitJumps;
+    mozilla::Span<const uint8_t> code;
+    mozilla::Span<const uint8_t> exitStates;
+  };
+
  private:
-  Vector<uint8_t, 0, SystemAllocPolicy> key_;
   HashNumber hash_;
+  uint32_t keySuffixLength_;
+  bool rejected_;
 
-  // The end of the key, in which stubs of the same stub info differ.
-  uint32_t keySuffixLength_ = 0;
+  Offset holesOffset_ = 0;
+  Offset exitJumpsOffset_ = 0;
+  Offset keyOffset_ = 0;
+  Offset codeOffset_ = 0;
+  Offset exitStatesOffset_ = 0;
+  Offset endOffset_ = 0;
 
-  // Set when no template can be built for the key.
-  bool rejected_ = false;
+  MonoStubTemplate(HashNumber hash, uint32_t keySuffixLength, bool rejected)
+      : hash_(hash), keySuffixLength_(keySuffixLength), rejected_(rejected) {}
 
-  Vector<uint8_t, 0, SystemAllocPolicy> code_;
-  Vector<Hole, 0, SystemAllocPolicy> holes_;
-  Vector<PendingJump, 0, SystemAllocPolicy> jumps_;
-  Vector<uint8_t, 0, SystemAllocPolicy> exitStates_;
-  MonoExitJumpVector exitJumps_;
+  static constexpr Offset jumpsOffset() { return sizeof(MonoStubTemplate); }
 
-  friend class MonoStubTemplateBuilder;
-  friend class MonoStubTemplates;
+  template <typename T>
+  Offset initElements(Offset start, mozilla::Span<const T> elements) {
+    MOZ_ASSERT(isAlignedOffset<T>(start));
+    std::uninitialized_copy(elements.begin(), elements.end(),
+                            offsetToPointer<T>(start));
+    return start + elements.size() * sizeof(T);
+  }
+
+  template <typename T>
+  mozilla::Span<const T> makeSpan(Offset start, Offset end) const {
+    return mozilla::Span{offsetToPointer<T>(start), numElements<T>(start, end)};
+  }
+
+  mozilla::Span<const PendingJump> jumps() const {
+    return makeSpan<PendingJump>(jumpsOffset(), holesOffset_);
+  }
+  mozilla::Span<const Hole> holes() const {
+    return makeSpan<Hole>(holesOffset_, exitJumpsOffset_);
+  }
+  mozilla::Span<const MonoExitJump> exitJumps() const {
+    return makeSpan<MonoExitJump>(exitJumpsOffset_, keyOffset_);
+  }
+  mozilla::Span<const uint8_t> code() const {
+    return makeSpan<uint8_t>(codeOffset_, exitStatesOffset_);
+  }
+  mozilla::Span<const uint8_t> exitStates() const {
+    return makeSpan<uint8_t>(exitStatesOffset_, endOffset_);
+  }
 
  public:
-  explicit MonoStubTemplate(HashNumber hash) : hash_(hash) {}
+  // Returns nullptr on OOM.
+  static MonoStubTemplate* New(const Parts& parts);
 
-  mozilla::Span<const uint8_t> key() const { return key_; }
+  mozilla::Span<const uint8_t> key() const {
+    return makeSpan<uint8_t>(keyOffset_, codeOffset_);
+  }
   mozilla::Span<const uint8_t> keySuffix() const {
-    return mozilla::Span<const uint8_t>(key_).Last(keySuffixLength_);
+    return key().Last(keySuffixLength_);
   }
   HashNumber hash() const { return hash_; }
   bool rejected() const { return rejected_; }
-  size_t codeLength() const { return code_.length(); }
 
   // Appends the code for the stub with the given stub data, its encoded exit
   // states and its jumps to them. Returns false on OOM.
   [[nodiscard]] bool instantiate(MacroAssembler& masm, JS::Zone* zone,
                                  const uint8_t* stubData,
-                                 CompactBufferWriter& exitStates,
-                                 MonoExitJumpVector& exitJumps) const;
+                                 CompactBufferWriter& states,
+                                 MonoExitJumpVector& stateJumps) const;
 };
 
 class MonoStubTemplates {
