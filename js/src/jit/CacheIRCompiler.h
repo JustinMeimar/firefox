@@ -1438,11 +1438,22 @@ class CacheIRStubInfo {
     // The templates last used for stubs of the info, most recent first.
     const MonoStubTemplate* recentTemplates[NumRecentTemplates] = {};
 
+    // Whether the CacheIR and fields of the info were scanned for the rest.
     bool cacheIRScanned = false;
+
     bool allOpsInlinable = false;
 
     // The first op that can't be inlined, if any.
     CacheOp noInlineOp = CacheOp(0);
+
+    bool hasICScriptStubField = false;
+
+    // Whether a stub field has a type whose things can be in the nursery.
+    bool hasStubFieldThatCanBeInNursery = false;
+
+    // The types the guards check the first inputs to have, or unknown.
+    static constexpr size_t NumGuardedInputs = 3;
+    JSValueType guardedInputTypes[NumGuardedInputs] = {};
   };
 
  private:

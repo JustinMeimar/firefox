@@ -4,7 +4,9 @@
 
 #include "jit/MonoBaseline.h"
 
+#include <algorithm>
 #include <bit>
+#include <iterator>
 
 #include "gc/GC.h"
 #include "jit/BaselineCacheIRCompiler.h"
@@ -87,46 +89,6 @@ mozilla::Maybe<MonoOperands> js::jit::MonoOperandsFor(CacheKind kind,
   return mozilla::Nothing();
 }
 
-// Whether the stub can be copied: it holds no nursery cell, which would need
-// the store buffer to point into the copy, and no ICScript, which trial
-// inlining may free.
-static bool CanCopyStub(ICCacheIRStub* stub) {
-  const CacheIRStubInfo* info = stub->stubInfo();
-  const uint8_t* data = stub->stubDataStart();
-  size_t offset = 0;
-  for (uint32_t field = 0;; field++) {
-    StubField::Type type = info->fieldType(field);
-    switch (type) {
-      case StubField::Type::Limit:
-        return true;
-      case StubField::Type::ICScript:
-        return false;
-      case StubField::Type::JSObject:
-      case StubField::Type::WeakObject:
-      case StubField::Type::String:
-      case StubField::Type::Symbol: {
-        auto* cell =
-            reinterpret_cast<gc::Cell*>(info->getStubRawWord(data, offset));
-        if (IsInsideNursery(cell)) {
-          return false;
-        }
-        break;
-      }
-      case StubField::Type::Value:
-      case StubField::Type::WeakValue: {
-        Value v = Value::fromRawBits(info->getStubRawInt64(data, offset));
-        if (v.isGCThing() && IsInsideNursery(v.toGCThing())) {
-          return false;
-        }
-        break;
-      }
-      default:
-        break;
-    }
-    offset += StubField::sizeInBytes(type);
-  }
-}
-
 // Ops whose Baseline code reads stub data without a constant form.
 static bool CanInlineOp(CacheOp op) {
   switch (op) {
@@ -153,6 +115,146 @@ static bool CanInlineOp(CacheOp op) {
   }
 }
 
+// Scans the CacheIR and fields of the info once for what monomorphic compiles
+// need to know about its stubs.
+static const CacheIRStubInfo::MonoBaselineCache& ScanStubInfo(
+    const CacheIRStubInfo* info) {
+  CacheIRStubInfo::MonoBaselineCache& cache = info->monoBaselineCache();
+  if (cache.cacheIRScanned) {
+    return cache;
+  }
+
+  cache.allOpsInlinable = true;
+  std::fill(std::begin(cache.guardedInputTypes),
+            std::end(cache.guardedInputTypes), JSVAL_TYPE_UNKNOWN);
+  CacheIRReader reader(info);
+  while (reader.more()) {
+    CacheOp op = reader.readOp();
+    if (cache.allOpsInlinable && !CanInlineOp(op)) {
+      cache.allOpsInlinable = false;
+      cache.noInlineOp = op;
+    }
+    ValOperandId input;
+    JSValueType type;
+    switch (op) {
+      case CacheOp::GuardToObject:
+        input = reader.argsForGuardToObject().inputId;
+        type = JSVAL_TYPE_OBJECT;
+        break;
+      case CacheOp::GuardToInt32:
+        input = reader.argsForGuardToInt32().inputId;
+        type = JSVAL_TYPE_INT32;
+        break;
+      case CacheOp::GuardToString:
+        input = reader.argsForGuardToString().inputId;
+        type = JSVAL_TYPE_STRING;
+        break;
+      case CacheOp::GuardToSymbol:
+        input = reader.argsForGuardToSymbol().inputId;
+        type = JSVAL_TYPE_SYMBOL;
+        break;
+      case CacheOp::GuardToBigInt:
+        input = reader.argsForGuardToBigInt().inputId;
+        type = JSVAL_TYPE_BIGINT;
+        break;
+      case CacheOp::GuardToBoolean:
+        input = reader.argsForGuardToBoolean().inputId;
+        type = JSVAL_TYPE_BOOLEAN;
+        break;
+      case CacheOp::GuardIsNull:
+        input = reader.argsForGuardIsNull().inputId;
+        type = JSVAL_TYPE_NULL;
+        break;
+      case CacheOp::GuardIsUndefined:
+        input = reader.argsForGuardIsUndefined().inputId;
+        type = JSVAL_TYPE_UNDEFINED;
+        break;
+      case CacheOp::GuardNonDoubleType: {
+        auto args = reader.argsForGuardNonDoubleType();
+        input = args.inputId;
+        type = JSValueType(args.type);
+        break;
+      }
+      default:
+        reader.skip(CacheIROpInfos[size_t(op)].argLength);
+        continue;
+    }
+    if (input.id() < CacheIRStubInfo::MonoBaselineCache::NumGuardedInputs) {
+      cache.guardedInputTypes[input.id()] = type;
+    }
+  }
+
+  for (uint32_t field = 0;; field++) {
+    StubField::Type type = info->fieldType(field);
+    if (type == StubField::Type::Limit) {
+      break;
+    }
+    switch (type) {
+      case StubField::Type::ICScript:
+        cache.hasICScriptStubField = true;
+        break;
+      case StubField::Type::JSObject:
+      case StubField::Type::WeakObject:
+      case StubField::Type::String:
+      case StubField::Type::Symbol:
+      case StubField::Type::Value:
+      case StubField::Type::WeakValue:
+        cache.hasStubFieldThatCanBeInNursery = true;
+        break;
+      default:
+        break;
+    }
+  }
+
+  cache.cacheIRScanned = true;
+  return cache;
+}
+
+// Whether the stub can be copied: it holds no nursery cell, which would need
+// the store buffer to point into the copy, and no ICScript, which trial
+// inlining may free.
+static bool CanCopyStub(ICCacheIRStub* stub) {
+  const CacheIRStubInfo* info = stub->stubInfo();
+  const CacheIRStubInfo::MonoBaselineCache& cache = ScanStubInfo(info);
+  if (cache.hasICScriptStubField) {
+    return false;
+  }
+  if (!cache.hasStubFieldThatCanBeInNursery) {
+    return true;
+  }
+  const uint8_t* data = stub->stubDataStart();
+  size_t offset = 0;
+  for (uint32_t field = 0;; field++) {
+    StubField::Type type = info->fieldType(field);
+    switch (type) {
+      case StubField::Type::Limit:
+        return true;
+      case StubField::Type::JSObject:
+      case StubField::Type::WeakObject:
+      case StubField::Type::String:
+      case StubField::Type::Symbol: {
+        auto* cell =
+            reinterpret_cast<gc::Cell*>(info->getStubRawWord(data, offset));
+        if (IsInsideNursery(cell)) {
+          return false;
+        }
+        break;
+      }
+      case StubField::Type::Value:
+      case StubField::Type::WeakValue: {
+        Value v = Value::fromRawBits(info->getStubRawInt64(data, offset));
+        if (v.isGCThing() && IsInsideNursery(v.toGCThing())) {
+          return false;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    offset += StubField::sizeInBytes(type);
+  }
+}
+
 MonoNoInline js::jit::WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op) {
   const CacheIRStubInfo* info = stub->stubInfo();
   if (info->makesGCCalls()) {
@@ -161,21 +263,7 @@ MonoNoInline js::jit::WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op) {
   if (!CanCopyStub(stub)) {
     return MonoNoInline::NoCopy;
   }
-  CacheIRStubInfo::MonoBaselineCache& cache = info->monoBaselineCache();
-  if (!cache.cacheIRScanned) {
-    cache.allOpsInlinable = true;
-    CacheIRReader reader(info);
-    while (reader.more()) {
-      CacheOp op = reader.readOp();
-      if (!CanInlineOp(op)) {
-        cache.allOpsInlinable = false;
-        cache.noInlineOp = op;
-        break;
-      }
-      reader.skip(CacheIROpInfos[size_t(op)].argLength);
-    }
-    cache.cacheIRScanned = true;
-  }
+  const CacheIRStubInfo::MonoBaselineCache& cache = ScanStubInfo(info);
   *op = cache.noInlineOp;
   return cache.allOpsInlinable ? MonoNoInline::None : MonoNoInline::Op;
 }
@@ -249,56 +337,13 @@ bool js::jit::EmitInlinedMonoStubWithExitTable(
 
 void js::jit::NarrowMonoStubInputTypes(const CacheIRStubInfo* info,
                                        mozilla::Span<JSValueType> types) {
-  CacheIRReader reader(info);
-  while (reader.more()) {
-    CacheOp op = reader.readOp();
-    ValOperandId input;
-    JSValueType type;
-    switch (op) {
-      case CacheOp::GuardToObject:
-        input = reader.argsForGuardToObject().inputId;
-        type = JSVAL_TYPE_OBJECT;
-        break;
-      case CacheOp::GuardToInt32:
-        input = reader.argsForGuardToInt32().inputId;
-        type = JSVAL_TYPE_INT32;
-        break;
-      case CacheOp::GuardToString:
-        input = reader.argsForGuardToString().inputId;
-        type = JSVAL_TYPE_STRING;
-        break;
-      case CacheOp::GuardToSymbol:
-        input = reader.argsForGuardToSymbol().inputId;
-        type = JSVAL_TYPE_SYMBOL;
-        break;
-      case CacheOp::GuardToBigInt:
-        input = reader.argsForGuardToBigInt().inputId;
-        type = JSVAL_TYPE_BIGINT;
-        break;
-      case CacheOp::GuardToBoolean:
-        input = reader.argsForGuardToBoolean().inputId;
-        type = JSVAL_TYPE_BOOLEAN;
-        break;
-      case CacheOp::GuardIsNull:
-        input = reader.argsForGuardIsNull().inputId;
-        type = JSVAL_TYPE_NULL;
-        break;
-      case CacheOp::GuardIsUndefined:
-        input = reader.argsForGuardIsUndefined().inputId;
-        type = JSVAL_TYPE_UNDEFINED;
-        break;
-      case CacheOp::GuardNonDoubleType: {
-        auto args = reader.argsForGuardNonDoubleType();
-        input = args.inputId;
-        type = JSValueType(args.type);
-        break;
-      }
-      default:
-        reader.skip(CacheIROpInfos[size_t(op)].argLength);
-        continue;
-    }
-    if (input.id() < types.size()) {
-      types[input.id()] = type;
+  static_assert(MonoMaxStackInputs <=
+                CacheIRStubInfo::MonoBaselineCache::NumGuardedInputs);
+  MOZ_ASSERT(types.size() <= MonoMaxStackInputs);
+  const CacheIRStubInfo::MonoBaselineCache& cache = ScanStubInfo(info);
+  for (size_t i = 0; i < types.size(); i++) {
+    if (cache.guardedInputTypes[i] != JSVAL_TYPE_UNKNOWN) {
+      types[i] = cache.guardedInputTypes[i];
     }
   }
 }
