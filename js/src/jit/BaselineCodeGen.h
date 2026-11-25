@@ -373,7 +373,8 @@ class BaselineCompilerHandler {
 
  public:
   // The exit of an inline stub, with the stack values that are not stored on
-  // the stack when it fails and the failure paths that restore its inputs.
+  // the stack when it fails, and with an exit table its encoded states and
+  // its jumps to them, else the failure paths that restore its inputs.
   struct MonoExit {
     uint32_t stubOffset;
     uint32_t pcOffset;
@@ -384,6 +385,10 @@ class BaselineCompilerHandler {
     uint32_t inputsEnd;
     uint32_t failuresStart;
     uint32_t failuresEnd;
+    uint32_t statesStart;
+    uint32_t statesEnd;
+    uint32_t jumpsStart;
+    uint32_t jumpsEnd;
   };
 
  private:
@@ -391,6 +396,8 @@ class BaselineCompilerHandler {
   Vector<StackValue, 0, SystemAllocPolicy> monoExitValues_;
   InlinedInputVector monoExitInputs_;
   InlinedFailureVector monoExitFailures_;
+  CompactBufferWriter monoExitStates_;
+  MonoExitJumpVector monoExitJumps_;
   Vector<MonoInlineStub, 0, SystemAllocPolicy> monoInlineStubs_;
 
   // Set when inline stubs exit through the shared trampoline, as this table
@@ -508,11 +515,16 @@ class BaselineCompilerHandler {
 #ifdef JS_CODEGEN_X64
     monoExitTable_ = JitOptions.baselineMonoExitTables;
 #endif
-    return monoExits_.reserve(numICEntries) &&
-           monoExitValues_.reserve(numICEntries) &&
-           monoExitInputs_.reserve(2 * numICEntries) &&
-           monoExitFailures_.reserve(2 * numICEntries) &&
-           monoInlineStubs_.reserve(numICEntries);
+    if (!monoExits_.reserve(numICEntries) ||
+        !monoExitValues_.reserve(numICEntries) ||
+        !monoInlineStubs_.reserve(numICEntries)) {
+      return false;
+    }
+    if (monoExitTable_) {
+      return monoExitJumps_.reserve(2 * numICEntries);
+    }
+    return monoExitInputs_.reserve(2 * numICEntries) &&
+           monoExitFailures_.reserve(2 * numICEntries);
   }
 
   void initMonoStats() {
@@ -565,10 +577,20 @@ class BaselineCompilerHandler {
   }
   InlinedInputVector& monoExitInputs() { return monoExitInputs_; }
   InlinedFailureVector& monoExitFailures() { return monoExitFailures_; }
+  CompactBufferWriter& monoExitStates() { return monoExitStates_; }
+  mozilla::Span<const uint8_t> monoExitStates(uint32_t start,
+                                              uint32_t end) const {
+    return mozilla::Span<const uint8_t>(monoExitStates_.buffer() + start,
+                                        end - start);
+  }
+  MonoExitJumpVector& monoExitJumps() { return monoExitJumps_; }
+
+  // Adds the exit of the inline stub that was just emitted, whose exit data
+  // follows that of the previous exit.
   [[nodiscard]] bool addMonoExit(uint32_t stubOffset, uint32_t pcOffset,
-                                 MonoOperands operands, uint32_t inputsStart,
-                                 uint32_t failuresStart,
+                                 MonoOperands operands,
                                  CompilerFrameInfo& frame) {
+    const MonoExit* prev = monoExits_.empty() ? nullptr : &monoExits_.back();
     uint32_t start = monoExitValues_.length();
     return frame.appendUnsynced(monoExitValues_) &&
            monoExits_.append(
@@ -577,10 +599,14 @@ class BaselineCompilerHandler {
                         .operands = operands,
                         .valuesStart = start,
                         .valuesEnd = uint32_t(monoExitValues_.length()),
-                        .inputsStart = inputsStart,
+                        .inputsStart = prev ? prev->inputsEnd : 0,
                         .inputsEnd = uint32_t(monoExitInputs_.length()),
-                        .failuresStart = failuresStart,
-                        .failuresEnd = uint32_t(monoExitFailures_.length())});
+                        .failuresStart = prev ? prev->failuresEnd : 0,
+                        .failuresEnd = uint32_t(monoExitFailures_.length()),
+                        .statesStart = prev ? prev->statesEnd : 0,
+                        .statesEnd = uint32_t(monoExitStates_.length()),
+                        .jumpsStart = prev ? prev->jumpsEnd : 0,
+                        .jumpsEnd = uint32_t(monoExitJumps_.length())});
   }
   [[nodiscard]] bool addMonoInlineStub(uint32_t stubOffset,
                                        uint32_t exitOffset) {

@@ -432,29 +432,17 @@ bool BaselineCompiler::emitMonoExit(
 
 bool BaselineCompiler::emitMonoExitStates(
     const BaselineCompilerHandler::MonoExit& exit) {
+#ifdef JS_CODEGEN_X64
   // The code offsets the table holds are meaningless once the assembler ran
   // out of memory, which fails the compile.
   if (masm.oom()) {
     return true;
   }
 
-  // The table can't hold nursery things.
-  for (uint32_t i = exit.valuesStart; i < exit.valuesEnd; i++) {
-    const StackValue& value = handler.monoExitValue(i);
-    if (value.kind() == StackValue::Constant &&
-        value.constant().isGCThing() &&
-        IsInsideNursery(value.constant().toGCThing())) {
-      return emitMonoExit(exit);
-    }
-  }
-
   if (!handler.addMonoInlineStub(exit.stubOffset, 0)) {
     return false;
   }
   MonoExitTableWriter& writer = handler.monoExitTableWriter();
-  mozilla::Span<const OperandLocation> inputs(
-      handler.monoExitInputs().begin() + exit.inputsStart,
-      handler.monoExitInputs().begin() + exit.inputsEnd);
 
   // The values the exits push: those the compiler had not stored, then the
   // operands the op took off the stack.
@@ -480,7 +468,6 @@ bool BaselineCompiler::emitMonoExitStates(
     case MonoOperands::Count:
       MOZ_CRASH();
   }
-  MOZ_ASSERT(numOperands <= inputs.size());
   writer.writeSite(exit.stubOffset, exit.pcOffset, drop,
                    exit.valuesEnd - exit.valuesStart + numOperands);
   for (uint32_t i = exit.valuesStart; i < exit.valuesEnd; i++) {
@@ -495,13 +482,13 @@ bool BaselineCompiler::emitMonoExitStates(
       case StackValue::ThisSlot:
         writer.writeValue(MonoExitValue::This, 0);
         break;
-#ifdef JS_PUNBOX64
       case StackValue::Register:
         writer.writeValue(MonoExitValue::Register,
                           value.reg().valueReg().code());
         break;
-#endif
       case StackValue::Constant:
+        MOZ_ASSERT_IF(value.constant().isGCThing(),
+                      !IsInsideNursery(value.constant().toGCThing()));
         if (!writer.writeConstant(value.constant())) {
           return false;
         }
@@ -514,61 +501,32 @@ bool BaselineCompiler::emitMonoExitStates(
     writer.writeValue(MonoExitValue::Input, i);
   }
 
-  // The states the failures leave the inputs in, with the first the original
-  // one, in which discarded stubs exit too.
-  Vector<const FailurePath*, 4, SystemAllocPolicy> states;
-  Vector<uint32_t, 8, SystemAllocPolicy> stateOfFailure;
-  if (!states.append(nullptr)) {
-    return false;
+  // Each state with jumps gets a call to the trampoline, one after another.
+  mozilla::Maybe<uint32_t> callsOffset;
+  if (exit.jumpsStart != exit.jumpsEnd) {
+    callsOffset.emplace(masm.currentOffset());
   }
-  for (uint32_t i = exit.failuresStart; i < exit.failuresEnd; i++) {
-    const FailurePath& failure = handler.monoExitFailures()[i];
-    uint32_t state = 0;
-    if (failure.needsRestore(inputs)) {
-      state = 1;
-      while (state < states.length() &&
-             !states[state]->canShareFailurePath(failure)) {
-        state++;
-      }
-      if (state == states.length() && !states.append(&failure)) {
-        return false;
-      }
-    }
-    if (!stateOfFailure.append(state)) {
-      return false;
-    }
-  }
-
   TrampolinePtr bailout = runtime->jitRuntime()->monoBailout();
-  writer.writeStates(inputs.size(), states.length());
-  Vector<OperandLocation, MonoMaxStackInputs, SystemAllocPolicy> locations;
-  for (uint32_t state = 0; state < states.length(); state++) {
-    bool hasPad = false;
-    for (uint32_t i = exit.failuresStart; i < exit.failuresEnd; i++) {
-      if (stateOfFailure[i - exit.failuresStart] == state) {
-        masm.bind(handler.monoExitFailures()[i].label());
-        hasPad = true;
-      }
+  const MonoExitJump* jump = handler.monoExitJumps().begin() + exit.jumpsStart;
+  const MonoExitJump* jumpsEnd =
+      handler.monoExitJumps().begin() + exit.jumpsEnd;
+  while (jump != jumpsEnd) {
+    uint32_t state = jump->state;
+    Label call;
+    for (; jump != jumpsEnd && jump->state == state; jump++) {
+      masm.useLabelAt(&call, jump->offset);
     }
-    mozilla::Maybe<uint32_t> padOffset;
-    if (hasPad) {
-      masm.call(bailout);
-      if (masm.oom()) {
-        return true;
-      }
-      padOffset.emplace(masm.currentOffset());
-    }
-    const FailurePath* failure = states[state];
-    locations.clear();
-    for (size_t i = 0; i < inputs.size(); i++) {
-      if (!locations.append(failure ? failure->input(i) : inputs[i])) {
-        return false;
-      }
-    }
-    writer.writeState(padOffset, failure ? failure->stackPushed() : 0,
-                      locations);
+    masm.bind(&call);
+    masm.call(bailout);
+    MOZ_ASSERT_IF(!masm.oom(), masm.currentOffset() - call.offset() ==
+                                   Assembler::PatchWrite_NearCallSize());
   }
-  return !writer.oom();
+  writer.writeStates(callsOffset,
+                     handler.monoExitStates(exit.statesStart, exit.statesEnd));
+  return true;
+#else
+  MOZ_CRASH("Monomorphic exit tables are x64 only");
+#endif
 }
 
 bool BaselineCompiler::finishCompile(JSContext* cx) {
@@ -1080,14 +1038,34 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
 
   stats.noInline = WhyNotInlineMonoStub(stub, &stats.noInlineOp);
   if (stats.noInline == MonoNoInline::None) {
-    uint32_t inputsStart = handler.monoExitInputs().length();
-    uint32_t failuresStart = handler.monoExitFailures().length();
+    // The exit table can't hold nursery things, so such values are stored.
+    if (handler.monoExitTable()) {
+      for (uint32_t i = 1; i <= frame.numUnsyncedSlots(); i++) {
+        const StackValue& value = frame.peekValue(-int32_t(i));
+        if (value.kind() == StackValue::Constant &&
+            value.constant().isGCThing() &&
+            IsInsideNursery(value.constant().toGCThing())) {
+          frame.setDeferSync(false);
+          frame.syncStack(0);
+          break;
+        }
+      }
+    }
     uint32_t stubOffset = masm.nopPatchableToCall().offset();
-    if (!EmitInlinedMonoStub(handler.monoCx(), masm, handler.alloc(), stub,
-                             stackInputTypes, handler.monoExitInputs(),
-                             handler.monoExitFailures(), &stats.templateUse) ||
-        !handler.addMonoExit(stubOffset, pcOffset, *operands, inputsStart,
-                             failuresStart, frame)) {
+    if (handler.monoExitTable()) {
+      if (!EmitInlinedMonoStubWithExitTable(
+              handler.monoCx(), masm, handler.alloc(), stub, stackInputTypes,
+              handler.monoExitStates(), handler.monoExitJumps(),
+              &stats.templateUse)) {
+        return false;
+      }
+    } else if (!EmitInlinedMonoStub(handler.monoCx(), masm, handler.alloc(),
+                                    stub, stackInputTypes,
+                                    handler.monoExitInputs(),
+                                    handler.monoExitFailures())) {
+      return false;
+    }
+    if (!handler.addMonoExit(stubOffset, pcOffset, *operands, frame)) {
       return false;
     }
     narrowSlotTypes();

@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "jit/CacheIRCompiler.h"
+#include "jit/MonoBaseline.h"
 #include "jit/MonoStats.h"
 #include "js/AllocPolicy.h"
 #include "js/HashTable.h"
@@ -52,17 +53,17 @@ class MonoStubTemplateBuilder;
 // peepholes. GC thing sentinels point into the arena of the thing they
 // replace, so that assertions about cells still hold. The holes are where the
 // three compiles have the sentinels of a field. The compiles must differ
-// nowhere else, and have the same relocations, jumps and failure paths.
+// nowhere else, and have the same relocations, jumps and exit states.
 // Their code may point into no zone or realm, except to the flag of the zone
 // that pre-barriers test, which is a hole too. Otherwise the template is
 // rejected, and stubs with its key are compiled directly.
 //
 // An instance of a template is its code appended to the Baseline code, with
 // the fields of the stub written into the holes, data relocations for its GC
-// things, its calls, and the jumps to its failure paths threaded onto fresh
-// labels for its exit.
+// things, its calls, and its exit states, encoded for the exit table when the
+// template is built, with the jumps to them.
 //
-// Templates are only built on x64.
+// Templates are only built on x64, for code with an exit table.
 
 class MonoStubTemplate {
  public:
@@ -101,13 +102,8 @@ class MonoStubTemplate {
   Vector<uint8_t, 0, SystemAllocPolicy> code_;
   Vector<Hole, 0, SystemAllocPolicy> holes_;
   Vector<PendingJump, 0, SystemAllocPolicy> jumps_;
-  Vector<OperandLocation, 0, SystemAllocPolicy> origInputs_;
-  Vector<FailurePath, 0, SystemAllocPolicy> failures_;
-
-  // The offsets of the jumps to the failure paths, those of the i-th path
-  // ending at failureJumpsEnd_[i].
-  Vector<uint32_t, 0, SystemAllocPolicy> failureJumps_;
-  Vector<uint32_t, 0, SystemAllocPolicy> failureJumpsEnd_;
+  Vector<uint8_t, 0, SystemAllocPolicy> exitStates_;
+  MonoExitJumpVector exitJumps_;
 
   friend class MonoStubTemplateBuilder;
   friend class MonoStubTemplates;
@@ -123,12 +119,12 @@ class MonoStubTemplate {
   bool rejected() const { return rejected_; }
   size_t codeLength() const { return code_.length(); }
 
-  // Appends the code for the stub with the given stub data, its original
-  // input locations and its failure paths. Returns false on OOM.
+  // Appends the code for the stub with the given stub data, its encoded exit
+  // states and its jumps to them. Returns false on OOM.
   [[nodiscard]] bool instantiate(MacroAssembler& masm, JS::Zone* zone,
                                  const uint8_t* stubData,
-                                 InlinedInputVector& origInputs,
-                                 InlinedFailureVector& failures) const;
+                                 CompactBufferWriter& exitStates,
+                                 MonoExitJumpVector& exitJumps) const;
 };
 
 class MonoStubTemplates {
@@ -152,8 +148,8 @@ class MonoStubTemplates {
   [[nodiscard]] bool emitStub(JSContext* cx, MacroAssembler& masm,
                               ICCacheIRStub* stub,
                               mozilla::Span<const JSValueType> inputTypes,
-                              InlinedInputVector& origInputs,
-                              InlinedFailureVector& failures,
+                              CompactBufferWriter& exitStates,
+                              MonoExitJumpVector& exitJumps,
                               MonoTemplateUse* use);
 };
 

@@ -233,22 +233,44 @@ class MonoExitTable {
   void trace(JSTracer* trc);
 };
 
+// A jump of an inline stub to the call to the trampoline for one of its exit
+// states.
+struct MonoExitJump {
+  uint32_t offset;
+  uint32_t state;
+};
+
+using MonoExitJumpVector = Vector<MonoExitJump, 0, SystemAllocPolicy>;
+
 // Encodes the exit table of monomorphic code, an inline stub at a time: its
-// site, then the values its exits push, then its states.
+// site, then the values its exits push, then its states. The states of a stub
+// don't depend on its site, so they are encoded once with its code, and its
+// exit only copies them.
 class MonoExitTableWriter {
   CompactBufferWriter sites_;
   Vector<uint64_t, 0, SystemAllocPolicy> constants_;
   uint32_t lastStubOffset_ = 0;
-  uint32_t lastPadOffset_ = 0;
+  uint32_t lastCallsOffset_ = 0;
 
  public:
+  // Encodes the states that the failures of an inline stub leave its inputs
+  // in, the first being the original one, in which discarded stubs exit too,
+  // and appends the jumps of its failures to each state, by state. Returns
+  // false on OOM.
+  [[nodiscard]] static bool encodeStates(
+      MacroAssembler& masm, mozilla::Span<const OperandLocation> origInputs,
+      mozilla::Span<FailurePath> failures, CompactBufferWriter& states,
+      MonoExitJumpVector& jumps);
+
   void writeSite(uint32_t stubOffset, uint32_t pcOffset, uint32_t drop,
                  uint32_t numValues);
   void writeValue(MonoExitValue kind, uint32_t index);
   [[nodiscard]] bool writeConstant(const Value& value);
-  void writeStates(uint32_t numInputs, uint32_t numStates);
-  void writeState(mozilla::Maybe<uint32_t> padOffset, uint32_t stackPushed,
-                  mozilla::Span<const OperandLocation> inputs);
+
+  // Writes the encoded states of the site, whose states with jumps each have
+  // a call to the trampoline, one after another from the given offset.
+  void writeStates(mozilla::Maybe<uint32_t> callsOffset,
+                   mozilla::Span<const uint8_t> states);
 
   bool oom() const { return sites_.oom(); }
   MonoExitTable* finish();
@@ -262,12 +284,19 @@ MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
 
 // Emits the stub inline, with its inputs known to have the given types, if
 // any, appending its original input locations and its failure paths for
-// emitting out of line. Sets *templateUse to whether it was copied from a
-// template. Returns false on OOM.
+// emitting out of line. Returns false on OOM.
 [[nodiscard]] bool EmitInlinedMonoStub(
     JSContext* cx, MacroAssembler& masm, TempAllocator& alloc,
     ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes,
-    InlinedInputVector& origInputs, InlinedFailureVector& failures,
+    InlinedInputVector& origInputs, InlinedFailureVector& failures);
+
+// Emits the stub inline for code with an exit table, appending its encoded
+// exit states and its jumps to them. Sets *templateUse to whether it was
+// copied from a template. Returns false on OOM.
+[[nodiscard]] bool EmitInlinedMonoStubWithExitTable(
+    JSContext* cx, MacroAssembler& masm, TempAllocator& alloc,
+    ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes,
+    CompactBufferWriter& states, MonoExitJumpVector& jumps,
     MonoTemplateUse* templateUse);
 
 // Narrows the types of the first inputs of the stub to the types its guards

@@ -303,8 +303,8 @@ static void ReadBarrierWeakFields(const TemplateFieldVector& fields,
 
 bool MonoStubTemplate::instantiate(MacroAssembler& masm, JS::Zone* zone,
                                    const uint8_t* stubData,
-                                   InlinedInputVector& origInputs,
-                                   InlinedFailureVector& failures) const {
+                                   CompactBufferWriter& exitStates,
+                                   MonoExitJumpVector& exitJumps) const {
 #ifdef JS_CODEGEN_X64
   MOZ_ASSERT(!rejected_);
   uint32_t base = masm.currentOffset();
@@ -348,29 +348,13 @@ bool MonoStubTemplate::instantiate(MacroAssembler& masm, JS::Zone* zone,
     masm.addPendingJumpAt(base + jump.offset, jump.target, jump.kind);
   }
 
-  uint32_t jumpsStart = 0;
-  for (size_t i = 0; i < failures_.length(); i++) {
-    const FailurePath& templateFailure = failures_[i];
-    FailurePath failure;
-    for (size_t j = 0; j < origInputs_.length(); j++) {
-      if (!failure.appendInput(templateFailure.input(j))) {
-        return false;
-      }
-    }
-    if (!failure.setSpilledRegs(templateFailure.spilledRegs())) {
-      return false;
-    }
-    failure.setStackPushed(templateFailure.stackPushed());
-    for (uint32_t j = jumpsStart; j < failureJumpsEnd_[i]; j++) {
-      masm.useLabelAt(failure.labelUnchecked(), base + failureJumps_[j]);
-    }
-    jumpsStart = failureJumpsEnd_[i];
-    if (!failures.append(std::move(failure))) {
+  exitStates.writeBytes(exitStates_.begin(), exitStates_.length());
+  for (const MonoExitJump& jump : exitJumps_) {
+    if (!exitJumps.append(MonoExitJump{base + jump.offset, jump.state})) {
       return false;
     }
   }
-
-  return origInputs.appendAll(origInputs_) && !masm.oom();
+  return !masm.oom() && !exitStates.oom();
 #else
   MOZ_CRASH("Monomorphic Baseline templates are x64 only");
 #endif
@@ -428,12 +412,10 @@ class MOZ_RAII js::jit::MonoStubTemplateBuilder {
   struct Compile {
     MacroAssembler* masm;
     Vector<uint8_t, 64, SystemAllocPolicy> stubData;
-    InlinedInputVector origInputs;
-    InlinedFailureVector failures;
     Vector<uint32_t, 8, SystemAllocPolicy> relocations;
     Vector<MonoStubTemplate::PendingJump, 4, SystemAllocPolicy> jumps;
-    Vector<uint32_t, 8, SystemAllocPolicy> failureJumps;
-    Vector<uint32_t, 4, SystemAllocPolicy> failureJumpsEnd;
+    CompactBufferWriter exitStates;
+    MonoExitJumpVector exitJumps;
   };
   Compile compiles_[NumTemplateCompiles];
 
@@ -488,9 +470,10 @@ bool MonoStubTemplateBuilder::compile(size_t index, TempAllocator& alloc,
   BaselineCacheIRCompiler compiler(
       cx_, alloc, CacheIRSource(info, compile.stubData.begin()), 0, &masm);
   compiler.setTemplateStubData(stubData);
+  InlinedInputVector origInputs;
+  InlinedFailureVector failures;
   if (!compiler.init(info->kind()) ||
-      !compiler.compileInline(inputTypes_, compile.origInputs,
-                              compile.failures)) {
+      !compiler.compileInline(inputTypes_, origInputs, failures)) {
     return false;
   }
   if (masm.oom()) {
@@ -518,17 +501,9 @@ bool MonoStubTemplateBuilder::compile(size_t index, TempAllocator& alloc,
     ok &= compile.jumps.append(
         MonoStubTemplate::PendingJump{offset, target, kind});
   });
-  if (!ok) {
-    return false;
-  }
-
-  for (FailurePath& failure : compile.failures) {
-    masm.forEachLabelUse(failure.labelUnchecked(), [&](uint32_t offset) {
-      ok &= compile.failureJumps.append(offset);
-    });
-    ok &= compile.failureJumpsEnd.append(compile.failureJumps.length());
-  }
-  return ok;
+  return ok &&
+         MonoExitTableWriter::encodeStates(
+             masm, origInputs, failures, compile.exitStates, compile.exitJumps);
 }
 
 bool MonoStubTemplateBuilder::findHoles(const uint64_t* sentinels, size_t width,
@@ -697,19 +672,12 @@ bool MonoStubTemplateBuilder::build(bool* rejected) {
   for (size_t i = 1; i < NumTemplateCompiles; i++) {
     const Compile& other = compiles_[i];
     bool same = other.masm->size() == length &&
-                other.origInputs.length() == first.origInputs.length() &&
-                other.failures.length() == first.failures.length() &&
                 other.relocations.length() == first.relocations.length() &&
                 other.jumps.length() == first.jumps.length() &&
-                other.failureJumps.length() == first.failureJumps.length() &&
-                other.failureJumpsEnd.length() ==
-                    first.failureJumpsEnd.length();
-    for (size_t j = 0; same && j < first.origInputs.length(); j++) {
-      same = other.origInputs[j] == first.origInputs[j];
-    }
-    for (size_t j = 0; same && j < first.failures.length(); j++) {
-      same = other.failures[j].canShareFailurePath(first.failures[j]);
-    }
+                other.exitStates.length() == first.exitStates.length() &&
+                other.exitJumps.length() == first.exitJumps.length() &&
+                memcmp(other.exitStates.buffer(), first.exitStates.buffer(),
+                       first.exitStates.length()) == 0;
     for (size_t j = 0; same && j < first.relocations.length(); j++) {
       same = other.relocations[j] == first.relocations[j];
     }
@@ -718,11 +686,9 @@ bool MonoStubTemplateBuilder::build(bool* rejected) {
              other.jumps[j].target == first.jumps[j].target &&
              other.jumps[j].kind == first.jumps[j].kind;
     }
-    for (size_t j = 0; same && j < first.failureJumps.length(); j++) {
-      same = other.failureJumps[j] == first.failureJumps[j];
-    }
-    for (size_t j = 0; same && j < first.failureJumpsEnd.length(); j++) {
-      same = other.failureJumpsEnd[j] == first.failureJumpsEnd[j];
+    for (size_t j = 0; same && j < first.exitJumps.length(); j++) {
+      same = other.exitJumps[j].offset == first.exitJumps[j].offset &&
+             other.exitJumps[j].state == first.exitJumps[j].state;
     }
     if (!same) {
       *rejected = true;
@@ -780,20 +746,18 @@ bool MonoStubTemplateBuilder::build(bool* rejected) {
       return true;
     }
   }
-  for (uint32_t offset : first.failureJumps) {
-    if (overlapsHole(offset)) {
+  for (const MonoExitJump& jump : first.exitJumps) {
+    if (overlapsHole(jump.offset)) {
       *rejected = true;
       return true;
     }
   }
 
-  Compile& result = compiles_[0];
-  template_.origInputs_ = std::move(result.origInputs);
-  template_.failures_ = std::move(result.failures);
-  return template_.code_.append(result.masm->rawCode(), length) &&
-         template_.jumps_.appendAll(result.jumps) &&
-         template_.failureJumps_.appendAll(result.failureJumps) &&
-         template_.failureJumpsEnd_.appendAll(result.failureJumpsEnd);
+  return template_.code_.append(first.masm->rawCode(), length) &&
+         template_.jumps_.appendAll(first.jumps) &&
+         template_.exitStates_.append(first.exitStates.buffer(),
+                                      first.exitStates.length()) &&
+         template_.exitJumps_.appendAll(first.exitJumps);
 }
 
 #endif  // JS_CODEGEN_X64
@@ -801,8 +765,8 @@ bool MonoStubTemplateBuilder::build(bool* rejected) {
 bool MonoStubTemplates::emitStub(JSContext* cx, MacroAssembler& masm,
                                  ICCacheIRStub* stub,
                                  mozilla::Span<const JSValueType> inputTypes,
-                                 InlinedInputVector& origInputs,
-                                 InlinedFailureVector& failures,
+                                 CompactBufferWriter& exitStates,
+                                 MonoExitJumpVector& exitJumps,
                                  MonoTemplateUse* use) {
   *use = MonoTemplateUse::None;
 #ifdef JS_CODEGEN_X64
@@ -864,7 +828,7 @@ bool MonoStubTemplates::emitStub(JSContext* cx, MacroAssembler& masm,
 
   const uint8_t* stubData = stub->stubDataStart();
   ReadBarrierWeakFields(fields, stubData);
-  return templ.instantiate(masm, cx->zone(), stubData, origInputs, failures);
+  return templ.instantiate(masm, cx->zone(), stubData, exitStates, exitJumps);
 #else
   return true;
 #endif

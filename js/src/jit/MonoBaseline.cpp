@@ -185,28 +185,51 @@ bool js::jit::CanInlineMonoStub(ICCacheIRStub* stub) {
   return WhyNotInlineMonoStub(stub, &op) == MonoNoInline::None;
 }
 
+// The code holds weak edges strongly, so mark them if we are marking.
+static void BarrierInlinedMonoStub(JSContext* cx, ICCacheIRStub* stub) {
+  Zone* zone = cx->zone();
+  if (zone->needsMarkingBarrier()) {
+    TraceCacheIRStub(zone->barrierTracer(),
+                     reinterpret_cast<MonoStubCopy*>(stub), stub->stubInfo());
+  }
+}
+
+static bool CompileInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
+                                   TempAllocator& alloc, ICCacheIRStub* stub,
+                                   mozilla::Span<const JSValueType> inputTypes,
+                                   InlinedInputVector& origInputs,
+                                   InlinedFailureVector& failures) {
+  const CacheIRStubInfo* info = stub->stubInfo();
+  BaselineCacheIRCompiler compiler(
+      cx, alloc, CacheIRSource(info, stub->stubDataStart()), 0, &masm);
+  return compiler.init(info->kind()) &&
+         compiler.compileInline(inputTypes, origInputs, failures);
+}
+
 bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
                                   TempAllocator& alloc, ICCacheIRStub* stub,
                                   mozilla::Span<const JSValueType> inputTypes,
                                   InlinedInputVector& origInputs,
-                                  InlinedFailureVector& failures,
-                                  MonoTemplateUse* templateUse) {
+                                  InlinedFailureVector& failures) {
   MOZ_ASSERT(CanInlineMonoStub(stub));
-  const CacheIRStubInfo* info = stub->stubInfo();
-  CacheKind kind = info->kind();
+  BarrierInlinedMonoStub(cx, stub);
+  return CompileInlinedMonoStub(cx, masm, alloc, stub, inputTypes, origInputs,
+                                failures);
+}
 
-  // The code holds weak edges strongly, so mark them if we are marking.
-  Zone* zone = cx->zone();
-  if (zone->needsMarkingBarrier()) {
-    TraceCacheIRStub(zone->barrierTracer(),
-                     reinterpret_cast<MonoStubCopy*>(stub), info);
-  }
+bool js::jit::EmitInlinedMonoStubWithExitTable(
+    JSContext* cx, MacroAssembler& masm, TempAllocator& alloc,
+    ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes,
+    CompactBufferWriter& states, MonoExitJumpVector& jumps,
+    MonoTemplateUse* templateUse) {
+  MOZ_ASSERT(CanInlineMonoStub(stub));
+  BarrierInlinedMonoStub(cx, stub);
 
   *templateUse = MonoTemplateUse::None;
   if (JitOptions.baselineMonoTemplates) {
     MonoStubTemplates& templates =
         cx->runtime()->jitRuntime()->monoStubTemplates();
-    if (!templates.emitStub(cx, masm, stub, inputTypes, origInputs, failures,
+    if (!templates.emitStub(cx, masm, stub, inputTypes, states, jumps,
                             templateUse)) {
       return false;
     }
@@ -216,10 +239,12 @@ bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
     }
   }
 
-  BaselineCacheIRCompiler compiler(
-      cx, alloc, CacheIRSource(info, stub->stubDataStart()), 0, &masm);
-  return compiler.init(kind) &&
-         compiler.compileInline(inputTypes, origInputs, failures);
+  InlinedInputVector origInputs;
+  InlinedFailureVector failures;
+  return CompileInlinedMonoStub(cx, masm, alloc, stub, inputTypes, origInputs,
+                                failures) &&
+         MonoExitTableWriter::encodeStates(masm, origInputs, failures, states,
+                                           jumps);
 }
 
 void js::jit::NarrowMonoStubInputTypes(const CacheIRStubInfo* info,
@@ -498,12 +523,6 @@ bool MonoExitTableWriter::writeConstant(const Value& value) {
   return constants_.append(value.asRawBits());
 }
 
-void MonoExitTableWriter::writeStates(uint32_t numInputs, uint32_t numStates) {
-  MOZ_ASSERT(numInputs <= MonoMaxStackInputs);
-  sites_.writeByte(numInputs);
-  sites_.writeByte(numStates);
-}
-
 static void WriteOperandLocation(CompactBufferWriter& writer,
                                  const OperandLocation& loc) {
   writer.writeByte(uint32_t(loc.kind()));
@@ -537,23 +556,80 @@ static void WriteOperandLocation(CompactBufferWriter& writer,
   MOZ_CRASH("Unexpected location of an inline stub input");
 }
 
-void MonoExitTableWriter::writeState(mozilla::Maybe<uint32_t> padOffset,
-                                     uint32_t stackPushed,
-                                     mozilla::Span<const OperandLocation> inputs) {
-  if (padOffset) {
-    MOZ_ASSERT(*padOffset > lastPadOffset_);
-    sites_.writeUnsigned(*padOffset - lastPadOffset_);
-    lastPadOffset_ = *padOffset;
+bool MonoExitTableWriter::encodeStates(
+    MacroAssembler& masm, mozilla::Span<const OperandLocation> origInputs,
+    mozilla::Span<FailurePath> failures, CompactBufferWriter& states,
+    MonoExitJumpVector& jumps) {
+#ifdef JS_CODEGEN_X64
+  // The failure leaving the inputs in each state, but the first.
+  Vector<const FailurePath*, 4, SystemAllocPolicy> stateFailures;
+  Vector<uint32_t, 8, SystemAllocPolicy> stateOfFailure;
+  if (!stateFailures.append(nullptr)) {
+    return false;
+  }
+  for (const FailurePath& failure : failures) {
+    uint32_t state = 0;
+    if (failure.needsRestore(origInputs)) {
+      state = 1;
+      while (state < stateFailures.length() &&
+             !stateFailures[state]->canShareFailurePath(failure)) {
+        state++;
+      }
+      if (state == stateFailures.length() && !stateFailures.append(&failure)) {
+        return false;
+      }
+    }
+    if (!stateOfFailure.append(state)) {
+      return false;
+    }
+  }
+
+  MOZ_ASSERT(origInputs.size() <= MonoMaxStackInputs);
+  states.writeByte(origInputs.size());
+  states.writeByte(stateFailures.length());
+  for (uint32_t state = 0; state < stateFailures.length(); state++) {
+    size_t jumpsStart = jumps.length();
+    bool ok = true;
+    for (size_t i = 0; i < failures.size(); i++) {
+      if (stateOfFailure[i] == state) {
+        masm.forEachLabelUse(failures[i].labelUnchecked(),
+                             [&](uint32_t offset) {
+                               ok &= jumps.append(MonoExitJump{offset, state});
+                             });
+      }
+    }
+    if (!ok) {
+      return false;
+    }
+    const FailurePath* failure = stateFailures[state];
+    states.writeByte(jumps.length() != jumpsStart);
+    states.writeUnsigned(failure ? failure->stackPushed() : 0);
+    for (size_t i = 0; i < origInputs.size(); i++) {
+      WriteOperandLocation(states, failure ? failure->input(i) : origInputs[i]);
+    }
+  }
+  return !states.oom();
+#else
+  MOZ_CRASH("Monomorphic exit tables are x64 only");
+#endif
+}
+
+void MonoExitTableWriter::writeStates(mozilla::Maybe<uint32_t> callsOffset,
+                                      mozilla::Span<const uint8_t> states) {
+  if (callsOffset) {
+    MOZ_ASSERT(*callsOffset > lastCallsOffset_);
+    sites_.writeUnsigned(*callsOffset - lastCallsOffset_);
+    lastCallsOffset_ = *callsOffset;
   } else {
     sites_.writeUnsigned(0);
   }
-  sites_.writeUnsigned(stackPushed);
-  for (const OperandLocation& loc : inputs) {
-    WriteOperandLocation(sites_, loc);
-  }
+  sites_.writeBytes(states.data(), states.size());
 }
 
 MonoExitTable* MonoExitTableWriter::finish() {
+  if (oom()) {
+    return nullptr;
+  }
   return MonoExitTable::New(constants_, sites_);
 }
 
@@ -612,7 +688,7 @@ static MonoExitInput ReadOperandLocation(CompactBufferReader& reader) {
 static MonoExit FindMonoExit(MonoExitTable* table, uint32_t returnOffset) {
   CompactBufferReader reader(table->dataStart(), table->dataEnd());
   uint32_t stubOffset = 0;
-  uint32_t padOffset = 0;
+  uint32_t callsOffset = 0;
   while (reader.more()) {
     MonoExit exit;
     stubOffset += reader.readUnsigned();
@@ -625,20 +701,24 @@ static MonoExit FindMonoExit(MonoExitTable* table, uint32_t returnOffset) {
       value.index =
           value.kind == MonoExitValue::This ? 0 : reader.readUnsigned();
     }
+    callsOffset += reader.readUnsigned();
+    uint32_t callReturnOffset = callsOffset;
     uint32_t numInputs = reader.readByte();
     uint32_t numStates = reader.readByte();
     MOZ_RELEASE_ASSERT(numInputs <= MonoMaxStackInputs);
     for (uint32_t state = 0; state < numStates; state++) {
-      uint32_t padDelta = reader.readUnsigned();
-      padOffset += padDelta;
+      bool hasCall = reader.readByte();
       exit.stackPushed = reader.readUnsigned();
       for (uint32_t i = 0; i < numInputs; i++) {
         exit.inputs[i] = ReadOperandLocation(reader);
       }
+      if (hasCall) {
+        callReturnOffset += Assembler::PatchWrite_NearCallSize();
+      }
       // The nop of a discarded stub calls the trampoline before the stub ran,
       // with its inputs where they are in the first state.
       bool discarded = state == 0 && returnOffset == stubOffset;
-      if (discarded || (padDelta != 0 && returnOffset == padOffset)) {
+      if (discarded || (hasCall && returnOffset == callReturnOffset)) {
         return exit;
       }
     }
