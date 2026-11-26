@@ -502,6 +502,7 @@ static uint8_t* ContinueInInterpreter(BaselineFrame* frame,
     script->updateJitCodeRaw(cx->runtime());
     jitScript->resetWarmUpCount(0);
   }
+  baselineScript->leaveMonoFrame();
 
   AutoSuppressProfilerSampling suppressProfilerSampling(cx);
   frame->switchFromJitToInterpreter(cx, script->offsetToPC(pcOffset));
@@ -887,23 +888,33 @@ static void LogDiscardBlocked(JSContext* cx, JSScript* script) {
   LogMonoDiscardBlocked(script, baselineScript, blocked, monoFrames, jitFrames);
 }
 
-static bool RunsBaselineCode(JSContext* cx, JSScript* script) {
+static uint32_t CountBaselineCodeFrames(JSContext* cx, JSScript* script) {
+  uint32_t count = 0;
   for (JitActivationIterator iter(cx); !iter.done(); ++iter) {
     for (OnlyJSJitFrameIter frames(iter); !frames.done(); ++frames) {
       const JSJitFrameIter& frame = frames.frame();
       if (frame.isBaselineJS() && frame.script() == script &&
           !frame.baselineFrame()->runningInInterpreter()) {
-        return true;
+        count++;
       }
     }
   }
-  return false;
+  return count;
 }
 
 bool js::jit::MaybeDiscardFailedMonoBaseline(JSContext* cx, JSScript* script) {
-  MOZ_ASSERT(script->baselineScript()->monoFailed());
-  if (RunsBaselineCode(cx, script)) {
-    if (script->baselineScript()->monoStatsId()) {
+  BaselineScript* baselineScript = script->baselineScript();
+  MOZ_ASSERT(baselineScript->monoFailed());
+
+  // No frame enters the code after it failed, so it is enough to count the
+  // frames still running it once and have them count down as they leave.
+  if (!baselineScript->monoFramesCounted()) {
+    baselineScript->setMonoLiveFrames(CountBaselineCodeFrames(cx, script));
+  }
+  MOZ_ASSERT(baselineScript->monoLiveFrames() ==
+             CountBaselineCodeFrames(cx, script));
+  if (baselineScript->monoLiveFrames()) {
+    if (baselineScript->monoStatsId()) {
       LogDiscardBlocked(cx, script);
     }
     return false;
@@ -912,12 +923,13 @@ bool js::jit::MaybeDiscardFailedMonoBaseline(JSContext* cx, JSScript* script) {
     Invalidate(cx, script, /* resetUses = */ false);
   }
   CancelOffThreadIonCompile(script);
-  if (script->baselineScript()->monoStatsId()) {
-    LogMonoScriptEvent("discard", script, script->baselineScript());
+  if (baselineScript->monoStatsId()) {
+    LogMonoScriptEvent("discard", script, baselineScript);
   }
-  BaselineScript* baselineScript =
+  BaselineScript* cleared =
       script->jitScript()->clearBaselineScript(cx->gcContext(), script);
-  BaselineScript::Destroy(cx->gcContext(), baselineScript);
+  MOZ_ASSERT(cleared == baselineScript);
+  BaselineScript::Destroy(cx->gcContext(), cleared);
   return true;
 }
 

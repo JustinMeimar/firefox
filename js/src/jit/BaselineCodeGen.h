@@ -63,6 +63,7 @@ class BaselineCodeGen {
 
   CodeOffset profilerEnterFrameToggleOffset_;
   CodeOffset profilerExitFrameToggleOffset_;
+  CodeOffset monoReturnToggleOffset_;
 
   // Early Ion bailouts will enter at this address. This is after frame
   // construction and before environment chain is initialized.
@@ -307,6 +308,7 @@ class BaselineCodeGen {
 
   void emitProfilerEnterFrame();
   void emitProfilerExitFrame();
+  void emitMonoReturn();
   void emitProfilerCallSiteInstrumentation();
 
   void emitOutOfLinePostBarrierSlot();

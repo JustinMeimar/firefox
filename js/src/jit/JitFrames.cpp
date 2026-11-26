@@ -617,6 +617,7 @@ static void HandleExceptionBaseline(JSContext* cx, JSJitFrameIter& frame,
     // Suppress profiler sampling while we fix up the frame to ensure the
     // sampler thread doesn't see an inconsistent state.
     AutoSuppressProfilerSampling suppressProfilerSampling(cx);
+    baselineFrame->script()->baselineScript()->leaveMonoFrame();
     baselineFrame->switchFromJitToInterpreterForExceptionHandler(cx, pc);
     prevFrame->setReturnAddress(retAddr);
 

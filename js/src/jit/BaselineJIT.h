@@ -216,6 +216,14 @@ class alignas(uintptr_t) BaselineScript final
   // frame still runs it. Counted only when diagnostics are on.
   uint32_t monoDiscardsBlocked_ = 0;
 
+  // Frames still running this code after it failed, once counted. Each
+  // decrements it when it leaves the code.
+  uint32_t monoLiveFrames_ = 0;
+
+  // The offset of the toggled jump around the decrement of monoLiveFrames_ in
+  // the epilogue.
+  uint32_t monoReturnToggleOffset_ = 0;
+
   // Baseline Interpreter can enter Baseline Compiler code at this address. This
   // is right after the warm-up counter check in the prologue.
   uint32_t warmUpCheckPrologueOffset_ = 0;
@@ -250,6 +258,10 @@ class alignas(uintptr_t) BaselineScript final
 
     // Flag set when monomorphic code continued in the Baseline Interpreter.
     MONO_FAILED = 1 << 2,
+
+    // Flag set when the frames still running failed monomorphic code were
+    // counted in monoLiveFrames_.
+    MONO_FRAMES_COUNTED = 1 << 3,
   };
 
   // Native code offset for OSR from Baseline Interpreter into Baseline JIT at
@@ -336,8 +348,10 @@ class alignas(uintptr_t) BaselineScript final
   }
 
   void setIsMono(MonoStub* monoStubs, MonoInlineStub* inlineStubs,
-                 uint32_t numInlineStubs, MonoExitTable* exitTable) {
+                 uint32_t numInlineStubs, MonoExitTable* exitTable,
+                 uint32_t returnToggleOffset) {
     flags_ |= IS_MONO;
+    monoReturnToggleOffset_ = returnToggleOffset;
     monoStubs_ = monoStubs;
     monoInlineStubs_ = inlineStubs;
     numMonoInlineStubs_ = numInlineStubs;
@@ -348,6 +362,18 @@ class alignas(uintptr_t) BaselineScript final
   void setMonoFailed() { flags_ |= MONO_FAILED; }
   void discardMonoStubs(JSRuntime* rt);
   bool monoFailed() const { return flags_ & MONO_FAILED; }
+  bool monoFramesCounted() const { return flags_ & MONO_FRAMES_COUNTED; }
+  void setMonoLiveFrames(uint32_t frames);
+  uint32_t monoLiveFrames() const { return monoLiveFrames_; }
+  void leaveMonoFrame() {
+    if (monoFramesCounted()) {
+      MOZ_ASSERT(monoLiveFrames_ > 0);
+      monoLiveFrames_--;
+    }
+  }
+  static size_t offsetOfMonoLiveFrames() {
+    return offsetof(BaselineScript, monoLiveFrames_);
+  }
 
   void setMonoStatsId(uint32_t id) { monoStatsId_ = id; }
   uint32_t monoStatsId() const { return monoStatsId_; }

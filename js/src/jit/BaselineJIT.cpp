@@ -1252,6 +1252,18 @@ static void ToggleProfilerInstrumentation(JitCode* code,
   }
 }
 
+void BaselineScript::setMonoLiveFrames(uint32_t frames) {
+  MOZ_ASSERT(monoFailed());
+  MOZ_ASSERT(!monoFramesCounted());
+  flags_ |= MONO_FRAMES_COUNTED;
+  monoLiveFrames_ = frames;
+  if (frames) {
+    AutoWritableJitCode awjc(method_);
+    Assembler::ToggleToCmp(
+        CodeLocationLabel(method_, CodeOffset(monoReturnToggleOffset_)));
+  }
+}
+
 void BaselineScript::toggleProfilerInstrumentation(bool enable) {
   JitSpew(JitSpew_BaselineIC, "  toggling profiling %s for BaselineScript %p",
           enable ? "on" : "off", this);

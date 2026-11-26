@@ -610,7 +610,8 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
       }
     }
     baselineScript->setIsMono(handler.releaseMonoStubs(), inlineStubsCopy,
-                              inlineStubs.length(), exitTable);
+                              inlineStubs.length(), exitTable,
+                              monoReturnToggleOffset_.offset());
   }
 
   if (handler.monoStats()) {
@@ -2460,6 +2461,27 @@ void BaselineCodeGen<Handler>::emitProfilerExitFrame() {
   MOZ_ASSERT(!profilerExitFrameToggleOffset_.bound());
   profilerExitFrameToggleOffset_ = toggleOffset;
 }
+
+// Counts down the frames running failed monomorphic code, guarded by a toggled
+// jump that is enabled once they are counted.
+template <>
+void BaselineCompilerCodeGen::emitMonoReturn() {
+  if (!handler.hasMonoCode()) {
+    return;
+  }
+  AutoForbidNopsForToggledJump afn(&masm);
+  Label done;
+  monoReturnToggleOffset_ = masm.toggledJump(&done);
+  Register scratch = R1.scratchReg();
+  loadJitScript(scratch);
+  masm.loadPtr(Address(scratch, JitScript::offsetOfBaselineScript()), scratch);
+  masm.add32(Imm32(-1),
+             Address(scratch, BaselineScript::offsetOfMonoLiveFrames()));
+  masm.bind(&done);
+}
+
+template <>
+void BaselineInterpreterCodeGen::emitMonoReturn() {}
 
 template <typename Handler>
 void BaselineCodeGen<Handler>::emitProfilerCallSiteInstrumentation() {
@@ -7466,6 +7488,7 @@ bool BaselineCodeGen<Handler>::emitEpilogue() {
   }
 
   emitProfilerExitFrame();
+  emitMonoReturn();
 
   masm.moveToStackPtr(FramePointer);
   masm.pop(FramePointer);

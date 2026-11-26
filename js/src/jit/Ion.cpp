@@ -2421,6 +2421,7 @@ bool jit::IonCompileScriptForBaselineOSR(JSContext* cx, BaselineFrame* frame,
     return false;
   }
 
+  script->baselineScript()->leaveMonoFrame();
   *infoPtr = info;
   return true;
 }
