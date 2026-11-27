@@ -301,14 +301,8 @@ MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
     CompactBufferWriter& states, MonoExitJumpVector& jumps,
     MonoTemplateUse* templateUse);
 
-// Narrows the types of the first inputs of the stub to the types its guards
-// check, which they have once it ran without failing.
-void NarrowMonoStubInputTypes(const CacheIRStubInfo* info,
-                              mozilla::Span<JSValueType> types);
-
-// The type of the value the stub returns once it ran without failing, or
-// unknown.
-JSValueType MonoStubResultType(const CacheIRStubInfo* info);
+// The known types of the stubs of the info, computed once.
+const CacheIRKnownTypes& MonoStubKnownTypes(const CacheIRStubInfo* info);
 
 // Puts back the operands of an inline stub and continues at the op in the
 // Baseline Interpreter.

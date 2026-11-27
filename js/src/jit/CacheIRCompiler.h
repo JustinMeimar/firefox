@@ -1417,6 +1417,22 @@ struct MapStubFieldToType<StubField::Type::WeakValue> {
   using WrappedType = WeakHeapPtr<Value>;
 };
 
+// The types the inputs and the output of a stub are known to have once it ran
+// without failing: the types its guards check its inputs to have and the result
+// type of its last op.
+//
+// TODO: Facts JSValueType can't express, like inputs that are numbers, and
+// facts about the operands the CacheIR loads, like their shapes, which unlike
+// types can change when code runs.
+struct CacheIRKnownTypes {
+  static constexpr size_t MaxInputs = 3;
+  JSValueType inputs[MaxInputs] = {JSVAL_TYPE_UNKNOWN, JSVAL_TYPE_UNKNOWN,
+                                   JSVAL_TYPE_UNKNOWN};
+  JSValueType result = JSVAL_TYPE_UNKNOWN;
+};
+
+CacheIRKnownTypes ComputeCacheIRKnownTypes(const CacheIRStubInfo* info);
+
 // See the 'Sharing Baseline stub code' comment in CacheIR.h for a description
 // of this class.
 //
@@ -1458,12 +1474,7 @@ class CacheIRStubInfo {
     // Whether a stub field has a type whose things can be in the nursery.
     bool hasStubFieldThatCanBeInNursery = false;
 
-    // The types the guards check the first inputs to have, or unknown.
-    static constexpr size_t NumGuardedInputs = 3;
-    JSValueType guardedInputTypes[NumGuardedInputs] = {};
-
-    // The type of the value the stubs return, or unknown.
-    JSValueType resultType = JSVAL_TYPE_UNKNOWN;
+    CacheIRKnownTypes knownTypes;
   };
 
  private:

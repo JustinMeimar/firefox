@@ -1053,7 +1053,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
     inputTypes[i] =
         input.hasKnownType() ? input.knownType() : JSVAL_TYPE_UNKNOWN;
   }
-  mozilla::Span<JSValueType> stackInputTypes(inputTypes, numStackInputs);
+  mozilla::Span<const JSValueType> stackInputTypes(inputTypes, numStackInputs);
   static_assert(MonoMaxStackInputs <= std::size(MonoStatsIC{}.inputTypes));
   stats.numInputTypes = numStackInputs;
   for (size_t i = 0; i < numStackInputs; i++) {
@@ -1061,12 +1061,17 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
   }
 
   // Once the stub ran, the locals, arguments and |this| it took as inputs
-  // have the types it guarded until they are stored to.
-  auto narrowSlotTypes = [&]() {
-    NarrowMonoStubInputTypes(stub->stubInfo(), stackInputTypes);
+  // have the types it guarded until they are stored to, and its result has the
+  // type of its last op.
+  static_assert(MonoMaxStackInputs <= CacheIRKnownTypes::MaxInputs);
+  auto recordKnownTypes = [&]() {
+    const CacheIRKnownTypes& knownTypes = MonoStubKnownTypes(stub->stubInfo());
     for (size_t i = 0; i < numStackInputs; i++) {
-      frame.setSlotType(stackInput(i), inputTypes[i]);
+      if (knownTypes.inputs[i] != JSVAL_TYPE_UNKNOWN) {
+        frame.setSlotType(stackInput(i), knownTypes.inputs[i]);
+      }
     }
+    handler.setICResultType(knownTypes.result);
   };
 
   stats.noInline = WhyNotInlineMonoStub(stub, &stats.noInlineOp);
@@ -1101,8 +1106,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
     if (!handler.addMonoExit(stubOffset, pcOffset, *operands, frame)) {
       return false;
     }
-    narrowSlotTypes();
-    handler.setICResultType(MonoStubResultType(stub->stubInfo()));
+    recordKnownTypes();
     stats.disposition = MonoICDisposition::Inline;
     *emitted = true;
     return true;
@@ -1130,8 +1134,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
                                             returnOffset)) {
     return false;
   }
-  narrowSlotTypes();
-  handler.setICResultType(MonoStubResultType(stub->stubInfo()));
+  recordKnownTypes();
   stats.disposition = MonoICDisposition::Copy;
   *emitted = true;
   return true;

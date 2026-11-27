@@ -125,8 +125,6 @@ static const CacheIRStubInfo::MonoBaselineCache& ScanStubInfo(
   }
 
   cache.allOpsInlinable = true;
-  std::fill(std::begin(cache.guardedInputTypes),
-            std::end(cache.guardedInputTypes), JSVAL_TYPE_UNKNOWN);
   CacheIRReader reader(info);
   while (reader.more()) {
     CacheOp op = reader.readOp();
@@ -134,63 +132,19 @@ static const CacheIRStubInfo::MonoBaselineCache& ScanStubInfo(
       cache.allOpsInlinable = false;
       cache.noInlineOp = op;
     }
-    cache.resultType = CacheIROpResultType(op);
-    ValOperandId input;
-    JSValueType type;
     switch (op) {
-      case CacheOp::GuardToObject:
-        input = reader.argsForGuardToObject().inputId;
-        type = JSVAL_TYPE_OBJECT;
-        break;
-      case CacheOp::GuardToInt32:
-        input = reader.argsForGuardToInt32().inputId;
-        type = JSVAL_TYPE_INT32;
-        break;
-      case CacheOp::GuardToString:
-        input = reader.argsForGuardToString().inputId;
-        type = JSVAL_TYPE_STRING;
-        break;
-      case CacheOp::GuardToSymbol:
-        input = reader.argsForGuardToSymbol().inputId;
-        type = JSVAL_TYPE_SYMBOL;
-        break;
-      case CacheOp::GuardToBigInt:
-        input = reader.argsForGuardToBigInt().inputId;
-        type = JSVAL_TYPE_BIGINT;
-        break;
-      case CacheOp::GuardToBoolean:
-        input = reader.argsForGuardToBoolean().inputId;
-        type = JSVAL_TYPE_BOOLEAN;
-        break;
-      case CacheOp::GuardIsNull:
-        input = reader.argsForGuardIsNull().inputId;
-        type = JSVAL_TYPE_NULL;
-        break;
-      case CacheOp::GuardIsUndefined:
-        input = reader.argsForGuardIsUndefined().inputId;
-        type = JSVAL_TYPE_UNDEFINED;
-        break;
-      case CacheOp::GuardNonDoubleType: {
-        auto args = reader.argsForGuardNonDoubleType();
-        input = args.inputId;
-        type = JSValueType(args.type);
-        break;
-      }
       case CacheOp::CallScriptedFunction:
       case CacheOp::CallBoundScriptedFunction:
       case CacheOp::CallScriptedGetterResult:
       case CacheOp::CallScriptedSetter:
         cache.callsScriptedFunction = true;
-        reader.skip(CacheIROpInfos[size_t(op)].argLength);
-        continue;
+        break;
       default:
-        reader.skip(CacheIROpInfos[size_t(op)].argLength);
-        continue;
+        break;
     }
-    if (input.id() < CacheIRStubInfo::MonoBaselineCache::NumGuardedInputs) {
-      cache.guardedInputTypes[input.id()] = type;
-    }
+    reader.skip(CacheIROpInfos[size_t(op)].argLength);
   }
+  cache.knownTypes = ComputeCacheIRKnownTypes(info);
 
   for (uint32_t field = 0;; field++) {
     StubField::Type type = info->fieldType(field);
@@ -345,21 +299,9 @@ bool js::jit::EmitInlinedMonoStubWithExitTable(
                                            jumps);
 }
 
-void js::jit::NarrowMonoStubInputTypes(const CacheIRStubInfo* info,
-                                       mozilla::Span<JSValueType> types) {
-  static_assert(MonoMaxStackInputs <=
-                CacheIRStubInfo::MonoBaselineCache::NumGuardedInputs);
-  MOZ_ASSERT(types.size() <= MonoMaxStackInputs);
-  const CacheIRStubInfo::MonoBaselineCache& cache = ScanStubInfo(info);
-  for (size_t i = 0; i < types.size(); i++) {
-    if (cache.guardedInputTypes[i] != JSVAL_TYPE_UNKNOWN) {
-      types[i] = cache.guardedInputTypes[i];
-    }
-  }
-}
-
-JSValueType js::jit::MonoStubResultType(const CacheIRStubInfo* info) {
-  return ScanStubInfo(info).resultType;
+const CacheIRKnownTypes& js::jit::MonoStubKnownTypes(
+    const CacheIRStubInfo* info) {
+  return ScanStubInfo(info).knownTypes;
 }
 
 void js::jit::EmitMonoExit(MacroAssembler& masm, MonoOperands operands,
