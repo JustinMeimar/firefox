@@ -154,6 +154,42 @@ void JitHintsMap::recordInvalidation(JSScript* script) {
   }
 }
 
+void JitHintsMap::recordMonoCompilation(JSScript* script) {
+  ScriptKey key = getScriptKey(script);
+  if (!key) {
+    return;
+  }
+
+  if (monoHintMap_.count() >= MonoHintMaxEntries) {
+    monoHintMap_.clear();
+  }
+
+  uint32_t threshold = std::min(script->warmUpCountAtLastICStub() + 10,
+                                JitOptions.baselineJitWarmUpThreshold);
+  (void)monoHintMap_.put(key, threshold);
+}
+
+bool JitHintsMap::getMonoThresholdHint(JSScript* script,
+                                       uint32_t& thresholdOut) const {
+  ScriptKey key = getScriptKey(script);
+  if (!key) {
+    return false;
+  }
+
+  auto p = monoHintMap_.lookup(key);
+  if (!p) {
+    return false;
+  }
+  thresholdOut = p->value();
+  return true;
+}
+
+void JitHintsMap::recordMonoFailure(JSScript* script) {
+  if (ScriptKey key = getScriptKey(script)) {
+    monoHintMap_.remove(key);
+  }
+}
+
 bool JitHintsMap::addMonomorphicInlineLocation(JSScript* script,
                                                BytecodeLocation loc) {
   ScriptKey key = getScriptKey(script);

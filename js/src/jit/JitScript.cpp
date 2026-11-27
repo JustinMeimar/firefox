@@ -15,6 +15,7 @@
 #include "jit/IonOptimizationLevels.h"  // jit::OptimizationInfo
 #include "jit/IonScript.h"
 #include "jit/JitFrames.h"
+#include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/ScriptFromCalleeToken.h"
 #include "jit/ShapeList.h"
@@ -139,6 +140,14 @@ bool JSScript::createJitScript(JSContext* cx) {
   uint32_t baseWarmUpThreshold =
       jit::OptimizationInfo::baseWarmUpThresholdForScript(cx, this);
   jitScript->setIonThreshold(baseWarmUpThreshold);
+
+  uint32_t monoThreshold;
+  if (JitOptions.baselineMono && cx->runtime()->hasJitRuntime() &&
+      cx->runtime()->jitRuntime()->hasJitHintsMap() &&
+      cx->runtime()->jitRuntime()->getJitHintsMap()->getMonoThresholdHint(
+          this, monoThreshold)) {
+    jitScript->setBaselineThreshold(monoThreshold);
+  }
 
   // Ensure concurrent marking doesn't see uninitialized jitScript.
   MemoryReleaseFence(cx->zone());

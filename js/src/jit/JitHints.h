@@ -186,6 +186,21 @@ class JitHintsMap {
   uint32_t baselineEntryCount_ = 0;
   void incrementBaselineEntryCount();
 
+  /* Mono Hints
+   * --------------------------------------------------------------------------
+   * Scripts that compiled monomorphic Baseline code map to the warmup count
+   * at which they compile again: the count when their last IC stub was
+   * attached, plus some wiggle room. A script loses its hint when its
+   * monomorphic code fails, and the map is cleared when it grows too large.
+   */
+  using ScriptToMonoThresholdMap =
+      HashMap<ScriptKey, uint32_t, js::DefaultHasher<ScriptKey>,
+              js::SystemAllocPolicy>;
+
+  static constexpr uint32_t MonoHintMaxEntries = 5000;
+
+  ScriptToMonoThresholdMap monoHintMap_;
+
   void updateAsRecentlyUsed(IonHint* hint);
   IonHint* addIonHint(ScriptKey key, ScriptToHintMap::AddPtr& p);
 
@@ -194,6 +209,10 @@ class JitHintsMap {
 
   void setEagerBaselineHint(JSScript* script);
   bool mightHaveEagerBaselineHint(JSScript* script) const;
+
+  void recordMonoCompilation(JSScript* script);
+  bool getMonoThresholdHint(JSScript* script, uint32_t& thresholdOut) const;
+  void recordMonoFailure(JSScript* script);
 
   bool recordIonCompilation(JSScript* script);
   bool getIonThresholdHint(JSScript* script, uint32_t& thresholdOut);

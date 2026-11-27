@@ -612,6 +612,10 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
     baselineScript->setIsMono(handler.releaseMonoStubs(), inlineStubsCopy,
                               inlineStubs.length(), exitTable,
                               monoReturnToggleOffset_.offset());
+    if (cx->runtime()->jitRuntime()->hasJitHintsMap()) {
+      cx->runtime()->jitRuntime()->getJitHintsMap()->recordMonoCompilation(
+          script);
+    }
   }
 
   if (handler.monoStats()) {
@@ -2270,8 +2274,9 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
     Address baselineScriptAddr(scriptReg, JitScript::offsetOfBaselineScript());
 
     // If the script is not warm enough to compile, we're done.
-    masm.branch32(Assembler::BelowOrEqual, countReg,
-                  Imm32(JitOptions.baselineJitWarmUpThreshold), &done);
+    masm.branch32(Assembler::AboveOrEqual,
+                  Address(scriptReg, JitScript::offsetOfBaselineThreshold()),
+                  countReg, &done);
 
     // Decide what to do based on the state of the baseline script field.
     Label notSpecial;
@@ -2373,8 +2378,9 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
   // If the script is warm enough for Baseline compilation, call into the VM to
   // compile it.
   Label done;
-  masm.branch32(Assembler::BelowOrEqual, countReg,
-                Imm32(JitOptions.baselineJitWarmUpThreshold), &done);
+  masm.branch32(Assembler::AboveOrEqual,
+                Address(scriptReg, JitScript::offsetOfBaselineThreshold()),
+                countReg, &done);
 
   masm.branchTestPtr(Assembler::NonZero,
                      Address(scriptReg, JitScript::offsetOfBaselineScript()),

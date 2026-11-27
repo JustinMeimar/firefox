@@ -510,6 +510,10 @@ static uint8_t* ContinueInInterpreter(BaselineFrame* frame,
     jitScript->setMonoFailed();
     script->updateJitCodeRaw(cx->runtime());
     jitScript->resetWarmUpCount(0);
+    jitScript->setBaselineThreshold(JitOptions.baselineJitWarmUpThreshold);
+    if (cx->runtime()->jitRuntime()->hasJitHintsMap()) {
+      cx->runtime()->jitRuntime()->getJitHintsMap()->recordMonoFailure(script);
+    }
   }
   baselineScript->leaveMonoFrame();
 

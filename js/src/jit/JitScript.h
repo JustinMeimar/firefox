@@ -400,6 +400,9 @@ class alignas(uintptr_t) JitScript final
   // used for Ion hints.
   uint32_t warmUpCountAtLastICStub_ = 0;
 
+  // Warmup count past which the Baseline Interpreter compiles the script.
+  uint32_t baselineThreshold_ = JitOptions.baselineJitWarmUpThreshold;
+
   ICScript icScript_;
   // End of fields.
 
@@ -457,12 +460,18 @@ class alignas(uintptr_t) JitScript final
   static constexpr size_t offsetOfWarmUpCount() {
     return offsetOfICScript() + ICScript::offsetOfWarmUpCount();
   }
+  static constexpr size_t offsetOfBaselineThreshold() {
+    return offsetof(JitScript, baselineThreshold_);
+  }
 
   uint32_t warmUpCount() const { return icScript_.warmUpCount_; }
   void incWarmUpCount() { icScript_.warmUpCount_++; }
   void resetWarmUpCount(uint32_t count);
 
   void setIonThreshold(uint32_t count) { icScript_.ionThreshold_ = count; }
+
+  uint32_t baselineThreshold() const { return baselineThreshold_; }
+  void setBaselineThreshold(uint32_t count) { baselineThreshold_ = count; }
 
   void prepareForDestruction(Zone* zone);
 

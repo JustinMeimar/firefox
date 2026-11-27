@@ -519,20 +519,25 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     return Method_Skipped;
   }
 
-  // If a hint is available, skip the warmup count threshold.
+  // If a hint is available, skip the warmup count threshold. Scripts that
+  // compiled monomorphic code instead wait for their ICs to be warm.
+  uint32_t warmUpThreshold = JitOptions.baselineJitWarmUpThreshold;
   bool mightHaveEagerBaselineHint = false;
-  if (!JitOptions.disableJitHints && !script->noEagerBaselineHint() &&
+  if (!JitOptions.disableJitHints &&
       cx->runtime()->jitRuntime()->hasJitHintsMap()) {
     JitHintsMap* jitHints = cx->runtime()->jitRuntime()->getJitHintsMap();
+    bool hasMonoHint = JitOptions.baselineMono &&
+                       jitHints->getMonoThresholdHint(script, warmUpThreshold);
     // If this lookup fails, the NoEagerBaselineHint script flag is set
     // to true to prevent any further lookups for this script.
-    if (jitHints->mightHaveEagerBaselineHint(script)) {
+    if (!hasMonoHint && !script->noEagerBaselineHint() &&
+        jitHints->mightHaveEagerBaselineHint(script)) {
       mightHaveEagerBaselineHint = true;
     }
   }
   // Check script warm-up counter if no hint.
   if (!mightHaveEagerBaselineHint) {
-    if (script->getWarmUpCount() <= JitOptions.baselineJitWarmUpThreshold) {
+    if (script->getWarmUpCount() <= warmUpThreshold) {
       return Method_Skipped;
     }
   }
