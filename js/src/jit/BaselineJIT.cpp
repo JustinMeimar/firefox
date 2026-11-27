@@ -537,6 +537,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
       cx->runtime()->jitRuntime()->hasJitHintsMap()) {
     JitHintsMap* jitHints = cx->runtime()->jitRuntime()->getJitHintsMap();
     bool hasMonoHint = JitOptions.baselineMono &&
+                       JitOptions.baselineMonoDeferEager &&
                        jitHints->getMonoThresholdHint(script, warmUpThreshold);
     // If this lookup fails, the NoEagerBaselineHint script flag is set
     // to true to prevent any further lookups for this script.

@@ -185,6 +185,10 @@ DefaultJitOptions::DefaultJitOptions() {
   // See MonoTemplates.h.
   SET_DEFAULT(baselineMonoTemplates, true);
 
+  // Whether scripts with monomorphic hints wait for their ICs to be warm
+  // instead of being compiled eagerly.
+  SET_DEFAULT(baselineMonoDeferEager, true);
+
   // Whether the inline stubs of monomorphic Baseline code exit through a
   // shared trampoline and a table instead of code of their own. See
   // MonoBaseline.h.

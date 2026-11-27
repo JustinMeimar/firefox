@@ -2733,6 +2733,7 @@ static bool MaybeDoEagerBaselineCompilations(JSContext* cx,
       // and are compiled off thread then.
       uint32_t monoThreshold;
       if (jit::JitOptions.baselineMono &&
+          jit::JitOptions.baselineMonoDeferEager &&
           jitHints->getMonoThresholdHint(script, monoThreshold)) {
         if (!script->ensureHasJitScript(cx, keepJitScript)) {
           return false;

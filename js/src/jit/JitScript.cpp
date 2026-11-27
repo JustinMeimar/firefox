@@ -142,7 +142,8 @@ bool JSScript::createJitScript(JSContext* cx) {
   jitScript->setIonThreshold(baseWarmUpThreshold);
 
   uint32_t monoThreshold;
-  if (JitOptions.baselineMono && cx->runtime()->hasJitRuntime() &&
+  if (JitOptions.baselineMono && JitOptions.baselineMonoDeferEager &&
+      cx->runtime()->hasJitRuntime() &&
       cx->runtime()->jitRuntime()->hasJitHintsMap() &&
       cx->runtime()->jitRuntime()->getJitHintsMap()->getMonoThresholdHint(
           this, monoThreshold)) {

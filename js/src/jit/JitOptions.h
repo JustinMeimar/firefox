@@ -79,6 +79,7 @@ struct DefaultJitOptions {
   bool baselineMono;
   bool baselineMonoMixed;
   bool baselineMonoTemplates;
+  bool baselineMonoDeferEager;
   bool baselineMonoExitTables;
   bool ion;
   bool jitForTrustedPrincipals;
