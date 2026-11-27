@@ -253,7 +253,6 @@ class CompilerFrameInfo : public FrameInfo {
   JSValueType& localType(uint32_t local) { return slotTypes_[local]; }
   JSValueType& argType(uint32_t arg) { return slotTypes_[nlocals() + arg]; }
   JSValueType& thisType() { return slotTypes_[slotTypes_.length() - 1]; }
-  void forgetSlotTypes();
 
  public:
   CompilerFrameInfo(JSScript* script, MacroAssembler& masm)
@@ -336,6 +335,40 @@ class CompilerFrameInfo : public FrameInfo {
   // types of the merge state of the target if all edges to it were merged, or
   // forgets them.
   void enterJumpTarget(uint32_t offset, bool allEdgesMerged);
+
+  void forgetSlotTypes();
+  void forgetLocalType(uint32_t local) {
+    if (tracksSlotTypes()) {
+      localType(local) = JSVAL_TYPE_UNKNOWN;
+    }
+  }
+  void forgetArgType(uint32_t arg) {
+    if (tracksSlotTypes()) {
+      argType(arg) = JSVAL_TYPE_UNKNOWN;
+    }
+  }
+
+  // Calls f with the address and the type of each local, argument and |this|
+  // of known type.
+  template <typename F>
+  void forEachKnownSlotType(F f) {
+    if (!tracksSlotTypes()) {
+      return;
+    }
+    for (uint32_t i = 0; i < nlocals(); i++) {
+      if (localType(i) != JSVAL_TYPE_UNKNOWN) {
+        f(addressOfLocal(i), localType(i));
+      }
+    }
+    for (uint32_t i = nlocals(); i < slotTypes_.length() - 1; i++) {
+      if (slotTypes_[i] != JSVAL_TYPE_UNKNOWN) {
+        f(addressOfArg(i - nlocals()), slotTypes_[i]);
+      }
+    }
+    if (thisType() != JSVAL_TYPE_UNKNOWN) {
+      f(addressOfThis(), thisType());
+    }
+  }
 
   // Forgets the type of the synced stack value after code stored another
   // value to it.

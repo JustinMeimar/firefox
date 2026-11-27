@@ -366,6 +366,10 @@ class BaselineCompilerHandler {
   // The type of the value the IC of the current op returns, if known.
   JSValueType icResultType_ = JSVAL_TYPE_UNKNOWN;
 
+  // The native offset at which OSR enters the current loop head, if it is not
+  // the start of the loop head's code.
+  mozilla::Maybe<uint32_t> loopHeadOSREntry_;
+
   // The stack depth before the current op.
   uint32_t opStackDepth_ = 0;
 
@@ -595,6 +599,14 @@ class BaselineCompilerHandler {
   JSValueType icResultType() const { return icResultType_; }
   void setICResultType(JSValueType type) { icResultType_ = type; }
 
+  void setLoopHeadOSREntry(uint32_t nativeOffset) {
+    MOZ_ASSERT(loopHeadOSREntry_.isNothing());
+    loopHeadOSREntry_ = mozilla::Some(nativeOffset);
+  }
+  mozilla::Maybe<uint32_t> takeLoopHeadOSREntry() {
+    return std::exchange(loopHeadOSREntry_, mozilla::Nothing());
+  }
+
   // The stack value at the given depth before the current op.
   const StackValue& opOperand(int32_t depth) const {
     MOZ_ASSERT(depth < 0 && uint32_t(-depth) <= numOpOperands_);
@@ -714,6 +726,10 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
   // Meets the slot types into the merge states of the forward jump targets of
   // the op.
   [[nodiscard]] bool mergeSlotTypesForJumps(BytecodeLocation loc);
+
+  // Gives the slots at the loop head the types they are known to have on all
+  // edges to it, and emits the checks OSR entering it makes.
+  [[nodiscard]] bool enterLoopHead(bool fallsThrough);
 
   bool monoInlinesIC(JSOp op);
   [[nodiscard]] bool emitMonoExit(

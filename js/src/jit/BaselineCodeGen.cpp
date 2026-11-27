@@ -31,6 +31,7 @@
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/BuiltinObjectKind.h"
+#include "vm/BytecodeIterator.h"
 #include "vm/ConstantCompareOperand.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/FunctionFlags.h"  // js::FunctionFlags
@@ -51,6 +52,7 @@
 #include "jit/SharedICHelpers-inl.h"
 #include "jit/TemplateObject-inl.h"
 #include "jit/VMFunctionList-inl.h"
+#include "vm/BytecodeIterator-inl.h"
 #include "vm/BytecodeLocation-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
@@ -2084,7 +2086,8 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
   jsbytecode* pc = handler.pc();
   if (JSOp(*pc) == JSOp::LoopHead) {
     uint32_t pcOffset = script->pcToOffset(pc);
-    uint32_t nativeOffset = masm.currentOffset();
+    uint32_t nativeOffset =
+        handler.takeLoopHeadOSREntry().valueOr(masm.currentOffset());
     if (!handler.osrEntries().emplaceBack(pcOffset, nativeOffset)) {
       return false;
     }
@@ -7645,6 +7648,67 @@ bool BaselineCompiler::mergeSlotTypesForJumps(BytecodeLocation loc) {
   return true;
 }
 
+bool BaselineCompiler::enterLoopHead(bool fallsThrough) {
+  JSScript* script = handler.script();
+  uint32_t offset = script->pcToOffset(handler.pc());
+
+  const TryNote* loop = nullptr;
+  for (const TryNote& tn : script->trynotes()) {
+    if (tn.isLoop() && tn.start == offset) {
+      loop = &tn;
+      break;
+    }
+  }
+  frame.enterJumpTarget(offset, /* allEdgesMerged = */ loop);
+  if (!loop) {
+    return true;
+  }
+
+  // Along backedges, the locals and arguments the loop does not store to keep
+  // the types they had when it was entered.
+  // TODO: Types for the slots the loop stores to, checked on the backedges.
+  BytecodeLocation begin(script, handler.pc());
+  BytecodeLocation end(script, script->offsetToPC(loop->start + loop->length));
+  for (BytecodeLocation loc : BytecodeLocationRange(begin, end)) {
+    switch (loc.getOp()) {
+      case JSOp::SetLocal:
+      case JSOp::InitLexical:
+        frame.forgetLocalType(loc.local());
+        break;
+      case JSOp::SetArg:
+        frame.forgetArgType(loc.arg());
+        break;
+      default:
+        break;
+    }
+  }
+
+  // OSR enters the loop with the values the Baseline Interpreter computed, so
+  // it checks them out of the way of the other edges.
+  bool anyKnown = false;
+  frame.forEachKnownSlotType([&](Address, JSValueType) { anyKnown = true; });
+  if (!anyKnown) {
+    return true;
+  }
+  Label* head = handler.labelOf(handler.pc());
+  if (fallsThrough) {
+    masm.jump(head);
+  }
+  handler.setLoopHeadOSREntry(masm.currentOffset());
+  Label fail;
+  frame.forEachKnownSlotType([&](Address slot, JSValueType type) {
+    masm.loadValue(slot, R0);
+    ScratchTagScope tag(masm, R0);
+    masm.splitTagForTest(R0, tag);
+    masm.branchTestType(Assembler::NotEqual, tag, type, &fail);
+  });
+  masm.jump(head);
+  masm.bind(&fail);
+  EmitMonoExit(masm, MonoOperands::InPlace, offset,
+               runtime->jitRuntime()->monoStubExitTail());
+  return true;
+}
+
 bool BaselineCompiler::emitBody() {
   AutoCreatedBy acb(masm, "BaselineCompiler::emitBody");
 
@@ -7688,9 +7752,13 @@ bool BaselineCompiler::emitBody() {
       // Exception handling resumes in the Baseline Interpreter, so only loop
       // heads are entered other than along the edges merged so far: along
       // backedges and by OSR.
-      // TODO: Assume the types loops are entered with at loop heads, checked
-      // on backedges and OSR entries.
-      frame.enterJumpTarget(pcOffset, op != JSOp::LoopHead);
+      if (op == JSOp::LoopHead) {
+        if (!enterLoopHead(fallsThrough)) {
+          return false;
+        }
+      } else {
+        frame.enterJumpTarget(pcOffset, /* allEdgesMerged = */ true);
+      }
       masm.bind(handler.labelOf(handler.pc()));
     } else if (MOZ_UNLIKELY(compileDebugInstrumentation())) {
       // Also fully sync the stack if the debugger is enabled.
