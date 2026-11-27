@@ -190,8 +190,8 @@ class JitHintsMap {
    * --------------------------------------------------------------------------
    * Scripts that compiled monomorphic Baseline code map to the warmup count
    * at which they compile again: the count when their last IC stub was
-   * attached, plus some wiggle room. A script loses its hint when its
-   * monomorphic code fails, and the map is cleared when it grows too large.
+   * attached. A script loses its hint when its monomorphic code fails, and
+   * the map is cleared when it grows too large.
    */
   using ScriptToMonoThresholdMap =
       HashMap<ScriptKey, uint32_t, js::DefaultHasher<ScriptKey>,

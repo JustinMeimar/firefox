@@ -164,7 +164,7 @@ void JitHintsMap::recordMonoCompilation(JSScript* script) {
     monoHintMap_.clear();
   }
 
-  uint32_t threshold = std::min(script->warmUpCountAtLastICStub() + 10,
+  uint32_t threshold = std::min(script->warmUpCountAtLastICStub(),
                                 JitOptions.baselineJitWarmUpThreshold);
   (void)monoHintMap_.put(key, threshold);
 }
