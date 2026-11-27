@@ -2729,6 +2729,12 @@ static bool MaybeDoEagerBaselineCompilations(JSContext* cx,
       if (!jitHints->mightHaveEagerBaselineHint(script)) {
         continue;
       }
+      // Scripts that compiled monomorphic code wait for their ICs to be warm.
+      uint32_t monoThreshold;
+      if (jit::JitOptions.baselineMono &&
+          jitHints->getMonoThresholdHint(script, monoThreshold)) {
+        continue;
+      }
     }
 
     if (!jit::CanBaselineCompileScript(cx, script)) {
