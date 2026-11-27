@@ -278,10 +278,11 @@ static void ReadBarrierWeakFields(const CacheIRStubInfo* info,
   size_t offset = 0;
   for (uint32_t i = 0;; i++) {
     StubField::Type type = info->fieldType(i);
+    if (type == StubField::Type::Limit) {
+      return;
+    }
     uintptr_t word = info->getStubRawWord(data, offset);
     switch (type) {
-      case StubField::Type::Limit:
-        return;
       case StubField::Type::WeakShape:
         gc::ReadBarrier(reinterpret_cast<Shape*>(word));
         break;
