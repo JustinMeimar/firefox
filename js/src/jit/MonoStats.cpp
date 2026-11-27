@@ -356,8 +356,12 @@ void js::jit::LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
     } else {
       PrintMonoStubOps(buf, firstStub->toCacheIRStub());
     }
-    buf.printf(",%u,%u,\"%s\"]", ic.emitNs, ic.exitNs,
+    buf.printf(",%u,%u,\"%s\",\"", ic.emitNs, ic.exitNs,
                MonoTemplateUseNames[size_t(ic.templateUse)]);
+    for (size_t i = 0; i < ic.numInputTypes; i++) {
+      buf.printf("%02x", ic.inputTypes[i]);
+    }
+    buf.printf("\"]");
     first = false;
   }
   buf.printf("],\"nic\":%u,\"blocks\":[", unsigned(icScript->numICEntries()));

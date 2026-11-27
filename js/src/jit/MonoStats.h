@@ -28,8 +28,9 @@ enum class CacheOp : uint16_t;
 // JS_MONO_STATS=DIR writes DIR/mono-PID.events, one JSON object per line:
 //   init: the JSOp, CacheKind and CacheOp tables the other events index.
 //   compile: a Baseline compile, with why the script was or wasn't compiled
-//     monomorphic, its code bytes, its bytecode and, per IC op, its IC state
-//     and how its IC was emitted.
+//     monomorphic, its code bytes, its bytecode and, per IC op, its IC state,
+//     how its IC was emitted and, as hex JSValueTypes, the types its stack
+//     inputs were known to have.
 //   exit: monomorphic code continued in the Baseline Interpreter.
 //   invalidate: the stubs of monomorphic code were discarded.
 //   discard, destroy: failed monomorphic code was discarded, Baseline code was
@@ -110,6 +111,10 @@ struct MonoStatsIC {
   MonoNoInline noInline;
   CacheOp noInlineOp;
   MonoTemplateUse templateUse;
+  // The types the stack inputs of an inline stub were known to have when it
+  // was emitted, as JSValueTypes.
+  uint8_t numInputTypes;
+  uint8_t inputTypes[3];
 };
 
 bool MonoStatsEnabled();

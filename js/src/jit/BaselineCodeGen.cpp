@@ -1054,6 +1054,11 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
         input.hasKnownType() ? input.knownType() : JSVAL_TYPE_UNKNOWN;
   }
   mozilla::Span<JSValueType> stackInputTypes(inputTypes, numStackInputs);
+  static_assert(MonoMaxStackInputs <= std::size(MonoStatsIC{}.inputTypes));
+  stats.numInputTypes = numStackInputs;
+  for (size_t i = 0; i < numStackInputs; i++) {
+    stats.inputTypes[i] = uint8_t(inputTypes[i]);
+  }
 
   // Once the stub ran, the locals, arguments and |this| it took as inputs
   // have the types it guarded until they are stored to.
@@ -1179,7 +1184,9 @@ bool BaselineCompilerCodeGen::emitNextIC() {
                     .disposition = MonoICDisposition::Chain,
                     .noInline = MonoNoInline::None,
                     .noInlineOp = CacheOp(0),
-                    .templateUse = MonoTemplateUse::None};
+                    .templateUse = MonoTemplateUse::None,
+                    .numInputTypes = 0,
+                    .inputTypes = {}};
   int64_t emitStart = handler.monoStats() ? MonoStatsNowNs() : 0;
   auto recordStats = [&]() {
     if (!handler.monoStats()) {
