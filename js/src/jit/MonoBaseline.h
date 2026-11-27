@@ -43,7 +43,9 @@ enum class CacheKind : uint8_t;
 // its exit. Each other IC op with one stub calls a copy of that stub instead
 // of the first stub of its IC chain, so it runs the same shared stub code. The
 // copy is owned by the BaselineScript, which traces its edges strongly, and
-// its next stub is an exit for the op.
+// its next stub is an exit for the op. A stub that calls a scripted function
+// is not copied, since trial inlining may replace it in the IC chain with one
+// passing the callee an ICScript of its own, and reads its entered count.
 //
 // Stubs fail only before they have effects, so when a stub fails the exit
 // only has to rebuild the frame the Baseline Interpreter expects at the op: it

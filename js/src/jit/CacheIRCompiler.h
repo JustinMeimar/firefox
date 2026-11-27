@@ -1448,6 +1448,10 @@ class CacheIRStubInfo {
 
     bool hasICScriptStubField = false;
 
+    // Whether the CacheIR calls a scripted function trial inlining can
+    // inline.
+    bool callsScriptedFunction = false;
+
     // Whether a stub field has a type whose things can be in the nursery.
     bool hasStubFieldThatCanBeInNursery = false;
 

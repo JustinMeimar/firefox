@@ -1,0 +1,1 @@
+|jit-test| --baseline-mono; --blinterp-warmup-threshold=2; --baseline-warmup-threshold=10; --trial-inlining-warmup-threshold=20; --inlining-entry-threshold=2; --ion-warmup-threshold=40; --ion-offthread-compile=off

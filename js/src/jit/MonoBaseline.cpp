@@ -175,6 +175,13 @@ static const CacheIRStubInfo::MonoBaselineCache& ScanStubInfo(
         type = JSValueType(args.type);
         break;
       }
+      case CacheOp::CallScriptedFunction:
+      case CacheOp::CallBoundScriptedFunction:
+      case CacheOp::CallScriptedGetterResult:
+      case CacheOp::CallScriptedSetter:
+        cache.callsScriptedFunction = true;
+        reader.skip(CacheIROpInfos[size_t(op)].argLength);
+        continue;
       default:
         reader.skip(CacheIROpInfos[size_t(op)].argLength);
         continue;
@@ -212,11 +219,13 @@ static const CacheIRStubInfo::MonoBaselineCache& ScanStubInfo(
 
 // Whether the stub can be copied: it holds no nursery cell, which would need
 // the store buffer to point into the copy, and no ICScript, which trial
-// inlining may free.
+// inlining may free. A stub trial inlining may replace is called through the
+// IC chain, so the callee gets the ICScript of the replacement and the stub
+// counts the calls trial inlining reads.
 static bool CanCopyStub(ICCacheIRStub* stub) {
   const CacheIRStubInfo* info = stub->stubInfo();
   const CacheIRStubInfo::MonoBaselineCache& cache = ScanStubInfo(info);
-  if (cache.hasICScriptStubField) {
+  if (cache.hasICScriptStubField || cache.callsScriptedFunction) {
     return false;
   }
   if (!cache.hasStubFieldThatCanBeInNursery) {
