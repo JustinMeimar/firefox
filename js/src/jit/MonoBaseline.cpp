@@ -440,6 +440,17 @@ bool js::jit::HasMonomorphicIC(JSScript* script) {
   return false;
 }
 
+bool js::jit::RunsMonoCode(JSScript* script) {
+  if (!JitOptions.baselineMono) {
+    return false;
+  }
+  if (script->hasBaselineScript()) {
+    BaselineScript* baselineScript = script->baselineScript();
+    return baselineScript->isMono() && !baselineScript->monoFailed();
+  }
+  return !script->jitScript()->monoFailed() && IsMonomorphicScript(script);
+}
+
 static uint8_t* ContinueInInterpreter(BaselineFrame* frame,
                                       uint32_t pcOffset) {
   JSContext* cx = TlsContext.get();

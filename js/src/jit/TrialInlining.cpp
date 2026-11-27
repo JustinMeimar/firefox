@@ -16,6 +16,7 @@
 #include "jit/CacheIRWriter.h"
 #include "jit/InlineScriptTree.h"
 #include "jit/Ion.h"  // TooManyFormalArguments
+#include "jit/MonoBaseline.h"
 #include "jit/StubFolding.h"
 
 #include "vm/BytecodeLocation-inl.h"
@@ -689,6 +690,10 @@ bool TrialInliner::canInline(JSContext* cx, JSScript* script,
 static bool ShouldUseMonomorphicInlining(JSScript* targetScript) {
   switch (JitOptions.monomorphicInlining) {
     case UseMonomorphicInlining::Default:
+      // Monomorphic code would leave an ICScript made for the call empty.
+      if (RunsMonoCode(targetScript)) {
+        return true;
+      }
       // Use heuristics below.
       break;
     case UseMonomorphicInlining::Always:

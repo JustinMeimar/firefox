@@ -318,6 +318,10 @@ bool IsMonomorphicScript(JSScript* script);
 // Whether any IC of the script is monomorphic.
 bool HasMonomorphicIC(JSScript* script);
 
+// Whether the script runs monomorphic code, or would if Baseline compiled it
+// now. Monomorphic code profiles only into the ICScript of its script.
+bool RunsMonoCode(JSScript* script);
+
 // Called by the exits with the pc offset of the op. Returns the address at
 // which the Baseline Interpreter continues.
 uint8_t* MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset);
