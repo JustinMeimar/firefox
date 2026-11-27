@@ -439,9 +439,10 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
                             baseWarmUpThreshold, isIonCompileable,
                             compileDebugInstrumentation);
 
-  // Scripts whose eager compile a monomorphic hint deferred are compiled off
-  // thread as eager compiles are.
-  bool isEager = script->jitScript()->eagerBaselineDeferred();
+  // Scripts whose eager compile a monomorphic hint deferred, and scripts whose
+  // monomorphic code failed, are compiled off thread as eager compiles are.
+  bool isEager = script->jitScript()->eagerBaselineDeferred() ||
+                 script->jitScript()->monoFailed();
   if (BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script,
                                                                  isEager) &&
       !forceMainThread) {
@@ -515,8 +516,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
     if (!script->baselineScript()->monoFailed()) {
       return Method_Compiled;
     }
-    if (script->getWarmUpCount() <= JitOptions.baselineJitWarmUpThreshold ||
-        !MaybeDiscardFailedMonoBaseline(cx, script)) {
+    if (!MaybeDiscardFailedMonoBaseline(cx, script)) {
       return Method_Skipped;
     }
   }
@@ -546,8 +546,10 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
       mightHaveEagerBaselineHint = true;
     }
   }
-  // Check script warm-up counter if no hint.
-  if (!mightHaveEagerBaselineHint) {
+  // Check script warm-up counter if no hint. Scripts whose monomorphic code
+  // failed were already warm and compile again right away.
+  bool monoFailed = script->hasJitScript() && script->jitScript()->monoFailed();
+  if (!mightHaveEagerBaselineHint && !monoFailed) {
     if (script->getWarmUpCount() <= warmUpThreshold) {
       return Method_Skipped;
     }
