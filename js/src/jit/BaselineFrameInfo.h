@@ -15,6 +15,7 @@
 #include "jit/FixedList.h"
 #include "jit/MacroAssembler.h"
 #include "jit/SharedICRegisters.h"
+#include "js/HashTable.h"
 
 namespace js {
 namespace jit {
@@ -233,23 +234,26 @@ class CompilerFrameInfo : public FrameInfo {
   // Whether syncing the stack only syncs up to the last value in a register.
   bool deferSync_ = false;
 
-  // The type a local, argument or |this| is known to have in the block it was
-  // set in. Blocks end at jump targets.
-  struct SlotType {
-    uint32_t block;
-    JSValueType type;
-  };
+  // The types the locals, arguments and |this| are known to have, in that
+  // order, or empty if they are not tracked.
+  //
+  // TODO: Types of the stack values at jump targets, which are unknown, and
+  // types branches imply, like the type a typeof test checks on the edge it
+  // jumps along.
+  FixedList<JSValueType> slotTypes_;
 
-  // The current block, or 0 if slot types are not tracked.
-  uint32_t block_ = 0;
-  FixedList<SlotType> localTypes_;
-  FixedList<SlotType> argTypes_;
-  SlotType thisType_ = {0, JSVAL_TYPE_UNKNOWN};
+  // The merge states of the jump targets compiled code jumped to: the slot
+  // types known on all the jumps to them compiled so far, by pc offset.
+  using MergeStateMap = HashMap<uint32_t, JSValueType*, DefaultHasher<uint32_t>,
+                                SystemAllocPolicy>;
+  MergeStateMap mergeStates_;
+  TempAllocator* alloc_ = nullptr;
 
-  JSValueType knownType(const SlotType& slot) const {
-    return block_ && slot.block == block_ ? slot.type : JSVAL_TYPE_UNKNOWN;
-  }
-  void setKnownType(SlotType& slot, JSValueType type) { slot = {block_, type}; }
+  bool tracksSlotTypes() const { return slotTypes_.length() > 0; }
+  JSValueType& localType(uint32_t local) { return slotTypes_[local]; }
+  JSValueType& argType(uint32_t arg) { return slotTypes_[nlocals() + arg]; }
+  JSValueType& thisType() { return slotTypes_[slotTypes_.length() - 1]; }
+  void forgetSlotTypes();
 
  public:
   CompilerFrameInfo(JSScript* script, MacroAssembler& masm)
@@ -305,17 +309,17 @@ class CompilerFrameInfo : public FrameInfo {
   inline void pushLocal(uint32_t local) {
     MOZ_ASSERT(local < nlocals());
     StackValue* sv = rawPush();
-    sv->setLocalSlot(
-        local, block_ ? knownType(localTypes_[local]) : JSVAL_TYPE_UNKNOWN);
+    sv->setLocalSlot(local, tracksSlotTypes() ? localType(local)
+                                              : JSVAL_TYPE_UNKNOWN);
   }
   inline void pushArg(uint32_t arg) {
     StackValue* sv = rawPush();
     sv->setArgSlot(arg,
-                   block_ ? knownType(argTypes_[arg]) : JSVAL_TYPE_UNKNOWN);
+                   tracksSlotTypes() ? argType(arg) : JSVAL_TYPE_UNKNOWN);
   }
   inline void pushThis() {
     StackValue* sv = rawPush();
-    sv->setThis(knownType(thisType_));
+    sv->setThis(tracksSlotTypes() ? thisType() : JSVAL_TYPE_UNKNOWN);
   }
 
   // Tracks the types of the locals, arguments and |this|. They must not
@@ -323,9 +327,15 @@ class CompilerFrameInfo : public FrameInfo {
   // change them.
   [[nodiscard]] bool initSlotTypes(TempAllocator& alloc);
 
-  // Forgets the types of the stack values, locals, arguments and |this|, as
-  // at jump targets, where other paths join.
-  void clearKnownTypes();
+  // Meets the types of the locals, arguments and |this| into the merge state
+  // of the jump target at the offset, for an edge to it.
+  [[nodiscard]] bool mergeSlotTypes(uint32_t targetOffset);
+
+  // At the jump target at the offset, once the stack is synced: forgets the
+  // types of the stack values, and gives the locals, arguments and |this| the
+  // types of the merge state of the target if all edges to it were merged, or
+  // forgets them.
+  void enterJumpTarget(uint32_t offset, bool allEdgesMerged);
 
   // Forgets the type of the synced stack value after code stored another
   // value to it.

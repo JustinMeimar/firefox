@@ -51,6 +51,7 @@
 #include "jit/SharedICHelpers-inl.h"
 #include "jit/TemplateObject-inl.h"
 #include "jit/VMFunctionList-inl.h"
+#include "vm/BytecodeLocation-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 
@@ -7621,6 +7622,29 @@ bool BaselineCompiler::monoInlinesIC(JSOp op) {
   return false;
 }
 
+bool BaselineCompiler::mergeSlotTypesForJumps(BytecodeLocation loc) {
+  JSScript* script = handler.script();
+  uint32_t offset = loc.bytecodeToOffset(script);
+  auto merge = [&](uint32_t target) {
+    return target <= offset || frame.mergeSlotTypes(target);
+  };
+  if (loc.isJump()) {
+    return merge(loc.getJumpTargetOffset(script));
+  }
+  if (loc.is(JSOp::TableSwitch)) {
+    if (!merge(loc.getTableSwitchDefaultOffset(script))) {
+      return false;
+    }
+    uint32_t ncases = loc.getTableSwitchHigh() - loc.getTableSwitchLow() + 1;
+    for (uint32_t i = 0; i < ncases; i++) {
+      if (!merge(loc.tableSwitchCaseOffset(script, i))) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool BaselineCompiler::emitBody() {
   AutoCreatedBy acb(masm, "BaselineCompiler::emitBody");
 
@@ -7628,6 +7652,9 @@ bool BaselineCompiler::emitBody() {
   MOZ_ASSERT(handler.pc() == script->code());
 
   mozilla::DebugOnly<jsbytecode*> prevpc = handler.pc();
+
+  // Whether the last op compiled falls through to the next.
+  bool fallsThrough = true;
 
   while (true) {
     JSOp op = JSOp(*handler.pc());
@@ -7638,6 +7665,8 @@ bool BaselineCompiler::emitBody() {
 
     // Skip unreachable ops.
     if (!info) {
+      fallsThrough = false;
+
       // Test if last instructions and stop emitting in that case.
       handler.moveToNextPC();
       if (handler.pc() >= script->codeEnd()) {
@@ -7652,7 +7681,16 @@ bool BaselineCompiler::emitBody() {
       // Fully sync the stack if there are incoming jumps.
       frame.syncStack(0);
       frame.setStackDepth(info->stackDepth);
-      frame.clearKnownTypes();
+      uint32_t pcOffset = script->pcToOffset(handler.pc());
+      if (fallsThrough && !frame.mergeSlotTypes(pcOffset)) {
+        return false;
+      }
+      // Exception handling resumes in the Baseline Interpreter, so only loop
+      // heads are entered other than along the edges merged so far: along
+      // backedges and by OSR.
+      // TODO: Assume the types loops are entered with at loop heads, checked
+      // on backedges and OSR entries.
+      frame.enterJumpTarget(pcOffset, op != JSOp::LoopHead);
       masm.bind(handler.labelOf(handler.pc()));
     } else if (MOZ_UNLIKELY(compileDebugInstrumentation())) {
       // Also fully sync the stack if the debugger is enabled.
@@ -7716,6 +7754,12 @@ bool BaselineCompiler::emitBody() {
 #undef EMIT_OP
 
     frame.setDeferSync(false);
+
+    BytecodeLocation loc(script, handler.pc());
+    fallsThrough = loc.fallsThrough();
+    if (!mergeSlotTypesForJumps(loc)) {
+      return false;
+    }
 
     MOZ_ASSERT(masm.framePushed() == 0);
 

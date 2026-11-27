@@ -710,6 +710,11 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
   bool compileImpl();
 
   bool emitBody();
+
+  // Meets the slot types into the merge states of the forward jump targets of
+  // the op.
+  [[nodiscard]] bool mergeSlotTypesForJumps(BytecodeLocation loc);
+
   bool monoInlinesIC(JSOp op);
   [[nodiscard]] bool emitMonoExit(
       const BaselineCompilerHandler::MonoExit& exit);

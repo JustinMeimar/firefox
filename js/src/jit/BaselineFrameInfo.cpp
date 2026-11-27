@@ -36,27 +36,59 @@ bool CompilerFrameInfo::init(TempAllocator& alloc) {
 
 bool CompilerFrameInfo::initSlotTypes(TempAllocator& alloc) {
   size_t nargs = script->isFunction() ? this->nargs() : 0;
-  if (!localTypes_.init(alloc, nlocals()) || !argTypes_.init(alloc, nargs)) {
+  if (!slotTypes_.init(alloc, nlocals() + nargs + 1)) {
     return false;
   }
-  for (size_t i = 0; i < localTypes_.length(); i++) {
-    localTypes_[i] = {0, JSVAL_TYPE_UNKNOWN};
-  }
-  for (size_t i = 0; i < argTypes_.length(); i++) {
-    argTypes_[i] = {0, JSVAL_TYPE_UNKNOWN};
-  }
-  block_ = 1;
+  alloc_ = &alloc;
+  forgetSlotTypes();
   return true;
 }
 
-void CompilerFrameInfo::clearKnownTypes() {
+void CompilerFrameInfo::forgetSlotTypes() {
+  for (size_t i = 0; i < slotTypes_.length(); i++) {
+    slotTypes_[i] = JSVAL_TYPE_UNKNOWN;
+  }
+}
+
+bool CompilerFrameInfo::mergeSlotTypes(uint32_t targetOffset) {
+  if (!tracksSlotTypes()) {
+    return true;
+  }
+  MergeStateMap::AddPtr p = mergeStates_.lookupForAdd(targetOffset);
+  if (p) {
+    JSValueType* state = p->value();
+    for (size_t i = 0; i < slotTypes_.length(); i++) {
+      if (state[i] != slotTypes_[i]) {
+        state[i] = JSVAL_TYPE_UNKNOWN;
+      }
+    }
+    return true;
+  }
+  JSValueType* state = alloc_->allocateArray<JSValueType>(slotTypes_.length());
+  if (!state) {
+    return false;
+  }
+  std::copy(slotTypes_.begin(), slotTypes_.end(), state);
+  return mergeStates_.add(p, targetOffset, state);
+}
+
+void CompilerFrameInfo::enterJumpTarget(uint32_t offset, bool allEdgesMerged) {
   for (size_t i = 0; i < stackDepth(); i++) {
     if (stack[i].kind() == StackValue::Stack) {
       stack[i].setStack();
     }
   }
-  if (block_) {
-    block_++;
+  if (!tracksSlotTypes()) {
+    return;
+  }
+  MergeStateMap::Ptr p = mergeStates_.lookup(offset);
+  if (p && allEdgesMerged) {
+    std::copy(p->value(), p->value() + slotTypes_.length(), slotTypes_.begin());
+  } else {
+    forgetSlotTypes();
+  }
+  if (p) {
+    mergeStates_.remove(p);
   }
 }
 
@@ -73,34 +105,33 @@ void CompilerFrameInfo::moveSyncedValue(int32_t from, int32_t to) {
 }
 
 void CompilerFrameInfo::storeLocalType(uint32_t local) {
-  if (block_) {
+  if (tracksSlotTypes()) {
     const StackValue* val = peek(-1);
-    setKnownType(localTypes_[local],
-                 val->hasKnownType() ? val->knownType() : JSVAL_TYPE_UNKNOWN);
+    localType(local) =
+        val->hasKnownType() ? val->knownType() : JSVAL_TYPE_UNKNOWN;
   }
 }
 
 void CompilerFrameInfo::storeArgType(uint32_t arg) {
-  if (block_) {
+  if (tracksSlotTypes()) {
     const StackValue* val = peek(-1);
-    setKnownType(argTypes_[arg],
-                 val->hasKnownType() ? val->knownType() : JSVAL_TYPE_UNKNOWN);
+    argType(arg) = val->hasKnownType() ? val->knownType() : JSVAL_TYPE_UNKNOWN;
   }
 }
 
 void CompilerFrameInfo::setSlotType(const StackValue& val, JSValueType type) {
-  if (!block_) {
+  if (!tracksSlotTypes()) {
     return;
   }
   switch (val.kind()) {
     case StackValue::LocalSlot:
-      setKnownType(localTypes_[val.localSlot()], type);
+      localType(val.localSlot()) = type;
       break;
     case StackValue::ArgSlot:
-      setKnownType(argTypes_[val.argSlot()], type);
+      argType(val.argSlot()) = type;
       break;
     case StackValue::ThisSlot:
-      setKnownType(thisType_, type);
+      thisType() = type;
       break;
     default:
       break;
