@@ -363,6 +363,9 @@ class BaselineCompilerHandler {
   // Set when compiling monomorphic code. See MonoBaseline.h.
   JSContext* monoCx_ = nullptr;
 
+  // The type of the value the IC of the current op returns, if known.
+  JSValueType icResultType_ = JSVAL_TYPE_UNKNOWN;
+
   // The stack depth before the current op.
   uint32_t opStackDepth_ = 0;
 
@@ -578,6 +581,7 @@ class BaselineCompilerHandler {
 
   void setOpStart(const CompilerFrameInfo& frame) {
     opStackDepth_ = frame.stackDepth();
+    icResultType_ = JSVAL_TYPE_UNKNOWN;
     if (!monoCx_ || !BytecodeOpHasIC(JSOp(*pc_))) {
       return;
     }
@@ -588,6 +592,8 @@ class BaselineCompilerHandler {
   }
   uint32_t opStackDepth() const { return opStackDepth_; }
   uint32_t numOpOperands() const { return numOpOperands_; }
+  JSValueType icResultType() const { return icResultType_; }
+  void setICResultType(JSValueType type) { icResultType_ = type; }
 
   // The stack value at the given depth before the current op.
   const StackValue& opOperand(int32_t depth) const {
@@ -805,6 +811,8 @@ class BaselineInterpreterHandler {
   JSObject* maybeGlobalLexicalEnvironment() const { return nullptr; }
 
   bool addEnvAllocSite() { return false; }  // Not supported.
+
+  JSValueType icResultType() const { return JSVAL_TYPE_UNKNOWN; }
 
   bool realmIndependentJitcode() const { return true; }
 

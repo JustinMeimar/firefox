@@ -1458,6 +1458,9 @@ class CacheIRStubInfo {
     // The types the guards check the first inputs to have, or unknown.
     static constexpr size_t NumGuardedInputs = 3;
     JSValueType guardedInputTypes[NumGuardedInputs] = {};
+
+    // The type of the value the stubs return, or unknown.
+    JSValueType resultType = JSVAL_TYPE_UNKNOWN;
   };
 
  private:

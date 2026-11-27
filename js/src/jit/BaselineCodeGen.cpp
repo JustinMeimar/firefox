@@ -1102,6 +1102,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
       return false;
     }
     narrowSlotTypes();
+    handler.setICResultType(MonoStubResultType(stub->stubInfo()));
     stats.disposition = MonoICDisposition::Inline;
     *emitted = true;
     return true;
@@ -1130,6 +1131,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
     return false;
   }
   narrowSlotTypes();
+  handler.setICResultType(MonoStubResultType(stub->stubInfo()));
   stats.disposition = MonoICDisposition::Copy;
   *emitted = true;
   return true;
@@ -3404,7 +3406,7 @@ bool BaselineCodeGen<Handler>::emit_Lambda() {
     return false;
   }
 
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -3499,7 +3501,7 @@ bool BaselineCodeGen<Handler>::emitBinaryArith() {
   }
 
   // Mark R0 as pushed stack value.
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -3514,7 +3516,7 @@ bool BaselineCodeGen<Handler>::emitUnaryArith() {
   }
 
   // Mark R0 as pushed stack value.
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -3769,7 +3771,7 @@ bool BaselineCodeGen<Handler>::emit_NewArray() {
     return false;
   }
 
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -3903,7 +3905,7 @@ bool BaselineCodeGen<Handler>::emitNewObject() {
     return false;
   }
 
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -4003,7 +4005,7 @@ bool BaselineCodeGen<Handler>::emit_GetElem() {
   }
 
   // Mark R0 as pushed stack value.
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -4200,7 +4202,7 @@ bool BaselineCodeGen<Handler>::emit_GetGName() {
   }
 
   // Mark R0 as pushed stack value.
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -4362,7 +4364,7 @@ bool BaselineCodeGen<Handler>::emit_GetProp() {
   }
 
   // Mark R0 as pushed stack value.
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -4676,7 +4678,7 @@ bool BaselineCodeGen<Handler>::emit_GetName() {
   }
 
   // Mark R0 as pushed stack value.
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -4738,7 +4740,7 @@ bool BaselineCodeGen<Handler>::emit_GetImport() {
     return false;
   }
 
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -4750,7 +4752,7 @@ bool BaselineCodeGen<Handler>::emit_GetIntrinsic() {
     return false;
   }
 
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -5298,7 +5300,7 @@ bool BaselineCompilerCodeGen::emitCall(JSOp op) {
   // Update FrameInfo.
   bool construct = IsConstructOp(op);
   frame.popn(2 + argc + construct);
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -5482,7 +5484,7 @@ bool BaselineCodeGen<Handler>::emit_Typeof() {
     return false;
   }
 
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -5499,7 +5501,7 @@ bool BaselineCodeGen<Handler>::emit_TypeofEq() {
     return false;
   }
 
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 
@@ -6084,7 +6086,7 @@ bool BaselineCodeGen<Handler>::emit_ToPropertyKey() {
     return false;
   }
 
-  frame.push(R0);
+  frame.push(R0, handler.icResultType());
   return true;
 }
 

@@ -115,6 +115,101 @@ static bool CanInlineOp(CacheOp op) {
   }
 }
 
+// The type of the value the op stores to the output, if it is the last op of
+// the stub.
+static JSValueType ResultTypeOf(CacheOp op) {
+  switch (op) {
+    case CacheOp::Int32AddResult:
+    case CacheOp::Int32SubResult:
+    case CacheOp::Int32MulResult:
+    case CacheOp::Int32DivResult:
+    case CacheOp::Int32ModResult:
+    case CacheOp::Int32PowResult:
+    case CacheOp::Int32BitOrResult:
+    case CacheOp::Int32BitXorResult:
+    case CacheOp::Int32BitAndResult:
+    case CacheOp::Int32LeftShiftResult:
+    case CacheOp::Int32RightShiftResult:
+    case CacheOp::Int32NotResult:
+    case CacheOp::Int32NegationResult:
+    case CacheOp::Int32IncResult:
+    case CacheOp::Int32DecResult:
+    case CacheOp::LoadInt32Result:
+    case CacheOp::LoadInt32ArrayLengthResult:
+    case CacheOp::LoadArgumentsObjectLengthResult:
+    case CacheOp::LoadFunctionLengthResult:
+    case CacheOp::LoadStringLengthResult:
+    case CacheOp::MathAbsInt32Result:
+    case CacheOp::MathClz32Result:
+    case CacheOp::MathSignInt32Result:
+    case CacheOp::MathSignNumberToInt32Result:
+    case CacheOp::MathImulResult:
+    case CacheOp::MathFloorToInt32Result:
+    case CacheOp::MathCeilToInt32Result:
+    case CacheOp::MathTruncToInt32Result:
+    case CacheOp::MathRoundToInt32Result:
+    case CacheOp::IndirectTruncateInt32Result:
+    case CacheOp::SetSizeResult:
+    case CacheOp::MapSizeResult:
+      return JSVAL_TYPE_INT32;
+    case CacheOp::DoubleAddResult:
+    case CacheOp::DoubleSubResult:
+    case CacheOp::DoubleMulResult:
+    case CacheOp::DoubleDivResult:
+    case CacheOp::DoubleModResult:
+    case CacheOp::DoublePowResult:
+    case CacheOp::DoubleNegationResult:
+    case CacheOp::DoubleIncResult:
+    case CacheOp::DoubleDecResult:
+    case CacheOp::LoadDoubleResult:
+    case CacheOp::MathAbsNumberResult:
+    case CacheOp::MathSignNumberResult:
+    case CacheOp::MathSqrtNumberResult:
+    case CacheOp::MathFRoundNumberResult:
+    case CacheOp::MathRandomResult:
+    case CacheOp::MathHypot2NumberResult:
+    case CacheOp::MathHypot3NumberResult:
+    case CacheOp::MathHypot4NumberResult:
+    case CacheOp::MathAtan2NumberResult:
+    case CacheOp::MathFloorNumberResult:
+    case CacheOp::MathCeilNumberResult:
+    case CacheOp::MathTruncNumberResult:
+    case CacheOp::MathRoundNumberResult:
+    case CacheOp::MathFunctionNumberResult:
+      return JSVAL_TYPE_DOUBLE;
+    case CacheOp::LoadBooleanResult:
+    case CacheOp::CompareInt32Result:
+    case CacheOp::CompareDoubleResult:
+    case CacheOp::CompareStringResult:
+    case CacheOp::CompareObjectResult:
+    case CacheOp::CompareSymbolResult:
+    case CacheOp::CompareNullUndefinedResult:
+    case CacheOp::LoadInstanceOfObjectResult:
+    case CacheOp::LoadTypeOfEqObjectResult:
+    case CacheOp::IsObjectResult:
+      return JSVAL_TYPE_BOOLEAN;
+    case CacheOp::LoadStringResult:
+    case CacheOp::LoadConstantStringResult:
+    case CacheOp::ConcatStringsResult:
+    case CacheOp::LoadTypeOfObjectResult:
+    case CacheOp::LoadFunctionNameResult:
+      return JSVAL_TYPE_STRING;
+    case CacheOp::LoadObjectResult:
+    case CacheOp::NewPlainObjectResult:
+    case CacheOp::NewArrayObjectResult:
+    case CacheOp::NewFunctionCloneResult:
+      return JSVAL_TYPE_OBJECT;
+    case CacheOp::LoadSymbolResult:
+      return JSVAL_TYPE_SYMBOL;
+    case CacheOp::LoadBigIntResult:
+      return JSVAL_TYPE_BIGINT;
+    case CacheOp::LoadUndefinedResult:
+      return JSVAL_TYPE_UNDEFINED;
+    default:
+      return JSVAL_TYPE_UNKNOWN;
+  }
+}
+
 // Scans the CacheIR and fields of the info once for what monomorphic compiles
 // need to know about its stubs.
 static const CacheIRStubInfo::MonoBaselineCache& ScanStubInfo(
@@ -134,6 +229,7 @@ static const CacheIRStubInfo::MonoBaselineCache& ScanStubInfo(
       cache.allOpsInlinable = false;
       cache.noInlineOp = op;
     }
+    cache.resultType = ResultTypeOf(op);
     ValOperandId input;
     JSValueType type;
     switch (op) {
@@ -355,6 +451,10 @@ void js::jit::NarrowMonoStubInputTypes(const CacheIRStubInfo* info,
       types[i] = cache.guardedInputTypes[i];
     }
   }
+}
+
+JSValueType js::jit::MonoStubResultType(const CacheIRStubInfo* info) {
+  return ScanStubInfo(info).resultType;
 }
 
 void js::jit::EmitMonoExit(MacroAssembler& masm, MonoOperands operands,

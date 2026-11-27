@@ -306,6 +306,10 @@ MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
 void NarrowMonoStubInputTypes(const CacheIRStubInfo* info,
                               mozilla::Span<JSValueType> types);
 
+// The type of the value the stub returns once it ran without failing, or
+// unknown.
+JSValueType MonoStubResultType(const CacheIRStubInfo* info);
+
 // Puts back the operands of an inline stub and continues at the op in the
 // Baseline Interpreter.
 void EmitMonoExit(MacroAssembler& masm, MonoOperands operands,
