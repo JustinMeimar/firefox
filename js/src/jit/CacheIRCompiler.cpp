@@ -3385,6 +3385,16 @@ bool CacheIRCompiler::emitLoadUndefinedResult() {
   return true;
 }
 
+void CacheIRCompiler::debugAssertResultType(CacheOp lastOp) {
+#ifdef DEBUG
+  JSValueType type = CacheIROpResultType(lastOp);
+  if (type != JSVAL_TYPE_UNKNOWN && outputUnchecked_ &&
+      outputUnchecked_->hasValue()) {
+    masm.debugAssertValueType(outputUnchecked_->valueReg(), type);
+  }
+#endif
+}
+
 static void EmitStoreBoolean(MacroAssembler& masm, bool b,
                              const AutoOutputRegister& output) {
   if (output.hasValue()) {

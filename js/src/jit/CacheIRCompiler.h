@@ -891,6 +891,9 @@ class MOZ_RAII CacheIRCompiler {
   }
 
  protected:
+  // Checks the output has the result type of the last op of the stub.
+  void debugAssertResultType(CacheOp lastOp);
+
   template <typename T>
   void emitPostBarrierSlot(Register obj, const T& val, Register scratch) {
     emitPostBarrierShared(obj, val, scratch, InvalidReg);

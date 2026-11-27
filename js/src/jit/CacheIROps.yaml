@@ -62,6 +62,13 @@
 # method will set the writer's TrialInliningState to Candidate to indicate that
 # this stub can be considered for inlining.
 #
+# result_type (optional)
+# ======================
+# For *Result ops, the type of the value the op always stores to the IC's
+# output register: Int32, Double, Boolean, String, Object, Symbol, BigInt,
+# Undefined or Null. Compilers can know the type of the result of a stub that
+# ends with the op. Debug builds check it.
+#
 # args
 # ====
 # List of arguments encoded in the bytecode stream. There are three argument
@@ -1280,6 +1287,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Boolean
   args:
     input: ValId
 
@@ -1656,6 +1664,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Int32
   args:
     input: Int32Id
 
@@ -1663,6 +1672,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Double
   args:
     input: NumberId
 
@@ -1670,6 +1680,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     input: Int32Id
 
@@ -1677,6 +1688,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     input: Int32Id
 
@@ -1684,6 +1696,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Double
   args:
     input: NumberId
 
@@ -1691,6 +1704,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Int32
   args:
     input: NumberId
 
@@ -1698,6 +1712,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -1706,6 +1721,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Double
   args:
     input: NumberId
 
@@ -1713,6 +1729,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Double
   args:
     input: NumberId
 
@@ -1729,6 +1746,7 @@
   shared: true
   transpile: true
   cost_estimate: 3
+  result_type: Double
   args:
     rng: RawPointerField
 
@@ -1736,6 +1754,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     first: NumberId
     second: NumberId
@@ -1744,6 +1763,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     first: NumberId
     second: NumberId
@@ -1753,6 +1773,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     first: NumberId
     second: NumberId
@@ -1763,6 +1784,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     lhs: NumberId
     rhs: NumberId
@@ -1771,6 +1793,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     input: NumberId
 
@@ -1778,6 +1801,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     input: NumberId
 
@@ -1785,6 +1809,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     input: NumberId
 
@@ -1792,6 +1817,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     input: NumberId
 
@@ -1799,6 +1825,7 @@
   shared: true
   transpile: true
   cost_estimate: 3
+  result_type: Int32
   args:
     input: NumberId
 
@@ -1806,12 +1833,14 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     input: NumberId
 
 - name: MathTruncToInt32Result
   shared: true
   transpile: true
+  result_type: Int32
   args:
     input: NumberId
 
@@ -1819,6 +1848,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     input: NumberId
 
@@ -1862,6 +1892,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     input: NumberId
     fun: UnaryMathFunctionImm
@@ -2443,6 +2474,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     obj: ObjId
 
@@ -2482,6 +2514,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     obj: ObjId
 
@@ -2497,6 +2530,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Int32
   args:
     obj: ObjId
 
@@ -2504,6 +2538,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: String
   args:
     obj: ObjId
 
@@ -2650,6 +2685,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     str: StringId
 
@@ -2663,6 +2699,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Object
   args:
     obj: ObjId
 
@@ -2670,6 +2707,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: String
   args:
     str: StringId
 
@@ -2677,6 +2715,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Symbol
   args:
     sym: SymbolId
 
@@ -2684,6 +2723,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     val: Int32Id
 
@@ -2691,6 +2731,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Double
   args:
     val: NumberId
 
@@ -2698,6 +2739,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: BigInt
   args:
     val: BigIntId
 
@@ -2807,12 +2849,14 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Undefined
   args:
 
 - name: LoadBooleanResult
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Boolean
   args:
     val: BoolImm
 
@@ -2867,6 +2911,7 @@
   shared: false
   transpile: true
   cost_estimate: 1
+  result_type: String
   args:
     str: StringField
 
@@ -2874,6 +2919,7 @@
   shared: true
   transpile: true
   cost_estimate: 3
+  result_type: Boolean
   args:
     lhs: ValId
     proto: ObjId
@@ -2882,6 +2928,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: String
   args:
     obj: ObjId
 
@@ -2889,6 +2936,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Boolean
   args:
     obj: ObjId
     operand: TypeofEqOperandImm
@@ -2897,6 +2945,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Double
   args:
     lhs: NumberId
     rhs: NumberId
@@ -2905,6 +2954,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Double
   args:
     lhs: NumberId
     rhs: NumberId
@@ -2913,6 +2963,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Double
   args:
     lhs: NumberId
     rhs: NumberId
@@ -2921,6 +2972,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Double
   args:
     lhs: NumberId
     rhs: NumberId
@@ -2929,6 +2981,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     lhs: NumberId
     rhs: NumberId
@@ -2937,6 +2990,7 @@
   shared: true
   transpile: true
   cost_estimate: 4
+  result_type: Double
   args:
     lhs: NumberId
     rhs: NumberId
@@ -2945,6 +2999,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -2953,6 +3008,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -2961,6 +3017,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -2969,6 +3026,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -2977,6 +3035,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -2985,6 +3044,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -3110,6 +3170,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -3118,6 +3179,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -3126,6 +3188,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -3134,6 +3197,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -3142,6 +3206,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     lhs: Int32Id
     rhs: Int32Id
@@ -3159,6 +3224,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     input: Int32Id
 
@@ -3266,6 +3332,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     input: Int32Id
 
@@ -3273,6 +3340,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Double
   args:
     input: NumberId
 
@@ -3295,6 +3363,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     input: Int32Id
 
@@ -3302,6 +3371,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     input: Int32Id
 
@@ -3309,6 +3379,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Double
   args:
     input: NumberId
 
@@ -3316,6 +3387,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Double
   args:
     input: NumberId
 
@@ -3428,6 +3500,7 @@
   shared: false
   transpile: true
   cost_estimate: 4
+  result_type: Object
   args:
     numFixedSlots: UInt32Imm
     numDynamicSlots: UInt32Imm
@@ -3439,6 +3512,7 @@
   shared: false
   transpile: true
   cost_estimate: 4
+  result_type: Object
   args:
     arrayLength: UInt32Imm
     shape: ShapeField
@@ -3448,6 +3522,7 @@
   shared: false
   transpile: true
   cost_estimate: 4
+  result_type: Object
   args:
     canonical: ObjectField
     allocKind: AllocKindImm
@@ -3457,6 +3532,7 @@
   shared: true
   transpile: true
   cost_estimate: 5
+  result_type: String
   args:
     lhs: StringId
     rhs: StringId
@@ -3481,6 +3557,7 @@
   shared: false
   transpile: true
   cost_estimate: 5
+  result_type: Boolean
   args:
     op: JSOpImm
     lhs: StringId
@@ -3490,6 +3567,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Boolean
   args:
     op: JSOpImm
     lhs: ObjId
@@ -3499,6 +3577,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Boolean
   args:
     op: JSOpImm
     lhs: SymbolId
@@ -3508,6 +3587,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Boolean
   args:
     op: JSOpImm
     lhs: Int32Id
@@ -3517,6 +3597,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Boolean
   args:
     op: JSOpImm
     lhs: NumberId
@@ -3562,6 +3643,7 @@
   shared: true
   transpile: true
   cost_estimate: 2
+  result_type: Boolean
   args:
     op: JSOpImm
     isUndefined: BoolImm
@@ -3587,6 +3669,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     val: Int32Id
 
@@ -3674,6 +3757,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     set: ObjId
 
@@ -3794,6 +3878,7 @@
   shared: true
   transpile: true
   cost_estimate: 1
+  result_type: Int32
   args:
     map: ObjId
 

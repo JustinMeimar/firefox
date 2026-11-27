@@ -123,6 +123,11 @@ class MOZ_RAII WarpCacheIRTranspiler : public WarpBuilderShared {
     current->push(result);
 #ifdef DEBUG
     pushedResult_ = true;
+    JSValueType type = CacheIROpResultType(currentOp_);
+    MOZ_ASSERT_IF(type != JSVAL_TYPE_UNKNOWN && result->type() != MIRType::Value,
+                  result->type() == MIRTypeFromValueType(type) ||
+                      (type == JSVAL_TYPE_DOUBLE &&
+                       IsTypeRepresentableAsDouble(result->type())));
 #endif
   }
 

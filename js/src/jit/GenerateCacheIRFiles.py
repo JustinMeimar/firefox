@@ -506,6 +506,20 @@ arg_length = {
 }
 
 
+# Map from the result_type of ops to JSValueType names.
+result_types = {
+    "Int32": "INT32",
+    "Double": "DOUBLE",
+    "Boolean": "BOOLEAN",
+    "String": "STRING",
+    "Object": "OBJECT",
+    "Symbol": "SYMBOL",
+    "BigInt": "BIGINT",
+    "Undefined": "UNDEFINED",
+    "Null": "NULL",
+}
+
+
 def generate_cacheirops_header(c_out, yaml_path):
     """Generate CacheIROpsGenerated.h from CacheIROps.yaml. The generated file
     contains a list of all CacheIR ops and generated source code for
@@ -513,8 +527,9 @@ def generate_cacheirops_header(c_out, yaml_path):
 
     data = load_yaml(yaml_path)
 
-    # CACHE_IR_OPS items. Each item stores an opcode name and arguments length
-    # expression. For example: _(GuardShape, 1 + 1)
+    # CACHE_IR_OPS items. Each item stores an opcode name, arguments length
+    # expression, whether it's transpiled, its cost estimate and its result
+    # type. For example: _(GuardShape, 1 + 1, true, 1, JSVAL_TYPE_UNKNOWN)
     ops_items = []
 
     # Generated CacheIRWriter methods.
@@ -561,13 +576,22 @@ def generate_cacheirops_header(c_out, yaml_path):
         inlining_candidate = op.get("inlining_candidate", False)
         assert isinstance(inlining_candidate, bool)
 
+        result_type = op.get("result_type")
+        assert result_type is None or (
+            result_type in result_types and name.endswith("Result")
+        )
+        result_type_str = result_types[result_type] if result_type else "UNKNOWN"
+
         if args:
             args_length = " + ".join([str(arg_length[v]) for v in args.values()])
         else:
             args_length = "0"
 
         transpile_str = "true" if transpile else "false"
-        ops_items.append(f"_({name}, {args_length}, {transpile_str}, {cost_estimate})")
+        ops_items.append(
+            f"_({name}, {args_length}, {transpile_str}, {cost_estimate}, "
+            f"JSVAL_TYPE_{result_type_str})"
+        )
 
         writer_methods.append(
             gen_writer_method(name, args, custom_writer, inlining_candidate)

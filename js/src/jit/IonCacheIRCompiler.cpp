@@ -594,8 +594,9 @@ JitCode* IonCacheIRCompiler::compile(IonICStub* stub) {
   perfSpewer_.startRecording();
 
   CacheIRReader reader(writer_);
+  CacheOp op;
   do {
-    CacheOp op = reader.readOp();
+    op = reader.readOp();
     perfSpewer_.recordInstruction(masm, op);
     switch (op) {
 #define DEFINE_OP(op, ...)                 \
@@ -610,6 +611,7 @@ JitCode* IonCacheIRCompiler::compile(IonICStub* stub) {
     }
     allocator.nextOp();
   } while (reader.more());
+  debugAssertResultType(op);
 
   if (!savedLiveRegs_) {
     allocator.restoreInputState(masm);

@@ -227,6 +227,14 @@ extern const CacheIROpInfo CacheIROpInfos[];
 
 extern const char* const CacheIROpNames[];
 
+// The type of the value a *Result op stores to the IC's output register, or
+// unknown if it can store values of different types.
+extern const JSValueType CacheIROpResultTypes[];
+
+inline JSValueType CacheIROpResultType(CacheOp op) {
+  return CacheIROpResultTypes[size_t(op)];
+}
+
 inline const char* CacheIRCodeName(CacheOp op) {
   return CacheIROpNames[static_cast<size_t>(op)];
 }

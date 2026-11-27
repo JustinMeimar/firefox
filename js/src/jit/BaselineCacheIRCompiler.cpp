@@ -315,6 +315,7 @@ bool BaselineCacheIRCompiler::emitOps() {
     makesGCCalls_ |= makesGCCallsBefore;
     allocator.nextOp();
   } while (reader.more());
+  debugAssertResultType(currentOp_);
   return true;
 }
 

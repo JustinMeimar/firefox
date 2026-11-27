@@ -101,9 +101,15 @@ const CacheIROpInfo js::jit::CacheIROpInfos[] = {
 };
 
 const uint32_t js::jit::CacheIROpHealth[] = {
-#define OPHEALTH(op, len, transpile, health) health,
+#define OPHEALTH(op, len, transpile, health, ...) health,
     CACHE_IR_OPS(OPHEALTH)
 #undef OPHEALTH
+};
+
+const JSValueType js::jit::CacheIROpResultTypes[] = {
+#define OPRESULTTYPE(op, len, transpile, health, resultType) resultType,
+    CACHE_IR_OPS(OPRESULTTYPE)
+#undef OPRESULTTYPE
 };
 
 size_t js::jit::NumInputsForCacheKind(CacheKind kind) {
