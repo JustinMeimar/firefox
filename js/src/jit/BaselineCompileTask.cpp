@@ -143,6 +143,19 @@ void js::AttachFinishedBaselineCompilations(JSContext* cx,
   }
 }
 
+bool BaselineSnapshot::takeMonoICs(JSContext* cx, LifoAlloc& alloc) {
+  monoReason_ = MonoReasonFor(cx, script(), compileDebugInstrumentation_);
+  if (monoReason_ != MonoScriptReason::Mono) {
+    return true;
+  }
+  monoICs_ = TakeMonoICs(cx, script(), alloc);
+  if (!monoICs_) {
+    return false;
+  }
+  numMonoICs_ = script()->jitScript()->numICEntries();
+  return true;
+}
+
 void BaselineSnapshot::trace(JSTracer* trc) {
   TraceOffthreadGCPtr(trc, script_, "baseline-snapshot-script");
   TraceOffthreadGCPtr(trc, globalLexical_, "baseline-snapshot-lexical");
@@ -154,6 +167,9 @@ void BaselineSnapshot::trace(JSTracer* trc) {
   if (namedLambdaTemplate_) {
     TraceOffthreadGCPtr(trc, namedLambdaTemplate_,
                         "baseline-snapshot-named-lambda-template");
+  }
+  if (monoICs_) {
+    TraceMonoICs(trc, monoICs_, numMonoICs_);
   }
 }
 

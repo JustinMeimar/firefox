@@ -25,6 +25,11 @@ class BaselineSnapshot {
   uint32_t baseWarmUpThreshold_;
   bool isIonCompileable_;
   bool compileDebugInstrumentation_;
+  MonoScriptReason monoReason_ = MonoScriptReason::OptionOff;
+  // The ICs that monomorphic code is compiled from, if the script is compiled
+  // monomorphic.
+  MonoIC* monoICs_ = nullptr;
+  size_t numMonoICs_ = 0;
 
  public:
   BaselineSnapshot(JSScript* script,
@@ -63,6 +68,13 @@ class BaselineSnapshot {
   bool compileDebugInstrumentation() const {
     return compileDebugInstrumentation_;
   }
+  MonoScriptReason monoReason() const { return monoReason_; }
+  MonoIC* monoICs() const { return monoICs_; }
+
+  // Decides whether the script is compiled monomorphic, and if so takes its
+  // ICs into alloc. Returns false on OOM.
+  [[nodiscard]] bool takeMonoICs(JSContext* cx, LifoAlloc& alloc);
+
   void trace(JSTracer* trc);
 };
 

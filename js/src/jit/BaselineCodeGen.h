@@ -21,9 +21,18 @@ namespace js {
 class NamedLambdaObject;
 class SourceLocationIterator;  // from vm/JSScript.h
 
+namespace gc {
+class AutoMarkingLock;
+}  // namespace gc
+
 namespace jit {
 
 class BaselineSnapshot;
+
+// Creates the alloc sites of the stubs of the IC, as Baseline does when it
+// compiles.
+void CreateAllocSitesForICChain(JSScript* script, uint32_t entryIndex,
+                                const gc::AutoMarkingLock& lock);
 
 enum class ScriptGCThingType {
   Atom,
@@ -360,7 +369,9 @@ class BaselineCompilerHandler {
 
   bool needsEnvAllocSite_ = false;
 
-  // Set when compiling monomorphic code. See MonoBaseline.h.
+  // The ICs monomorphic code is compiled from when compiling it, and the
+  // context when compiling it on the main thread. See MonoBaseline.h.
+  const MonoIC* monoICs_ = nullptr;
   JSContext* monoCx_ = nullptr;
 
   // The type of the value the IC of the current op returns, if known.
@@ -379,6 +390,15 @@ class BaselineCompilerHandler {
   uint32_t numOpOperands_ = 0;
 
   MonoStub* monoStubs_ = nullptr;
+
+  // Stubs called as copies off thread for lack of a template, with their
+  // input types, whose templates are built when the code is linked.
+  struct MissingMonoTemplate {
+    ICCacheIRStub* stub;
+    uint8_t numInputTypes;
+    JSValueType inputTypes[MonoMaxStackInputs];
+  };
+  Vector<MissingMonoTemplate, 0, SystemAllocPolicy> missingMonoTemplates_;
 
  public:
   // The exit of an inline stub, with the stack values that are not stored on
@@ -524,28 +544,14 @@ class BaselineCompilerHandler {
 
   TempAllocator& alloc() const { return alloc_; }
 
-  [[nodiscard]] bool setMono(JSContext* cx, size_t numICEntries) {
-    monoCx_ = cx;
-#ifdef JS_CODEGEN_X64
-    monoExitTable_ = JitOptions.baselineMonoExitTables;
-#endif
-    if (!monoExits_.reserve(numICEntries) ||
-        !monoExitValues_.reserve(numICEntries) ||
-        !monoInlineStubs_.reserve(numICEntries)) {
-      return false;
-    }
-    if (monoExitTable_) {
-      return monoExitJumps_.reserve(2 * numICEntries);
-    }
-    return monoExitInputs_.reserve(2 * numICEntries) &&
-           monoExitFailures_.reserve(2 * numICEntries);
-  }
+  // Sets up compiling monomorphic code if the snapshot has its ICs, with the
+  // context if on the main thread.
+  [[nodiscard]] bool initMono(JSContext* cx);
 
   void initMonoStats() {
     monoStats_ = MonoStatsEnabled() || MonoCodeMapEnabled();
   }
   bool monoStats() const { return monoStats_; }
-  void setMonoReason(MonoScriptReason reason) { monoReason_ = reason; }
   MonoScriptReason monoReason() const { return monoReason_; }
   Vector<MonoStatsIC, 0, SystemAllocPolicy>& monoStatsICs() {
     return monoStatsICs_;
@@ -581,12 +587,17 @@ class BaselineCompilerHandler {
   }
   uint32_t monoExitsStart() const { return monoExitsStart_; }
   uint32_t monoExitsEnd() const { return monoExitsEnd_; }
+  bool isMono() const { return monoICs_; }
+  const MonoIC& monoIC(uint32_t entryIndex) const {
+    MOZ_ASSERT(isMono());
+    return monoICs_[entryIndex];
+  }
   JSContext* monoCx() const { return monoCx_; }
 
   void setOpStart(const CompilerFrameInfo& frame) {
     opStackDepth_ = frame.stackDepth();
     icResultType_ = JSVAL_TYPE_UNKNOWN;
-    if (!monoCx_ || !BytecodeOpHasIC(JSOp(*pc_))) {
+    if (!isMono() || !BytecodeOpHasIC(JSOp(*pc_))) {
       return;
     }
     numOpOperands_ = std::min(opStackDepth_, uint32_t(MonoMaxStackInputs));
@@ -666,6 +677,15 @@ class BaselineCompilerHandler {
   bool hasMonoCode() const { return monoStubs_ || !monoExits_.empty(); }
   bool monoExitTable() const { return monoExitTable_; }
   MonoExitTableWriter& monoExitTableWriter() { return monoExitTableWriter_; }
+  [[nodiscard]] bool addMissingMonoTemplate(
+      ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes) {
+    MissingMonoTemplate missing{.stub = stub,
+                                .numInputTypes = uint8_t(inputTypes.size()),
+                                .inputTypes = {}};
+    std::copy(inputTypes.begin(), inputTypes.end(), missing.inputTypes);
+    return missingMonoTemplates_.append(missing);
+  }
+  [[nodiscard]] bool buildMissingMonoTemplates(JSContext* cx);
   MonoStub* releaseMonoStubs() {
     MonoStub* list = monoStubs_;
     monoStubs_ = nullptr;

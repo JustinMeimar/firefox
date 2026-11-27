@@ -21,6 +21,7 @@
 #include "jit/JitRuntime.h"
 #include "jit/JitSpewer.h"
 #include "jit/Linker.h"
+#include "jit/MonoTemplates.h"
 #include "jit/PerfSpewer.h"
 #include "jit/SharedICHelpers.h"
 #include "jit/TemplateObject.h"
@@ -90,7 +91,9 @@ BaselineCompilerHandler::BaselineCompilerHandler(MacroAssembler& masm,
       icEntryIndex_(0),
       baseWarmUpThreshold_(snapshot->baseWarmUpThreshold()),
       compileDebugInstrumentation_(snapshot->compileDebugInstrumentation()),
-      ionCompileable_(snapshot->isIonCompileable()) {
+      ionCompileable_(snapshot->isIonCompileable()),
+      monoICs_(snapshot->monoICs()),
+      monoReason_(snapshot->monoReason()) {
 }
 
 BaselineInterpreterHandler::BaselineInterpreterHandler(MacroAssembler& masm)
@@ -291,28 +294,7 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
 
   MOZ_ASSERT(!script->hasBaselineScript());
 
-  MonoScriptReason reason = MonoScriptReason::Mono;
-  if (!JitOptions.baselineMono) {
-    reason = MonoScriptReason::OptionOff;
-  } else if (compileDebugInstrumentation()) {
-    reason = MonoScriptReason::Debug;
-  } else if (runtime->geckoProfiler().enabled()) {
-    reason = MonoScriptReason::Profiler;
-  } else if (script->jitScript()->monoFailed()) {
-    reason = MonoScriptReason::Failed;
-  } else if (IsRealmIndependentBaselineCode(script)) {
-    reason = MonoScriptReason::RealmIndependent;
-  } else if (script->isGenerator()) {
-    reason = MonoScriptReason::Generator;
-  } else if (script->isAsync()) {
-    reason = MonoScriptReason::Async;
-  } else if (JitOptions.baselineMonoMixed ? !HasMonomorphicIC(script)
-                                           : !IsMonomorphicScript(script)) {
-    reason = MonoScriptReason::NotMonomorphic;
-  }
-  handler.setMonoReason(reason);
-  if (reason == MonoScriptReason::Mono &&
-      !handler.setMono(cx, script->jitScript()->icScript()->numICEntries())) {
+  if (!handler.initMono(cx)) {
     ReportOutOfMemory(cx);
     return Method_Error;
   }
@@ -331,10 +313,7 @@ MethodStatus BaselineCompiler::compile(JSContext* cx) {
 
 MethodStatus BaselineCompiler::compileOffThread() {
   handler.setCompilingOffThread();
-  if (JitOptions.baselineMono) {
-    handler.setMonoReason(MonoScriptReason::OffThread);
-  }
-  if (!compileImpl()) {
+  if (!handler.initMono(nullptr) || !compileImpl()) {
     return Method_Error;
   }
   return Method_Compiled;
@@ -346,7 +325,7 @@ bool BaselineCompiler::compileImpl() {
 
   AutoCreatedBy acb(masm, "BaselineCompiler::compile");
 
-  if (handler.monoCx() && !frame.initSlotTypes(handler.alloc())) {
+  if (handler.isMono() && !frame.initSlotTypes(handler.alloc())) {
     return false;
   }
 
@@ -557,6 +536,12 @@ bool BaselineCompiler::emitMonoExitStates(
 bool BaselineCompiler::finishCompile(JSContext* cx) {
   int64_t linkStart = handler.monoStats() ? MonoStatsNowNs() : 0;
   Rooted<JSScript*> script(cx, handler.script());
+
+  if (!handler.buildMissingMonoTemplates(cx)) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+
   bool isRealmIndependentJitCodeShared = IsRealmIndependentBaselineCode(script);
 
   UniquePtr<BaselineScript> baselineScript(
@@ -646,10 +631,10 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
   if (handler.monoStats()) {
     baselineScript->setMonoStatsId(NextMonoCompileId());
     LogMonoCompile(script, baselineScript.get(), handler.monoReason(),
-                   handler.monoCountersIndex(), handler.monoExitsStart(),
-                   handler.monoExitsEnd(), handler.monoCodegenNs(),
-                   MonoStatsNowNs() - linkStart, handler.monoStatsICs(),
-                   handler.monoBlocks());
+                   handler.compilingOffThread(), handler.monoCountersIndex(),
+                   handler.monoExitsStart(), handler.monoExitsEnd(),
+                   handler.monoCodegenNs(), MonoStatsNowNs() - linkStart,
+                   handler.monoStatsICs(), handler.monoBlocks());
     LogMonoBaselineCode(script, baselineScript.get(), handler.monoExitsStart(),
                         handler.monoExitsEnd(), handler.monoStatsICs());
   }
@@ -973,8 +958,8 @@ static bool CreateAllocSitesForCacheIRStub(JSScript* script, uint32_t pcOffset,
   return true;
 }
 
-static void CreateAllocSitesForICChain(JSScript* script, uint32_t entryIndex,
-                                       const gc::AutoMarkingLock& lock) {
+void CreateAllocSitesForICChain(JSScript* script, uint32_t entryIndex,
+                                const gc::AutoMarkingLock& lock) {
   JitScript* jitScript = script->jitScript();
   ICStub* stub = jitScript->icEntry(entryIndex).firstStub();
   uint32_t pcOffset = jitScript->fallbackStub(entryIndex)->pcOffset();
@@ -988,6 +973,48 @@ static void CreateAllocSitesForICChain(JSScript* script, uint32_t entryIndex,
     }
     stub = stub->toCacheIRStub()->next();
   }
+}
+
+bool BaselineCompilerHandler::initMono(JSContext* cx) {
+  if (!isMono()) {
+    return true;
+  }
+  monoCx_ = cx;
+  size_t numICEntries = script_->jitScript()->numICEntries();
+#ifdef JS_CODEGEN_X64
+  monoExitTable_ = JitOptions.baselineMonoExitTables;
+#endif
+  if (!monoExits_.reserve(numICEntries) ||
+      !monoExitValues_.reserve(numICEntries) ||
+      !monoInlineStubs_.reserve(numICEntries)) {
+    return false;
+  }
+  if (monoExitTable_) {
+    return monoExitJumps_.reserve(2 * numICEntries);
+  }
+  return monoExitInputs_.reserve(2 * numICEntries) &&
+         monoExitFailures_.reserve(2 * numICEntries);
+}
+
+bool BaselineCompilerHandler::buildMissingMonoTemplates(JSContext* cx) {
+  if (missingMonoTemplates_.empty()) {
+    return true;
+  }
+  JitContext jctx(cx);
+  gc::AutoSuppressGC suppressGC(cx);
+  MonoStubTemplates& templates =
+      cx->runtime()->jitRuntime()->monoStubTemplates();
+  for (const MissingMonoTemplate& missing : missingMonoTemplates_) {
+    const MonoStubTemplate* templ;
+    MonoTemplateUse use;
+    if (!templates.lookup(
+            cx, missing.stub,
+            mozilla::Span(missing.inputTypes, missing.numInputTypes), &templ,
+            &use)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void BaselineCompilerHandler::createAllocSites() {
@@ -1007,19 +1034,12 @@ template <>
 bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
                                          MonoStatsIC& stats, bool* emitted) {
   *emitted = false;
-  stats.disposition = MonoICDisposition::Empty;
-
-  JSScript* script = handler.script();
-  ICScript* icScript = script->jitScript()->icScript();
-  ICStub* firstStub = icScript->icEntry(entryIndex).firstStub();
-  if (firstStub->isFallback()) {
+  const MonoIC& ic = handler.monoIC(entryIndex);
+  if (!ic.info) {
+    stats.disposition =
+        ic.empty ? MonoICDisposition::Empty : MonoICDisposition::Polymorphic;
     return true;
   }
-  if (!IsMonomorphicIC(icScript, entryIndex)) {
-    stats.disposition = MonoICDisposition::Polymorphic;
-    return true;
-  }
-  ICCacheIRStub* stub = firstStub->toCacheIRStub();
 
   if (frame.stackDepth() > handler.opStackDepth()) {
     stats.disposition = MonoICDisposition::Pushed;
@@ -1027,24 +1047,18 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
   }
   uint32_t popped = handler.opStackDepth() - frame.stackDepth();
   mozilla::Maybe<MonoOperands> operands =
-      MonoOperandsFor(stub->stubInfo()->kind(), popped);
+      MonoOperandsFor(ic.info->kind(), popped);
   if (!operands) {
     stats.disposition = MonoICDisposition::Operands;
     return true;
   }
-  uint32_t pcOffset = script->pcToOffset(handler.pc());
-
-  // The stub needs the alloc sites it gets when Baseline compiles.
-  if (BytecodeOpCanHaveAllocSite(JSOp(*handler.pc()))) {
-    gc::AutoMarkingLock lock(script->zone(), icScript->markingLock());
-    CreateAllocSitesForICChain(script, entryIndex, lock);
-  }
+  uint32_t pcOffset = handler.script()->pcToOffset(handler.pc());
 
   // The inputs of a stub whose op takes operands off the stack are the top
   // stack values before the op, from the deepest, which its exit puts back.
   size_t numStackInputs = 0;
   if (*operands != MonoOperands::InPlace) {
-    numStackInputs = NumInputsForCacheKind(stub->stubInfo()->kind());
+    numStackInputs = NumInputsForCacheKind(ic.info->kind());
     MOZ_ASSERT(numStackInputs <= handler.numOpOperands());
   }
   auto stackInput = [&](size_t i) -> const StackValue& {
@@ -1068,7 +1082,7 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
   // type of its last op.
   static_assert(MonoMaxStackInputs <= CacheIRKnownTypes::MaxInputs);
   auto recordKnownTypes = [&]() {
-    const CacheIRKnownTypes& knownTypes = MonoStubKnownTypes(stub->stubInfo());
+    const CacheIRKnownTypes& knownTypes = MonoStubKnownTypes(ic.info);
     for (size_t i = 0; i < numStackInputs; i++) {
       if (knownTypes.inputs[i] != JSVAL_TYPE_UNKNOWN) {
         frame.setSlotType(stackInput(i), knownTypes.inputs[i]);
@@ -1077,56 +1091,74 @@ bool BaselineCompilerCodeGen::emitMonoIC(uint32_t entryIndex,
     handler.setICResultType(knownTypes.result);
   };
 
-  stats.noInline = WhyNotInlineMonoStub(stub, &stats.noInlineOp);
+  stats.noInline = WhyNotInlineMonoStub(ic, &stats.noInlineOp);
   if (stats.noInline == MonoNoInline::None) {
-    // The exit table can't hold nursery things, so such values are stored.
-    if (handler.monoExitTable()) {
-      for (uint32_t i = 1; i <= frame.numUnsyncedSlots(); i++) {
-        const StackValue& value = frame.peekValue(-int32_t(i));
-        if (value.kind() == StackValue::Constant &&
-            value.constant().isGCThing() &&
-            IsInsideNursery(value.constant().toGCThing())) {
-          frame.setDeferSync(false);
-          frame.syncStack(0);
-          break;
-        }
-      }
-    }
-    uint32_t stubOffset = masm.nopPatchableToCall().offset();
-    if (handler.monoExitTable()) {
-      if (!EmitInlinedMonoStubWithExitTable(
-              handler.monoCx(), masm, handler.alloc(), stub, stackInputTypes,
-              handler.monoExitStates(), handler.monoExitJumps(),
-              &stats.templateUse)) {
+    const MonoStubTemplate* templ = nullptr;
+    if (handler.monoExitTable() && JitOptions.baselineMonoTemplates) {
+      MonoStubTemplates& templates = runtime->jitRuntime()->monoStubTemplates();
+      if (!templates.lookup(handler.monoCx(), ic.stub, stackInputTypes, &templ,
+                            &stats.templateUse)) {
         return false;
       }
-    } else if (!EmitInlinedMonoStub(handler.monoCx(), masm, handler.alloc(),
-                                    stub, stackInputTypes,
-                                    handler.monoExitInputs(),
-                                    handler.monoExitFailures())) {
+    }
+
+    // Off thread, stubs can only be copied from templates. A stub without one
+    // is called as a copy, and its template is built when the code is linked.
+    if (templ || handler.monoCx()) {
+      // The exit table can't hold nursery things, so such values are stored.
+      if (handler.monoExitTable()) {
+        for (uint32_t i = 1; i <= frame.numUnsyncedSlots(); i++) {
+          const StackValue& value = frame.peekValue(-int32_t(i));
+          if (value.kind() == StackValue::Constant &&
+              value.constant().isGCThing() &&
+              IsInsideNursery(value.constant().toGCThing())) {
+            frame.setDeferSync(false);
+            frame.syncStack(0);
+            break;
+          }
+        }
+      }
+      uint32_t stubOffset = masm.nopPatchableToCall().offset();
+      if (handler.monoExitTable()) {
+        if (!EmitInlinedMonoStubWithExitTable(
+                handler.monoCx(), masm, handler.alloc(),
+                handler.script()->zoneFromAnyThread(), ic.stub, templ,
+                stackInputTypes, handler.monoExitStates(),
+                handler.monoExitJumps())) {
+          return false;
+        }
+      } else if (!EmitInlinedMonoStub(handler.monoCx(), masm, handler.alloc(),
+                                      ic.stub, stackInputTypes,
+                                      handler.monoExitInputs(),
+                                      handler.monoExitFailures())) {
+        return false;
+      }
+      if (!handler.addMonoExit(stubOffset, pcOffset, *operands, frame)) {
+        return false;
+      }
+      recordKnownTypes();
+      stats.disposition = MonoICDisposition::Inline;
+      *emitted = true;
+      return true;
+    }
+    if (stats.templateUse == MonoTemplateUse::Missing &&
+        !handler.addMissingMonoTemplate(ic.stub, stackInputTypes)) {
       return false;
     }
-    if (!handler.addMonoExit(stubOffset, pcOffset, *operands, frame)) {
-      return false;
-    }
-    recordKnownTypes();
-    stats.disposition = MonoICDisposition::Inline;
-    *emitted = true;
-    return true;
   }
 
+  // Copies exit with every stack value stored.
+  frame.setDeferSync(false);
   frame.syncStack(0);
-  if (stats.noInline == MonoNoInline::NoCopy) {
+  if (!ic.stub) {
     stats.disposition = MonoICDisposition::NoCopy;
     return true;
   }
 
-  bool oom;
-  MonoStub* monoStub =
-      MonoStub::New(handler.monoCx(), stub, pcOffset, *operands, &oom);
+  MonoStub* monoStub = MonoStub::New(
+      ic.stub, runtime->jitRuntime()->monoStubExit(*operands), pcOffset);
   if (!monoStub) {
-    stats.disposition = MonoICDisposition::NoCopy;
-    return !oom;
+    return false;
   }
   handler.addMonoStub(monoStub);
 
@@ -1205,7 +1237,7 @@ bool BaselineCompilerCodeGen::emitNextIC() {
     return handler.monoStatsICs().append(stats);
   };
 
-  if (handler.monoCx()) {
+  if (handler.isMono()) {
     bool emitted;
     if (!emitMonoIC(entryIndex, stats, &emitted)) {
       return false;
@@ -7610,17 +7642,17 @@ bool BaselineCompiler::monoInlinesIC(JSOp op) {
     if (entryPcOffset > pcOffset) {
       return false;
     }
-    ICStub* firstStub = icScript->icEntry(i).firstStub();
-    if (firstStub->isFallback()) {
+    const MonoIC& ic = handler.monoIC(i);
+    if (!ic.info) {
       return false;
     }
-    ICCacheIRStub* stub = firstStub->toCacheIRStub();
-    CacheKind kind = stub->stubInfo()->kind();
+    CacheKind kind = ic.info->kind();
     mozilla::Maybe<MonoOperands> operands =
         MonoOperandsFor(kind, NumInputsForCacheKind(kind));
+    CacheOp noInlineOp;
     return operands &&
            (*operands == MonoOperands::R0 || *operands == MonoOperands::R0R1) &&
-           CanInlineMonoStub(stub);
+           WhyNotInlineMonoStub(ic, &noInlineOp) == MonoNoInline::None;
   }
   return false;
 }
@@ -7803,7 +7835,7 @@ bool BaselineCompiler::emitBody() {
                                     handler.column(), frame);
     }
 
-    if (handler.monoCx()) {
+    if (handler.isMono()) {
       frame.setDeferSync(monoInlinesIC(op));
     }
 

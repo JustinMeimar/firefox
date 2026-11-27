@@ -380,6 +380,9 @@ class alignas(uintptr_t) JitScript final
     // True if monomorphic Baseline code of this script continued in the
     // Baseline Interpreter.
     bool monoFailed : 1;
+    // True if the eager Baseline compile of this script waits for its ICs to
+    // be warm, as its monomorphic hint asks.
+    bool eagerBaselineDeferred : 1;
   };
   Flags flags_ = {};  // Zero-initialize flags.
 
@@ -428,6 +431,8 @@ class alignas(uintptr_t) JitScript final
 
   void setMonoFailed() { flags_.monoFailed = true; }
   bool monoFailed() const { return flags_.monoFailed; }
+  void setEagerBaselineDeferred() { flags_.eagerBaselineDeferred = true; }
+  bool eagerBaselineDeferred() const { return flags_.eagerBaselineDeferred; }
 
   uint32_t numICEntries() const { return icScript_.numICEntries(); }
 

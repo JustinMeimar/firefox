@@ -174,8 +174,9 @@ class JitRuntime {
   // Thunk that the exits of monomorphic Baseline code with an exit table call.
   WriteOnceData<uint32_t> monoBailoutOffset_{0};
 
-  // Templates of the inline stubs of monomorphic Baseline code.
-  MainThreadData<MonoStubTemplates> monoStubTemplates_;
+  // Templates of the inline stubs of monomorphic Baseline code, which compiles
+  // on any thread look up.
+  mutable MonoStubTemplates monoStubTemplates_;
 
   // Thunk to convert the value in R0 to int32 if it's a double.
   // Note: this stub treats -0 as +0 and may clobber R1.scratchReg().
@@ -476,7 +477,7 @@ class JitRuntime {
   TrampolinePtr monoBailout() const {
     return trampolineCode(monoBailoutOffset_);
   }
-  MonoStubTemplates& monoStubTemplates() { return monoStubTemplates_.ref(); }
+  MonoStubTemplates& monoStubTemplates() const { return monoStubTemplates_; }
 
   TrampolinePtr getDoubleToInt32ValueStub() const {
     return trampolineCode(doubleToInt32ValueStubOffset_);

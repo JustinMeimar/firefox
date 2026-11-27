@@ -8,17 +8,21 @@
 #include <bit>
 #include <iterator>
 
+#include "gc/Barrier.h"
 #include "gc/GC.h"
 #include "jit/BaselineCacheIRCompiler.h"
+#include "jit/BaselineCodeGen.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRCloner.h"
 #include "jit/CacheIRCompiler.h"
+#include "jit/CacheIRGenerator.h"
 #include "jit/CacheIRReader.h"
 #include "jit/CacheIRWriter.h"
 #include "jit/Invalidation.h"
+#include "jit/JitcodeMap.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitScript.h"
@@ -219,43 +223,146 @@ static bool CanCopyStub(ICCacheIRStub* stub) {
   }
 }
 
-MonoNoInline js::jit::WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op) {
-  const CacheIRStubInfo* info = stub->stubInfo();
-  if (info->makesGCCalls()) {
+MonoNoInline js::jit::WhyNotInlineMonoStub(const MonoIC& ic, CacheOp* op) {
+  if (ic.info->makesGCCalls()) {
     return MonoNoInline::GCCalls;
   }
-  if (!CanCopyStub(stub)) {
+  if (!ic.stub) {
     return MonoNoInline::NoCopy;
   }
-  const CacheIRStubInfo::MonoBaselineCache& cache = ScanStubInfo(info);
+  const CacheIRStubInfo::MonoBaselineCache& cache = ScanStubInfo(ic.info);
   *op = cache.noInlineOp;
   return cache.allOpsInlinable ? MonoNoInline::None : MonoNoInline::Op;
 }
 
-bool js::jit::CanInlineMonoStub(ICCacheIRStub* stub) {
-  CacheOp op;
-  return WhyNotInlineMonoStub(stub, &op) == MonoNoInline::None;
+MonoScriptReason js::jit::MonoReasonFor(JSContext* cx, JSScript* script,
+                                        bool compileDebugInstrumentation) {
+  if (!JitOptions.baselineMono) {
+    return MonoScriptReason::OptionOff;
+  }
+  if (compileDebugInstrumentation) {
+    return MonoScriptReason::Debug;
+  }
+  if (cx->runtime()->geckoProfiler().enabled()) {
+    return MonoScriptReason::Profiler;
+  }
+  if (script->jitScript()->monoFailed()) {
+    return MonoScriptReason::Failed;
+  }
+  if (IsRealmIndependentBaselineCode(script)) {
+    return MonoScriptReason::RealmIndependent;
+  }
+  if (script->isGenerator()) {
+    return MonoScriptReason::Generator;
+  }
+  if (script->isAsync()) {
+    return MonoScriptReason::Async;
+  }
+  if (JitOptions.baselineMonoMixed ? !HasMonomorphicIC(script)
+                                   : !IsMonomorphicScript(script)) {
+    return MonoScriptReason::NotMonomorphic;
+  }
+  return MonoScriptReason::Mono;
 }
 
-// The code holds weak edges strongly, so mark them if we are marking.
-static void BarrierInlinedMonoStub(JSContext* cx, ICCacheIRStub* stub) {
-  Zone* zone = cx->zone();
-  if (zone->needsMarkingBarrier()) {
-    TraceCacheIRStub(zone->barrierTracer(),
-                     reinterpret_cast<MonoStubCopy*>(stub), stub->stubInfo());
+bool js::jit::CanCompileMonoOffThread() {
+#ifdef JS_CODEGEN_X64
+  return JitOptions.baselineMonoExitTables && JitOptions.baselineMonoTemplates;
+#else
+  return false;
+#endif
+}
+
+static void ReadBarrierWeakFields(const CacheIRStubInfo* info,
+                                  const uint8_t* data) {
+  size_t offset = 0;
+  for (uint32_t i = 0;; i++) {
+    StubField::Type type = info->fieldType(i);
+    uintptr_t word = info->getStubRawWord(data, offset);
+    switch (type) {
+      case StubField::Type::Limit:
+        return;
+      case StubField::Type::WeakShape:
+        gc::ReadBarrier(reinterpret_cast<Shape*>(word));
+        break;
+      case StubField::Type::WeakObject:
+        gc::ReadBarrier(reinterpret_cast<JSObject*>(word));
+        break;
+      case StubField::Type::WeakBaseScript:
+        gc::ReadBarrier(reinterpret_cast<BaseScript*>(word));
+        break;
+      case StubField::Type::WeakValue:
+        gc::ValueReadBarrier(
+            Value::fromRawBits(info->getStubRawInt64(data, offset)));
+        break;
+      default:
+        break;
+    }
+    offset += StubField::sizeInBytes(type);
   }
 }
 
-static bool CompileInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
-                                   TempAllocator& alloc, ICCacheIRStub* stub,
-                                   mozilla::Span<const JSValueType> inputTypes,
-                                   InlinedInputVector& origInputs,
-                                   InlinedFailureVector& failures) {
-  const CacheIRStubInfo* info = stub->stubInfo();
-  BaselineCacheIRCompiler compiler(
-      cx, alloc, CacheIRSource(info, stub->stubDataStart()), 0, &masm);
-  return compiler.init(info->kind()) &&
-         compiler.compileInline(inputTypes, origInputs, failures);
+MonoIC* js::jit::TakeMonoICs(JSContext* cx, JSScript* script,
+                             LifoAlloc& alloc) {
+  ICScript* icScript = script->jitScript()->icScript();
+  size_t numICs = icScript->numICEntries();
+  MonoIC* ics = alloc.newArrayUninitialized<MonoIC>(numICs);
+  if (!ics) {
+    return nullptr;
+  }
+  Zone* zone = script->zone();
+  for (size_t i = 0; i < numICs; i++) {
+    MonoIC& ic = ics[i];
+    ic = MonoIC{.info = nullptr,
+                .stub = nullptr,
+                .empty = icScript->icEntry(i).firstStub()->isFallback()};
+    if (!IsMonomorphicIC(icScript, i)) {
+      continue;
+    }
+
+    // The stub needs the alloc sites it gets when Baseline compiles.
+    jsbytecode* pc = script->offsetToPC(icScript->fallbackStub(i)->pcOffset());
+    if (BytecodeOpCanHaveAllocSite(JSOp(*pc))) {
+      gc::AutoMarkingLock lock(zone, icScript->markingLock());
+      CreateAllocSitesForICChain(script, i, lock);
+    }
+
+    ICCacheIRStub* stub = icScript->icEntry(i).firstStub()->toCacheIRStub();
+    const CacheIRStubInfo* info = stub->stubInfo();
+    ic.info = info;
+    if (!CanCopyStub(stub)) {
+      continue;
+    }
+
+    // The code and copies hold weak edges strongly, so mark them if we are
+    // marking.
+    if (zone->needsMarkingBarrier()) {
+      TraceCacheIRStub(zone->barrierTracer(),
+                       reinterpret_cast<MonoStubCopy*>(stub), info);
+    }
+    ReadBarrierWeakFields(info, stub->stubDataStart());
+
+    void* mem = alloc.alloc(info->stubDataOffset() + info->stubDataSize());
+    if (!mem) {
+      return nullptr;
+    }
+    ic.stub = new (mem) ICCacheIRStub(stub->jitCode(), info);
+    CopyCacheIRStubData(info, stub->stubDataStart(), ic.stub->stubDataStart());
+  }
+  return ics;
+}
+
+void js::jit::TraceMonoICs(JSTracer* trc, MonoIC* ics, size_t numICs) {
+  for (size_t i = 0; i < numICs; i++) {
+    ICCacheIRStub* stub = ics[i].stub;
+    if (!stub) {
+      continue;
+    }
+    JitCode* code = stub->jitCode();
+    TraceManuallyBarrieredEdge(trc, &code, "mono-ic-code");
+    TraceCacheIRStub(trc, reinterpret_cast<MonoStubCopy*>(stub),
+                     stub->stubInfo());
+  }
 }
 
 bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
@@ -263,38 +370,27 @@ bool js::jit::EmitInlinedMonoStub(JSContext* cx, MacroAssembler& masm,
                                   mozilla::Span<const JSValueType> inputTypes,
                                   InlinedInputVector& origInputs,
                                   InlinedFailureVector& failures) {
-  MOZ_ASSERT(CanInlineMonoStub(stub));
-  BarrierInlinedMonoStub(cx, stub);
-  return CompileInlinedMonoStub(cx, masm, alloc, stub, inputTypes, origInputs,
-                                failures);
+  const CacheIRStubInfo* info = stub->stubInfo();
+  BaselineCacheIRCompiler compiler(
+      cx, alloc, CacheIRSource(info, stub->stubDataStart()), 0, &masm);
+  return compiler.init(info->kind()) &&
+         compiler.compileInline(inputTypes, origInputs, failures);
 }
 
 bool js::jit::EmitInlinedMonoStubWithExitTable(
-    JSContext* cx, MacroAssembler& masm, TempAllocator& alloc,
-    ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes,
-    CompactBufferWriter& states, MonoExitJumpVector& jumps,
-    MonoTemplateUse* templateUse) {
-  MOZ_ASSERT(CanInlineMonoStub(stub));
-  BarrierInlinedMonoStub(cx, stub);
-
-  *templateUse = MonoTemplateUse::None;
-  if (JitOptions.baselineMonoTemplates) {
-    MonoStubTemplates& templates =
-        cx->runtime()->jitRuntime()->monoStubTemplates();
-    if (!templates.emitStub(cx, masm, stub, inputTypes, states, jumps,
-                            templateUse)) {
-      return false;
-    }
-    if (*templateUse == MonoTemplateUse::Hit ||
-        *templateUse == MonoTemplateUse::Built) {
-      return true;
-    }
+    JSContext* cx, MacroAssembler& masm, TempAllocator& alloc, JS::Zone* zone,
+    ICCacheIRStub* stub, const MonoStubTemplate* templ,
+    mozilla::Span<const JSValueType> inputTypes, CompactBufferWriter& states,
+    MonoExitJumpVector& jumps) {
+  if (templ) {
+    return templ->instantiate(masm, zone, stub->stubDataStart(), states, jumps);
   }
 
+  MOZ_ASSERT(cx);
   InlinedInputVector origInputs;
   InlinedFailureVector failures;
-  return CompileInlinedMonoStub(cx, masm, alloc, stub, inputTypes, origInputs,
-                                failures) &&
+  return EmitInlinedMonoStub(cx, masm, alloc, stub, inputTypes, origInputs,
+                             failures) &&
          MonoExitTableWriter::encodeStates(masm, origInputs, failures, states,
                                            jumps);
 }
@@ -334,32 +430,19 @@ void js::jit::EmitMonoExit(MacroAssembler& masm, MonoOperands operands,
   masm.jump(exitTail);
 }
 
-MonoStub* MonoStub::New(JSContext* cx, ICCacheIRStub* stub, uint32_t pcOffset,
-                        MonoOperands operands, bool* oom) {
-  *oom = false;
-  if (!CanCopyStub(stub)) {
-    return nullptr;
-  }
-
+MonoStub* MonoStub::New(ICCacheIRStub* stub, TrampolinePtr exit,
+                        uint32_t pcOffset) {
   const CacheIRStubInfo* info = stub->stubInfo();
-
-  // The copy holds weak edges strongly, so mark them if we are marking.
-  Zone* zone = cx->zone();
-  if (zone->needsMarkingBarrier()) {
-    TraceWeakCacheIRStub(zone->barrierTracer(), stub, info);
-  }
-
   size_t bytes = offsetOfStub() + info->stubDataOffset() + info->stubDataSize();
   uint8_t* mem = js_pod_malloc<uint8_t>(bytes);
   if (!mem) {
-    *oom = true;
     return nullptr;
   }
-  auto* monoStub = new (mem)
-      MonoStub(Exit{cx->runtime()->jitRuntime()->monoStubExit(operands).value,
-                    pcOffset, false});
+  auto* monoStub = new (mem) MonoStub(Exit{exit.value, pcOffset, false});
   auto* copy = new (monoStub->stub()) ICCacheIRStub(stub->jitCode(), info);
-  CopyCacheIRStubData(info, stub->stubDataStart(), copy->stubDataStart());
+  // The stub holds no nursery cells, so its fields need no post barriers,
+  // which can't run off thread.
+  memcpy(copy->stubDataStart(), stub->stubDataStart(), info->stubDataSize());
   copy->setNext(reinterpret_cast<ICStub*>(&monoStub->exit_));
   return monoStub;
 }

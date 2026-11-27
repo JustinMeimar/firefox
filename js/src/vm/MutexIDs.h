@@ -64,6 +64,7 @@
   _(BufferAllocator, 500)               \
   _(GeckoProfilerScriptSources, 500)    \
   _(GCMarkingLock, 500)                 \
+  _(MonoStubTemplates, 500)             \
                                         \
   _(GCAtomRefLock, 550)                 \
                                         \

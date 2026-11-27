@@ -228,14 +228,17 @@ bool BaselineCompileTask::OffThreadBaselineCompilationAvailable(
   if (IsRealmIndependentBaselineCode(script)) {
     return false;
   }
+  if (JitOptions.baselineMono && !CanCompileMonoOffThread()) {
+    return false;
+  }
   return CanUseExtraThreads();
 }
 
 static bool DispatchOffThreadBaselineCompile(JSContext* cx,
                                              BaselineSnapshot& snapshot) {
   JSScript* script = snapshot.script();
-  MOZ_ASSERT(
-      BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script));
+  MOZ_ASSERT(BaselineCompileTask::OffThreadBaselineCompilationAvailable(
+      cx, script, script->jitScript()->eagerBaselineDeferred()));
 
   auto alloc = cx->make_unique<LifoAlloc>(TempAllocator::PreferredLifoChunkSize,
                                           js::BackgroundMallocArena);
@@ -244,7 +247,7 @@ static bool DispatchOffThreadBaselineCompile(JSContext* cx,
     return false;
   }
   auto* snapshotCopy = alloc->new_<OffThreadBaselineSnapshot>(snapshot);
-  if (!snapshotCopy) {
+  if (!snapshotCopy || !snapshotCopy->takeMonoICs(cx, *alloc)) {
     ReportOutOfMemory(cx);
     return false;
   }
@@ -357,7 +360,7 @@ static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
     auto* offThreadSnapshot = alloc->new_<OffThreadBaselineSnapshot>(
         script, globalLexical, globalThis, baseWarmUpThreshold,
         isIonCompileable, compileDebugInstrumentation);
-    if (!offThreadSnapshot) {
+    if (!offThreadSnapshot || !offThreadSnapshot->takeMonoICs(cx, *alloc)) {
       ReportOutOfMemory(cx);
       return false;
     }
@@ -412,8 +415,7 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
       options.hasFlag(BaselineOption::ForceDebugInstrumentation);
   bool forceMainThread =
       compileDebugInstrumentation ||
-      options.hasFlag(BaselineOption::ForceMainThreadCompilation) ||
-      JitOptions.baselineMono;
+      options.hasFlag(BaselineOption::ForceMainThreadCompilation);
 
   JitContext jctx(cx);
 
@@ -437,7 +439,11 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
                             baseWarmUpThreshold, isIonCompileable,
                             compileDebugInstrumentation);
 
-  if (BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script) &&
+  // Scripts whose eager compile a monomorphic hint deferred are compiled off
+  // thread as eager compiles are.
+  bool isEager = script->jitScript()->eagerBaselineDeferred();
+  if (BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script,
+                                                                 isEager) &&
       !forceMainThread) {
     if (!DispatchOffThreadBaselineCompile(cx, snapshot)) {
       ReportOutOfMemory(cx);
@@ -447,6 +453,10 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   }
 
   TempAllocator temp(&cx->tempLifoAlloc());
+  if (!snapshot.takeMonoICs(cx, *temp.lifoAlloc())) {
+    ReportOutOfMemory(cx);
+    return Method_Error;
+  }
 
   mozilla::Maybe<JSAutoNullableRealm> ar;
   if (IsRealmIndependentBaselineCode(script)) {

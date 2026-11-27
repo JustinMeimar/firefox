@@ -315,31 +315,6 @@ bool MonoStubTemplates::Hasher::match(const UniquePtr<MonoStubTemplate>& entry,
          memcmp(key.data(), lookup.key.data(), key.size()) == 0;
 }
 
-static void ReadBarrierWeakFields(const TemplateFieldVector& fields,
-                                  const uint8_t* data) {
-  for (const TemplateField& field : fields) {
-    const uint8_t* bits = data + field.offset;
-    uintptr_t word = *reinterpret_cast<const uintptr_t*>(bits);
-    switch (field.type) {
-      case StubField::Type::WeakShape:
-        gc::ReadBarrier(reinterpret_cast<Shape*>(word));
-        break;
-      case StubField::Type::WeakObject:
-        gc::ReadBarrier(reinterpret_cast<JSObject*>(word));
-        break;
-      case StubField::Type::WeakBaseScript:
-        gc::ReadBarrier(reinterpret_cast<BaseScript*>(word));
-        break;
-      case StubField::Type::WeakValue:
-        gc::ValueReadBarrier(
-            Value::fromRawBits(*reinterpret_cast<const uint64_t*>(bits)));
-        break;
-      default:
-        break;
-    }
-  }
-}
-
 bool MonoStubTemplate::instantiate(MacroAssembler& masm, JS::Zone* zone,
                                    const uint8_t* stubData,
                                    CompactBufferWriter& states,
@@ -816,12 +791,11 @@ bool MonoStubTemplateBuilder::buildParts(TempAllocator& alloc,
 
 #endif  // JS_CODEGEN_X64
 
-bool MonoStubTemplates::emitStub(JSContext* cx, MacroAssembler& masm,
-                                 ICCacheIRStub* stub,
-                                 mozilla::Span<const JSValueType> inputTypes,
-                                 CompactBufferWriter& exitStates,
-                                 MonoExitJumpVector& exitJumps,
-                                 MonoTemplateUse* use) {
+bool MonoStubTemplates::lookup(JSContext* cx, ICCacheIRStub* stub,
+                               mozilla::Span<const JSValueType> inputTypes,
+                               const MonoStubTemplate** templ,
+                               MonoTemplateUse* use) {
+  *templ = nullptr;
   *use = MonoTemplateUse::None;
 #ifdef JS_CODEGEN_X64
   const CacheIRStubInfo* info = stub->stubInfo();
@@ -836,45 +810,54 @@ bool MonoStubTemplates::emitStub(JSContext* cx, MacroAssembler& masm,
   }
 
   CacheIRStubInfo::MonoBaselineCache& cache = info->monoBaselineCache();
-  const MonoStubTemplate* found = FindRecentTemplate(cache, suffix);
-  if (found) {
-    *use = MonoTemplateUse::Hit;
-  } else {
-    TemplateKey key;
-    if (!BuildKey(info, fields.length(), suffix, key)) {
-      return false;
-    }
-    HashNumber hash = mozilla::HashBytes(key.begin(), key.length());
-    Hasher::Lookup lookup{
-        mozilla::Span<const uint8_t>(key.begin(), key.length()), hash};
-    auto p = templates_.lookupForAdd(lookup);
-    if (p) {
-      *use = MonoTemplateUse::Hit;
-    } else {
-      MonoStubTemplateBuilder builder(cx, stub, inputTypes, fields);
-      UniquePtr<MonoStubTemplate> templ(
-          builder.build({.key = lookup.key,
-                         .keySuffixLength = uint32_t(suffix.length()),
-                         .hash = hash}));
-      if (!templ || !templates_.add(p, std::move(templ))) {
+  TemplateKey key;
+  Hasher::Lookup lookup{};
+  const MonoStubTemplate* found;
+  {
+    LockGuard<Mutex> guard(lock_);
+    found = FindRecentTemplate(cache, suffix);
+    if (!found) {
+      if (!BuildKey(info, fields.length(), suffix, key)) {
         return false;
       }
-      *use = MonoTemplateUse::Built;
+      lookup = {mozilla::Span<const uint8_t>(key.begin(), key.length()),
+                mozilla::HashBytes(key.begin(), key.length())};
+      if (auto p = templates_.lookup(lookup)) {
+        found = p->get();
+        AddRecentTemplate(cache, found);
+      }
+    }
+  }
+
+  if (found) {
+    *use = MonoTemplateUse::Hit;
+  } else if (!cx) {
+    *use = MonoTemplateUse::Missing;
+    return true;
+  } else {
+    MonoStubTemplateBuilder builder(cx, stub, inputTypes, fields);
+    UniquePtr<MonoStubTemplate> built(
+        builder.build({.key = lookup.key,
+                       .keySuffixLength = uint32_t(suffix.length()),
+                       .hash = lookup.hash}));
+    if (!built) {
+      return false;
+    }
+    LockGuard<Mutex> guard(lock_);
+    auto p = templates_.lookupForAdd(lookup);
+    if (!p && !templates_.add(p, std::move(built))) {
+      return false;
     }
     found = p->get();
     AddRecentTemplate(cache, found);
+    *use = MonoTemplateUse::Built;
   }
 
-  const MonoStubTemplate& templ = *found;
-  if (templ.rejected()) {
+  if (found->rejected()) {
     *use = MonoTemplateUse::Rejected;
     return true;
   }
-
-  const uint8_t* stubData = stub->stubDataStart();
-  ReadBarrierWeakFields(fields, stubData);
-  return templ.instantiate(masm, cx->zone(), stubData, exitStates, exitJumps);
-#else
-  return true;
+  *templ = found;
 #endif
+  return true;
 }

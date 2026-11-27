@@ -37,8 +37,8 @@ using namespace js;
 using namespace js::jit;
 
 static const char* const MonoScriptReasonNames[] = {
-    "mono",      "off",       "offthread", "debug",          "profiler",
-    "failed",    "realm-ind", "generator", "async",          "not-mono"};
+    "mono",      "off",       "debug", "profiler", "failed",
+    "realm-ind", "generator", "async", "not-mono"};
 
 static const char* const MonoICDispositionNames[] = {
     "chain", "empty",  "polymorphic", "inline",
@@ -46,7 +46,7 @@ static const char* const MonoICDispositionNames[] = {
 
 static const char* const MonoNoInlineNames[] = {"", "gc", "nocopy", "op"};
 static const char* const MonoTemplateUseNames[] = {"", "hit", "built",
-                                                   "rejected"};
+                                                   "rejected", "missing"};
 
 #ifdef XP_UNIX
 static constexpr size_t MaxMonoCounters = size_t(1) << 24;
@@ -311,9 +311,10 @@ static void PrintMonoStubOps(MonoEventBuffer& buf, ICCacheIRStub* stub) {
 }
 
 void js::jit::LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
-                             MonoScriptReason reason, int64_t countersIndex,
-                             uint32_t exitsStart, uint32_t exitsEnd,
-                             int64_t codegenNs, int64_t linkNs,
+                             MonoScriptReason reason, bool offThread,
+                             int64_t countersIndex, uint32_t exitsStart,
+                             uint32_t exitsEnd, int64_t codegenNs,
+                             int64_t linkNs,
                              mozilla::Span<const MonoStatsIC> ics,
                              mozilla::Span<const uint32_t> blocks) {
   if (!MonoStatsEnabled()) {
@@ -328,9 +329,10 @@ void js::jit::LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
   buf.string(script->filename());
   buf.printf(",\"line\":%u,\"col\":%u", script->lineno(),
              script->column().oneOriginValue());
-  buf.printf(",\"why\":\"%s\",\"wu\":%u,\"code\":\"%p\",\"bytes\":%zu",
-             MonoScriptReasonNames[size_t(reason)], script->getWarmUpCount(),
-             code->raw(), code->instructionsSize());
+  buf.printf(",\"why\":\"%s\",\"offthread\":%d,\"wu\":%u,\"code\":\"%p\"",
+             MonoScriptReasonNames[size_t(reason)], int(offThread),
+             script->getWarmUpCount(), code->raw());
+  buf.printf(",\"bytes\":%zu", code->instructionsSize());
   buf.printf(",\"exits\":[%u,%u],\"ctr\":%" PRId64, exitsStart, exitsEnd,
              countersIndex);
   buf.printf(",\"ns\":[%" PRId64 ",%" PRId64 "]", codegenNs, linkNs);

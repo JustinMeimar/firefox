@@ -28,9 +28,9 @@ enum class CacheOp : uint16_t;
 // JS_MONO_STATS=DIR writes DIR/mono-PID.events, one JSON object per line:
 //   init: the JSOp, CacheKind and CacheOp tables the other events index.
 //   compile: a Baseline compile, with why the script was or wasn't compiled
-//     monomorphic, its code bytes, its bytecode and, per IC op, its IC state,
-//     how its IC was emitted and, as hex JSValueTypes, the types its stack
-//     inputs were known to have.
+//     monomorphic, whether it ran off thread, its code bytes, its bytecode and,
+//     per IC op, its IC state, how its IC was emitted and, as hex JSValueTypes,
+//     the types its stack inputs were known to have.
 //   exit: monomorphic code continued in the Baseline Interpreter.
 //   invalidate: the stubs of monomorphic code were discarded.
 //   discard, destroy: failed monomorphic code was discarded, Baseline code was
@@ -51,7 +51,6 @@ enum class CacheOp : uint16_t;
 enum class MonoScriptReason : uint8_t {
   Mono,
   OptionOff,
-  OffThread,
   Debug,
   Profiler,
   Failed,
@@ -97,6 +96,9 @@ enum class MonoTemplateUse : uint8_t {
   Built,
   // Compiled, since no template can be built for its key.
   Rejected,
+  // Called as a copy, since no template was built for its key yet and none
+  // can be built off thread.
+  Missing,
 };
 
 struct MonoStatsIC {
@@ -130,9 +132,10 @@ uint32_t NextMonoCompileId();
 int64_t MonoStatsNowNs();
 
 void LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
-                    MonoScriptReason reason, int64_t countersIndex,
-                    uint32_t exitsStart, uint32_t exitsEnd, int64_t codegenNs,
-                    int64_t linkNs, mozilla::Span<const MonoStatsIC> ics,
+                    MonoScriptReason reason, bool offThread,
+                    int64_t countersIndex, uint32_t exitsStart,
+                    uint32_t exitsEnd, int64_t codegenNs, int64_t linkNs,
+                    mozilla::Span<const MonoStatsIC> ics,
                     mozilla::Span<const uint32_t> blocks);
 void LogMonoExit(JSScript* script, BaselineScript* baselineScript,
                  uint32_t pcOffset);

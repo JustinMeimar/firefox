@@ -22,6 +22,9 @@ struct JSContext;
 struct JSRuntime;
 
 namespace js {
+
+class LifoAlloc;
+
 namespace jit {
 
 class BaselineFrame;
@@ -29,6 +32,7 @@ class ICCacheIRStub;
 class ICScript;
 class Label;
 class MacroAssembler;
+class MonoStubTemplate;
 class TempAllocator;
 struct TrampolinePtr;
 enum class CacheKind : uint8_t;
@@ -57,6 +61,12 @@ enum class CacheKind : uint8_t;
 // The first such exit marks the script polymorphic. The script stops entering
 // its monomorphic code, and once it warms up again in the Baseline Interpreter
 // and no frame runs that code anymore, it is compiled with IC chains.
+//
+// The compile takes the ICs of the script on the main thread when it starts:
+// the info of the only stub of each monomorphic IC, and a copy of the stub. It
+// reads nothing else of the ICs, so it can run off thread like other Baseline
+// compiles, where inline stubs can only be copied from templates (see
+// MonoTemplates.h).
 //
 // When the IC stubs of a script whose monomorphic code is on the stack are
 // discarded, its stubs are discarded too: copies fail right away, inline stubs
@@ -162,10 +172,9 @@ class MonoStub {
   }
 
  public:
-  // Copies the stub, or returns nullptr with *oom false if it can't be
-  // copied.
-  static MonoStub* New(JSContext* cx, ICCacheIRStub* stub, uint32_t pcOffset,
-                       MonoOperands operands, bool* oom);
+  // Copies the stub, whose edges must be strong. Returns nullptr on OOM.
+  static MonoStub* New(ICCacheIRStub* stub, TrampolinePtr exit,
+                       uint32_t pcOffset);
   static void DestroyList(MonoStub* list);
 
   static constexpr size_t offsetOfExitPcOffset() {
@@ -278,11 +287,34 @@ class MonoExitTableWriter {
   MonoExitTable* finish();
 };
 
-// Whether the stub can be emitted inline.
-bool CanInlineMonoStub(ICCacheIRStub* stub);
+// An IC as monomorphic code is compiled from it. The ICs of a script are taken
+// on the main thread when its compile starts, so that the code can be
+// compiled on any thread.
+struct MonoIC {
+  // The stub info of the only stub of the IC if it is monomorphic, else null.
+  const CacheIRStubInfo* info;
+  // A copy of that stub if it can be copied, else null. Its edges are strong.
+  ICCacheIRStub* stub;
+  // Whether the IC has no stub.
+  bool empty;
+};
 
-// Why the stub can't be emitted inline, with the op that can't be in *op.
-MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
+// Why the script is or isn't compiled monomorphic.
+MonoScriptReason MonoReasonFor(JSContext* cx, JSScript* script,
+                               bool compileDebugInstrumentation);
+
+// Whether monomorphic code can be compiled off thread, where its inline stubs
+// can only be copied from templates.
+bool CanCompileMonoOffThread();
+
+// Takes the ICs of the script, copying their stubs into alloc. Returns
+// nullptr on OOM.
+MonoIC* TakeMonoICs(JSContext* cx, JSScript* script, LifoAlloc& alloc);
+void TraceMonoICs(JSTracer* trc, MonoIC* ics, size_t numICs);
+
+// Why the stub of the IC can't be emitted inline, with the op that can't be
+// in *op.
+MonoNoInline WhyNotInlineMonoStub(const MonoIC& ic, CacheOp* op);
 
 // Emits the stub inline, with its inputs known to have the given types, if
 // any, appending its original input locations and its failure paths for
@@ -292,14 +324,14 @@ MonoNoInline WhyNotInlineMonoStub(ICCacheIRStub* stub, CacheOp* op);
     ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes,
     InlinedInputVector& origInputs, InlinedFailureVector& failures);
 
-// Emits the stub inline for code with an exit table, appending its encoded
-// exit states and its jumps to them. Sets *templateUse to whether it was
-// copied from a template. Returns false on OOM.
+// Emits the stub inline for code with an exit table, copied from the template
+// if one is given, else compiled, appending its encoded exit states and its
+// jumps to them. Returns false on OOM.
 [[nodiscard]] bool EmitInlinedMonoStubWithExitTable(
-    JSContext* cx, MacroAssembler& masm, TempAllocator& alloc,
-    ICCacheIRStub* stub, mozilla::Span<const JSValueType> inputTypes,
-    CompactBufferWriter& states, MonoExitJumpVector& jumps,
-    MonoTemplateUse* templateUse);
+    JSContext* cx, MacroAssembler& masm, TempAllocator& alloc, JS::Zone* zone,
+    ICCacheIRStub* stub, const MonoStubTemplate* templ,
+    mozilla::Span<const JSValueType> inputTypes, CompactBufferWriter& states,
+    MonoExitJumpVector& jumps);
 
 // The known types of the stubs of the info, computed once.
 const CacheIRKnownTypes& MonoStubKnownTypes(const CacheIRStubInfo* info);
@@ -328,9 +360,9 @@ uint8_t* MonoBaselineExit(BaselineFrame* frame, uint32_t pcOffset);
 
 // Called by the trampoline that the exits of code with an exit table call,
 // with the general purpose registers, indexed by their code, stored below the
-// return address of the call. Pushes the values of the exit, stores the stack pointer from which
-// to continue in place of the stored stack pointer, and returns the address at
-// which the Baseline Interpreter continues.
+// return address of the call. Pushes the values of the exit, stores the stack
+// pointer from which to continue in place of the stored stack pointer, and
+// returns the address at which the Baseline Interpreter continues.
 uint8_t* MonoBailout(BaselineFrame* frame, uintptr_t* regs);
 
 // Makes the monomorphic code of a script whose IC stubs are discarded exit

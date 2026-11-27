@@ -19,7 +19,9 @@
 #include "js/HashTable.h"
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
+#include "threading/Mutex.h"
 #include "util/TrailingArray.h"
+#include "vm/MutexIDs.h"
 
 struct JSContext;
 
@@ -65,7 +67,9 @@ class MonoStubTemplateBuilder;
 // things, its calls, and its exit states, encoded for the exit table when the
 // template is built, with the jumps to them.
 //
-// Templates are only built on x64, for code with an exit table.
+// Templates are only built on x64, for code with an exit table. Compiles off
+// thread don't build them: a stub with no template yet is called as a copy
+// instead, and its template is built when the code is linked.
 
 // A template is a single allocation, holding these arrays after the header:
 //
@@ -196,17 +200,18 @@ class MonoStubTemplates {
 
   HashSet<UniquePtr<MonoStubTemplate>, Hasher, SystemAllocPolicy> templates_;
 
+  // Guards the templates and the recent templates of stub infos, since
+  // compiles off thread look them up.
+  Mutex lock_{mutexid::MonoStubTemplates};
+
  public:
-  // Emits the stub inline from the template for its key, building the
-  // template if there is none. Sets *use to how the stub was emitted, leaving
-  // the stub to be compiled directly when that's None or Rejected. Returns
-  // false on OOM.
-  [[nodiscard]] bool emitStub(JSContext* cx, MacroAssembler& masm,
-                              ICCacheIRStub* stub,
-                              mozilla::Span<const JSValueType> inputTypes,
-                              CompactBufferWriter& exitStates,
-                              MonoExitJumpVector& exitJumps,
-                              MonoTemplateUse* use);
+  // Looks up the template for the key of the stub, building it if there is
+  // none and cx is given. Sets *templ to it if the stub can be copied from it,
+  // else to nullptr, and *use to why. Returns false on OOM.
+  [[nodiscard]] bool lookup(JSContext* cx, ICCacheIRStub* stub,
+                            mozilla::Span<const JSValueType> inputTypes,
+                            const MonoStubTemplate** templ,
+                            MonoTemplateUse* use);
 };
 
 }  // namespace jit
