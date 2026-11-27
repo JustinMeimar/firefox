@@ -143,6 +143,24 @@ bool BaselineCompilerHandler::init() {
   return true;
 }
 
+bool BaselineCompilerHandler::initMonoBlocks() {
+  bool afterJump = false;
+  for (jsbytecode* pc = script_->code(); pc < script_->codeEnd();
+       pc = GetNextPc(pc)) {
+    BytecodeInfo* info = analysis_.maybeInfo(pc);
+    if (!info) {
+      continue;
+    }
+    if (info->jumpTarget || afterJump) {
+      if (!monoBlocks_.append(script_->pcToOffset(pc))) {
+        return false;
+      }
+    }
+    afterJump = IsJumpOpcode(JSOp(*pc));
+  }
+  return true;
+}
+
 const SourceLocationIterator&
 BaselineCompilerHandler::sourceLocationIterAtCurrentPc() const {
   if (!srcLocIter_) {
@@ -332,10 +350,14 @@ bool BaselineCompiler::compileImpl() {
   handler.initMonoStats();
   int64_t codegenStart = handler.monoStats() ? MonoStatsNowNs() : 0;
   if (handler.monoStats()) {
+    if (!handler.initMonoBlocks()) {
+      return false;
+    }
+    size_t numICEntries = handler.script()->jitScript()->numICEntries();
     int64_t index;
     uint64_t* counters = NewMonoCounters(
-        handler.script()->jitScript()->numICEntries() + 1, &index);
-    handler.setMonoCounters(counters, index);
+        numICEntries + 1 + handler.monoBlocks().length(), &index);
+    handler.setMonoCounters(counters, index, numICEntries);
   }
 
   perfSpewer_.startRecording(runtime);
@@ -623,7 +645,8 @@ bool BaselineCompiler::finishCompile(JSContext* cx) {
     LogMonoCompile(script, baselineScript.get(), handler.monoReason(),
                    handler.monoCountersIndex(), handler.monoExitsStart(),
                    handler.monoExitsEnd(), handler.monoCodegenNs(),
-                   MonoStatsNowNs() - linkStart, handler.monoStatsICs());
+                   MonoStatsNowNs() - linkStart, handler.monoStatsICs(),
+                   handler.monoBlocks());
     LogMonoBaselineCode(script, baselineScript.get(), handler.monoExitsStart(),
                         handler.monoExitsEnd(), handler.monoStatsICs());
   }
@@ -2051,6 +2074,11 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     uint32_t nativeOffset = masm.currentOffset();
     if (!handler.osrEntries().emplaceBack(pcOffset, nativeOffset)) {
       return false;
+    }
+    if (handler.monoCounters()) {
+      if (uint64_t* counter = handler.monoBlockCounter(pcOffset)) {
+        masm.inc64(AbsoluteAddress(counter));
+      }
     }
   }
 
@@ -7627,6 +7655,14 @@ bool BaselineCompiler::emitBody() {
 
     frame.assertValidState(*info);
     handler.setOpStart(frame);
+
+    // Loop heads count their entries where OSR enters them too.
+    if (handler.monoCounters() && op != JSOp::LoopHead) {
+      if (uint64_t* counter =
+              handler.monoBlockCounter(script->pcToOffset(handler.pc()))) {
+        masm.inc64(AbsoluteAddress(counter));
+      }
+    }
 
     // If the script has a resume offset for this pc we need to keep track of
     // the native code offset.

@@ -38,8 +38,11 @@ enum class CacheOp : uint16_t;
 // Stub CacheIR is written as dot-separated ops, each its CacheOp index and,
 // after a colon, its argument bytes in hex.
 // JS_MONO_COUNTS=1, with JS_MONO_STATS, also has Baseline code count its
-//   entries and the runs of each of its IC ops in DIR/mono-PID.counters, an
-//   array of uint64_t indexed from the ctr field of compile events.
+//   entries, the runs of each of its nic IC entries and the entries of each
+//   basic block starting at a pc offset of the blocks field of its compile
+//   event in DIR/mono-PID.counters, an array of uint64_t indexed from the ctr
+//   field of compile events. Blocks start at jump targets and after jumps.
+//   Loop heads count OSR entries; generator resumes are not counted.
 // JS_MONO_CODEMAP=DIR writes DIR/codemap-PID.txt, a line per JIT code range:
 //   "ns start bytes kind name", where later lines win over earlier ones.
 
@@ -123,9 +126,9 @@ int64_t MonoStatsNowNs();
 
 void LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
                     MonoScriptReason reason, int64_t countersIndex,
-                    uint32_t exitsStart, uint32_t exitsEnd,
-                    int64_t codegenNs, int64_t linkNs,
-                    mozilla::Span<const MonoStatsIC> ics);
+                    uint32_t exitsStart, uint32_t exitsEnd, int64_t codegenNs,
+                    int64_t linkNs, mozilla::Span<const MonoStatsIC> ics,
+                    mozilla::Span<const uint32_t> blocks);
 void LogMonoExit(JSScript* script, BaselineScript* baselineScript,
                  uint32_t pcOffset);
 void LogMonoScriptEvent(const char* event, JSScript* script,

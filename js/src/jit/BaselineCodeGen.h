@@ -413,6 +413,11 @@ class BaselineCompilerHandler {
   Vector<MonoStatsIC, 0, SystemAllocPolicy> monoStatsICs_;
   uint64_t* monoCounters_ = nullptr;
   int64_t monoCountersIndex_ = -1;
+  // The pc offsets of the basic blocks whose entries the counters count after
+  // the runs of the IC ops, their first counter, and the next one to count.
+  Vector<uint32_t, 0, SystemAllocPolicy> monoBlocks_;
+  uint64_t* monoBlockCounters_ = nullptr;
+  size_t nextMonoBlock_ = 0;
   uint32_t monoExitsStart_ = 0;
   uint32_t monoExitsEnd_ = 0;
   int64_t monoCodegenNs_ = 0;
@@ -538,12 +543,29 @@ class BaselineCompilerHandler {
   Vector<MonoStatsIC, 0, SystemAllocPolicy>& monoStatsICs() {
     return monoStatsICs_;
   }
-  void setMonoCounters(uint64_t* counters, int64_t index) {
+  void setMonoCounters(uint64_t* counters, int64_t index, size_t numICEntries) {
     monoCounters_ = counters;
     monoCountersIndex_ = index;
+    monoBlockCounters_ = counters ? counters + 1 + numICEntries : nullptr;
   }
   uint64_t* monoCounters() const { return monoCounters_; }
   int64_t monoCountersIndex() const { return monoCountersIndex_; }
+  [[nodiscard]] bool initMonoBlocks();
+  const Vector<uint32_t, 0, SystemAllocPolicy>& monoBlocks() const {
+    return monoBlocks_;
+  }
+  // The counter of the block starting at the pc offset, if one does.
+  uint64_t* monoBlockCounter(uint32_t pcOffset) {
+    while (nextMonoBlock_ < monoBlocks_.length() &&
+           monoBlocks_[nextMonoBlock_] < pcOffset) {
+      nextMonoBlock_++;
+    }
+    if (nextMonoBlock_ == monoBlocks_.length() ||
+        monoBlocks_[nextMonoBlock_] != pcOffset) {
+      return nullptr;
+    }
+    return monoBlockCounters_ + nextMonoBlock_;
+  }
   void setMonoCodegenNs(int64_t ns) { monoCodegenNs_ = ns; }
   int64_t monoCodegenNs() const { return monoCodegenNs_; }
   void setMonoExitsRange(uint32_t start, uint32_t end) {

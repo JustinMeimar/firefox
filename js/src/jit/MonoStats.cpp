@@ -314,7 +314,8 @@ void js::jit::LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
                              MonoScriptReason reason, int64_t countersIndex,
                              uint32_t exitsStart, uint32_t exitsEnd,
                              int64_t codegenNs, int64_t linkNs,
-                             mozilla::Span<const MonoStatsIC> ics) {
+                             mozilla::Span<const MonoStatsIC> ics,
+                             mozilla::Span<const uint32_t> blocks) {
   if (!MonoStatsEnabled()) {
     return;
   }
@@ -358,6 +359,10 @@ void js::jit::LogMonoCompile(JSScript* script, BaselineScript* baselineScript,
     buf.printf(",%u,%u,\"%s\"]", ic.emitNs, ic.exitNs,
                MonoTemplateUseNames[size_t(ic.templateUse)]);
     first = false;
+  }
+  buf.printf("],\"nic\":%u,\"blocks\":[", unsigned(icScript->numICEntries()));
+  for (size_t i = 0; i < blocks.size(); i++) {
+    buf.printf("%s%u", i ? "," : "", blocks[i]);
   }
   buf.printf("]}");
   WriteMonoEvent(buf);
