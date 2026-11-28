@@ -13176,7 +13176,7 @@ bool InitOptionParser(OptionParser& op) {
       !op.addIntOption('\0', "baseline-mono-speculate-warmup", "COUNT",
                        "The warm-up count at which scripts whose ICs are "
                        "monomorphic are compiled monomorphic off thread "
-                       "before they are warm (default: 20, 0: off)",
+                       "before they are warm (default: 80, 0: off)",
                        -1) ||
       !op.addStringOption('\0', "ion-offthread-compile", "on/off",
                           "Compile Ion scripts offthread (default: on)") ||
