@@ -351,8 +351,8 @@ bool IsMonomorphicScript(JSScript* script);
 // Whether any IC of the script is monomorphic.
 bool HasMonomorphicIC(JSScript* script);
 
-// A hash of the first stub of each IC of the script and of whether it is the
-// only one.
+// A hash of the first stub of each IC of the script, of whether it is the only
+// one, and of the ICs that failed to attach or are not specialized.
 mozilla::HashNumber HashMonoICs(JSScript* script);
 
 // Whether the script runs monomorphic code, or would if Baseline compiled it

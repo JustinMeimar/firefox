@@ -518,6 +518,11 @@ mozilla::HashNumber js::jit::HashMonoICs(JSScript* script) {
   ICScript* icScript = script->jitScript()->icScript();
   mozilla::HashNumber hash = 0;
   for (size_t i = 0; i < icScript->numICEntries(); i++) {
+    const ICState& state = icScript->fallbackStub(i)->state();
+    if (state.hasFailures() || state.mode() != ICState::Mode::Specialized) {
+      hash = mozilla::AddToHash(hash, i, uint8_t(state.mode()),
+                                state.hasFailures());
+    }
     ICStub* stub = icScript->icEntry(i).firstStub();
     if (stub->isFallback()) {
       continue;
