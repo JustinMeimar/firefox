@@ -534,6 +534,9 @@ enum class BailoutReason {
 enum class BaselineOption : uint8_t {
   ForceDebugInstrumentation = 1 << 0,
   ForceMainThreadCompilation = 1 << 1,
+  // Compile the script monomorphic off thread before it is warm, or not at
+  // all. See LinkParkedMonoBaseline.
+  MonoSpeculation = 1 << 2,
 };
 
 using BaselineOptions = EnumFlags<BaselineOption>;

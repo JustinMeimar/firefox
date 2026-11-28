@@ -148,6 +148,12 @@ bool JSScript::createJitScript(JSContext* cx) {
       cx->runtime()->jitRuntime()->getJitHintsMap()->getMonoThresholdHint(
           this, monoThreshold)) {
     jitScript->setBaselineThreshold(monoThreshold);
+  } else if (JitOptions.baselineMono &&
+             JitOptions.baselineMonoSpeculateWarmUp &&
+             JitOptions.baselineMonoSpeculateWarmUp <
+                 JitOptions.baselineJitWarmUpThreshold) {
+    jitScript->setMonoSpeculation(true);
+    jitScript->setBaselineThreshold(JitOptions.baselineMonoSpeculateWarmUp);
   }
 
   // Ensure concurrent marking doesn't see uninitialized jitScript.

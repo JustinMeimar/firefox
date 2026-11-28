@@ -6,6 +6,8 @@
 
 #include "jit/JitRuntime.h"
 #include "jit/JitScript.h"
+#include "jit/MonoBaseline.h"
+#include "jit/MonoStats.h"
 #include "vm/HelperThreadState.h"
 
 #include "vm/JSScript-inl.h"
@@ -89,7 +91,11 @@ void BaselineCompileTask::runTask() {
 void BaselineCompileTask::FinishOffThreadTask(BaselineCompileTask* task) {
   for (auto* snapshot : task->snapshots_) {
     JSScript* script = snapshot->script();
-    if (script->isBaselineCompilingOffThread()) {
+    if (task->parked_) {
+      if (script->hasJitScript()) {
+        script->jitScript()->setMonoSpeculationParked(false);
+      }
+    } else if (script->isBaselineCompilingOffThread()) {
       script->jitScript()->clearIsBaselineCompiling(script);
     }
     snapshot->compiler_.reset();
@@ -104,6 +110,15 @@ void BaselineCompileTask::FinishOffThreadTask(BaselineCompileTask* task) {
 void BaselineCompileTask::finishOnMainThread(JSContext* cx) {
   AutoRealm ar(cx, firstScript());
   for (auto* snapshot : snapshots_) {
+    if (snapshot->monoSpeculation() &&
+        (snapshot->script()->isDebuggee() ||
+         HashMonoICs(snapshot->script()) != snapshot->monoICHash())) {
+      LogMonoSpeculation("drop", snapshot->script());
+      continue;
+    }
+    if (snapshot->monoSpeculation()) {
+      LogMonoSpeculation("use", snapshot->script());
+    }
     if (!snapshot->compiler_->finishCompile(cx)) {
       cx->recoverFromOutOfMemory();
     }
@@ -129,6 +144,21 @@ void js::AttachFinishedBaselineCompilations(JSContext* cx,
 
       HelperThreadState().remove(finished, &i);
       rt->jitRuntime()->numFinishedOffThreadTasksRef(lock)--;
+
+      // Speculative compiles that finish before their script is warm wait for
+      // it to be.
+      if (!task->failed() && task->isMonoSpeculation()) {
+        JSScript* script = task->monoSpeculationScript();
+        if (script->getWarmUpCount() <= JitOptions.baselineJitWarmUpThreshold &&
+            HelperThreadState().baselineParkedList(lock).append(task)) {
+          script->jitScript()->clearIsBaselineCompiling(script);
+          script->jitScript()->setMonoSpeculationParked(true);
+          task->setParked();
+          LogMonoSpeculation("park", script);
+          continue;
+        }
+      }
+
       {
         if (!task->failed()) {
           AutoUnlockHelperThreadState unlock(lock);
@@ -141,6 +171,35 @@ void js::AttachFinishedBaselineCompilations(JSContext* cx,
       break;
     }
   }
+}
+
+bool jit::LinkParkedMonoBaseline(JSContext* cx, JSScript* script,
+                                 bool needsDebugInstrumentation) {
+  MOZ_ASSERT(script->jitScript()->monoSpeculationParked());
+  BaselineCompileTask* task = nullptr;
+  {
+    AutoLockHelperThreadState lock;
+    GlobalHelperThreadState::BaselineCompileTaskVector& parked =
+        HelperThreadState().baselineParkedList(lock);
+    for (size_t i = 0; i < parked.length(); i++) {
+      if (parked[i]->scriptMatches(script)) {
+        task = parked[i];
+        HelperThreadState().remove(parked, &i);
+        break;
+      }
+    }
+  }
+  script->jitScript()->setMonoSpeculationParked(false);
+  if (!task) {
+    return false;
+  }
+  if (needsDebugInstrumentation) {
+    LogMonoSpeculation("drop", script);
+  } else {
+    task->finishOnMainThread(cx);
+  }
+  BaselineCompileTask::FinishOffThreadTask(task);
+  return script->hasBaselineScript();
 }
 
 bool BaselineSnapshot::takeMonoICs(JSContext* cx, LifoAlloc& alloc) {

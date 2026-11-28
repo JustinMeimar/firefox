@@ -440,6 +440,19 @@ void js::jit::LogMonoAttach(JSScript* script, ICScript* icScript,
   WriteMonoEvent(buf);
 }
 
+void js::jit::LogMonoSpeculation(const char* what, JSScript* script) {
+  if (!MonoStatsEnabled()) {
+    return;
+  }
+  MonoEventBuffer buf;
+  buf.printf("{\"ev\":\"spec\",\"t\":%" PRId64 ",\"what\":\"%s\",",
+             MonoStatsNowNs(), what);
+  PrintMonoScript(buf, script);
+  buf.printf(",\"wu\":%u,\"attach_wu\":%u}", script->getWarmUpCount(),
+             script->jitScript()->warmUpCountAtLastICStub());
+  WriteMonoEvent(buf);
+}
+
 bool js::jit::MonoCodeMapEnabled() {
 #ifdef XP_UNIX
   static const char* dir = getenv("JS_MONO_CODEMAP");

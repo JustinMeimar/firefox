@@ -383,6 +383,12 @@ class alignas(uintptr_t) JitScript final
     // True if the eager Baseline compile of this script waits for its ICs to
     // be warm, as its monomorphic hint asks.
     bool eagerBaselineDeferred : 1;
+    // True if the script is compiled monomorphic off thread once its warm-up
+    // count reaches the speculation threshold.
+    bool monoSpeculation : 1;
+    // True if a speculative monomorphic compile of the script finished before
+    // the script was warm and waits to be used.
+    bool monoSpeculationParked : 1;
   };
   Flags flags_ = {};  // Zero-initialize flags.
 
@@ -433,6 +439,12 @@ class alignas(uintptr_t) JitScript final
   bool monoFailed() const { return flags_.monoFailed; }
   void setEagerBaselineDeferred() { flags_.eagerBaselineDeferred = true; }
   bool eagerBaselineDeferred() const { return flags_.eagerBaselineDeferred; }
+  void setMonoSpeculation(bool value) { flags_.monoSpeculation = value; }
+  bool monoSpeculation() const { return flags_.monoSpeculation; }
+  void setMonoSpeculationParked(bool value) {
+    flags_.monoSpeculationParked = value;
+  }
+  bool monoSpeculationParked() const { return flags_.monoSpeculationParked; }
 
   uint32_t numICEntries() const { return icScript_.numICEntries(); }
 

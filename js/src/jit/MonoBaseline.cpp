@@ -514,6 +514,23 @@ bool js::jit::IsMonomorphicScript(JSScript* script) {
   return hasStub;
 }
 
+mozilla::HashNumber js::jit::HashMonoICs(JSScript* script) {
+  ICScript* icScript = script->jitScript()->icScript();
+  mozilla::HashNumber hash = 0;
+  for (size_t i = 0; i < icScript->numICEntries(); i++) {
+    ICStub* stub = icScript->icEntry(i).firstStub();
+    if (stub->isFallback()) {
+      continue;
+    }
+    ICCacheIRStub* cacheIRStub = stub->toCacheIRStub();
+    const CacheIRStubInfo* info = cacheIRStub->stubInfo();
+    hash = mozilla::AddToHash(
+        hash, i, info, cacheIRStub->next()->isFallback(),
+        mozilla::HashBytes(cacheIRStub->stubDataStart(), info->stubDataSize()));
+  }
+  return hash;
+}
+
 bool js::jit::HasMonomorphicIC(JSScript* script) {
   ICScript* icScript = script->jitScript()->icScript();
   for (size_t i = 0; i < icScript->numICEntries(); i++) {

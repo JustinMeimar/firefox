@@ -80,6 +80,7 @@ struct DefaultJitOptions {
   bool baselineMonoMixed;
   bool baselineMonoTemplates;
   bool baselineMonoDeferEager;
+  uint32_t baselineMonoSpeculateWarmUp;
   bool baselineMonoExitTables;
   bool ion;
   bool jitForTrustedPrincipals;

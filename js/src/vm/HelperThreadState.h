@@ -148,6 +148,10 @@ class GlobalHelperThreadState {
   // Baseline compilation worklist and finished jobs.
   BaselineCompileTaskVector baselineWorklist_, baselineFinishedList_;
 
+  // Speculative monomorphic Baseline compiles that finished before their
+  // scripts were warm, waiting to be used or dropped.
+  BaselineCompileTaskVector baselineParkedList_;
+
   // Ion compilation worklist and finished jobs.
   IonCompileTaskVector ionWorklist_, ionFinishedList_;
   IonFreeTaskVector ionFreeList_;
@@ -288,6 +292,10 @@ class GlobalHelperThreadState {
   BaselineCompileTaskVector& baselineFinishedList(
       const AutoLockHelperThreadState&) {
     return baselineFinishedList_;
+  }
+  BaselineCompileTaskVector& baselineParkedList(
+      const AutoLockHelperThreadState&) {
+    return baselineParkedList_;
   }
   IonCompileTaskVector& ionWorklist(const AutoLockHelperThreadState&) {
     return ionWorklist_;

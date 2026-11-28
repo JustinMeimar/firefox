@@ -5,6 +5,7 @@
 #ifndef jit_MonoBaseline_h
 #define jit_MonoBaseline_h
 
+#include "mozilla/HashFunctions.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Span.h"
 
@@ -349,6 +350,10 @@ bool IsMonomorphicScript(JSScript* script);
 
 // Whether any IC of the script is monomorphic.
 bool HasMonomorphicIC(JSScript* script);
+
+// A hash of the first stub of each IC of the script and of whether it is the
+// only one.
+mozilla::HashNumber HashMonoICs(JSScript* script);
 
 // Whether the script runs monomorphic code, or would if Baseline compiled it
 // now. Monomorphic code profiles only into the ICScript of its script.

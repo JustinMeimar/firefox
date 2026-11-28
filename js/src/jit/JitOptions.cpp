@@ -189,6 +189,11 @@ DefaultJitOptions::DefaultJitOptions() {
   // instead of being compiled eagerly.
   SET_DEFAULT(baselineMonoDeferEager, true);
 
+  // The warm-up count at which scripts without monomorphic hints whose ICs are
+  // monomorphic are compiled monomorphic off thread, to be used once they are
+  // warm if their ICs did not change. 0 disables this.
+  SET_DEFAULT(baselineMonoSpeculateWarmUp, 20);
+
   // Whether the inline stubs of monomorphic Baseline code exit through a
   // shared trampoline and a table instead of code of their own. See
   // MonoBaseline.h.

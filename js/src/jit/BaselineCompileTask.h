@@ -5,6 +5,7 @@
 #ifndef jit_BaselineCompileTask_h
 #define jit_BaselineCompileTask_h
 
+#include "mozilla/HashFunctions.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Maybe.h"
 
@@ -30,6 +31,11 @@ class BaselineSnapshot {
   // monomorphic.
   MonoIC* monoICs_ = nullptr;
   size_t numMonoICs_ = 0;
+  // Whether the script is compiled monomorphic before it is warm, and the hash
+  // of its ICs when they were taken, which they must still have when the code
+  // is used.
+  bool monoSpeculation_ = false;
+  mozilla::HashNumber monoICHash_ = 0;
 
  public:
   BaselineSnapshot(JSScript* script,
@@ -70,6 +76,12 @@ class BaselineSnapshot {
   }
   MonoScriptReason monoReason() const { return monoReason_; }
   MonoIC* monoICs() const { return monoICs_; }
+  bool monoSpeculation() const { return monoSpeculation_; }
+  mozilla::HashNumber monoICHash() const { return monoICHash_; }
+  void setMonoSpeculation(mozilla::HashNumber monoICHash) {
+    monoSpeculation_ = true;
+    monoICHash_ = monoICHash;
+  }
 
   // Decides whether the script is compiled monomorphic, and if so takes its
   // ICs into alloc. Returns false on OOM.
@@ -148,6 +160,17 @@ class BaselineCompileTask final : public HelperThreadTask {
 
   bool failed() const { return failed_; }
 
+  // Whether the task compiles one script monomorphic before it is warm.
+  bool isMonoSpeculation() const {
+    return snapshots_.getFirst()->monoSpeculation();
+  }
+  JSScript* monoSpeculationScript() const { return firstScript(); }
+
+  // Whether the task is parked, so its script is no longer marked as
+  // compiling.
+  bool parked() const { return parked_; }
+  void setParked() { parked_ = true; }
+
  private:
   // All scripts are in the same realm, so we can use an arbitrary script
   // to access the realm/zone/runtime.
@@ -158,7 +181,14 @@ class BaselineCompileTask final : public HelperThreadTask {
   BaselineSnapshotList snapshots_;
 
   bool failed_ = false;
+  bool parked_ = false;
 };
+
+// Uses the parked speculative monomorphic compile of the script, if any, unless
+// the code must have debug instrumentation, in which case it is dropped.
+// Returns whether the script has a BaselineScript after.
+bool LinkParkedMonoBaseline(JSContext* cx, JSScript* script,
+                            bool needsDebugInstrumentation);
 
 }  // namespace js::jit
 

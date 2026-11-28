@@ -235,10 +235,11 @@ bool BaselineCompileTask::OffThreadBaselineCompilationAvailable(
 }
 
 static bool DispatchOffThreadBaselineCompile(JSContext* cx,
-                                             BaselineSnapshot& snapshot) {
+                                             BaselineSnapshot& snapshot,
+                                             bool isEager) {
   JSScript* script = snapshot.script();
   MOZ_ASSERT(BaselineCompileTask::OffThreadBaselineCompilationAvailable(
-      cx, script, script->jitScript()->eagerBaselineDeferred()));
+      cx, script, isEager));
 
   auto alloc = cx->make_unique<LifoAlloc>(TempAllocator::PreferredLifoChunkSize,
                                           js::BackgroundMallocArena);
@@ -439,17 +440,26 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
                             baseWarmUpThreshold, isIonCompileable,
                             compileDebugInstrumentation);
 
-  // Scripts whose eager compile a monomorphic hint deferred, and scripts whose
-  // monomorphic code failed, are compiled off thread as eager compiles are.
+  // Scripts whose eager compile a monomorphic hint deferred, scripts whose
+  // monomorphic code failed and speculative compiles are compiled off thread
+  // as eager compiles are.
+  bool monoSpeculation = options.hasFlag(BaselineOption::MonoSpeculation);
   bool isEager = script->jitScript()->eagerBaselineDeferred() ||
-                 script->jitScript()->monoFailed();
+                 script->jitScript()->monoFailed() || monoSpeculation;
   if (BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script,
                                                                  isEager) &&
       !forceMainThread) {
-    if (!DispatchOffThreadBaselineCompile(cx, snapshot)) {
+    if (monoSpeculation) {
+      snapshot.setMonoSpeculation(HashMonoICs(script));
+      LogMonoSpeculation("dispatch", script);
+    }
+    if (!DispatchOffThreadBaselineCompile(cx, snapshot, isEager)) {
       ReportOutOfMemory(cx);
       return Method_Error;
     }
+    return Method_Skipped;
+  }
+  if (monoSpeculation) {
     return Method_Skipped;
   }
 
@@ -482,6 +492,23 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
     script->disableBaselineCompile();
   }
 
+  return status;
+}
+
+static MethodStatus SpeculateMonoBaseline(JSContext* cx, HandleScript script) {
+  if (MonoReasonFor(cx, script, /* compileDebugInstrumentation = */ false) !=
+      MonoScriptReason::Mono) {
+    return Method_Skipped;
+  }
+  if (!CanLikelyAllocateMoreExecutableMemory()) {
+    return Method_Skipped;
+  }
+  if (!cx->zone()->ensureJitZoneExists(cx)) {
+    return Method_Error;
+  }
+  BaselineOptions options({BaselineOption::MonoSpeculation});
+  MethodStatus status = BaselineCompile(cx, script, options);
+  MOZ_ASSERT(status != Method_Compiled);
   return status;
 }
 
@@ -533,12 +560,13 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   // compiled monomorphic code instead wait for their ICs to be warm.
   uint32_t warmUpThreshold = JitOptions.baselineJitWarmUpThreshold;
   bool mightHaveEagerBaselineHint = false;
+  bool hasMonoHint = false;
   if (!JitOptions.disableJitHints &&
       cx->runtime()->jitRuntime()->hasJitHintsMap()) {
     JitHintsMap* jitHints = cx->runtime()->jitRuntime()->getJitHintsMap();
-    bool hasMonoHint = JitOptions.baselineMono &&
-                       JitOptions.baselineMonoDeferEager &&
-                       jitHints->getMonoThresholdHint(script, warmUpThreshold);
+    hasMonoHint = JitOptions.baselineMono &&
+                  JitOptions.baselineMonoDeferEager &&
+                  jitHints->getMonoThresholdHint(script, warmUpThreshold);
     // If this lookup fails, the NoEagerBaselineHint script flag is set
     // to true to prevent any further lookups for this script.
     if (!hasMonoHint && !script->noEagerBaselineHint() &&
@@ -550,9 +578,25 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   // failed were already warm and compile again right away.
   bool monoFailed = script->hasJitScript() && script->jitScript()->monoFailed();
   if (!mightHaveEagerBaselineHint && !monoFailed) {
+    // Scripts without a hint whose ICs are monomorphic at the speculation
+    // threshold are compiled off thread then, and the code is used once they
+    // are warm if their ICs did not change.
+    if (script->hasJitScript() && script->jitScript()->monoSpeculation()) {
+      script->jitScript()->setMonoSpeculation(false);
+      script->jitScript()->setBaselineThreshold(warmUpThreshold);
+      if (!hasMonoHint && script->getWarmUpCount() <= warmUpThreshold) {
+        return SpeculateMonoBaseline(cx, script);
+      }
+    }
     if (script->getWarmUpCount() <= warmUpThreshold) {
       return Method_Skipped;
     }
+  }
+
+  if (script->hasJitScript() && script->jitScript()->monoSpeculationParked() &&
+      LinkParkedMonoBaseline(cx, script,
+                             osrSourceFrame && osrSourceFrame.isDebuggee())) {
+    return Method_Compiled;
   }
 
   // Check this before calling ensureJitZoneExists, so we're less
@@ -918,7 +962,8 @@ void BaselineScript::discardMonoStubs(JSRuntime* rt) {
   uint8_t* bailout = rt->jitRuntime()->monoBailout().value;
   for (uint32_t i = 0; i < numMonoInlineStubs_; i++) {
     const MonoInlineStub& stub = monoInlineStubs_[i];
-    uint8_t* exit = stub.exitOffset ? method_->raw() + stub.exitOffset : bailout;
+    uint8_t* exit =
+        stub.exitOffset ? method_->raw() + stub.exitOffset : bailout;
     MacroAssembler::patchNopToCall(method_->raw() + stub.stubOffset, exit);
   }
 }

@@ -146,6 +146,9 @@ void LogMonoDiscardBlocked(JSScript* script, BaselineScript* baselineScript,
                            uint32_t jitFrames);
 void LogMonoAttach(JSScript* script, ICScript* icScript,
                    ICFallbackStub* fallback, ICCacheIRStub* stub, bool folded);
+// Logs a step of a speculative monomorphic compile of the script: dispatch,
+// park, use or drop.
+void LogMonoSpeculation(const char* what, JSScript* script);
 
 void LogMonoCode(const void* start, size_t bytes, const char* kind,
                  const char* name);

@@ -536,6 +536,9 @@ void GlobalHelperThreadState::trace(JSTracer* trc) {
     for (auto task : baselineFinishedList(lock)) {
       task->trace(trc);
     }
+    for (auto task : baselineParkedList(lock)) {
+      task->trace(trc);
+    }
 
     for (auto task : ionWorklist(lock)) {
       task->alloc().lifoAlloc()->setReadWrite();
@@ -1221,6 +1224,16 @@ void GlobalHelperThreadState::cancelOffThreadBaselineCompile(
         jitRuntime->numFinishedOffThreadTasksRef(lock)--;
         jit::BaselineCompileTask::FinishOffThreadTask(task);
         remove(finished, &i);
+      }
+    }
+
+    GlobalHelperThreadState::BaselineCompileTaskVector& parked =
+        baselineParkedList(lock);
+    for (size_t i = 0; i < parked.length(); i++) {
+      jit::BaselineCompileTask* task = parked[i];
+      if (BaselineCompileTaskMatches(selector, task)) {
+        jit::BaselineCompileTask::FinishOffThreadTask(task);
+        remove(parked, &i);
       }
     }
   }
