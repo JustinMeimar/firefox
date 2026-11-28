@@ -726,8 +726,11 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
                    MacroAssembler& masm, BaselineSnapshot* snapshot);
   [[nodiscard]] bool init();
 
+  // Speculative compiles leave the eager Baseline hint to be set when their
+  // code is used, as most are for scripts that never get warm.
   static bool PrepareToCompile(JSContext* cx, Handle<JSScript*> script,
-                               bool compileDebugInstrumentation);
+                               bool compileDebugInstrumentation,
+                               bool setEagerBaselineHint = true);
 
   MethodStatus compile(JSContext* cx);
   MethodStatus compileOffThread();

@@ -10,6 +10,7 @@
 #include "jit/MonoStats.h"
 #include "vm/HelperThreadState.h"
 
+#include "jit/JitHints-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/Realm-inl.h"
 
@@ -118,6 +119,11 @@ void BaselineCompileTask::finishOnMainThread(JSContext* cx) {
     }
     if (snapshot->monoSpeculation()) {
       LogMonoSpeculation("use", snapshot->script());
+      if (!JitOptions.disableJitHints &&
+          cx->runtime()->jitRuntime()->hasJitHintsMap()) {
+        cx->runtime()->jitRuntime()->getJitHintsMap()->setEagerBaselineHint(
+            snapshot->script());
+      }
     }
     if (!snapshot->compiler_->finishCompile(cx)) {
       cx->recoverFromOutOfMemory();

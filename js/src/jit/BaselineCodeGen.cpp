@@ -245,7 +245,8 @@ bool BaselineInterpreterHandler::addDebugInstrumentationOffset(
 
 /*static*/
 bool BaselineCompiler::PrepareToCompile(JSContext* cx, Handle<JSScript*> script,
-                                        bool compileDebugInstrumentation) {
+                                        bool compileDebugInstrumentation,
+                                        bool setEagerBaselineHint) {
   JitSpew(JitSpew_BaselineScripts, "Baseline compiling script %s:%u:%u (%p)",
           script->filename(), script->lineno(),
           script->column().oneOriginValue(), script.get());
@@ -263,7 +264,7 @@ bool BaselineCompiler::PrepareToCompile(JSContext* cx, Handle<JSScript*> script,
     }
   }
 
-  if (!JitOptions.disableJitHints &&
+  if (setEagerBaselineHint && !JitOptions.disableJitHints &&
       cx->runtime()->jitRuntime()->hasJitHintsMap()) {
     JitHintsMap* jitHints = cx->runtime()->jitRuntime()->getJitHintsMap();
     jitHints->setEagerBaselineHint(script);

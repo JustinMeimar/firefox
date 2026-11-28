@@ -423,9 +423,11 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   // Suppress GC during compilation.
   gc::AutoSuppressGC suppressGC(cx);
 
+  bool monoSpeculation = options.hasFlag(BaselineOption::MonoSpeculation);
   Rooted<JSScript*> rooted(cx, script);
   if (!BaselineCompiler::PrepareToCompile(cx, rooted,
-                                          compileDebugInstrumentation)) {
+                                          compileDebugInstrumentation,
+                                          !monoSpeculation)) {
     return Method_Error;
   }
 
@@ -443,7 +445,6 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
   // Scripts whose eager compile a monomorphic hint deferred, scripts whose
   // monomorphic code failed and speculative compiles are compiled off thread
   // as eager compiles are.
-  bool monoSpeculation = options.hasFlag(BaselineOption::MonoSpeculation);
   bool isEager = script->jitScript()->eagerBaselineDeferred() ||
                  script->jitScript()->monoFailed() || monoSpeculation;
   if (BaselineCompileTask::OffThreadBaselineCompilationAvailable(cx, script,
